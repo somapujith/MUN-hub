@@ -51,3 +51,13 @@ Design tokens landed in `app/globals.css` — "Diplomatic Modernism" direction: 
 ## Registration integrity (critical invariant)
 
 Capacity check + reservation + payment order + webhook + confirm must happen inside DB transactions per `docs/superpowers/specs/2026-09-13-mun-hub-mvp-backend-design.md` Section 3. Never trust client-supplied `userId` in any action that reads/writes a specific user's data — derive actor identity from `getSession()` server-side only (IDOR risk flagged by UI-session review, fixed in Drizzle rewrite).
+
+`initiateRegistration`'s capacity check row-locks the registration product (`.for('update')`) inside the transaction — without this, concurrent registrations for the same product all read the same pre-insert count under Postgres READ COMMITTED and oversell. Covered by a concurrency regression test (`lib/actions/registration.test.ts`, 10 concurrent callers vs capacity 3). The payments webhook only confirms a registration that is still `PAYMENT_PENDING` (never resurrects a TTL-expired/cancelled one) and releases the seat (sets `CANCELLED`) on a failed payment instead of leaving it stuck.
+
+## Backend status: all 7 MVP verticals landed (2026-09-13)
+
+Foundation (schema/adapters/types), mun-config CRUD, student/organizer dashboards, marketplace+`getMunBySlug`, admin-review+auth, seed data, organizer-application+lifecycle, registration+payment (incl. the overbooking fix above) — all committed to `main`, 95/95 tests passing, `tsc --noEmit` clean.
+
+**Known gap, not yet fixed:** `signIn(email)` in `lib/actions/auth.ts` is passwordless mock auth (looks up by email, no password check) — flagged by its own red-team review as a genuine unauthenticated-admin-takeover path. Fine for local dev/demo only. Must not be reachable from any environment exposed to the internet before real auth (password or OAuth) replaces it.
+
+UI/pages (mun-hub-93 session): foundation only as of last sync — tokens, fonts, theme toggle, header/footer, status badge. No feature pages built against real actions yet; starting on homepage + `/muns` search page now.
