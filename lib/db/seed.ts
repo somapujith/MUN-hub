@@ -38,12 +38,24 @@ async function upsertUserByEmail(db: Db, users: Users, data: NewUser) {
   return created
 }
 
+interface OrganizerSeed {
+  name: string
+  email: string
+}
+
 interface MunSeed {
   name: string
   slug: string
+  edition?: string
+  theme?: string
+  description?: string
   city: string
   country: string
-  organizerEmail: string
+  startDate?: string
+  endDate?: string
+  organizer: OrganizerSeed
+  committees?: { name: string; agenda: string }[]
+  registrationProducts?: { name: string; price: number; capacity: number }[]
 }
 
 const MUN_SEEDS: MunSeed[] = [
@@ -52,14 +64,126 @@ const MUN_SEEDS: MunSeed[] = [
     slug: 'oxford-mun-2027',
     city: 'Oxford',
     country: 'UK',
-    organizerEmail: 'organizer@munhub.test',
+    organizer: { name: 'Oxford MUN Society', email: 'organizer@munhub.test' },
   },
   {
     name: 'VIT MUN 2027',
     slug: 'vit-mun-2027',
     city: 'Vellore',
     country: 'India',
-    organizerEmail: 'organizer-vit@munhub.test',
+    organizer: { name: 'VIT MUN Committee', email: 'organizer-vit@munhub.test' },
+  },
+  // --- Real Hyderabad MUN conferences (researched 2026-09-13, sources noted
+  // in commit message) — placeholder registration fees since no conference
+  // in this circuit publicly discloses fees (confirmed via research, not a
+  // data gap on our end); dates/themes/committees are real where sourced.
+  {
+    name: "BITSMUN Hyderabad '25",
+    slug: 'bitsmun-hyderabad-25',
+    edition: '14th',
+    theme: 'Accord Amid Anarchy',
+    description:
+      'BITSMUN Hyderabad is the flagship Model United Nations conference of BITS Pilani, Hyderabad Campus, run as part of the ATMOS techno-management fest. Now in its 14th edition, it brings together delegates across classic UN bodies and specialized political simulations for three days of committee debate.',
+    city: 'Hyderabad',
+    country: 'India',
+    startDate: '2025-11-07',
+    endDate: '2025-11-09',
+    organizer: { name: 'BITS Pilani Hyderabad MUN Society', email: 'organizer-bitsmun@munhub.test' },
+    committees: [
+      { name: 'UNSC', agenda: 'Security Council reform and regional peacekeeping mandates.' },
+      { name: 'Lok Sabha', agenda: 'Simulating contemporary Indian parliamentary debate and policy-making.' },
+      { name: 'European Parliament', agenda: 'EU-wide legislative negotiation on cross-border policy.' },
+    ],
+    registrationProducts: [
+      { name: 'Delegate', price: 2000, capacity: 250 },
+      { name: 'Press', price: 1200, capacity: 25 },
+    ],
+  },
+  {
+    name: 'CBITMUN 2026',
+    slug: 'cbitmun-2026',
+    edition: '15th',
+    theme: 'Sankalpena Netritvam (Leadership Rooted in Resolve)',
+    description:
+      'CBITMUN is the annual Model United Nations conference hosted by Chaitanya Bharathi Institute of Technology, Gandipet, Hyderabad. In its 15th edition, the conference continues a long-running tradition of committee simulation and diplomatic debate for college delegates across the region.',
+    city: 'Hyderabad',
+    country: 'India',
+    startDate: '2026-04-10',
+    endDate: '2026-04-12',
+    organizer: { name: 'CBIT MUN Society', email: 'organizer-cbitmun@munhub.test' },
+    registrationProducts: [
+      { name: 'Delegate', price: 1800, capacity: 220 },
+      { name: 'Press', price: 1000, capacity: 20 },
+    ],
+  },
+  {
+    name: 'Shri HMUN 2026',
+    slug: 'shri-hmun-2026',
+    edition: '5th',
+    theme: 'Strategize. Sustain. Succeed.',
+    description:
+      'Shri HMUN is The Shri Ram Universal School\'s flagship Model United Nations conference for grades VIII-XII, held at its Financial District campus in Gachibowli, Hyderabad. Now in its 5th edition, it carries forward an SDG-focused tradition that grew out of the school\'s earlier Shri Colloquium gathering.',
+    city: 'Hyderabad',
+    country: 'India',
+    startDate: '2026-07-03',
+    endDate: '2026-07-05',
+    organizer: { name: 'The Shri Ram Universal School MUN Committee', email: 'organizer-shrihmun@munhub.test' },
+    registrationProducts: [
+      { name: 'Delegate', price: 1500, capacity: 150 },
+    ],
+  },
+  {
+    name: 'Vista MUN 2025',
+    slug: 'vista-mun-2025',
+    theme: 'Sustainable Development in a Divided World',
+    description:
+      'Vista MUN is hosted by Vista International School in Gachibowli, Hyderabad, bringing together school-level delegates for a weekend of committee simulation with an emphasis on sustainability and global development themes.',
+    city: 'Hyderabad',
+    country: 'India',
+    startDate: '2025-06-27',
+    endDate: '2025-06-29',
+    organizer: { name: 'Vista International School MUN Society', email: 'organizer-vistamun@munhub.test' },
+    registrationProducts: [
+      { name: 'Delegate', price: 1200, capacity: 100 },
+    ],
+  },
+  {
+    name: 'St. Francis College MUN 2025',
+    slug: 'st-francis-college-mun-2025',
+    theme: 'India-U.S. Strategic Partnership and Global Diplomacy',
+    description:
+      "Hosted by St. Francis College for Women, Begumpet, Hyderabad, in partnership with American Corner Hyderabad, this conference brings together roughly 150 students for a focused two-day exploration of international diplomacy and strategic partnership themes.",
+    city: 'Hyderabad',
+    country: 'India',
+    startDate: '2025-02-03',
+    endDate: '2025-02-04',
+    organizer: { name: 'St. Francis College for Women MUN Committee', email: 'organizer-stfrancismun@munhub.test' },
+    registrationProducts: [
+      { name: 'Delegate', price: 1000, capacity: 150 },
+    ],
+  },
+  {
+    name: 'M-UN 2025',
+    slug: 'm-un-2025',
+    theme: 'Dialogue • Develop • Dream',
+    description:
+      'M-UN is an independent Hyderabad-based Model United Nations conference drawing around 300 delegates for a three-day program spanning a Continuous Crisis Council, International Press corps, AIPPM, UNHRC, and an expert-level UNSC.',
+    city: 'Hyderabad',
+    country: 'India',
+    startDate: '2025-06-06',
+    endDate: '2025-06-08',
+    organizer: { name: 'M-UN Hyderabad', email: 'organizer-mun2k25@munhub.test' },
+    committees: [
+      { name: 'Continuous Crisis Council', agenda: 'Real-time evolving crisis simulation across an unfolding scenario.' },
+      { name: 'International Press', agenda: 'Reporting and shaping narrative across the conference\'s committees.' },
+      { name: 'AIPPM', agenda: 'All India Political Parties Meet — simulating Indian multi-party political negotiation.' },
+      { name: 'UNHRC', agenda: 'Protecting civil liberties and human rights in conflict zones.' },
+      { name: 'UNSC', agenda: 'Expert-level Security Council crisis response and resolution drafting.' },
+    ],
+    registrationProducts: [
+      { name: 'Delegate', price: 1500, capacity: 300 },
+      { name: 'Press', price: 1000, capacity: 60 },
+    ],
   },
 ]
 
@@ -103,11 +227,13 @@ async function seedMun(db: Db, tables: Tables, organizerId: string, seed: MunSee
     organizerId,
     name: seed.name,
     slug: seed.slug,
-    edition: '2027',
-    theme: 'Diplomacy in a Fractured World',
-    description: `${seed.name} brings together delegates from across the region for three days of high-stakes committee debate, crisis simulation, and diplomacy.`,
-    startDate: new Date('2027-03-10'),
-    endDate: new Date('2027-03-12'),
+    edition: seed.edition ?? '2027',
+    theme: seed.theme ?? 'Diplomacy in a Fractured World',
+    description:
+      seed.description ??
+      `${seed.name} brings together delegates from across the region for three days of high-stakes committee debate, crisis simulation, and diplomacy.`,
+    startDate: new Date(seed.startDate ?? '2027-03-10'),
+    endDate: new Date(seed.endDate ?? '2027-03-12'),
     city: seed.city,
     country: seed.country,
     status: 'PUBLISHED',
@@ -117,7 +243,8 @@ async function seedMun(db: Db, tables: Tables, organizerId: string, seed: MunSee
   const [mun] = await db.insert(muns).values(munValues).returning()
   console.log(`  - Created MUN "${mun.name}" (slug: ${mun.slug})`)
 
-  for (const committeeSeed of COMMITTEE_SEEDS) {
+  const committeeSeeds = seed.committees ?? COMMITTEE_SEEDS
+  for (const committeeSeed of committeeSeeds) {
     const [committee] = await db
       .insert(committees)
       .values({
@@ -140,8 +267,9 @@ async function seedMun(db: Db, tables: Tables, organizerId: string, seed: MunSee
     console.log(`    - Created committee "${committee.name}" with ${PORTFOLIO_SEEDS.length} portfolios`)
   }
 
+  const productSeeds = seed.registrationProducts ?? REGISTRATION_PRODUCT_SEEDS
   await db.insert(registrationProducts).values(
-    REGISTRATION_PRODUCT_SEEDS.map((productSeed) => ({
+    productSeeds.map((productSeed) => ({
       munId: mun.id,
       name: productSeed.name,
       price: productSeed.price,
@@ -149,7 +277,7 @@ async function seedMun(db: Db, tables: Tables, organizerId: string, seed: MunSee
     })),
   )
 
-  console.log(`    - Created ${REGISTRATION_PRODUCT_SEEDS.length} registration products`)
+  console.log(`    - Created ${productSeeds.length} registration products`)
 
   return mun
 }
@@ -169,20 +297,6 @@ async function main() {
   })
   console.log(`  - Admin: ${admin.email}`)
 
-  const organizer = await upsertUserByEmail(db, users, {
-    name: 'Oxford MUN Society',
-    email: 'organizer@munhub.test',
-    role: 'ORGANIZER',
-  })
-  console.log(`  - Organizer: ${organizer.email}`)
-
-  const organizerVit = await upsertUserByEmail(db, users, {
-    name: 'VIT MUN Committee',
-    email: 'organizer-vit@munhub.test',
-    role: 'ORGANIZER',
-  })
-  console.log(`  - Organizer: ${organizerVit.email}`)
-
   const student = await upsertUserByEmail(db, users, {
     name: 'Asha Verma',
     email: 'student@munhub.test',
@@ -191,16 +305,26 @@ async function main() {
   })
   console.log(`  - Student: ${student.email} (institution: ${student.institution})`)
 
-  const organizersByEmail = new Map([
-    [organizer.email, organizer],
-    [organizerVit.email, organizerVit],
-  ])
+  // One organizer account per MUN_SEED, derived from each seed's `organizer`
+  // field so adding a new MUN_SEED entry doesn't also require hand-wiring a
+  // matching organizer block here.
+  const organizersByEmail = new Map<string, Awaited<ReturnType<typeof upsertUserByEmail>>>()
+  for (const seed of MUN_SEEDS) {
+    if (organizersByEmail.has(seed.organizer.email)) continue
+    const organizer = await upsertUserByEmail(db, users, {
+      name: seed.organizer.name,
+      email: seed.organizer.email,
+      role: 'ORGANIZER',
+    })
+    organizersByEmail.set(organizer.email, organizer)
+    console.log(`  - Organizer: ${organizer.email}`)
+  }
 
   console.log('Seeding MUNs...')
   for (const seed of MUN_SEEDS) {
-    const munOrganizer = organizersByEmail.get(seed.organizerEmail)
+    const munOrganizer = organizersByEmail.get(seed.organizer.email)
     if (!munOrganizer) {
-      throw new Error(`No seeded organizer found for email ${seed.organizerEmail}`)
+      throw new Error(`No seeded organizer found for email ${seed.organizer.email}`)
     }
     await seedMun(db, tables, munOrganizer.id, seed)
   }
