@@ -76,7 +76,16 @@ const MUN_SEEDS: MunSeed[] = [
   // --- Real Hyderabad MUN conferences (researched 2026-09-13, sources noted
   // in commit message) — placeholder registration fees since no conference
   // in this circuit publicly discloses fees (confirmed via research, not a
-  // data gap on our end); dates/themes/committees are real where sourced.
+  // data gap on our end); themes/committees are real where sourced.
+  //
+  // DATES: all 6 researched dates fell before 2026-09-13 (today), which made
+  // the homepage carousel (which only promotes upcoming conferences) show
+  // zero Hyderabad slides — flagged by mun-hub-02. Per user's explicit call,
+  // dates below are shifted +1 year from the researched date as a projected
+  // "next annual edition," not the literal researched date. Conference names
+  // that hard-code the researched year (e.g. "BITSMUN Hyderabad '25") keep
+  // that name as-is — it's the real, findable name of the conference; only
+  // the date fields are projected forward.
   {
     name: "BITSMUN Hyderabad '25",
     slug: 'bitsmun-hyderabad-25',
@@ -86,8 +95,8 @@ const MUN_SEEDS: MunSeed[] = [
       'BITSMUN Hyderabad is the flagship Model United Nations conference of BITS Pilani, Hyderabad Campus, run as part of the ATMOS techno-management fest. Now in its 14th edition, it brings together delegates across classic UN bodies and specialized political simulations for three days of committee debate.',
     city: 'Hyderabad',
     country: 'India',
-    startDate: '2025-11-07',
-    endDate: '2025-11-09',
+    startDate: '2026-11-07', // researched: 2025-11-07, projected +1yr
+    endDate: '2026-11-09', // researched: 2025-11-09, projected +1yr
     organizer: { name: 'BITS Pilani Hyderabad MUN Society', email: 'organizer-bitsmun@munhub.test' },
     committees: [
       { name: 'UNSC', agenda: 'Security Council reform and regional peacekeeping mandates.' },
@@ -108,8 +117,8 @@ const MUN_SEEDS: MunSeed[] = [
       'CBITMUN is the annual Model United Nations conference hosted by Chaitanya Bharathi Institute of Technology, Gandipet, Hyderabad. In its 15th edition, the conference continues a long-running tradition of committee simulation and diplomatic debate for college delegates across the region.',
     city: 'Hyderabad',
     country: 'India',
-    startDate: '2026-04-10',
-    endDate: '2026-04-12',
+    startDate: '2027-04-10', // researched: 2026-04-10 (already past 2026-09-13 "today"), projected +1yr
+    endDate: '2027-04-12', // researched: 2026-04-12, projected +1yr
     organizer: { name: 'CBIT MUN Society', email: 'organizer-cbitmun@munhub.test' },
     registrationProducts: [
       { name: 'Delegate', price: 1800, capacity: 220 },
@@ -125,8 +134,8 @@ const MUN_SEEDS: MunSeed[] = [
       'Shri HMUN is The Shri Ram Universal School\'s flagship Model United Nations conference for grades VIII-XII, held at its Financial District campus in Gachibowli, Hyderabad. Now in its 5th edition, it carries forward an SDG-focused tradition that grew out of the school\'s earlier Shri Colloquium gathering.',
     city: 'Hyderabad',
     country: 'India',
-    startDate: '2026-07-03',
-    endDate: '2026-07-05',
+    startDate: '2027-07-03', // researched: 2026-07-03 (already past 2026-09-13 "today"), projected +1yr
+    endDate: '2027-07-05', // researched: 2026-07-05, projected +1yr
     organizer: { name: 'The Shri Ram Universal School MUN Committee', email: 'organizer-shrihmun@munhub.test' },
     registrationProducts: [
       { name: 'Delegate', price: 1500, capacity: 150 },
@@ -140,8 +149,8 @@ const MUN_SEEDS: MunSeed[] = [
       'Vista MUN is hosted by Vista International School in Gachibowli, Hyderabad, bringing together school-level delegates for a weekend of committee simulation with an emphasis on sustainability and global development themes.',
     city: 'Hyderabad',
     country: 'India',
-    startDate: '2025-06-27',
-    endDate: '2025-06-29',
+    startDate: '2027-06-27', // researched: 2025-06-27; +1yr (2026-06-27) still fell before "today" 2026-09-13, so +2yr
+    endDate: '2027-06-29', // researched: 2025-06-29, projected +2yr
     organizer: { name: 'Vista International School MUN Society', email: 'organizer-vistamun@munhub.test' },
     registrationProducts: [
       { name: 'Delegate', price: 1200, capacity: 100 },
@@ -155,8 +164,8 @@ const MUN_SEEDS: MunSeed[] = [
       "Hosted by St. Francis College for Women, Begumpet, Hyderabad, in partnership with American Corner Hyderabad, this conference brings together roughly 150 students for a focused two-day exploration of international diplomacy and strategic partnership themes.",
     city: 'Hyderabad',
     country: 'India',
-    startDate: '2025-02-03',
-    endDate: '2025-02-04',
+    startDate: '2027-02-03', // researched: 2025-02-03; +1yr (2026-02-03) still fell before "today" 2026-09-13, so +2yr
+    endDate: '2027-02-04', // researched: 2025-02-04, projected +2yr
     organizer: { name: 'St. Francis College for Women MUN Committee', email: 'organizer-stfrancismun@munhub.test' },
     registrationProducts: [
       { name: 'Delegate', price: 1000, capacity: 150 },
@@ -170,8 +179,8 @@ const MUN_SEEDS: MunSeed[] = [
       'M-UN is an independent Hyderabad-based Model United Nations conference drawing around 300 delegates for a three-day program spanning a Continuous Crisis Council, International Press corps, AIPPM, UNHRC, and an expert-level UNSC.',
     city: 'Hyderabad',
     country: 'India',
-    startDate: '2025-06-06',
-    endDate: '2025-06-08',
+    startDate: '2027-06-06', // researched: 2025-06-06; +1yr (2026-06-06) still fell before "today" 2026-09-13, so +2yr
+    endDate: '2027-06-08', // researched: 2025-06-08, projected +2yr
     organizer: { name: 'M-UN Hyderabad', email: 'organizer-mun2k25@munhub.test' },
     committees: [
       { name: 'Continuous Crisis Council', agenda: 'Real-time evolving crisis simulation across an unfolding scenario.' },
@@ -207,16 +216,27 @@ async function seedMun(db: Db, tables: Tables, organizerId: string, seed: MunSee
   const [existingMun] = await db.select().from(muns).where(eq(muns.slug, seed.slug)).limit(1)
 
   if (existingMun) {
-    if (existingMun.organizerId !== organizerId) {
-      // Backfill for MUNs seeded before each MUN_SEED got its own organizer —
+    const targetStartDate = new Date(seed.startDate ?? '2027-03-10')
+    const targetEndDate = new Date(seed.endDate ?? '2027-03-12')
+    const organizerDrifted = existingMun.organizerId !== organizerId
+    const datesDrifted =
+      existingMun.startDate?.getTime() !== targetStartDate.getTime() ||
+      existingMun.endDate?.getTime() !== targetEndDate.getTime()
+
+    if (organizerDrifted || datesDrifted) {
+      // Backfill fields that have drifted from the current seed definition —
       // without this, re-running the seed script against an already-seeded
-      // DB leaves every MUN pointing at whichever organizer seeded first.
+      // DB leaves stale values in place forever (bit us twice already: once
+      // with organizerId all pointing at one organizer, once with dates
+      // researched in the past that never got projected forward).
       const [updated] = await db
         .update(muns)
-        .set({ organizerId })
+        .set({ organizerId, startDate: targetStartDate, endDate: targetEndDate })
         .where(eq(muns.id, existingMun.id))
         .returning()
-      console.log(`  - MUN "${seed.name}" already exists (slug: ${seed.slug}), backfilled organizerId.`)
+      console.log(
+        `  - MUN "${seed.name}" already exists (slug: ${seed.slug}), backfilled${organizerDrifted ? ' organizerId' : ''}${datesDrifted ? ' dates' : ''}.`,
+      )
       return updated
     }
     console.log(`  - MUN "${seed.name}" already exists (slug: ${seed.slug}), skipping.`)
