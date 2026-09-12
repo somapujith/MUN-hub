@@ -13,6 +13,7 @@ import {
   SheetFooter,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { CitySelector } from "@/components/marketplace/city-selector";
 import { signOutAction } from "@/app/actions/session";
 
 /**
@@ -31,12 +32,22 @@ interface SiteHeaderMobileNavProps {
   links: MobileNavLink[];
   isSignedIn: boolean;
   dashboardHref: string | null;
+  /**
+   * Marketplace cities, when the page supplies them. The nav bar's compact
+   * city picker is hidden below `md`, so it reappears here — same
+   * `<CitySelector>`, same navigation, just the pill layout, which suits a
+   * full-width sheet better than a dropdown inside a dropdown.
+   */
+  cities?: string[];
+  selectedCity?: string;
 }
 
 export function SiteHeaderMobileNav({
   links,
   isSignedIn,
   dashboardHref,
+  cities,
+  selectedCity = "",
 }: SiteHeaderMobileNavProps) {
   const [open, setOpen] = React.useState(false);
   const pathname = usePathname();
@@ -54,17 +65,31 @@ export function SiteHeaderMobileNav({
           <Button
             variant="ghost"
             size="icon-sm"
-            className="md:hidden"
+            // Visible until `xl` when a city picker is present: the header
+            // pushes the primary link row out at that width to make room for
+            // the browse cluster, so the hamburger has to cover the gap.
+            className={cities ? "xl:hidden" : "md:hidden"}
             aria-label="Open menu"
           >
             <MenuIcon />
           </Button>
         }
       />
-      <SheetContent side="right" className="gap-0">
+      <SheetContent side="right" className="gap-0 overflow-y-auto">
         <SheetHeader>
           <SheetTitle>Menu</SheetTitle>
         </SheetHeader>
+
+        {cities && cities.length > 0 && (
+          <div className="flex flex-col gap-xs border-b border-border px-sm pt-sm pb-md md:hidden">
+            <h3 className="px-sm text-caption uppercase tracking-[0.16px] text-muted-foreground">
+              City
+            </h3>
+            <div className="px-sm">
+              <CitySelector cities={cities} selected={selectedCity} />
+            </div>
+          </div>
+        )}
 
         <nav aria-label="Mobile" className="flex flex-col p-sm">
           {links.map((link) => (

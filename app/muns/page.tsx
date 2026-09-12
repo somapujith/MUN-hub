@@ -87,7 +87,9 @@ export default async function MunsPage({ searchParams }: MunsPageProps) {
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
-      <SiteHeader />
+      {/* Facets are already fetched above for the rail — reuse them for the
+          nav's city picker instead of a second round trip. */}
+      <SiteHeader cities={facets.cities} selectedCity={params.city ?? ""} />
 
       <main className="flex-1">
         {/* Editorial page head — calm whitespace, no gradient, no hero card. */}
@@ -121,11 +123,7 @@ export default async function MunsPage({ searchParams }: MunsPageProps) {
 
         {/* Rail + results */}
         <div className="content-container flex flex-col gap-lg pt-xl pb-section lg:flex-row lg:gap-xxl">
-          <FilterSidebar
-            cities={facets.cities}
-            countries={facets.countries}
-            resultCount={total}
-          />
+          <FilterSidebar countries={facets.countries} resultCount={total} />
 
           <section aria-label="Search results" className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline justify-between gap-xs border-b border-border pb-sm">

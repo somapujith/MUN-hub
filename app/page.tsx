@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
-import { CitySelector } from "@/components/marketplace/city-selector";
 import { MunAdCarousel } from "@/components/mun/mun-ad-carousel";
+import { HomeFilterSidebar } from "@/components/mun/home-filter-sidebar";
 import { MunRow } from "@/components/mun/mun-row";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,8 +12,13 @@ import {
   SignatureCardEyebrow,
   SignatureCardTitle,
 } from "@/components/ui/signature-card";
-import { getMarketplaceFacets, searchMuns } from "@/lib/actions/marketplace";
+import {
+  getMarketplaceFacets,
+  searchMuns,
+  type MunSearchResult,
+} from "@/lib/actions/marketplace";
 import { getSession } from "@/lib/auth/session";
+import { resolvePriceBand, resolveStatusFilter } from "@/lib/home-filters";
 import type { MunSummary } from "@/lib/types";
 
 /**
@@ -70,8 +75,11 @@ const FEATURED_LIMIT = 5;
 /** Cards per shelf — enough to overflow the row and prove it scrolls. */
 const ROW_LIMIT = 12;
 
+/** Stand-in for a shelf the active status filter excluded — no query is run. */
+const EMPTY_RESULT: MunSearchResult = { results: [], total: 0 };
+
 interface HomeProps {
-  searchParams: Promise<{ city?: string }>;
+  searchParams: Promise<{ city?: string; status?: string; price?: string }>;
 }
 
 /**
@@ -87,7 +95,11 @@ function seeAllHref(city: string): string {
 }
 
 export default async function Home({ searchParams }: HomeProps) {
-  const { city: rawCity } = await searchParams;
+  const {
+    city: rawCity,
+    status: rawStatus,
+    price: rawPrice,
+  } = await searchParams;
 
   const facets = await getMarketplaceFacets();
 
@@ -97,21 +109,57 @@ export default async function Home({ searchParams }: HomeProps) {
   const city = rawCity && facets.cities.includes(rawCity) ? rawCity : "";
   const cityFilter = city || undefined;
 
-  const [openNow, publishedOnly, session] = await Promise.all([
+  // Same allow-list discipline for the sidebar params. `status` is validated
+  // against the rail's own public-status list rather than the full 15-state
+  // enum — `?status=UNDER_REVIEW` must not become a way to probe the review
+  // queue from an anonymous URL, even though `searchMuns` would also refuse.
+  const statusFilter = resolveStatusFilter(rawStatus);
+
+  // `price` resolves through the rail's own band table, so the bounds the
+  // server queries are literally the bounds the rail labelled.
+  const priceBand = resolvePriceBand(rawPrice);
+
+  /** Filters every shelf shares. Rows add their own `status` on top. */
+  const sharedFilters = {
+    city: cityFilter,
+    minPrice: priceBand?.min,
+    maxPrice: priceBand?.max,
+    sortBy: "date",
+  } as const;
+
+  // A status filter collapses the three status-grouped shelves down to the one
+  // that matches it — showing an "Opening soon" row while the rail says
+  // "Registration open" would be the page contradicting its own filter.
+  const wantsOpen = !statusFilter || statusFilter === "REGISTRATION_OPEN";
+  const wantsPublished = !statusFilter || statusFilter === "PUBLISHED";
+  const wantsClosed = statusFilter === "REGISTRATION_CLOSED";
+
+  const [openNow, publishedOnly, closed, session] = await Promise.all([
     // Actionable right now: registration is open. Soonest conference first.
-    searchMuns({
-      status: ["REGISTRATION_OPEN"],
-      city: cityFilter,
-      sortBy: "date",
-      limit: ROW_LIMIT,
-    }),
+    wantsOpen
+      ? searchMuns({
+          ...sharedFilters,
+          status: ["REGISTRATION_OPEN"],
+          limit: ROW_LIMIT,
+        })
+      : EMPTY_RESULT,
     // Listed and reviewed, but the registration window hasn't opened yet.
-    searchMuns({
-      status: ["PUBLISHED"],
-      city: cityFilter,
-      sortBy: "date",
-      limit: ROW_LIMIT,
-    }),
+    wantsPublished
+      ? searchMuns({
+          ...sharedFilters,
+          status: ["PUBLISHED"],
+          limit: ROW_LIMIT,
+        })
+      : EMPTY_RESULT,
+    // Only queried when explicitly asked for — a closed conference isn't a
+    // browse-worthy shelf on an unfiltered homepage.
+    wantsClosed
+      ? searchMuns({
+          ...sharedFilters,
+          status: ["REGISTRATION_CLOSED"],
+          limit: ROW_LIMIT,
+        })
+      : EMPTY_RESULT,
     getSession(),
   ]);
 
@@ -134,13 +182,23 @@ export default async function Home({ searchParams }: HomeProps) {
     .slice(0, FEATURED_LIMIT);
 
   const hasAnyRow =
-    openNow.results.length > 0 || publishedOnly.results.length > 0;
+    openNow.results.length > 0 ||
+    publishedOnly.results.length > 0 ||
+    closed.results.length > 0;
+
+  // Badge count for the rail's active row: how many conferences the current
+  // filter set actually matched, across every shelf on screen.
+  const resultCount =
+    openNow.results.length + publishedOnly.results.length + closed.results.length;
 
   const cityLabel = city ? ` in ${city}` : "";
+  const hasRailFilter = Boolean(statusFilter || priceBand);
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <SiteHeader />
+      {/* The nav bar's city picker is fed from the facets this page already
+          fetched — no second `getMarketplaceFacets()` round trip. */}
+      <SiteHeader cities={facets.cities} selectedCity={city} />
 
       <main className="flex-1">
         {/* ---- 1. rotating promo carousel --------------------------------- */}
@@ -152,7 +210,11 @@ export default async function Home({ searchParams }: HomeProps) {
           </section>
         )}
 
-        {/* ---- 2. city pills + status shelves ----------------------------- */}
+        {/* ---- 2. shelves (left) + filter rail (right) --------------------
+            The city control that used to sit here as a pill row has moved into
+            the nav bar, so this band is now shelves + the facets the nav does
+            NOT carry (status, fee). Two city pickers on one screen is one
+            picker too many. */}
         <section className="pb-section">
           <div className="content-container">
             <div className="flex flex-col gap-sm border-b border-border pb-lg">
@@ -160,58 +222,84 @@ export default async function Home({ searchParams }: HomeProps) {
                 Model UN conferences{cityLabel}
               </h1>
               <p className="max-w-[60ch] text-body-md text-body dark:text-muted-foreground">
-                Every listing is reviewed before it goes live. Pick a city to
-                narrow everything below.
+                {/* Deliberately doesn't say "in the bar above": the city picker
+                    sits in the nav on desktop but inside the menu sheet below
+                    768px, so a positional instruction would be wrong on
+                    phones. */}
+                Every listing is reviewed before it goes live. Narrow by city,
+                registration status, or delegate fee.
               </p>
-              <div className="pt-xs">
-                <CitySelector cities={facets.cities} selected={city} />
-              </div>
             </div>
 
-            {hasAnyRow ? (
-              <div className="flex flex-col gap-xxl pt-xl">
-                <MunRow
-                  title="Registration open now"
-                  description="Accepting delegates today — soonest conference first."
-                  muns={openNow.results}
-                  seeAllHref={seeAllHref(city)}
-                />
+            {/* `lg:flex-row` mirrors /muns, with the rail on the trailing edge.
+                On mobile the rail collapses to its own sheet trigger, which
+                sits above the shelves so it's reachable without scrolling
+                past three horizontally-scrolling rows to find it. */}
+            <div className="flex flex-col gap-lg pt-lg lg:flex-row lg:gap-xxl lg:pt-xl">
+              <div className="order-1 min-w-0 flex-1 lg:order-none">
+                {hasAnyRow ? (
+                  <div className="flex flex-col gap-xxl">
+                    <MunRow
+                      title="Registration open now"
+                      description="Accepting delegates today — soonest conference first."
+                      muns={openNow.results}
+                      seeAllHref={seeAllHref(city)}
+                    />
 
-                <MunRow
-                  title="Closing soon"
-                  description={`Registration is open, but the conference starts within ${CLOSING_SOON_DAYS} days.`}
-                  muns={closingSoon}
-                  seeAllHref={seeAllHref(city)}
-                />
+                    <MunRow
+                      title="Closing soon"
+                      description={`Registration is open, but the conference starts within ${CLOSING_SOON_DAYS} days.`}
+                      muns={closingSoon}
+                      seeAllHref={seeAllHref(city)}
+                    />
 
-                <MunRow
-                  title="Opening soon"
-                  description="Listed and reviewed — registration hasn't opened yet."
-                  muns={publishedOnly.results}
-                  seeAllHref={seeAllHref(city)}
-                />
+                    <MunRow
+                      title="Opening soon"
+                      description="Listed and reviewed — registration hasn't opened yet."
+                      muns={publishedOnly.results}
+                      seeAllHref={seeAllHref(city)}
+                    />
+
+                    <MunRow
+                      title="Registration closed"
+                      description="No longer accepting delegates — listed for reference."
+                      muns={closed.results}
+                      seeAllHref={seeAllHref(city)}
+                    />
+                  </div>
+                ) : (
+                  <SignatureCard variant="cream" padding="lg" className="items-start">
+                    <SignatureCardTitle className="text-title-lg sm:text-title-lg">
+                      {hasRailFilter
+                        ? "No conferences match these filters"
+                        : city
+                          ? `No conferences in ${city} yet`
+                          : "No conferences are published yet"}
+                    </SignatureCardTitle>
+                    <SignatureCardDescription className="text-[#333840]">
+                      {hasRailFilter
+                        ? "Nothing matched this combination of status, fee and city. Clearing the filters brings every reviewed conference back."
+                        : city
+                          ? "Nothing is listed in this city right now. Browse every city instead — or check back once a local organizer clears review."
+                          : "Once organizers clear review, their conferences appear here first."}
+                    </SignatureCardDescription>
+                    <SignatureCardActions>
+                      <Button variant="on-dark" size="sm" render={<Link href="/" />}>
+                        {hasRailFilter || city
+                          ? "Clear all filters"
+                          : "Browse the marketplace"}
+                      </Button>
+                    </SignatureCardActions>
+                  </SignatureCard>
+                )}
               </div>
-            ) : (
-              <div className="pt-xl">
-                <SignatureCard variant="cream" padding="lg" className="items-start">
-                  <SignatureCardTitle className="text-title-lg sm:text-title-lg">
-                    {city
-                      ? `No conferences in ${city} yet`
-                      : "No conferences are published yet"}
-                  </SignatureCardTitle>
-                  <SignatureCardDescription className="text-[#333840]">
-                    {city
-                      ? "Nothing is listed in this city right now. Browse every city instead — or check back once a local organizer clears review."
-                      : "Once organizers clear review, their conferences appear here first."}
-                  </SignatureCardDescription>
-                  <SignatureCardActions>
-                    <Button variant="on-dark" size="sm" render={<Link href="/" />}>
-                      {city ? "Show all cities" : "Browse the marketplace"}
-                    </Button>
-                  </SignatureCardActions>
-                </SignatureCard>
+
+              {/* Rail renders before the shelves in the DOM on mobile (it's the
+                  sheet trigger there), and to their right from `lg`. */}
+              <div className="order-none lg:order-1">
+                <HomeFilterSidebar resultCount={resultCount} />
               </div>
-            )}
+            </div>
           </div>
         </section>
 

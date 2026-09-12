@@ -27,7 +27,6 @@ import { cn } from "cn";
  */
 
 interface FilterSidebarProps {
-  cities: string[];
   countries: string[];
   /** Result count for the current query — rendered as the active-item badge. */
   resultCount?: number;
@@ -160,7 +159,7 @@ function CollapsibleOptions({
   );
 }
 
-export function FilterSidebar({ cities, countries, resultCount }: FilterSidebarProps) {
+export function FilterSidebar({ countries, resultCount }: FilterSidebarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
@@ -211,15 +210,13 @@ export function FilterSidebar({ cities, countries, resultCount }: FilterSidebarP
         />
       </RailGroup>
 
-      <RailGroup heading="City">
-        <CollapsibleOptions
-          values={cities}
-          allLabel="All cities"
-          selected={selectedCity}
-          resultCount={resultCount}
-          onSelect={(v) => setParam("city", v)}
-        />
-      </RailGroup>
+      {/* No City group here. The nav bar's compact city picker (see
+          `components/layout/site-header.tsx`) is now the single authoritative
+          city control on every browse surface, and this rail used to render a
+          second one that wrote the same `?city=` param — two controls for one
+          param, disagreeing about which is canonical. The rail keeps the facets
+          the nav does NOT carry. The active city still appears as a removable
+          chip on mobile, read from the URL rather than from a `cities` prop. */}
 
       <RailGroup heading="Sort by">
         {SORT_OPTIONS.map((option) => (
