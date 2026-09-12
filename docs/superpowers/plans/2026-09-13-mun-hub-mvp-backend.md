@@ -134,327 +134,223 @@ git commit -m "chore: scaffold Next.js app with Prisma, Vitest, Docker Postgres"
 
 ---
 
-## Task 2: Prisma Schema (All MVP Entities + Enums)
+## Task 2: Drizzle Schema (All MVP Entities + Enums)
+
+> **Actually implemented with Drizzle ORM, not Prisma.** This task's code blocks below are the real, verified implementation (superseding the original Prisma draft). See `lib/db/schema.ts` and `lib/db/schema-enums.ts`.
 
 **Files:**
-- Create: `prisma/schema.prisma`
+- Create: `lib/db/schema-enums.ts` (pgEnum definitions)
+- Create: `lib/db/schema.ts` (pgTable + relations definitions)
 - Create: `lib/db/client.ts`
-- Test: `lib/db/client.test.ts`
+- Create: `lib/db/migrate.ts` (migration runner script)
 
 **Interfaces:**
 - Consumes: `DATABASE_URL` env var from Task 1.
-- Produces: `PrismaClient` singleton export `import { db } from '@/lib/db/client'`. All later tasks import `db` from here — never instantiate `PrismaClient` directly elsewhere.
-- Produces: Prisma models `User`, `Mun`, `Committee`, `Portfolio`, `RegistrationProduct`, `Registration`, `Payment`, `OrganizerApplication`, `VerificationLog`, `Certificate`, `Achievement` and enums `Role`, `MunStatus`, `RegistrationStatus`, `PaymentStatus`.
+- Produces: Drizzle client singleton export `import { db } from '@/lib/db/client'`. All later tasks import `db` from here — never instantiate `drizzle(...)` directly elsewhere.
+- Produces: Drizzle tables `users`, `muns`, `committees`, `portfolios`, `registrationProducts`, `registrations`, `payments`, `organizerApplications`, `verificationLogs`, `certificates`, `achievements`, `sessions` and pgEnums `roleEnum`, `munStatusEnum`, `registrationStatusEnum`, `paymentStatusEnum`, `applicationStatusEnum` (TS types `Role`, `MunStatus`, `RegistrationStatus`, `PaymentStatus`, `ApplicationStatus` derived via `(typeof xEnum.enumValues)[number]`).
+- Produces `relations()` definitions for every FK so `db.query.muns.findMany({ with: { committees: true } })` style relational queries work.
+- Adds a `sessions` table (not in the original Prisma-shaped draft) so `lib/auth/session.ts` can look up a session by opaque token instead of trusting a raw userId cookie.
 
-- [ ] **Step 1: Write the schema**
+- [ ] **Step 1: Write the enums**
 
-Create `prisma/schema.prisma`:
-```prisma
-generator client {
-  provider = "prisma-client-js"
-}
+Create `lib/db/schema-enums.ts`:
+```typescript
+import { pgEnum } from 'drizzle-orm/pg-core'
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+export const roleEnum = pgEnum('role', [
+  'STUDENT',
+  'ORGANIZER',
+  'OPERATIONS',
+  'ADMIN',
+  'SUPER_ADMIN',
+])
 
-enum Role {
-  STUDENT
-  ORGANIZER
-  OPERATIONS
-  ADMIN
-  SUPER_ADMIN
-}
+export const munStatusEnum = pgEnum('mun_status', [
+  'DRAFT',
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'APPROVED',
+  'REJECTED',
+  'CHANGES_REQUESTED',
+  'ONBOARDING',
+  'CONTENT_SUBMITTED',
+  'VERIFICATION',
+  'PUBLISHED',
+  'REGISTRATION_OPEN',
+  'REGISTRATION_CLOSED',
+  'CONFERENCE_ACTIVE',
+  'COMPLETED',
+  'ARCHIVED',
+])
 
-enum MunStatus {
-  DRAFT
-  SUBMITTED
-  UNDER_REVIEW
-  APPROVED
-  REJECTED
-  CHANGES_REQUESTED
-  ONBOARDING
-  CONTENT_SUBMITTED
-  VERIFICATION
-  PUBLISHED
-  REGISTRATION_OPEN
-  REGISTRATION_CLOSED
-  CONFERENCE_ACTIVE
-  COMPLETED
-  ARCHIVED
-}
+export const registrationStatusEnum = pgEnum('registration_status', [
+  'PENDING',
+  'PAYMENT_PENDING',
+  'CONFIRMED',
+  'CANCELLED',
+  'REFUNDED',
+  'ATTENDED',
+  'NO_SHOW',
+])
 
-enum RegistrationStatus {
-  PENDING
-  PAYMENT_PENDING
-  CONFIRMED
-  CANCELLED
-  REFUNDED
-  ATTENDED
-  NO_SHOW
-}
+export const paymentStatusEnum = pgEnum('payment_status', [
+  'CREATED',
+  'PENDING',
+  'PAID',
+  'FAILED',
+  'REFUNDED',
+])
 
-enum PaymentStatus {
-  CREATED
-  PENDING
-  PAID
-  FAILED
-  REFUNDED
-}
+export const applicationStatusEnum = pgEnum('application_status', [
+  'SUBMITTED',
+  'APPROVED',
+  'REJECTED',
+  'CHANGES_REQUESTED',
+])
 
-enum ApplicationStatus {
-  SUBMITTED
-  APPROVED
-  REJECTED
-  CHANGES_REQUESTED
-}
-
-model User {
-  id             String    @id @default(cuid())
-  name           String
-  email          String    @unique
-  phone          String?
-  role           Role      @default(STUDENT)
-  username       String?   @unique
-  institution    String?
-  profileImage   String?
-  createdAt      DateTime  @default(now())
-
-  organizedMuns       Mun[]                 @relation("MunOrganizer")
-  registrations       Registration[]
-  organizerApplications OrganizerApplication[]
-  certificates        Certificate[]
-  achievements        Achievement[]
-  verificationLogs    VerificationLog[]      @relation("ReviewerLogs")
-}
-
-model Mun {
-  id            String    @id @default(cuid())
-  organizerId   String
-  organizer     User      @relation("MunOrganizer", fields: [organizerId], references: [id])
-  name          String
-  slug          String    @unique
-  edition       String?
-  theme         String?
-  description   String?
-  startDate     DateTime?
-  endDate       DateTime?
-  venue         String?
-  city          String?
-  country       String?
-  status        MunStatus @default(DRAFT)
-  publishedAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  committees            Committee[]
-  registrationProducts  RegistrationProduct[]
-  registrations         Registration[]
-  certificates          Certificate[]
-  achievements          Achievement[]
-  verificationLogs      VerificationLog[]
-  organizerApplication  OrganizerApplication?
-
-  @@index([status])
-  @@index([organizerId])
-}
-
-model Committee {
-  id          String   @id @default(cuid())
-  munId       String
-  mun         Mun      @relation(fields: [munId], references: [id], onDelete: Cascade)
-  name        String
-  agenda      String?
-  description String?
-  capacity    Int      @default(0)
-  createdAt   DateTime @default(now())
-
-  portfolios     Portfolio[]
-  registrations  Registration[]
-
-  @@index([munId])
-}
-
-model Portfolio {
-  id           String   @id @default(cuid())
-  committeeId  String
-  committee    Committee @relation(fields: [committeeId], references: [id], onDelete: Cascade)
-  name         String
-  type         String?
-  availability Int      @default(1)
-  createdAt    DateTime @default(now())
-
-  registrations Registration[]
-
-  @@index([committeeId])
-}
-
-model RegistrationProduct {
-  id        String   @id @default(cuid())
-  munId     String
-  mun       Mun      @relation(fields: [munId], references: [id], onDelete: Cascade)
-  name      String
-  price     Int
-  currency  String   @default("INR")
-  capacity  Int
-  deadline  DateTime?
-  status    String   @default("active")
-  createdAt DateTime @default(now())
-
-  registrations Registration[]
-
-  @@index([munId])
-}
-
-model Registration {
-  id                     String              @id @default(cuid())
-  userId                 String
-  user                   User                @relation(fields: [userId], references: [id])
-  munId                  String
-  mun                    Mun                 @relation(fields: [munId], references: [id])
-  registrationProductId  String
-  registrationProduct    RegistrationProduct @relation(fields: [registrationProductId], references: [id])
-  committeeId            String?
-  committee              Committee?          @relation(fields: [committeeId], references: [id])
-  portfolioId            String?
-  portfolio              Portfolio?          @relation(fields: [portfolioId], references: [id])
-  formResponses          Json?
-  status                 RegistrationStatus  @default(PENDING)
-  expiresAt              DateTime?
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
-
-  payment  Payment?
-  certificates Certificate[]
-  achievements Achievement[]
-
-  @@index([munId, status])
-  @@index([registrationProductId, status])
-  @@index([userId])
-}
-
-model Payment {
-  id                 String        @id @default(cuid())
-  registrationId     String        @unique
-  registration       Registration  @relation(fields: [registrationId], references: [id])
-  provider           String        @default("mock_razorpay")
-  providerOrderId    String        @unique
-  providerPaymentId  String?
-  amount             Int
-  status             PaymentStatus @default(CREATED)
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
-}
-
-model Certificate {
-  id                  String   @id @default(cuid())
-  userId              String
-  user                User     @relation(fields: [userId], references: [id])
-  munId               String
-  mun                 Mun      @relation(fields: [munId], references: [id])
-  registrationId      String
-  registration        Registration @relation(fields: [registrationId], references: [id])
-  certificateUrl      String?
-  verificationStatus  String   @default("unverified")
-  createdAt           DateTime @default(now())
-}
-
-model Achievement {
-  id                  String   @id @default(cuid())
-  userId              String
-  user                User     @relation(fields: [userId], references: [id])
-  munId               String
-  mun                 Mun      @relation(fields: [munId], references: [id])
-  registrationId      String
-  registration        Registration @relation(fields: [registrationId], references: [id])
-  committee           String?
-  portfolio            String?
-  award                String?
-  verificationStatus  String   @default("unverified")
-  createdAt           DateTime @default(now())
-}
-
-model OrganizerApplication {
-  id           String             @id @default(cuid())
-  organizerId  String             @unique
-  organizer    User               @relation(fields: [organizerId], references: [id])
-  munId        String?            @unique
-  mun          Mun?               @relation(fields: [munId], references: [id])
-  status       ApplicationStatus  @default(SUBMITTED)
-  reviewNotes  String?
-  submittedAt  DateTime           @default(now())
-}
-
-model VerificationLog {
-  id          String   @id @default(cuid())
-  munId       String
-  mun         Mun      @relation(fields: [munId], references: [id], onDelete: Cascade)
-  reviewerId  String
-  reviewer    User     @relation("ReviewerLogs", fields: [reviewerId], references: [id])
-  action      String
-  notes       String?
-  internalNotes String?
-  createdAt   DateTime @default(now())
-
-  @@index([munId])
-}
+export type Role = (typeof roleEnum.enumValues)[number]
+export type MunStatus = (typeof munStatusEnum.enumValues)[number]
+export type RegistrationStatus = (typeof registrationStatusEnum.enumValues)[number]
+export type PaymentStatus = (typeof paymentStatusEnum.enumValues)[number]
+export type ApplicationStatus = (typeof applicationStatusEnum.enumValues)[number]
 ```
 
-- [ ] **Step 2: Run migration**
+- [ ] **Step 2: Write the tables + relations**
 
-Run: `npm run db:up && npm run db:migrate -- --name init`
-Expected: migration succeeds, `prisma/migrations/` created, no errors.
+Create `lib/db/schema.ts` — see the real file at `lib/db/schema.ts` for the complete, verified definitions of all 12 tables (`users`, `sessions`, `muns`, `committees`, `portfolios`, `registrationProducts`, `registrations`, `payments`, `certificates`, `achievements`, `organizerApplications`, `verificationLogs`) plus their `relations()` blocks. Pattern used throughout:
+
+```typescript
+import { relations } from 'drizzle-orm'
+import { index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { munStatusEnum, roleEnum /* ...other enums */ } from './schema-enums'
+
+export * from './schema-enums'
+
+function id() {
+  return text('id').primaryKey().$defaultFn(() => crypto.randomUUID())
+}
+
+export const users = pgTable('users', {
+  id: id(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  phone: text('phone'),
+  role: roleEnum('role').notNull().default('STUDENT'),
+  username: text('username').unique(),
+  institution: text('institution'),
+  profileImage: text('profile_image'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const muns = pgTable(
+  'muns',
+  {
+    id: id(),
+    organizerId: text('organizer_id').notNull().references(() => users.id),
+    name: text('name').notNull(),
+    slug: text('slug').notNull().unique(),
+    // ...edition, theme, description, startDate, endDate, venue, city, country
+    status: munStatusEnum('status').notNull().default('DRAFT'),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('muns_status_idx').on(table.status),
+    index('muns_organizer_id_idx').on(table.organizerId),
+  ],
+)
+
+export const munsRelations = relations(muns, ({ one, many }) => ({
+  organizer: one(users, { fields: [muns.organizerId], references: [users.id] }),
+  committees: many(committees),
+  registrationProducts: many(registrationProducts),
+  // ...
+}))
+
+// sessions table (new): supports token-based getSession()
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: id(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('sessions_user_id_idx').on(table.userId)],
+)
+```
+
+Field/table names to use everywhere downstream (Drizzle uses camelCase JS identifiers mapped to snake_case columns): `muns.organizerId`, `registrations.registrationProductId`, `registrations.committeeId`, `registrations.portfolioId`, `payments.registrationId`, `payments.providerOrderId`, `verificationLogs.reviewerId`, `verificationLogs.internalNotes`. Indexes added: `muns(status)`, `muns(organizerId)`, `committees(munId)`, `portfolios(committeeId)`, `registrationProducts(munId)`, `registrations(munId, status)`, `registrations(registrationProductId, status)`, `registrations(userId)`, `verificationLogs(munId)`, `sessions(userId)`.
 
 - [ ] **Step 3: Write DB client singleton**
 
 Create `lib/db/client.ts`:
 ```typescript
-import { PrismaClient } from '@prisma/client'
+import { drizzle } from 'drizzle-orm/postgres-js'
+import postgres from 'postgres'
+import * as schema from './schema'
 
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
+const globalForDb = globalThis as unknown as { queryClient?: ReturnType<typeof postgres> }
 
-export const db = globalForPrisma.prisma ?? new PrismaClient()
+const queryClient = globalForDb.queryClient ?? postgres(process.env.DATABASE_URL!)
 
 if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = db
+  globalForDb.queryClient = queryClient
 }
+
+export const db = drizzle(queryClient, { schema })
 ```
 
-- [ ] **Step 4: Write failing test for client connectivity**
+- [ ] **Step 4: Write the migration runner**
 
-Create `lib/db/client.test.ts`:
+Create `lib/db/migrate.ts` (this is what `npm run db:migrate` calls, per `package.json`):
 ```typescript
-import { describe, it, expect, afterAll } from 'vitest'
-import { db } from './client'
+import { config } from 'dotenv'
+import { drizzle } from 'drizzle-orm/postgres-js'
+import { migrate } from 'drizzle-orm/postgres-js/migrator'
+import postgres from 'postgres'
 
-describe('db client', () => {
-  it('connects and can run a query', async () => {
-    const result = await db.$queryRaw<{ ok: number }[]>`SELECT 1 as ok`
-    expect(result[0].ok).toBe(1)
-  })
+config({ path: '.env' })
 
-  afterAll(async () => {
-    await db.$disconnect()
-  })
+async function main() {
+  const databaseUrl = process.env.DATABASE_URL
+  if (!databaseUrl) throw new Error('DATABASE_URL is not set')
+
+  const migrationClient = postgres(databaseUrl, { max: 1 })
+  const db = drizzle(migrationClient)
+
+  console.log('Running migrations from ./drizzle ...')
+  await migrate(db, { migrationsFolder: './drizzle' })
+  console.log('Migrations complete.')
+
+  await migrationClient.end()
+}
+
+main().catch((error) => {
+  console.error('Migration failed:', error)
+  process.exit(1)
 })
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [ ] **Step 5: Generate and run the migration**
 
-Run: `npm run test -- lib/db/client.test.ts`
-Expected: PASS (requires `npm run db:up` and `npm run db:migrate` already run).
+Run: `npm run db:up && npx drizzle-kit generate && npm run db:migrate`
+Expected: `drizzle/0000_*.sql` generated (verified: 12 tables, all FKs/indexes present), migration applies cleanly against local Postgres, no errors (a harmless NOTICE about one long FK constraint name being truncated to 63 chars is expected and safe).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add prisma lib/db
-git commit -m "feat: add Prisma schema for all MVP entities and DB client singleton"
+git add lib/db/schema.ts lib/db/schema-enums.ts lib/db/client.ts lib/db/migrate.ts drizzle
+git commit -m "feat: add Drizzle schema for all MVP entities and DB client singleton"
 ```
 
 ---
 
 ## Task 3: Shared Types + Tenant Guard
+
+> **Actually implemented with Drizzle ORM, not Prisma.** Code blocks below are the real, verified implementation. `assertMunExists` uses Drizzle's `select().from().where()` syntax, not `db.mun.findUnique`. Types use `InferSelectModel` against `lib/db/schema.ts` tables, not `@prisma/client` imports.
 
 **Files:**
 - Create: `lib/types/mun.ts`, `lib/types/registration.ts`, `lib/types/user.ts`, `lib/types/index.ts`
@@ -462,27 +358,34 @@ git commit -m "feat: add Prisma schema for all MVP entities and DB client single
 - Test: `lib/db/tenant-guard.test.ts`
 
 **Interfaces:**
-- Consumes: Prisma models from Task 2 (`db` client).
-- Produces: `withTenant<T>(munId: string, query: (tx: typeof db) => Promise<T>): Promise<T>` — every tenant-scoped read/write in later tasks wraps its query with this. Produces re-exported types `MunSummary`, `MunDetail`, `RegistrationInput`, `PublicUser` from `lib/types/index.ts` for the UI session to import.
+- Consumes: Drizzle tables/relations from Task 2 (`db` client from `lib/db/client.ts`).
+- Produces: `assertMunExists(munId: string): Promise<MunRow>` — every tenant-scoped read/write in later tasks should call this first to fail fast on a bad `munId`. Produces re-exported types `MunSummary`, `MunDetail`, `RegistrationInput`, `PublicUser` from `lib/types/index.ts` for the UI session to import.
+- **IDOR correction:** `RegistrationInput.userId` is optional, not required — callers must never accept a client-supplied `userId` for a mutation on a specific user's data. The actor is always derived from `getSession()` (Task 4). The optional field exists only for internal server-side construction after the session is already resolved.
+- **MunSummary correction:** expanded beyond the original id/name/slug/city/country/startDate/endDate/status shape to also carry `minPrice: number | null` (cheapest active `registrationProducts` row for that MUN), `coverImage: string | null`, and `organizerName: string | null` — required for marketplace card rendering. These are derived/joined fields; callers building a `MunSummary` compute them, they are not raw columns on `muns`.
 
 - [ ] **Step 1: Write failing test for tenant guard**
 
 Create `lib/db/tenant-guard.test.ts`:
 ```typescript
-import { describe, it, expect, afterAll, beforeAll } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from './client'
+import { muns, users } from './schema'
 import { assertMunExists } from './tenant-guard'
 
 describe('tenant-guard', () => {
   let munId: string
 
   beforeAll(async () => {
-    const organizer = await db.user.create({
-      data: { name: 'Org', email: `org-${Date.now()}@test.com`, role: 'ORGANIZER' },
-    })
-    const mun = await db.mun.create({
-      data: { organizerId: organizer.id, name: 'Test Mun', slug: `test-mun-${Date.now()}` },
-    })
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'Org', email: `org-${Date.now()}@test.com`, role: 'ORGANIZER' })
+      .returning()
+
+    const [mun] = await db
+      .insert(muns)
+      .values({ organizerId: organizer.id, name: 'Test Mun', slug: `test-mun-${Date.now()}` })
+      .returning()
+
     munId = mun.id
   })
 
@@ -496,7 +399,7 @@ describe('tenant-guard', () => {
   })
 
   afterAll(async () => {
-    await db.$disconnect()
+    await db.$client.end()
   })
 })
 ```
@@ -510,11 +413,14 @@ Expected: FAIL — `assertMunExists` not defined.
 
 Create `lib/db/tenant-guard.ts`:
 ```typescript
+import { eq } from 'drizzle-orm'
 import { db } from './client'
-import type { Mun } from '@prisma/client'
+import { muns } from './schema'
 
-export async function assertMunExists(munId: string): Promise<Mun> {
-  const mun = await db.mun.findUnique({ where: { id: munId } })
+export type MunRow = typeof muns.$inferSelect
+
+export async function assertMunExists(munId: string): Promise<MunRow> {
+  const [mun] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
   if (!mun) {
     throw new Error('Mun not found')
   }
@@ -531,24 +437,45 @@ Expected: PASS
 
 Create `lib/types/mun.ts`:
 ```typescript
-import type { Mun, MunStatus } from '@prisma/client'
+import type { InferSelectModel } from 'drizzle-orm'
+import type { committees, muns, registrationProducts } from '@/lib/db/schema'
+import type { MunStatus } from '@/lib/db/schema-enums'
 
-export type MunSummary = Pick<Mun, 'id' | 'name' | 'slug' | 'city' | 'country' | 'startDate' | 'endDate' | 'status'>
+export type Mun = InferSelectModel<typeof muns>
+export type Committee = InferSelectModel<typeof committees>
+export type RegistrationProduct = InferSelectModel<typeof registrationProducts>
 
-export type MunDetail = Mun & {
-  committees: Array<{ id: string; name: string; capacity: number }>
-  registrationProducts: Array<{ id: string; name: string; price: number; capacity: number }>
+export interface MunSummary {
+  id: string
+  name: string
+  slug: string
+  city: string | null
+  country: string | null
+  startDate: Date | null
+  endDate: Date | null
+  status: MunStatus
+  minPrice: number | null
+  coverImage: string | null
+  organizerName: string | null
 }
 
-export type { MunStatus }
+export interface MunDetail extends Mun {
+  committees: Committee[]
+  registrationProducts: RegistrationProduct[]
+  organizerName: string | null
+}
 ```
 
 Create `lib/types/registration.ts`:
 ```typescript
-import type { RegistrationStatus } from '@prisma/client'
+import type { InferSelectModel } from 'drizzle-orm'
+import type { registrations } from '@/lib/db/schema'
+import type { RegistrationStatus } from '@/lib/db/schema-enums'
+
+export type Registration = InferSelectModel<typeof registrations>
 
 export interface RegistrationInput {
-  userId: string
+  userId?: string // NEVER accept from a client — derive from getSession()
   munId: string
   registrationProductId: string
   committeeId?: string
@@ -561,7 +488,11 @@ export type { RegistrationStatus }
 
 Create `lib/types/user.ts`:
 ```typescript
-import type { Role } from '@prisma/client'
+import type { InferSelectModel } from 'drizzle-orm'
+import type { users } from '@/lib/db/schema'
+import type { Role } from '@/lib/db/schema-enums'
+
+export type User = InferSelectModel<typeof users>
 
 export interface PublicUser {
   id: string
@@ -591,19 +522,24 @@ git commit -m "feat: add tenant guard and shared types contract"
 
 ## Task 4: Mock Auth Adapter + Authorize Helper
 
+> **Actually implemented with Drizzle ORM, not Prisma.** `getSession()` now looks up a real `sessions` table row by opaque token (never a raw userId in the cookie) — this is a deliberate correction over the original plan, flagged by a UI-session review as an IDOR risk if a raw userId were trusted from a cookie. `createSession`/`destroySession` were added for sign-in/sign-out wiring in a later wave.
+
 **Files:**
 - Create: `lib/auth/adapter.ts`, `lib/auth/mock-adapter.ts`, `lib/auth/authorize.ts`, `lib/auth/session.ts`
 - Test: `lib/auth/authorize.test.ts`
 
 **Interfaces:**
-- Consumes: `Role` enum from Task 2, `db` client.
-- Produces: `getSession(): Promise<{ userId: string; role: Role } | null>` from `lib/auth/session.ts` — every server action in later tasks calls this to identify the actor. Produces `requireRole(session, allowedRoles: Role[]): void` from `lib/auth/authorize.ts` — throws `Error('Forbidden')` if role not allowed. Produces `AuthAdapter` interface with `signIn`, `signOut`, `getCurrentUserId` methods — real Supabase adapter implements same interface later.
+- Consumes: `Role` type from Task 2's `lib/db/schema-enums.ts`, `db` client, `sessions`/`users` tables.
+- Produces: `getSession(): Promise<Session | null>` from `lib/auth/session.ts` — reads the `mun_hub_session` cookie as a TOKEN, joins `sessions` → `users`, checks `expiresAt`, returns `{ userId, role }` or null. Every server action in later tasks calls this to identify the actor — never accept a client-supplied `userId` parameter for a mutation/read of a specific user's data.
+- Produces `createSession(userId): Promise<{ token: string; expiresAt: Date }>` and `destroySession(token): Promise<void>` — sign-in/sign-out (built in a later wave) call these.
+- Produces `requireRole(session, allowedRoles: Role[]): void` from `lib/auth/authorize.ts` — throws `Error('Forbidden')` if role not allowed.
+- Produces `AuthAdapter` interface with `signIn`, `signOut`, `getCurrentUserId` methods — real provider adapter (Supabase Auth or other, undecided) implements same interface later.
 
 - [ ] **Step 1: Write failing test for authorize**
 
 Create `lib/auth/authorize.test.ts`:
 ```typescript
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { requireRole } from './authorize'
 
 describe('requireRole', () => {
@@ -630,7 +566,7 @@ Expected: FAIL — module not found.
 
 Create `lib/auth/adapter.ts`:
 ```typescript
-import type { Role } from '@prisma/client'
+import type { Role } from '@/lib/db/schema-enums'
 
 export interface Session {
   userId: string
@@ -644,55 +580,85 @@ export interface AuthAdapter {
 }
 ```
 
-- [ ] **Step 4: Implement mock adapter**
-
-Create `lib/auth/mock-adapter.ts`:
-```typescript
-import { db } from '@/lib/db/client'
-import type { AuthAdapter, Session } from './adapter'
-
-export const mockAuthAdapter: AuthAdapter = {
-  async signIn(email: string): Promise<Session> {
-    const user = await db.user.findUnique({ where: { email } })
-    if (!user) {
-      throw new Error('Invalid credentials')
-    }
-    return { userId: user.id, role: user.role }
-  },
-
-  async signOut(): Promise<void> {
-    return
-  },
-
-  async getCurrentUserId(sessionToken: string): Promise<string | null> {
-    return sessionToken || null
-  },
-}
-```
-
-- [ ] **Step 5: Implement session + authorize helpers**
+- [ ] **Step 4: Implement session helpers (token-based, not raw userId cookie)**
 
 Create `lib/auth/session.ts`:
 ```typescript
+import crypto from 'node:crypto'
 import { cookies } from 'next/headers'
+import { and, eq, gt } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
+import { sessions, users } from '@/lib/db/schema'
 import type { Session } from './adapter'
+
+export const SESSION_COOKIE_NAME = 'mun_hub_session'
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
 
 export async function getSession(): Promise<Session | null> {
   const cookieStore = await cookies()
-  const userId = cookieStore.get('mun_hub_session')?.value
-  if (!userId) return null
+  const token = cookieStore.get(SESSION_COOKIE_NAME)?.value
+  if (!token) return null
 
-  const user = await db.user.findUnique({ where: { id: userId } })
-  if (!user) return null
+  const [row] = await db
+    .select({ userId: users.id, role: users.role, expiresAt: sessions.expiresAt })
+    .from(sessions)
+    .innerJoin(users, eq(sessions.userId, users.id))
+    .where(and(eq(sessions.token, token), gt(sessions.expiresAt, new Date())))
+    .limit(1)
 
-  return { userId: user.id, role: user.role }
+  if (!row) return null
+  return { userId: row.userId, role: row.role }
 }
+
+export async function createSession(userId: string): Promise<{ token: string; expiresAt: Date }> {
+  const token = crypto.randomBytes(32).toString('hex')
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
+  await db.insert(sessions).values({ userId, token, expiresAt })
+  return { token, expiresAt }
+}
+
+export async function destroySession(token: string): Promise<void> {
+  await db.delete(sessions).where(eq(sessions.token, token))
+}
+```
+
+- [ ] **Step 5: Implement mock adapter + authorize helper**
+
+Create `lib/auth/mock-adapter.ts`:
+```typescript
+import { eq } from 'drizzle-orm'
+import { db } from '@/lib/db/client'
+import { sessions, users } from '@/lib/db/schema'
+import type { AuthAdapter, Session } from './adapter'
+import { createSession, destroySession } from './session'
+
+export const mockAuthAdapter: AuthAdapter = {
+  async signIn(email: string): Promise<Session> {
+    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1)
+    if (!user) throw new Error('Invalid credentials')
+    return { userId: user.id, role: user.role }
+  },
+
+  async signOut(sessionToken: string): Promise<void> {
+    await destroySession(sessionToken)
+  },
+
+  async getCurrentUserId(sessionToken: string): Promise<string | null> {
+    const [row] = await db
+      .select({ userId: sessions.userId })
+      .from(sessions)
+      .where(eq(sessions.token, sessionToken))
+      .limit(1)
+    return row?.userId ?? null
+  },
+}
+
+export { createSession }
 ```
 
 Create `lib/auth/authorize.ts`:
 ```typescript
-import type { Role } from '@prisma/client'
+import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from './adapter'
 
 export function requireRole(session: Session | null, allowedRoles: Role[]): asserts session is Session {
@@ -711,29 +677,33 @@ Expected: PASS
 
 ```bash
 git add lib/auth
-git commit -m "feat: add mock auth adapter and role authorization helper"
+git commit -m "feat: add mock auth adapter, token-based session, and role authorization helper"
 ```
 
 ---
 
 ## Task 5: Mock Payments Adapter + Webhook Route
 
+> **Actually implemented with Drizzle ORM, not Prisma.** The adapter itself (this task's Step 1-6) was built in the foundation wave and is verified below. **The webhook route handler (Step 7-9) was NOT built in the foundation wave — it is still owed by whoever picks up this task.** Prisma syntax in the original Step 7-9 draft is illustrative only — use Drizzle against `lib/db/schema.ts` (see Task 2 for the pattern: `db.select().from(payments).where(eq(payments.providerOrderId, orderId))`, `db.update(payments).set({...}).where(...)`, `db.transaction(async (tx) => {...})` for the atomic payment+registration update). Also wire in `simulatePaymentOutcome` (added to the mock adapter, see below) for the mock checkout page so the HMAC secret never reaches the browser.
+
 **Files:**
-- Create: `lib/payments/adapter.ts`, `lib/payments/mock-adapter.ts`
-- Create: `app/api/webhooks/payments/route.ts`
-- Test: `lib/payments/mock-adapter.test.ts`, `app/api/webhooks/payments/route.test.ts`
+- Create: `lib/payments/adapter.ts`, `lib/payments/mock-adapter.ts` (done)
+- Create: `app/api/webhooks/payments/route.ts` (not yet done — later wave)
+- Test: `lib/payments/mock-adapter.test.ts` (done), `app/api/webhooks/payments/route.test.ts` (not yet done)
 
 **Interfaces:**
-- Consumes: `db` client, `Payment`/`Registration` models from Task 2.
-- Produces: `PaymentsAdapter` interface with `createOrder(amount, currency, registrationId): Promise<{ orderId: string }>` and `verifyWebhookSignature(payload, signature): boolean` — real Razorpay adapter implements same interface later. Produces route handler `POST /api/webhooks/payments` that later tasks' registration flow triggers indirectly (mock adapter self-fires it in dev/test via direct call, not HTTP, to keep tests fast).
+- Consumes: `db` client, `payments`/`registrations` tables from Task 2.
+- Produces: `PaymentsAdapter` interface with `createOrder(amount, currency, registrationId): Promise<{ orderId: string }>` and `verifyWebhookSignature(payload, signature): boolean` — real Razorpay adapter implements same interface later.
+- Produces `simulatePaymentOutcome(orderId, outcome: 'success' | 'failure'): Promise<{ signature: string; payload: string }>` — server-side-only helper so a later "mock checkout page" can produce an authentically-signed fake payment outcome without the HMAC secret ever reaching the browser (flagged as a requirement by a UI-session reviewer).
+- Still to produce (later wave): route handler `POST /api/webhooks/payments` that the registration flow's checkout redirect posts to.
 
 - [ ] **Step 1: Write failing test for mock adapter**
 
 Create `lib/payments/mock-adapter.test.ts`:
 ```typescript
-import { describe, it, expect } from 'vitest'
-import { mockPaymentsAdapter } from './mock-adapter'
 import crypto from 'node:crypto'
+import { describe, expect, it } from 'vitest'
+import { mockPaymentsAdapter, simulatePaymentOutcome } from './mock-adapter'
 
 describe('mockPaymentsAdapter', () => {
   it('creates an order with a unique orderId', async () => {
@@ -751,6 +721,25 @@ describe('mockPaymentsAdapter', () => {
   it('rejects a tampered payload', () => {
     const payload = JSON.stringify({ orderId: 'mock_order_1', status: 'paid' })
     expect(mockPaymentsAdapter.verifyWebhookSignature(payload, 'bad-signature')).toBe(false)
+  })
+
+  it('rejects a signature of differing length without throwing', () => {
+    const payload = JSON.stringify({ orderId: 'mock_order_1', status: 'paid' })
+    expect(mockPaymentsAdapter.verifyWebhookSignature(payload, 'short')).toBe(false)
+  })
+})
+
+describe('simulatePaymentOutcome', () => {
+  it('produces a payload+signature that verifies as authentic for success', async () => {
+    const { payload, signature } = await simulatePaymentOutcome('mock_order_abc', 'success')
+    expect(JSON.parse(payload).status).toBe('paid')
+    expect(mockPaymentsAdapter.verifyWebhookSignature(payload, signature)).toBe(true)
+  })
+
+  it('produces a payload+signature that verifies as authentic for failure', async () => {
+    const { payload, signature } = await simulatePaymentOutcome('mock_order_abc', 'failure')
+    expect(JSON.parse(payload).status).toBe('failed')
+    expect(mockPaymentsAdapter.verifyWebhookSignature(payload, signature)).toBe(true)
   })
 })
 ```
@@ -774,19 +763,21 @@ export interface PaymentsAdapter {
 }
 ```
 
-- [ ] **Step 4: Implement mock adapter**
+- [ ] **Step 4: Implement mock adapter (with simulatePaymentOutcome)**
 
 Create `lib/payments/mock-adapter.ts`:
 ```typescript
 import crypto from 'node:crypto'
-import type { PaymentsAdapter, PaymentOrder } from './adapter'
+import type { PaymentOrder, PaymentsAdapter } from './adapter'
 
 function getWebhookSecret(): string {
   const secret = process.env.MOCK_PAYMENT_WEBHOOK_SECRET
-  if (!secret) {
-    throw new Error('MOCK_PAYMENT_WEBHOOK_SECRET not configured')
-  }
+  if (!secret) throw new Error('MOCK_PAYMENT_WEBHOOK_SECRET not configured')
   return secret
+}
+
+function sign(payload: string): string {
+  return crypto.createHmac('sha256', getWebhookSecret()).update(payload).digest('hex')
 }
 
 export const mockPaymentsAdapter: PaymentsAdapter = {
@@ -795,145 +786,59 @@ export const mockPaymentsAdapter: PaymentsAdapter = {
   },
 
   verifyWebhookSignature(payload: string, signature: string): boolean {
-    const expected = crypto.createHmac('sha256', getWebhookSecret()).update(payload).digest('hex')
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature.padEnd(expected.length, '0').slice(0, expected.length)))
-      && expected === signature
+    const expected = sign(payload)
+    const expectedBuf = Buffer.from(expected)
+    const actualBuf = Buffer.from(signature)
+    if (expectedBuf.length !== actualBuf.length) return false
+    return crypto.timingSafeEqual(expectedBuf, actualBuf)
   },
+}
+
+/**
+ * Server-side-only: signs a fake payment outcome so a mock checkout page can
+ * post an authentic webhook payload+signature without the HMAC secret ever
+ * reaching the browser.
+ */
+export async function simulatePaymentOutcome(
+  orderId: string,
+  outcome: 'success' | 'failure',
+): Promise<{ signature: string; payload: string }> {
+  const payload = JSON.stringify({
+    orderId,
+    status: outcome === 'success' ? 'paid' : 'failed',
+    providerPaymentId: outcome === 'success' ? `mock_pay_${orderId}` : undefined,
+  })
+  return { payload, signature: sign(payload) }
 }
 ```
 
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npm run test -- lib/payments/mock-adapter.test.ts`
-Expected: PASS
+Expected: PASS (verified: 5 tests pass)
 
-- [ ] **Step 6: Write failing test for webhook route**
-
-Create `app/api/webhooks/payments/route.test.ts`:
-```typescript
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import crypto from 'node:crypto'
-import { db } from '@/lib/db/client'
-import { POST } from './route'
-
-describe('POST /api/webhooks/payments', () => {
-  let registrationId: string
-  let orderId: string
-
-  beforeAll(async () => {
-    const organizer = await db.user.create({ data: { name: 'Org', email: `org-${Date.now()}@test.com`, role: 'ORGANIZER' } })
-    const student = await db.user.create({ data: { name: 'Student', email: `student-${Date.now()}@test.com`, role: 'STUDENT' } })
-    const mun = await db.mun.create({ data: { organizerId: organizer.id, name: 'Webhook Mun', slug: `webhook-mun-${Date.now()}` } })
-    const product = await db.registrationProduct.create({ data: { munId: mun.id, name: 'Delegate', price: 2500, capacity: 10 } })
-    const registration = await db.registration.create({
-      data: { userId: student.id, munId: mun.id, registrationProductId: product.id, status: 'PAYMENT_PENDING' },
-    })
-    registrationId = registration.id
-    orderId = `mock_order_${registrationId}_test`
-    await db.payment.create({
-      data: { registrationId, providerOrderId: orderId, amount: 2500, status: 'PENDING' },
-    })
-  })
-
-  it('confirms registration on valid signed webhook', async () => {
-    const body = JSON.stringify({ orderId, status: 'paid', providerPaymentId: 'mock_pay_1' })
-    const signature = crypto.createHmac('sha256', process.env.MOCK_PAYMENT_WEBHOOK_SECRET!).update(body).digest('hex')
-
-    const req = new Request('http://localhost/api/webhooks/payments', {
-      method: 'POST',
-      headers: { 'x-mock-signature': signature, 'content-type': 'application/json' },
-      body,
-    })
-
-    const res = await POST(req)
-    expect(res.status).toBe(200)
-
-    const registration = await db.registration.findUnique({ where: { id: registrationId } })
-    expect(registration?.status).toBe('CONFIRMED')
-
-    const payment = await db.payment.findUnique({ where: { registrationId } })
-    expect(payment?.status).toBe('PAID')
-  })
-
-  it('rejects webhook with invalid signature', async () => {
-    const body = JSON.stringify({ orderId, status: 'paid' })
-    const req = new Request('http://localhost/api/webhooks/payments', {
-      method: 'POST',
-      headers: { 'x-mock-signature': 'invalid', 'content-type': 'application/json' },
-      body,
-    })
-
-    const res = await POST(req)
-    expect(res.status).toBe(400)
-  })
-
-  afterAll(async () => {
-    await db.$disconnect()
-  })
-})
-```
-
-- [ ] **Step 7: Run test to verify it fails**
-
-Run: `npm run test -- app/api/webhooks/payments/route.test.ts`
-Expected: FAIL — route not found.
-
-- [ ] **Step 8: Implement webhook route handler**
-
-Create `app/api/webhooks/payments/route.ts`:
-```typescript
-import { db } from '@/lib/db/client'
-import { mockPaymentsAdapter } from '@/lib/payments/mock-adapter'
-
-export async function POST(req: Request): Promise<Response> {
-  const body = await req.text()
-  const signature = req.headers.get('x-mock-signature') ?? ''
-
-  if (!mockPaymentsAdapter.verifyWebhookSignature(body, signature)) {
-    return Response.json({ error: 'Invalid signature' }, { status: 400 })
-  }
-
-  const { orderId, providerPaymentId } = JSON.parse(body) as { orderId: string; providerPaymentId?: string }
-
-  const payment = await db.payment.findUnique({ where: { providerOrderId: orderId } })
-  if (!payment) {
-    return Response.json({ error: 'Payment not found' }, { status: 404 })
-  }
-
-  if (payment.status === 'PAID') {
-    return Response.json({ ok: true, alreadyConfirmed: true }, { status: 200 })
-  }
-
-  await db.$transaction([
-    db.payment.update({
-      where: { id: payment.id },
-      data: { status: 'PAID', providerPaymentId },
-    }),
-    db.registration.update({
-      where: { id: payment.registrationId },
-      data: { status: 'CONFIRMED' },
-    }),
-  ])
-
-  return Response.json({ ok: true }, { status: 200 })
-}
-```
-
-- [ ] **Step 9: Run test to verify it passes**
-
-Run: `npm run test -- app/api/webhooks/payments/route.test.ts`
-Expected: PASS
-
-- [ ] **Step 10: Commit**
+- [ ] **Step 6: Commit adapter**
 
 ```bash
-git add lib/payments app/api/webhooks
-git commit -m "feat: add mock payments adapter and idempotent webhook handler"
+git add lib/payments
+git commit -m "feat: add mock payments adapter with server-signed outcome simulation"
 ```
+
+- [ ] **Step 7 (later wave, NOT done in foundation task): write failing test for webhook route**
+
+Create `app/api/webhooks/payments/route.test.ts` using Drizzle inserts (`db.insert(users).values({...}).returning()`, etc. — see Task 2/3 patterns) to seed an organizer/student/mun/product/registration/payment, then POST a signed body to the route and assert the registration flips to `CONFIRMED` and payment to `PAID`. Mirror the idempotency assertion (`alreadyConfirmed: true` on a second call) and invalid-signature rejection (400) from the original Prisma-shaped test.
+
+- [ ] **Step 8 (later wave): implement webhook route handler**
+
+Create `app/api/webhooks/payments/route.ts` using Drizzle: look up the payment row by `providerOrderId` with `db.select().from(payments).where(eq(payments.providerOrderId, orderId))`, short-circuit if already `PAID` (idempotency — the unique constraint on `providerOrderId` also protects this), then apply the payment+registration status update inside `db.transaction(async (tx) => { ... })`.
+
+- [ ] **Step 9 (later wave): run test, verify PASS, commit**
 
 ---
 
 ## Task 6: Mock Storage Adapter
+
+> No Prisma dependency in this task — the code below is unchanged from the original draft and has been verified as-is (no ORM involved).
 
 **Files:**
 - Create: `lib/storage/adapter.ts`, `lib/storage/mock-adapter.ts`
@@ -946,7 +851,7 @@ git commit -m "feat: add mock payments adapter and idempotent webhook handler"
 
 Create `lib/storage/mock-adapter.test.ts`:
 ```typescript
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { mockStorageAdapter } from './mock-adapter'
 
 describe('mockStorageAdapter', () => {
@@ -998,7 +903,7 @@ export const mockStorageAdapter: StorageAdapter = {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm run test -- lib/storage/mock-adapter.test.ts`
-Expected: PASS
+Expected: PASS (verified)
 
 - [ ] **Step 5: Commit**
 
@@ -1011,86 +916,91 @@ git commit -m "feat: add mock storage adapter"
 
 ## Task 7: Seed Script
 
+> **NOT built in the foundation wave** — the foundation task covered schema/types/adapters only. Prisma syntax below is illustrative only — use Drizzle against `lib/db/schema.ts` (see Task 2 for the pattern). `tsx` is already installed; `package.json`'s `db:seed` script already points at `tsx lib/db/seed.ts` (not `prisma/seed.ts` — there is no `prisma/` directory in this project).
+
 **Files:**
-- Create: `prisma/seed.ts`
-- Modify: `package.json` (add `tsx` dependency)
+- Create: `lib/db/seed.ts` (NOT `prisma/seed.ts` — there is no Prisma in this project)
 
 **Interfaces:**
-- Consumes: all Prisma models from Task 2.
+- Consumes: `db` client and tables from Task 2 (`lib/db/schema.ts`).
 - Produces: `npm run db:seed` populates 3 users (1 admin, 1 organizer, 1 student), 2 published MUNs each with 2 committees, 2 portfolios per committee, 2 registration products. UI session and later backend tasks rely on this fixture data existing for manual testing.
 
-- [ ] **Step 1: Install tsx**
+- [ ] **Step 1: Write seed script (Drizzle — illustrative sketch, adapt field/table names against `lib/db/schema.ts`)**
 
-```bash
-npm install -D tsx
-```
-
-- [ ] **Step 2: Write seed script**
-
-Create `prisma/seed.ts`:
+Create `lib/db/seed.ts`:
 ```typescript
-import { PrismaClient } from '@prisma/client'
+import { config } from 'dotenv'
+config({ path: '.env' })
 
-const db = new PrismaClient()
+import { eq } from 'drizzle-orm'
+import { db } from './client'
+import { committees, muns, portfolios, registrationProducts, users } from './schema'
+
+async function upsertUserByEmail(data: typeof users.$inferInsert) {
+  const [existing] = await db.select().from(users).where(eq(users.email, data.email)).limit(1)
+  if (existing) return existing
+  const [created] = await db.insert(users).values(data).returning()
+  return created
+}
 
 async function main() {
-  const admin = await db.user.upsert({
-    where: { email: 'admin@munhub.test' },
-    update: {},
-    create: { name: 'Platform Admin', email: 'admin@munhub.test', role: 'ADMIN' },
+  const admin = await upsertUserByEmail({ name: 'Platform Admin', email: 'admin@munhub.test', role: 'ADMIN' })
+  const organizer = await upsertUserByEmail({
+    name: 'Oxford MUN Society',
+    email: 'organizer@munhub.test',
+    role: 'ORGANIZER',
   })
-
-  const organizer = await db.user.upsert({
-    where: { email: 'organizer@munhub.test' },
-    update: {},
-    create: { name: 'Oxford MUN Society', email: 'organizer@munhub.test', role: 'ORGANIZER' },
-  })
-
-  await db.user.upsert({
-    where: { email: 'student@munhub.test' },
-    update: {},
-    create: { name: 'Asha Verma', email: 'student@munhub.test', role: 'STUDENT', institution: 'VIT Vellore', city: 'Vellore' } as never,
+  await upsertUserByEmail({
+    name: 'Asha Verma',
+    email: 'student@munhub.test',
+    role: 'STUDENT',
+    institution: 'VIT Vellore',
   })
 
   for (const [i, name] of ['Oxford MUN 2027', 'VIT MUN 2027'].entries()) {
-    const mun = await db.mun.upsert({
-      where: { slug: `mun-${i}-${name.toLowerCase().replace(/\s+/g, '-')}` },
-      update: {},
-      create: {
-        organizerId: organizer.id,
-        name,
-        slug: `mun-${i}-${name.toLowerCase().replace(/\s+/g, '-')}`,
-        edition: '2027',
-        theme: 'Diplomacy in a Fractured World',
-        description: `${name} brings together delegates from across the region.`,
-        startDate: new Date('2027-03-10'),
-        endDate: new Date('2027-03-12'),
-        city: i === 0 ? 'Oxford' : 'Vellore',
-        country: i === 0 ? 'UK' : 'India',
-        status: 'PUBLISHED',
-        publishedAt: new Date(),
-      },
-    })
+    const slug = `mun-${i}-${name.toLowerCase().replace(/\s+/g, '-')}`
+    const [existingMun] = await db.select().from(muns).where(eq(muns.slug, slug)).limit(1)
+
+    const mun =
+      existingMun ??
+      (
+        await db
+          .insert(muns)
+          .values({
+            organizerId: organizer.id,
+            name,
+            slug,
+            edition: '2027',
+            theme: 'Diplomacy in a Fractured World',
+            description: `${name} brings together delegates from across the region.`,
+            startDate: new Date('2027-03-10'),
+            endDate: new Date('2027-03-12'),
+            city: i === 0 ? 'Oxford' : 'Vellore',
+            country: i === 0 ? 'UK' : 'India',
+            status: 'PUBLISHED',
+            publishedAt: new Date(),
+          })
+          .returning()
+      )[0]
+
+    if (existingMun) continue // idempotent re-run: skip child rows if mun already existed
 
     for (const committeeName of ['UNSC', 'UNHRC']) {
-      const committee = await db.committee.create({
-        data: { munId: mun.id, name: committeeName, agenda: 'Sample agenda', capacity: 30 },
-      })
+      const [committee] = await db
+        .insert(committees)
+        .values({ munId: mun.id, name: committeeName, agenda: 'Sample agenda', capacity: 30 })
+        .returning()
 
-      await db.portfolio.createMany({
-        data: [
-          { committeeId: committee.id, name: 'United States', type: 'country', availability: 1 },
-          { committeeId: committee.id, name: 'France', type: 'country', availability: 1 },
-        ],
-      })
+      await db.insert(portfolios).values([
+        { committeeId: committee.id, name: 'United States', type: 'country', availability: 1 },
+        { committeeId: committee.id, name: 'France', type: 'country', availability: 1 },
+      ])
     }
 
-    await db.registrationProduct.createMany({
-      data: [
-        { munId: mun.id, name: 'Delegate', price: 2500, capacity: 200 },
-        { munId: mun.id, name: 'Press', price: 1500, capacity: 20 },
-      ],
-    })
+    await db.insert(registrationProducts).values([
+      { munId: mun.id, name: 'Delegate', price: 2500, capacity: 200 },
+      { munId: mun.id, name: 'Press', price: 1500, capacity: 20 },
+    ])
   }
 
   console.log('Seed complete. Admin:', admin.email)
@@ -1102,27 +1012,29 @@ main()
     process.exit(1)
   })
   .finally(async () => {
-    await db.$disconnect()
+    await db.$client.end()
   })
 ```
 
-- [ ] **Step 3: Run seed and verify**
+- [ ] **Step 2: Run seed and verify**
 
 Run: `npm run db:seed`
 Expected: "Seed complete. Admin: admin@munhub.test" logged, no errors.
 
-Verify: `npm run db:studio` opens Prisma Studio, shows 3 users, 2 MUNs, 4 committees, 8 portfolios, 4 registration products.
+Verify: `npm run db:studio` opens Drizzle Studio, shows 3 users, 2 MUNs, 4 committees, 8 portfolios, 4 registration products.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add prisma/seed.ts package.json package-lock.json
+git add lib/db/seed.ts
 git commit -m "feat: add seed script with demo MUNs, committees, portfolios"
 ```
 
 ---
 
 ## Task 8: Marketplace Query Layer (Search/Filter/Sort)
+
+> **Prisma syntax below is illustrative only — use Drizzle against `lib/db/schema.ts`, see Task 2 for the pattern.** `db.mun.findMany({ where, orderBy, select })` becomes `db.select({...}).from(muns).where(...).orderBy(...)` (or `db.query.muns.findMany({ where: ..., orderBy: ... })` for the relational query API). Note the corrected `MunSummary` shape from Task 3 — `searchMuns` must also populate `minPrice`, `coverImage`, `organizerName` on every returned row, not just the original id/name/slug/city/country/startDate/endDate/status fields. Getting `minPrice` requires either a join/subquery against `registrationProducts` (cheapest `status = 'active'` row per `munId`) or a follow-up batched query — check `lib/db/schema.ts` for the real `registrationProducts` field names (`price`, `status`, `munId`).
 
 **Files:**
 - Create: `lib/actions/marketplace.ts`
@@ -1249,6 +1161,8 @@ git commit -m "feat: add marketplace search/filter server action"
 ---
 
 ## Task 9: Organizer Application + MUN Lifecycle State Machine
+
+> **Prisma syntax below is illustrative only — use Drizzle against `lib/db/schema.ts`, see Task 2 for the pattern.** `db.mun.findUnique({ where: { id } })` → `db.select().from(muns).where(eq(muns.id, munId)).limit(1)` (destructure the first row). `db.$transaction([...])` → `db.transaction(async (tx) => { ... })` with `tx.update(muns).set({...}).where(...)` and `tx.insert(verificationLogs).values({...})` inside. Field names: `verificationLogs.reviewerId`, `verificationLogs.internalNotes`, `muns.publishedAt`. `assertMunExists` from `lib/db/tenant-guard.ts` (Task 3) can replace the manual not-found check.
 
 **Files:**
 - Create: `lib/lifecycle/mun-state-machine.ts`
@@ -1489,6 +1403,8 @@ git commit -m "feat: add MUN lifecycle state machine and organizer application s
 
 ## Task 10: Admin Review Actions
 
+> **Prisma syntax below is illustrative only — use Drizzle against `lib/db/schema.ts`, see Task 2 for the pattern.** `import type { Mun, MunStatus } from '@prisma/client'` → `import type { Mun } from '@/lib/types'` and `import type { MunStatus } from '@/lib/db/schema-enums'`. `session.userId`/`session.role` are unchanged (the `Session` type from Task 4 is ORM-agnostic).
+
 **Files:**
 - Create: `lib/actions/admin-review.ts`
 - Test: `lib/actions/admin-review.test.ts`
@@ -1597,6 +1513,8 @@ git commit -m "feat: add admin review and publish actions with RBAC enforcement"
 ---
 
 ## Task 11: Committee/Portfolio/Registration-Product CRUD Actions
+
+> **Prisma syntax below is illustrative only — use Drizzle against `lib/db/schema.ts`, see Task 2 for the pattern.** `db.mun.findUnique`/`db.committee.findUnique` → `db.select().from(muns).where(eq(muns.id, munId)).limit(1)` / same for `committees`. `db.committee.create({ data: input })` → `db.insert(committees).values(input).returning()` then take `[0]`. Same pattern for `portfolios` and `registrationProducts`. Field names: `committees.munId`, `portfolios.committeeId`, `registrationProducts.munId`.
 
 **Files:**
 - Create: `lib/actions/mun-config.ts`
@@ -1739,6 +1657,8 @@ git commit -m "feat: add committee/portfolio/registration-product CRUD actions w
 ---
 
 ## Task 12: Registration + Capacity + Payment Integrity Flow
+
+> **Prisma syntax below is illustrative only — use Drizzle against `lib/db/schema.ts`, see Task 2 for the pattern.** `db.registration.updateMany({ where: { ..., status: { in: [...] }, expiresAt: { lt: new Date() } }, data: {...} })` → `db.update(registrations).set({ status: 'CANCELLED' }).where(and(eq(registrations.registrationProductId, id), inArray(registrations.status, ['PENDING', 'PAYMENT_PENDING']), lt(registrations.expiresAt, new Date())))`, and read `.length`/`result.count` depends on the postgres-js driver's returned row count — check actual API, or add `.returning()` and count the array. `db.$transaction(async (tx) => {...})` → `db.transaction(async (tx) => {...})` with `tx.select(...).from(registrations)` for the capacity count and `tx.insert(registrations).values({...}).returning()`. **CRITICAL — IDOR:** `RegistrationInput.userId` must NEVER be read from a client-supplied parameter in the real action; derive the actor via `getSession()` (Task 4) inside `initiateRegistration` itself, and only fall back to `input.userId` for internal/test call sites that already resolved the session. Field names: `registrations.registrationProductId`, `registrations.expiresAt`, `payments.providerOrderId`.
 
 **Files:**
 - Create: `lib/actions/registration.ts`
@@ -1913,75 +1833,71 @@ git commit -m "feat: add registration flow with capacity enforcement and expired
 
 ## Task 13: Notifications Stub
 
+> **Built in the foundation wave, no Prisma dependency.** Actual implementation differs slightly from the original sketch: `NotificationsAdapter.send()` takes a single `NotificationPayload` object (`{ to, subject, body }`) rather than positional `(to, template, data)` args — see `lib/notifications/adapter.ts`/`lib/notifications/console-adapter.ts` for the real signature. No test file was written for this task in the foundation wave (straightforward console.log passthrough); add one if desired following the pattern below, adjusted for the object-shaped payload.
+
 **Files:**
-- Create: `lib/notifications/adapter.ts`, `lib/notifications/console-adapter.ts`
-- Test: `lib/notifications/console-adapter.test.ts`
+- Create: `lib/notifications/adapter.ts`, `lib/notifications/console-adapter.ts` (done)
+- Test: `lib/notifications/console-adapter.test.ts` (not yet written)
 
 **Interfaces:**
-- Produces: `NotificationsAdapter` interface with `send(to: string, template: string, data: Record<string, unknown>): Promise<void>` — real Resend adapter implements same interface later. Registration confirmation (Task 12 callers) and admin review (Task 10 callers) can call this once wired by the UI session; this task only builds the adapter, not the call sites (out of scope per spec section 7 — "notifications stub").
+- Produces: `NotificationsAdapter` interface with `send(notification: { to: string; subject: string; body: string }): Promise<void>` — real Resend adapter implements same interface later. Registration confirmation (Task 12 callers) and admin review (Task 10 callers) can call this once wired by the UI session; this task only builds the adapter, not the call sites (out of scope per spec section 7 — "notifications stub").
 
-- [ ] **Step 1: Write failing test**
+- [ ] **Step 1 (optional, not yet done): write test**
 
 Create `lib/notifications/console-adapter.test.ts`:
 ```typescript
-import { describe, it, expect, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { consoleNotificationsAdapter } from './console-adapter'
 
 describe('consoleNotificationsAdapter', () => {
   it('logs the notification and resolves', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
-    await consoleNotificationsAdapter.send('student@test.com', 'registration_confirmed', { munName: 'Oxford MUN' })
+    await consoleNotificationsAdapter.send({
+      to: 'student@test.com',
+      subject: 'registration_confirmed',
+      body: 'Oxford MUN',
+    })
 
-    expect(spy).toHaveBeenCalledWith(
-      expect.stringContaining('registration_confirmed'),
-      expect.objectContaining({ munName: 'Oxford MUN' }),
-    )
+    expect(spy).toHaveBeenCalled()
     spy.mockRestore()
   })
 })
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Already implemented**
 
-Run: `npm run test -- lib/notifications/console-adapter.test.ts`
-Expected: FAIL — module not found.
-
-- [ ] **Step 3: Implement adapter**
-
-Create `lib/notifications/adapter.ts`:
+`lib/notifications/adapter.ts`:
 ```typescript
+export interface NotificationPayload {
+  to: string
+  subject: string
+  body: string
+}
+
 export interface NotificationsAdapter {
-  send(to: string, template: string, data: Record<string, unknown>): Promise<void>
+  send(notification: NotificationPayload): Promise<void>
 }
 ```
 
-Create `lib/notifications/console-adapter.ts`:
+`lib/notifications/console-adapter.ts`:
 ```typescript
-import type { NotificationsAdapter } from './adapter'
+import type { NotificationPayload, NotificationsAdapter } from './adapter'
 
 export const consoleNotificationsAdapter: NotificationsAdapter = {
-  async send(to: string, template: string, data: Record<string, unknown>): Promise<void> {
-    console.log(`[notify] to=${to} template=${template}`, data)
+  async send(notification: NotificationPayload): Promise<void> {
+    console.log('[notification]', notification.to, notification.subject, notification.body)
   },
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npm run test -- lib/notifications/console-adapter.test.ts`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add lib/notifications
-git commit -m "feat: add console-logging notifications adapter stub"
-```
+- [ ] **Step 3: Commit (already done as part of foundation commit)**
 
 ---
 
 ## Task 14: Student Dashboard Query Actions
+
+> **Prisma syntax below is illustrative only — use Drizzle against `lib/db/schema.ts`, see Task 2 for the pattern.** `db.registration.findMany({ where: {...}, include: {...}, orderBy: {...} })` → use the relational query API `db.query.registrations.findMany({ where: (registrations, { eq, and, inArray }) => and(...), with: { mun: true, committee: true, portfolio: true }, orderBy: ... })`, which the `relations()` definitions in `lib/db/schema.ts` make available. `mun: { startDate: { gte: new Date() } }` (nested relation filter) needs either a join in the query builder or a `db.query` `where` callback that reaches into the related `muns` row — verify against the installed drizzle-orm version's relational-query filter API. **IDOR reminder:** `userId` here must come from `getSession()`, never a route param/client input.
 
 **Files:**
 - Create: `lib/actions/student-dashboard.ts`
@@ -2095,6 +2011,8 @@ git commit -m "feat: add student dashboard upcoming/past registration queries"
 ---
 
 ## Task 15: Organizer Dashboard Query Actions
+
+> **Prisma syntax below is illustrative only — use Drizzle against `lib/db/schema.ts`, see Task 2 for the pattern.** `db.registration.count(...)` → `db.select({ count: count() }).from(registrations).where(...)` (import `count` from `drizzle-orm`) then read `result[0].count`. `db.payment.aggregate({ _sum: { amount } })` → `db.select({ total: sum(payments.amount) }).from(payments).innerJoin(registrations, eq(payments.registrationId, registrations.id)).where(...)` (import `sum` from `drizzle-orm`; result is `string | null`, cast to number). `db.registrationProduct.findMany({ where, select })` → `db.select({ capacity: registrationProducts.capacity }).from(registrationProducts).where(eq(registrationProducts.munId, munId))`. `db.registration.findMany({ include: {...} })` → `db.query.registrations.findMany({ where: ..., with: { user: true, committee: true, portfolio: true, payment: true, registrationProduct: true } })`. Field names: `payments.registrationId`, `registrationProducts.munId`, `registrations.munId`.
 
 **Files:**
 - Create: `lib/actions/organizer-dashboard.ts`

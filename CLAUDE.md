@@ -40,6 +40,14 @@ Coordinate via SendMessage before touching the other side's files. Both sessions
 - Do NOT assume Supabase Postgres — DB is Neon.
 - Auth provider is NOT decided yet (was drafted as Supabase Auth in early spec, not confirmed) — keep behind adapter interface until user confirms.
 
+## UI foundation status (mun-hub-93 side)
+
+Design tokens landed in `app/globals.css` — "Diplomatic Modernism" direction: deep blue primary, brass accent, navy dark mode (never near-black — keep dark bg chroma >= 0.05 or it reads charcoal, learned the hard way via design-critic). Fraunces (display) + Inter (body, tabular nums) + JetBrains Mono (technical). `lib/mun-status.ts` holds the 15-state MunStatus → {label, tone, icon} mapping consumed by `components/mun/mun-status-badge.tsx` — 3-channel encoding (color + icon + label) since 15 states collapse to 6 tones. Badge text uses dedicated `--{tone}-text` tokens, not `-foreground` (foreground is for solid fills, text on 15%-tint backgrounds needs different contrast values — don't reuse them).
+
+`lib/mun-status.ts` has a local `MunStatus` type as a placeholder — swap to `import type { MunStatus } from "@/lib/types"` once that lands.
+
+`components/layout/{site-header,site-footer,theme-toggle}.tsx` and `components/theme-provider.tsx` are live. `app/page.tsx` is currently a token/badge preview placeholder, not the real homepage — that's blocked on `searchMuns`/`getMunBySlug`.
+
 ## Registration integrity (critical invariant)
 
 Capacity check + reservation + payment order + webhook + confirm must happen inside DB transactions per `docs/superpowers/specs/2026-09-13-mun-hub-mvp-backend-design.md` Section 3. Never trust client-supplied `userId` in any action that reads/writes a specific user's data — derive actor identity from `getSession()` server-side only (IDOR risk flagged by UI-session review, fixed in Drizzle rewrite).
