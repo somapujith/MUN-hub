@@ -60,10 +60,10 @@ const NAV_LINKS = [
 /** Role → the dashboard that role actually lands on. */
 const DASHBOARD_HREF = {
   STUDENT: "/dashboard",
-  ORGANIZER: "/organizer",
-  OPERATIONS: "/admin",
-  ADMIN: "/admin",
-  SUPER_ADMIN: "/admin",
+  ORGANIZER: "/organizer/dashboard",
+  OPERATIONS: "/admin/review",
+  ADMIN: "/admin/review",
+  SUPER_ADMIN: "/admin/review",
 } as const;
 
 interface SiteHeaderProps {
