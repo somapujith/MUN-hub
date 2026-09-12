@@ -6,13 +6,15 @@
 
 ## 1. Stack
 
-- Next.js 14 App Router, TypeScript, Tailwind, shadcn/ui
+- Next.js (App Router, current stable via create-next-app), TypeScript, Tailwind, shadcn/ui
 - Server Actions + Route Handlers only — no separate Express backend (PRD Section 22)
-- Prisma ORM + Postgres. Local Postgres (Docker) for dev now; swaps to Supabase Postgres later without schema change.
-- Auth: mock adapter behind `lib/auth/adapter.ts` interface — swaps to Supabase Auth later.
+- Drizzle ORM + `postgres` driver + Postgres. Local Postgres (Docker) for dev now; swaps to **Neon** (cloud Postgres, user's actual target — not Supabase Postgres) later via connection-string swap only, no schema rewrite (Drizzle schema is plain SQL-shaped, portable across any Postgres).
+- Auth: mock adapter behind `lib/auth/adapter.ts` interface — swaps to a real provider later (Supabase Auth or other — undecided, adapter isolates the choice).
 - Payments: mock Razorpay adapter behind `lib/payments/adapter.ts` — swaps to real Razorpay later. Webhook signature verification stubbed but structurally real (HMAC check against a mock secret) so swap-in is drop-in.
 - Storage: mock adapter behind `lib/storage/adapter.ts` — swaps to Cloudflare R2 later.
 - Routing: path-based `/mun/[slug]` — no wildcard subdomain middleware yet (PRD Section 15 deferred).
+
+**Correction note:** original draft of this spec specified Prisma. User corrected mid-build: no Prisma, cloud DB is Neon, ORM is Drizzle. This version supersedes.
 
 ## 2. Data Model (Prisma schema, from PRD Section 24)
 

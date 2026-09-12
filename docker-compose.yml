@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mun_hub
+      POSTGRES_PASSWORD: mun_hub_dev
+      POSTGRES_DB: mun_hub
+    ports:
+      - "5432:5432"
+    volumes:
+      - mun_hub_pgdata:/var/lib/postgresql/data
+volumes:
+  mun_hub_pgdata:
