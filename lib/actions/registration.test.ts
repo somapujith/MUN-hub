@@ -119,10 +119,15 @@ describe('initiateRegistration', () => {
 
     const students = await Promise.all(Array.from({ length: 10 }, () => createUser('STUDENT')))
 
-    // The overbooking bug is keyed on registrationProductId, not on which
-    // user is registering, so a single shared session is enough to exercise
-    // the real race (10 concurrent calls against one product with capacity 3).
-    mockGetSession.mockResolvedValue({ userId: students[0].id, role: 'STUDENT' })
+    // Each concurrent caller must be a DISTINCT user — since initiateRegistration
+    // now also rejects a second active registration from the same user, reusing
+    // one session across all 10 calls would make most of them fail with "already
+    // have an active registration" instead of exercising the capacity race.
+    // getSession() is called synchronously near the top of each invocation, so
+    // popping the next student off a queue on each mock invocation correctly
+    // assigns one distinct student per concurrent call.
+    const queue = [...students]
+    mockGetSession.mockImplementation(() => Promise.resolve({ userId: queue.shift()!.id, role: 'STUDENT' }))
 
     const results = await Promise.allSettled(
       students.map(() => initiateRegistration({ munId: mun.id, registrationProductId: product.id })),
@@ -143,6 +148,42 @@ describe('initiateRegistration', () => {
       .where(eq(registrations.registrationProductId, product.id))
     const active = activeCount.filter((r) => r.status === 'PENDING' || r.status === 'PAYMENT_PENDING' || r.status === 'CONFIRMED')
     expect(active.length).toBe(3)
+  })
+
+  it('rejects a second active registration from the same user for the same product', async () => {
+    const organizer = await createUser('ORGANIZER')
+    const student = await createUser('STUDENT')
+    const mun = await createMun(organizer.id)
+    const product = await createProduct(mun.id, 10)
+
+    mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
+
+    const first = await initiateRegistration({ munId: mun.id, registrationProductId: product.id })
+    expect(first.registrationId).toBeTruthy()
+
+    await expect(
+      initiateRegistration({ munId: mun.id, registrationProductId: product.id }),
+    ).rejects.toThrow('You already have an active registration for this product')
+  })
+
+  it('allows a fresh registration after the previous one was cancelled (retry after failed payment)', async () => {
+    const organizer = await createUser('ORGANIZER')
+    const student = await createUser('STUDENT')
+    const mun = await createMun(organizer.id)
+    const product = await createProduct(mun.id, 10)
+
+    mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
+
+    const first = await initiateRegistration({ munId: mun.id, registrationProductId: product.id })
+
+    await db
+      .update(registrations)
+      .set({ status: 'CANCELLED' })
+      .where(eq(registrations.id, first.registrationId))
+
+    const second = await initiateRegistration({ munId: mun.id, registrationProductId: product.id })
+    expect(second.registrationId).toBeTruthy()
+    expect(second.registrationId).not.toBe(first.registrationId)
   })
 
   it('throws Forbidden for an unauthenticated caller and never accepts a client-supplied userId', async () => {

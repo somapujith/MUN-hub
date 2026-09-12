@@ -92,29 +92,39 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: true }, { status: 200 })
   }
 
-  await db.transaction(async (tx) => {
-    const updatedPayment = await tx
+  const outcome = await db.transaction(async (tx) => {
+    const [currentRegistration] = await tx
+      .select({ status: registrations.status })
+      .from(registrations)
+      .where(eq(registrations.id, payment.registrationId))
+      .for('update')
+      .limit(1)
+
+    // If the reservation already expired/was cancelled before this "paid"
+    // webhook arrived, money still moved on the provider's side — recording
+    // the payment as PAID here would be a lie (the UI/refund tooling would
+    // treat it as a live confirmed purchase). Record it as REFUNDED instead:
+    // honest that a refund is owed, and never confirms a dead registration.
+    const registrationIsConfirmable = currentRegistration?.status === 'PAYMENT_PENDING'
+
+    await tx
       .update(payments)
       .set({
-        status: 'PAID',
+        status: registrationIsConfirmable ? 'PAID' : 'REFUNDED',
         providerPaymentId: payload.providerPaymentId ?? null,
         updatedAt: new Date(),
       })
       .where(eq(payments.id, payment.id))
-      .returning({ id: payments.id })
 
-    if (updatedPayment.length === 0) {
-      return
+    if (registrationIsConfirmable) {
+      await tx
+        .update(registrations)
+        .set({ status: 'CONFIRMED', updatedAt: new Date() })
+        .where(eq(registrations.id, payment.registrationId))
     }
 
-    // Only confirm a registration that is still PAYMENT_PENDING — a late or
-    // replayed webhook must never resurrect a registration whose reservation
-    // already expired and was released (status CANCELLED) back to CONFIRMED.
-    await tx
-      .update(registrations)
-      .set({ status: 'CONFIRMED', updatedAt: new Date() })
-      .where(and(eq(registrations.id, payment.registrationId), eq(registrations.status, 'PAYMENT_PENDING')))
+    return { registrationIsConfirmable }
   })
 
-  return NextResponse.json({ ok: true }, { status: 200 })
+  return NextResponse.json({ ok: true, refundOwed: !outcome.registrationIsConfirmable }, { status: 200 })
 }

@@ -90,7 +90,7 @@ export async function initiateRegistration(
     }
 
     const activeRegistrations = await tx
-      .select({ id: registrations.id })
+      .select({ id: registrations.id, userId: registrations.userId })
       .from(registrations)
       .where(
         and(
@@ -98,6 +98,14 @@ export async function initiateRegistration(
           inArray(registrations.status, ACTIVE_REGISTRATION_STATUSES),
         ),
       )
+
+    // The product row-lock above serializes every concurrent
+    // initiateRegistration call for this product through this transaction,
+    // so this check is race-free the same way the capacity check below is —
+    // two simultaneous calls from the same user cannot both pass it.
+    if (activeRegistrations.some((r) => r.userId === userId)) {
+      throw new Error('You already have an active registration for this product')
+    }
 
     if (activeRegistrations.length >= product.capacity) {
       throw new Error('Registration product is at capacity')

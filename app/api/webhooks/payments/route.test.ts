@@ -139,7 +139,7 @@ describe('POST /api/webhooks/payments', () => {
     expect(updatedRegistration.status).toBe('CANCELLED')
   })
 
-  it('does not resurrect a registration whose reservation already expired and was cancelled', async () => {
+  it('records the payment as REFUNDED (not PAID) and does not resurrect a registration whose reservation already expired and was cancelled', async () => {
     const { registration, orderId } = await seedPendingPayment()
 
     await db
@@ -150,6 +150,8 @@ describe('POST /api/webhooks/payments', () => {
     const { payload, signature } = await simulatePaymentOutcome(orderId, 'success')
     const response = await POST(makeRequest(payload, signature))
     expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.refundOwed).toBe(true)
 
     const [updatedRegistration] = await db
       .select()
@@ -159,6 +161,17 @@ describe('POST /api/webhooks/payments', () => {
     // A late/replayed "paid" webhook must never flip an already-cancelled
     // (expired-and-released) registration back to CONFIRMED.
     expect(updatedRegistration.status).toBe('CANCELLED')
+
+    const [updatedPayment] = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.providerOrderId, orderId))
+      .limit(1)
+    // Money genuinely moved on the provider's side even though the
+    // registration is dead — recording it as PAID would falsely imply a
+    // live confirmed purchase (and would need to be caught by refund
+    // tooling anyway). REFUNDED is the honest state: paid, and owed back.
+    expect(updatedPayment.status).toBe('REFUNDED')
   })
 
   it('rejects a payload that is not a JSON object instead of crashing', async () => {

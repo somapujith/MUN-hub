@@ -53,7 +53,11 @@ export async function transitionMun(
   internalNotes?: string,
 ): Promise<Mun> {
   return db.transaction(async (tx) => {
-    const [mun] = await tx.select().from(muns).where(eq(muns.id, munId)).limit(1)
+    // Row-lock the mun for the duration of this transaction so two concurrent
+    // transitionMun calls against the same mun (e.g. two admins deciding the
+    // same UNDER_REVIEW mun at once) serialize instead of both reading the
+    // same pre-update status and both passing canTransition.
+    const [mun] = await tx.select().from(muns).where(eq(muns.id, munId)).for('update').limit(1)
     if (!mun) {
       throw new Error('Mun not found')
     }
