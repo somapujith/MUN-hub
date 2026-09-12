@@ -25,7 +25,7 @@ describe('student dashboard queries', () => {
   let pastMunId: string
 
   beforeAll(async () => {
-    const suffix = Date.now()
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
     const [organizer] = await db
       .insert(users)

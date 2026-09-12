@@ -24,7 +24,7 @@ async function asUser(userId: string) {
 
 describe('organizer dashboard queries', () => {
   it('computes overview totals for the owning organizer', async () => {
-    const suffix = Date.now()
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const [organizer] = await db
       .insert(users)
       .values({ name: 'Org', email: `org-${suffix}@test.com`, role: 'ORGANIZER' })
@@ -76,7 +76,7 @@ describe('organizer dashboard queries', () => {
   })
 
   it('rejects a non-owning organizer', async () => {
-    const suffix = Date.now()
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const [owner] = await db
       .insert(users)
       .values({ name: 'Owner', email: `owner-${suffix}@test.com`, role: 'ORGANIZER' })
@@ -97,7 +97,7 @@ describe('organizer dashboard queries', () => {
   })
 
   it('allows an admin to access any mun', async () => {
-    const suffix = Date.now()
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const [owner] = await db
       .insert(users)
       .values({ name: 'Owner2', email: `owner2-${suffix}@test.com`, role: 'ORGANIZER' })
@@ -118,7 +118,7 @@ describe('organizer dashboard queries', () => {
   })
 
   it('applies the paymentStatus filter to the delegate list', async () => {
-    const suffix = Date.now()
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const [organizer] = await db
       .insert(users)
       .values({ name: 'Org3', email: `org3-${suffix}@test.com`, role: 'ORGANIZER' })
