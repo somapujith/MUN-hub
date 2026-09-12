@@ -199,35 +199,51 @@ export default async function Home() {
           </div>
         </section>
 
-        {/* ---- 5. hero-card-dark — closing CTA ---------------------------- */}
-        <section className="pb-section">
+        {/* ---- 5. hero-card-dark — closing CTA ----------------------------
+            One action only. The doc reserves the primary button for a single
+            action per viewport, and `button-secondary-on-dark` is explicitly
+            "a white block over dark surfaces — the system never inverts to a
+            translucent on-dark style". So the secondary sits as a text link
+            rather than a ghost-outlined button.
+
+            No trailing `pb-section` here: the footer opens with its own 96px,
+            and stacking both reads as a dead 192px gap above the footer.
+
+            In dark mode `surface-dark` (#0d1218) sits on a #181d26 canvas and
+            the band all but disappears — the doc's depth model is
+            "color-block first", which needs a contrasting block to work. A
+            hairline restores the edge without importing a shadow language the
+            system doesn't have. */}
+        <section>
           <div className="content-container">
-            <SignatureCard variant="dark" className="items-start text-center sm:items-center">
-              <div className="max-w-2xl sm:text-center">
+            <SignatureCard
+              variant="dark"
+              className="items-center dark:border dark:border-border"
+            >
+              <div className="max-w-2xl text-center">
                 <SignatureCardTitle className="text-balance">
                   Your next placard is one search away.
                 </SignatureCardTitle>
-                <SignatureCardDescription className="text-title-md opacity-85 sm:mx-auto">
+                <SignatureCardDescription className="mx-auto text-title-md opacity-85">
                   Every listing on MUN Hub is reviewed before it goes live, so
                   the conference you register for is the conference you show up
                   to.
                 </SignatureCardDescription>
-                <SignatureCardActions className="sm:justify-center">
+                <SignatureCardActions className="justify-center">
                   <Button variant="on-dark" render={<Link href="/muns" />}>
                     Browse MUNs
                   </Button>
-                  {/* Don't invite a signed-in visitor to sign in again — send
-                      organizers to the listing flow instead. */}
-                  <Button
-                    variant="on-dark"
-                    className="border-white/35 bg-transparent text-white hover:bg-white/10 active:bg-white/15"
-                    render={
-                      <Link href={session ? "/organizer/apply" : "/login"} />
-                    }
+                </SignatureCardActions>
+                {/* Don't invite a signed-in visitor to sign in again. */}
+                <p className="mt-lg text-body-md text-white/70">
+                  {session ? "Organizing a conference? " : "Already registered? "}
+                  <Link
+                    href={session ? "/organizer/apply" : "/login"}
+                    className="rounded-sm text-white underline underline-offset-4 transition-opacity duration-150 hover:opacity-80 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-4 focus-visible:ring-offset-surface-dark focus-visible:outline-none"
                   >
                     {session ? "List your MUN" : "Sign in"}
-                  </Button>
-                </SignatureCardActions>
+                  </Link>
+                </p>
               </div>
             </SignatureCard>
           </div>

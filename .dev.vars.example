@@ -1,0 +1,5 @@
+DATABASE_URL="postgresql://mun_hub:mun_hub_dev@localhost:5432/mun_hub"
+MOCK_PAYMENT_WEBHOOK_SECRET="dev-webhook-secret-change-me"
+AUTH_ADAPTER="mock"
+PAYMENTS_ADAPTER="mock"
+STORAGE_ADAPTER="mock"

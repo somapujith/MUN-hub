@@ -202,30 +202,44 @@
 }
 
 /* ---------------------------------------------------------------------------
-   CONTAINER SCALE — MUST BE RESTATED. DO NOT DELETE.
+   CONTAINER SCALE REPAIR — DO NOT DELETE, DO NOT REORDER ABOVE @theme.
 
-   `max-w-xs … max-w-xl` read Tailwind v4's `--container-*` namespace, but the
-   `--spacing-*` tokens above share the same t-shirt key names and shadow them.
-   Left alone, `max-w-xs` compiles to `max-width: 8px`, `max-w-sm` to 12px,
-   `max-w-md` to 16px, `max-w-lg` to 24px and `max-w-xl` to 32px — which
-   silently shreds every prose column, plus the shared `dialog` (sm:max-w-md),
-   `sheet` (sm:max-w-sm) and `tooltip` (max-w-xs) primitives site-wide.
+   The `--spacing-*` tokens above (xs/sm/md/lg/xl, from the design doc's 4px
+   scale) collide with Tailwind v4's `--container-*` t-shirt keys, and the
+   spacing namespace wins. Left unpatched:
 
-   This block is deliberately a plain `@theme`, NOT `@theme inline`: the inline
-   variant marks variables for inlining instead of registering them in the
-   namespace, so declaring these keys up in the inline block has no effect.
+     max-w-xs -> 8px    max-w-sm -> 12px   max-w-md -> 16px
+     max-w-lg -> 24px   max-w-xl -> 32px
+
+   That silently shreds every prose column on the site, plus the shared
+   primitives that rely on these keys: dialog (`sm:max-w-md`), sheet
+   (`sm:max-w-sm`) and tooltip (`max-w-xs`).
+
+   Declaring `--container-*` in `@theme` does NOT fix it — the spacing-derived
+   declaration is still emitted and, at equal specificity, wins on source
+   order. So the repair is an explicit `@layer utilities` block, which Tailwind
+   emits after its generated utilities and which therefore takes the cascade.
 
    Values are Tailwind v4's stock container scale. Spacing utilities
-   (`p-*`, `gap-*`, `m-*`) keep the design doc's 4px scale and are unaffected.
+   (`p-*`, `gap-*`, `m-*`) keep the doc's 4px scale and are unaffected.
 --------------------------------------------------------------------------- */
-@theme {
-  --container-3xs: 16rem;
-  --container-2xs: 18rem;
-  --container-xs: 20rem;
-  --container-sm: 24rem;
-  --container-md: 28rem;
-  --container-lg: 32rem;
-  --container-xl: 36rem;
+@layer utilities {
+  .max-w-3xs { max-width: 16rem; }
+  .max-w-2xs { max-width: 18rem; }
+  .max-w-xs  { max-width: 20rem; }
+  .max-w-sm  { max-width: 24rem; }
+  .max-w-md  { max-width: 28rem; }
+  .max-w-lg  { max-width: 32rem; }
+  .max-w-xl  { max-width: 36rem; }
+
+  /* Responsive variants used by the shared primitives (dialog / sheet). */
+  @media (min-width: 40rem) {
+    .sm\:max-w-xs { max-width: 20rem; }
+    .sm\:max-w-sm { max-width: 24rem; }
+    .sm\:max-w-md { max-width: 28rem; }
+    .sm\:max-w-lg { max-width: 32rem; }
+    .sm\:max-w-xl { max-width: 36rem; }
+  }
 }
 
 :root {
