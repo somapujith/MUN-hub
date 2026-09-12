@@ -209,17 +209,14 @@ export default async function Home() {
             No trailing `pb-section` here: the footer opens with its own 96px,
             and stacking both reads as a dead 192px gap above the footer.
 
-            In dark mode `surface-dark` (#0d1218) sits on a #181d26 canvas and
-            the band all but disappears — the doc's depth model is
-            "color-block first", which needs a contrasting block to work. A
-            hairline restores the edge without importing a shadow language the
-            system doesn't have. */}
+            Dark mode contrast against the page canvas is handled inside
+            `SignatureCard`'s `dark` variant itself (it swaps to
+            `surface-strong` in dark mode, since `surface-dark` collides with
+            a canvas that's already that color) — no per-page workaround
+            needed here. */}
         <section>
           <div className="content-container">
-            <SignatureCard
-              variant="dark"
-              className="items-center dark:border dark:border-border"
-            >
+            <SignatureCard variant="dark" className="items-center">
               <div className="max-w-2xl text-center">
                 <SignatureCardTitle className="text-balance">
                   Your next placard is one search away.
@@ -235,11 +232,11 @@ export default async function Home() {
                   </Button>
                 </SignatureCardActions>
                 {/* Don't invite a signed-in visitor to sign in again. */}
-                <p className="mt-lg text-body-md text-white/70">
+                <p className="mt-lg text-body-md text-on-dark/70 dark:text-foreground/70">
                   {session ? "Organizing a conference? " : "Already registered? "}
                   <Link
                     href={session ? "/organizer/apply" : "/login"}
-                    className="rounded-sm text-white underline underline-offset-4 transition-opacity duration-150 hover:opacity-80 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-4 focus-visible:ring-offset-surface-dark focus-visible:outline-none"
+                    className="rounded-sm text-on-dark underline underline-offset-4 transition-opacity duration-150 hover:opacity-80 focus-visible:ring-2 focus-visible:ring-on-dark focus-visible:ring-offset-4 focus-visible:ring-offset-surface-dark focus-visible:outline-none dark:text-foreground dark:focus-visible:ring-foreground dark:focus-visible:ring-offset-surface-strong"
                   >
                     {session ? "List your MUN" : "Sign in"}
                   </Link>

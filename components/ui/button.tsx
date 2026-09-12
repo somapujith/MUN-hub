@@ -60,6 +60,15 @@ const buttonVariants = cva(
         // button-pricing-pill — pricing sub-system dialect ONLY
         pricing:
           "rounded-pill! border-border bg-background font-pricing text-pricing-ink! hover:bg-surface-soft active:bg-surface-strong",
+        // Inverted pricing pill — same pill/font dialect, filled instead of
+        // outlined (the primary "buy this pass" action on a pricing card).
+        // A dedicated variant, not a call-site override: `pricing`'s
+        // `text-pricing-ink!` is `!important` (to escape the tailwind-merge
+        // collision documented above), so a call site can never win a color
+        // fight against it — that produced literally invisible button text
+        // (ink-on-ink) on every purchasable registration pass.
+        "pricing-solid":
+          "rounded-pill! border-transparent bg-pricing-ink font-pricing text-background! hover:brightness-110 active:brightness-90",
         // button-legal — required system surfaces (cookie / terms)
         legal:
           "rounded-xs! bg-link text-white! hover:bg-link-active active:bg-link-active",

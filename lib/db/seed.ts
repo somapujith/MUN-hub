@@ -43,11 +43,24 @@ interface MunSeed {
   slug: string
   city: string
   country: string
+  organizerEmail: string
 }
 
 const MUN_SEEDS: MunSeed[] = [
-  { name: 'Oxford MUN 2027', slug: 'oxford-mun-2027', city: 'Oxford', country: 'UK' },
-  { name: 'VIT MUN 2027', slug: 'vit-mun-2027', city: 'Vellore', country: 'India' },
+  {
+    name: 'Oxford MUN 2027',
+    slug: 'oxford-mun-2027',
+    city: 'Oxford',
+    country: 'UK',
+    organizerEmail: 'organizer@munhub.test',
+  },
+  {
+    name: 'VIT MUN 2027',
+    slug: 'vit-mun-2027',
+    city: 'Vellore',
+    country: 'India',
+    organizerEmail: 'organizer-vit@munhub.test',
+  },
 ]
 
 const COMMITTEE_SEEDS = [
@@ -70,6 +83,18 @@ async function seedMun(db: Db, tables: Tables, organizerId: string, seed: MunSee
   const [existingMun] = await db.select().from(muns).where(eq(muns.slug, seed.slug)).limit(1)
 
   if (existingMun) {
+    if (existingMun.organizerId !== organizerId) {
+      // Backfill for MUNs seeded before each MUN_SEED got its own organizer —
+      // without this, re-running the seed script against an already-seeded
+      // DB leaves every MUN pointing at whichever organizer seeded first.
+      const [updated] = await db
+        .update(muns)
+        .set({ organizerId })
+        .where(eq(muns.id, existingMun.id))
+        .returning()
+      console.log(`  - MUN "${seed.name}" already exists (slug: ${seed.slug}), backfilled organizerId.`)
+      return updated
+    }
     console.log(`  - MUN "${seed.name}" already exists (slug: ${seed.slug}), skipping.`)
     return existingMun
   }
@@ -151,6 +176,13 @@ async function main() {
   })
   console.log(`  - Organizer: ${organizer.email}`)
 
+  const organizerVit = await upsertUserByEmail(db, users, {
+    name: 'VIT MUN Committee',
+    email: 'organizer-vit@munhub.test',
+    role: 'ORGANIZER',
+  })
+  console.log(`  - Organizer: ${organizerVit.email}`)
+
   const student = await upsertUserByEmail(db, users, {
     name: 'Asha Verma',
     email: 'student@munhub.test',
@@ -159,9 +191,18 @@ async function main() {
   })
   console.log(`  - Student: ${student.email} (institution: ${student.institution})`)
 
+  const organizersByEmail = new Map([
+    [organizer.email, organizer],
+    [organizerVit.email, organizerVit],
+  ])
+
   console.log('Seeding MUNs...')
   for (const seed of MUN_SEEDS) {
-    await seedMun(db, tables, organizer.id, seed)
+    const munOrganizer = organizersByEmail.get(seed.organizerEmail)
+    if (!munOrganizer) {
+      throw new Error(`No seeded organizer found for email ${seed.organizerEmail}`)
+    }
+    await seedMun(db, tables, munOrganizer.id, seed)
   }
 
   console.log('Seed complete.')
