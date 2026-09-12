@@ -1,10 +1,25 @@
 import type { InferSelectModel } from 'drizzle-orm'
-import type { committees, muns, registrationProducts } from '@/lib/db/schema'
+import type {
+  committees,
+  muns,
+  organizerApplications,
+  portfolios,
+  registrationProducts,
+  verificationLogs,
+} from '@/lib/db/schema'
 import type { MunStatus } from '@/lib/db/schema-enums'
 
 export type Mun = InferSelectModel<typeof muns>
 export type Committee = InferSelectModel<typeof committees>
+export type Portfolio = InferSelectModel<typeof portfolios>
 export type RegistrationProduct = InferSelectModel<typeof registrationProducts>
+export type OrganizerApplication = InferSelectModel<typeof organizerApplications>
+export type VerificationLog = InferSelectModel<typeof verificationLogs>
+
+/** A committee with its portfolios nested — shape returned by `getMunBySlug`. */
+export interface CommitteeWithPortfolios extends Committee {
+  portfolios: Portfolio[]
+}
 
 /**
  * Card-shaped summary for marketplace listing/search results.
@@ -33,7 +48,20 @@ export interface MunSummary {
 }
 
 export interface MunDetail extends Mun {
-  committees: Committee[]
+  committees: CommitteeWithPortfolios[]
   registrationProducts: RegistrationProduct[]
   organizerName: string | null
+}
+
+/**
+ * Ops-only full review detail — shape returned by `getMunForReview`.
+ *
+ * Unlike the public `MunDetail`, `verificationLogs` here includes
+ * `internalNotes`: this type must never be sent to a non-admin/ops surface.
+ * `organizerApplication` is null only in the (should-not-happen-in-practice)
+ * case where a mun has no linked application row.
+ */
+export interface MunWithApplication extends Mun {
+  organizerApplication: OrganizerApplication | null
+  verificationLogs: VerificationLog[]
 }
