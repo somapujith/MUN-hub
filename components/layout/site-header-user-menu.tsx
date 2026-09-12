@@ -5,6 +5,7 @@ import { LayoutDashboardIcon, LogOutIcon, TicketIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -56,30 +57,32 @@ export function SiteHeaderUserMenu({
         }
       />
       <DropdownMenuContent align="end" sideOffset={8} className="w-56!">
-        <DropdownMenuLabel>Signed in as {label}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem render={<Link href={dashboardHref} />}>
-          <LayoutDashboardIcon />
-          Dashboard
-        </DropdownMenuItem>
-        {role === "STUDENT" && (
-          <DropdownMenuItem render={<Link href="/dashboard" />}>
-            <TicketIcon />
-            My registrations
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Signed in as {label}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem render={<Link href={dashboardHref} />}>
+            <LayoutDashboardIcon />
+            Dashboard
           </DropdownMenuItem>
-        )}
-        <DropdownMenuSeparator />
-        <form action={signOutAction}>
-          <DropdownMenuItem
-            variant="destructive"
-            className="w-full"
-            render={<button type="submit" />}
-            nativeButton
-          >
-            <LogOutIcon />
-            Sign out
-          </DropdownMenuItem>
-        </form>
+          {role === "STUDENT" && (
+            <DropdownMenuItem render={<Link href="/dashboard" />}>
+              <TicketIcon />
+              My registrations
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <form action={signOutAction}>
+            <DropdownMenuItem
+              variant="destructive"
+              className="w-full"
+              render={<button type="submit" />}
+              nativeButton
+            >
+              <LogOutIcon />
+              Sign out
+            </DropdownMenuItem>
+          </form>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

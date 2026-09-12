@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { ArrowRightIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
-import { MunCardGrid } from "@/components/mun/mun-card-grid";
+import { CitySelector } from "@/components/marketplace/city-selector";
+import { MunAdCarousel } from "@/components/mun/mun-ad-carousel";
+import { MunRow } from "@/components/mun/mun-row";
 import { Button } from "@/components/ui/button";
 import {
   SignatureCard,
@@ -13,163 +14,208 @@ import {
 } from "@/components/ui/signature-card";
 import { getMarketplaceFacets, searchMuns } from "@/lib/actions/marketplace";
 import { getSession } from "@/lib/auth/session";
+import type { MunSummary } from "@/lib/types";
 
 /**
- * Homepage — the long-scroll editorial pacing from DESIGN-airtable.md.
+ * Homepage — a browse-first "shelf" surface (carousel -> city pills -> status
+ * rows), rendered in the DESIGN-airtable.md editorial system.
  *
- * Surface rhythm, in order, never repeating a mode in consecutive bands
- * (doc Don't #5 — "two whites in a row read as a typography blog"):
- *
- *   1. white canvas   `hero-band`               headline + button pair, 96px
- *   2. coral          `signature-coral-card`    the marketplace pitch
- *   3. white canvas   featured MUN grid         `article-card` 3-up
- *   4. cream          `cream-callout-card`      organizer conversion
- *   5. dark navy      `hero-card-dark`          closing CTA
- *   6. light          `footer`
- *
- * Every band carries {spacing.section} (96px) vertical padding via
- * `section-rhythm`. The hero is deliberately calm: no gradient, no mesh, no
- * atmospheric backdrop — whitespace alone does the framing (doc Do #4).
+ * Band order:
+ *   1. carousel       rotating `signature-card` promos (coral/forest/dark)
+ *   2. white canvas   city pill row + status-grouped horizontal shelves
+ *   3. cream          `cream-callout-card`  organizer conversion
+ *   4. dark navy      `hero-card-dark`      closing CTA
+ *   5. light          `footer`
  *
  * Data is live: `searchMuns` and `getMarketplaceFacets` from
- * `lib/actions/marketplace.ts` (frozen backend contract).
+ * `lib/actions/marketplace.ts` (frozen backend contract — this page reads it,
+ * never edits it).
+ *
+ * ---------------------------------------------------------------------------
+ * ROW SELECTION LOGIC — and why it is what it is
+ * ---------------------------------------------------------------------------
+ * The brief asked for "Opening soon" and "Closing soon" rows. Neither concept
+ * is expressible against the current backend contract, so both are mapped onto
+ * the nearest signal that the data actually carries:
+ *
+ *   - There is NO "registration opens at" field anywhere. `muns` has
+ *     startDate/endDate/publishedAt only (lib/db/schema.ts), and `MunSummary`
+ *     exposes startDate/endDate/status/minPrice. "PUBLISHED with a future
+ *     registration-open date" therefore cannot be computed — the closest true
+ *     statement is "PUBLISHED but not yet REGISTRATION_OPEN", i.e. listed and
+ *     awaiting its registration window. That's what "Opening soon" selects,
+ *     and the row copy says exactly that rather than implying a known date.
+ *
+ *   - `registrationProducts.deadline` DOES exist on the schema, but
+ *     `searchMuns` never selects it and `MunSummary` has no deadline field, so
+ *     a deadline-window filter is not reachable from this page. Nor is it
+ *     sortable — `sortBy` accepts only 'date' | 'price' | 'newest'. So
+ *     "Closing soon" is instead keyed on the conference start date: among
+ *     REGISTRATION_OPEN muns, the ones starting within CLOSING_SOON_DAYS. A
+ *     conference that starts in under ~6 weeks is genuinely about to stop
+ *     taking delegates, and unlike a deadline guess it's derived from a real,
+ *     non-null column.
+ *
+ * If a true deadline-driven row is wanted later, the backend needs `deadline`
+ * (min over active products) added to `MunSummary`/`searchMuns` plus a
+ * 'deadline' sort option. That is a lib/ change and deliberately not made here.
  */
 
-export default async function Home() {
-  const [upcoming, facets, session] = await Promise.all([
-    // Default status filter already limits this to PUBLISHED /
-    // REGISTRATION_OPEN / REGISTRATION_CLOSED — no internal states leak here.
-    searchMuns({ sortBy: "date", limit: 6 }),
-    getMarketplaceFacets(),
+/** Start-date horizon that counts a registration-open MUN as "closing soon". */
+const CLOSING_SOON_DAYS = 42;
+
+/** How many promo slides the carousel gets. */
+const FEATURED_LIMIT = 5;
+
+/** Cards per shelf — enough to overflow the row and prove it scrolls. */
+const ROW_LIMIT = 12;
+
+interface HomeProps {
+  searchParams: Promise<{ city?: string }>;
+}
+
+/**
+ * Builds a /muns href for a row's "See all", carrying the active city.
+ *
+ * Deliberately city-only, with no `?status=`: `app/muns/page.tsx` parses
+ * q/city/country/sortBy/page and nothing else, so a status param would be
+ * silently dropped and the link would claim a filter it doesn't apply. Adding
+ * status support to the marketplace page is out of scope here.
+ */
+function seeAllHref(city: string): string {
+  return city ? `/muns?city=${encodeURIComponent(city)}` : "/muns";
+}
+
+export default async function Home({ searchParams }: HomeProps) {
+  const { city: rawCity } = await searchParams;
+
+  const facets = await getMarketplaceFacets();
+
+  // Only honour a city the marketplace actually knows about. An arbitrary
+  // `?city=<anything>` would otherwise render three empty rows and a page with
+  // no content at all, and it lets a crawler mint unlimited junk URLs.
+  const city = rawCity && facets.cities.includes(rawCity) ? rawCity : "";
+  const cityFilter = city || undefined;
+
+  const [openNow, publishedOnly, session] = await Promise.all([
+    // Actionable right now: registration is open. Soonest conference first.
+    searchMuns({
+      status: ["REGISTRATION_OPEN"],
+      city: cityFilter,
+      sortBy: "date",
+      limit: ROW_LIMIT,
+    }),
+    // Listed and reviewed, but the registration window hasn't opened yet.
+    searchMuns({
+      status: ["PUBLISHED"],
+      city: cityFilter,
+      sortBy: "date",
+      limit: ROW_LIMIT,
+    }),
     getSession(),
   ]);
 
-  const cityCount = facets.cities.length;
-  const countryCount = facets.countries.length;
+  const now = Date.now();
+  const closingSoonCutoff = now + CLOSING_SOON_DAYS * 24 * 60 * 60 * 1000;
 
-  // Only claim a number the query actually proves. `total` is the full count of
-  // publicly-visible MUNs, not the 6 returned rows.
-  const liveCount = upcoming.total;
+  const closingSoon = openNow.results.filter(
+    (mun) =>
+      mun.startDate !== null &&
+      mun.startDate.getTime() >= now &&
+      mun.startDate.getTime() <= closingSoonCutoff,
+  );
+
+  // Featured = registration-open first (a slide you can act on beats one you
+  // can't), then the rest by soonest start date. Past-dated conferences are
+  // never promoted — a banner for a conference that already happened is worse
+  // than one fewer slide.
+  const featured: MunSummary[] = [...openNow.results, ...publishedOnly.results]
+    .filter((mun) => mun.startDate === null || mun.startDate.getTime() >= now)
+    .slice(0, FEATURED_LIMIT);
+
+  const hasAnyRow =
+    openNow.results.length > 0 || publishedOnly.results.length > 0;
+
+  const cityLabel = city ? ` in ${city}` : "";
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <SiteHeader />
 
       <main className="flex-1">
-        {/* ---- 1. hero-band — white canvas, 96px, no decoration ------------ */}
-        <section className="section-rhythm">
+        {/* ---- 1. rotating promo carousel --------------------------------- */}
+        {featured.length > 0 && (
+          <section className="pt-xl pb-xxl">
+            <div className="content-container">
+              <MunAdCarousel slides={featured} />
+            </div>
+          </section>
+        )}
+
+        {/* ---- 2. city pills + status shelves ----------------------------- */}
+        <section className="pb-section">
           <div className="content-container">
-            <div className="max-w-3xl">
-              <p className="text-caption uppercase text-muted-foreground">
-                Curated Model UN marketplace
-              </p>
-              <h1 className="mt-md font-display text-display-md tracking-[-0.011em] text-balance text-ink sm:text-display-lg">
-                Every Model UN worth your weekend, in one place.
+            <div className="flex flex-col gap-sm border-b border-border pb-lg">
+              <h1 className="font-display text-display-md font-normal tracking-[-0.011em] text-balance text-ink">
+                Model UN conferences{cityLabel}
               </h1>
-              <p className="mt-lg max-w-xl text-title-md text-body">
-                Browse conferences from reviewed organizers, compare committees
-                and delegate fees side by side, and register without chasing a
-                Google Form.
+              <p className="max-w-[60ch] text-body-md text-body dark:text-muted-foreground">
+                Every listing is reviewed before it goes live. Pick a city to
+                narrow everything below.
               </p>
-              <div className="mt-xl flex flex-col gap-sm sm:flex-row sm:items-center">
-                <Button render={<Link href="/muns" />}>Browse MUNs</Button>
-                <Button variant="outline" render={<Link href="/organizer/apply" />}>
-                  For organizers
-                </Button>
+              <div className="pt-xs">
+                <CitySelector cities={facets.cities} selected={city} />
               </div>
-
-              {(liveCount > 0 || cityCount > 0) && (
-                <dl className="mt-xxl flex flex-wrap gap-x-xxl gap-y-lg border-t border-border pt-lg">
-                  <div>
-                    <dt className="text-body-md text-muted-foreground">
-                      Conferences listed
-                    </dt>
-                    <dd className="mt-xxs font-display text-title-lg tabular-nums text-ink">
-                      {liveCount}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-body-md text-muted-foreground">
-                      Host cities
-                    </dt>
-                    <dd className="mt-xxs font-display text-title-lg tabular-nums text-ink">
-                      {cityCount}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-body-md text-muted-foreground">
-                      Countries
-                    </dt>
-                    <dd className="mt-xxs font-display text-title-lg tabular-nums text-ink">
-                      {countryCount}
-                    </dd>
-                  </div>
-                </dl>
-              )}
             </div>
-          </div>
-        </section>
 
-        {/* ---- 2. signature-coral-card — the brand's voltage moment -------- */}
-        <section className="pb-section">
-          <div className="content-container">
-            <SignatureCard variant="coral">
-              <div className="max-w-2xl">
-                <SignatureCardEyebrow>Find your next conference</SignatureCardEyebrow>
-                <SignatureCardTitle>
-                  Stop piecing a circuit together from group chats.
-                </SignatureCardTitle>
-                <SignatureCardDescription className="text-title-md opacity-90">
-                  Filter by city, dates and delegate fee. Open the agenda, read
-                  the committee list, see exactly what the fee covers — then
-                  register in one pass.
-                </SignatureCardDescription>
-                <SignatureCardActions>
-                  <Button variant="on-dark" render={<Link href="/muns" />}>
-                    Browse the marketplace
-                  </Button>
-                </SignatureCardActions>
-              </div>
-            </SignatureCard>
-          </div>
-        </section>
-
-        {/* ---- 3. white canvas — featured / upcoming MUNs ------------------ */}
-        <section className="pb-section">
-          <div className="content-container">
-            <div className="flex flex-wrap items-end justify-between gap-md">
-              <div className="max-w-xl">
-                <h2 className="font-display text-title-lg tracking-[-0.011em] text-ink sm:text-display-md">
-                  Happening next
-                </h2>
-                <p className="mt-sm text-body-md text-body">
-                  The soonest conferences currently accepting delegates, sorted
-                  by start date.
-                </p>
-              </div>
-              <Link
-                href="/muns"
-                className="group/all inline-flex items-center gap-xxs rounded-sm text-body-md text-link transition-colors duration-150 hover:text-link-active focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background focus-visible:outline-none"
-              >
-                View all conferences
-                <ArrowRightIcon
-                  aria-hidden
-                  strokeWidth={1.75}
-                  className="size-3.5 transition-transform duration-150 ease-out group-hover/all:translate-x-px"
+            {hasAnyRow ? (
+              <div className="flex flex-col gap-xxl pt-xl">
+                <MunRow
+                  title="Registration open now"
+                  description="Accepting delegates today — soonest conference first."
+                  muns={openNow.results}
+                  seeAllHref={seeAllHref(city)}
                 />
-              </Link>
-            </div>
 
-            <div className="mt-xl">
-              <MunCardGrid
-                muns={upcoming.results}
-                emptyMessage="No conferences are published yet. Once organizers clear review, they'll appear here first."
-              />
-            </div>
+                <MunRow
+                  title="Closing soon"
+                  description={`Registration is open, but the conference starts within ${CLOSING_SOON_DAYS} days.`}
+                  muns={closingSoon}
+                  seeAllHref={seeAllHref(city)}
+                />
+
+                <MunRow
+                  title="Opening soon"
+                  description="Listed and reviewed — registration hasn't opened yet."
+                  muns={publishedOnly.results}
+                  seeAllHref={seeAllHref(city)}
+                />
+              </div>
+            ) : (
+              <div className="pt-xl">
+                <SignatureCard variant="cream" padding="lg" className="items-start">
+                  <SignatureCardTitle className="text-title-lg sm:text-title-lg">
+                    {city
+                      ? `No conferences in ${city} yet`
+                      : "No conferences are published yet"}
+                  </SignatureCardTitle>
+                  <SignatureCardDescription className="text-[#333840]">
+                    {city
+                      ? "Nothing is listed in this city right now. Browse every city instead — or check back once a local organizer clears review."
+                      : "Once organizers clear review, their conferences appear here first."}
+                  </SignatureCardDescription>
+                  <SignatureCardActions>
+                    <Button variant="on-dark" size="sm" render={<Link href="/" />}>
+                      {city ? "Show all cities" : "Browse the marketplace"}
+                    </Button>
+                  </SignatureCardActions>
+                </SignatureCard>
+              </div>
+            )}
           </div>
         </section>
 
-        {/* ---- 4. cream-callout-card — organizer conversion ---------------- */}
+        {/* ---- 3. cream-callout-card — organizer conversion ---------------- */}
         <section className="pb-section">
           <div className="content-container">
             <SignatureCard
@@ -199,7 +245,7 @@ export default async function Home() {
           </div>
         </section>
 
-        {/* ---- 5. hero-card-dark — closing CTA ----------------------------
+        {/* ---- 4. hero-card-dark — closing CTA ----------------------------
             One action only. The doc reserves the primary button for a single
             action per viewport, and `button-secondary-on-dark` is explicitly
             "a white block over dark surfaces — the system never inverts to a

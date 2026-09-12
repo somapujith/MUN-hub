@@ -441,6 +441,20 @@
   }
   html {
     @apply font-sans;
+
+    /* Guard against accidental sideways page scroll.
+       Horizontal-scroll shelves (e.g. `components/mun/mun-row.tsx`) are their
+       own scroll containers, but Chromium still lets their overflowing
+       children contribute to the ROOT scrolling box: at a 390px viewport the
+       homepage picked up ~305px of real page scroll (window.scrollX reached
+       305) even though body.scrollWidth was a correct 390, and clipping on
+       the page wrapper or <main> did not contain it — only the root does.
+
+       `clip`, not `hidden`: `hidden` on <html> turns the root into a scroll
+       container, which breaks `position: sticky` (the site header) and
+       scroll-anchoring. `clip` blocks the scroll without that side effect.
+       Vertical scrolling is untouched. */
+    overflow-x: clip;
   }
 }
 

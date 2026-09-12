@@ -145,6 +145,22 @@ export function ApplyForm() {
   const errors = state.fieldErrors ?? {};
   const values = state.values ?? {};
 
+  // Every field below is a plain uncontrolled input keyed by `defaultValue`.
+  // The first failed submit hands them non-empty `values` for the first
+  // time — going from `defaultValue=""` to `defaultValue="what I typed"` on
+  // an *already-mounted* input is exactly what trips Base UI's "changing an
+  // uncontrolled FieldControl after init" warning (defaultValue is meant to
+  // be read once, at mount). `generation` flips from 0 to 1 the first time
+  // `state.values` shows up and never again, so it can key the whole field
+  // block: React remounts every field fresh with the server-echoed value
+  // already baked into its initial render, instead of mutating a live one.
+  const generation = React.useRef(0);
+  const sawValues = React.useRef(false);
+  if (state.values && !sawValues.current) {
+    sawValues.current = true;
+    generation.current += 1;
+  }
+
   // Toast mirrors the inline alert for users whose focus is mid-form and who
   // would otherwise miss the summary that renders at the top.
   const lastMessage = React.useRef<string | undefined>(undefined);
@@ -171,104 +187,112 @@ export function ApplyForm() {
         </div>
       )}
 
-      <Section
-        title="Your conference"
-        description="What you're planning to run, and where delegates will gather."
-      >
-        <Field
-          name="conferenceName"
-          label="Conference name"
-          required
-          placeholder="Oxford MUN 2027"
-          hint="This becomes your public listing title and page address."
-          error={errors.conferenceName}
-          defaultValue={values.conferenceName}
-        />
-        <div className="grid gap-lg sm:grid-cols-2">
-          <Field
-            name="location"
-            label="Host city"
-            required
-            placeholder="Bengaluru"
-            error={errors.location}
-            defaultValue={values.location}
-          />
-          <Field
-            name="expectedDate"
-            label="Expected start date"
-            type="date"
-            required
-            error={errors.expectedDate}
-            defaultValue={values.expectedDate}
-          />
-        </div>
-      </Section>
-
-      <Section
-        title="Scale"
-        description="A rough figure is fine — it helps us size your review."
-      >
-        <Field
-          name="expectedDelegateCount"
-          label="Expected delegates"
-          type="number"
-          inputMode="numeric"
-          min="1"
-          required
-          placeholder="250"
-          hint="Total across every committee."
-          error={errors.expectedDelegateCount}
-          defaultValue={values.expectedDelegateCount}
-        />
-      </Section>
-
-      <Section
-        title="Context"
-        description="Give our review team enough to understand your conference."
-      >
-        <Field
-          name="description"
-          label="About the conference"
-          required
-          hint="Agenda focus, committees you're planning, who it's for. Minimum 40 characters."
-          error={errors.description}
-          defaultValue={values.description}
+      {/*
+        Keyed on `generation`: this whole subtree remounts fresh exactly once,
+        the render where server-echoed `values` first appears, instead of
+        each field's `defaultValue` prop mutating on a live instance (see the
+        comment above `generation` for why that matters).
+      */}
+      <React.Fragment key={generation.current}>
+        <Section
+          title="Your conference"
+          description="What you're planning to run, and where delegates will gather."
         >
-          {(props) => (
-            <textarea
-              {...props}
-              rows={6}
-              placeholder="A four-day conference for high-school delegates across six committees, focused on climate finance and humanitarian response…"
-              className={cn(
-                "w-full min-w-0 resize-y rounded-sm border border-input bg-background px-md py-sm",
-                "text-base text-ink transition-colors outline-none md:text-body-md",
-                "placeholder:text-muted-foreground",
-                "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25",
-                "aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20",
-                "dark:bg-card",
-              )}
+          <Field
+            name="conferenceName"
+            label="Conference name"
+            required
+            placeholder="Oxford MUN 2027"
+            hint="This becomes your public listing title and page address."
+            error={errors.conferenceName}
+            defaultValue={values.conferenceName}
+          />
+          <div className="grid gap-lg sm:grid-cols-2">
+            <Field
+              name="location"
+              label="Host city"
+              required
+              placeholder="Bengaluru"
+              error={errors.location}
+              defaultValue={values.location}
             />
-          )}
-        </Field>
+            <Field
+              name="expectedDate"
+              label="Expected start date"
+              type="date"
+              required
+              error={errors.expectedDate}
+              defaultValue={values.expectedDate}
+            />
+          </div>
+        </Section>
 
-        <div className="grid gap-lg sm:grid-cols-2">
+        <Section
+          title="Scale"
+          description="A rough figure is fine — it helps us size your review."
+        >
           <Field
-            name="previousEditions"
-            label="Previous editions"
-            placeholder="3 editions since 2024"
-            error={errors.previousEditions}
-            defaultValue={values.previousEditions}
+            name="expectedDelegateCount"
+            label="Expected delegates"
+            type="number"
+            inputMode="numeric"
+            min="1"
+            required
+            placeholder="250"
+            hint="Total across every committee."
+            error={errors.expectedDelegateCount}
+            defaultValue={values.expectedDelegateCount}
           />
+        </Section>
+
+        <Section
+          title="Context"
+          description="Give our review team enough to understand your conference."
+        >
           <Field
-            name="websiteUrl"
-            label="Website"
-            type="url"
-            placeholder="https://example.org"
-            error={errors.websiteUrl}
-            defaultValue={values.websiteUrl}
-          />
-        </div>
-      </Section>
+            name="description"
+            label="About the conference"
+            required
+            hint="Agenda focus, committees you're planning, who it's for. Minimum 40 characters."
+            error={errors.description}
+            defaultValue={values.description}
+          >
+            {(props) => (
+              <textarea
+                {...props}
+                rows={6}
+                placeholder="A four-day conference for high-school delegates across six committees, focused on climate finance and humanitarian response…"
+                className={cn(
+                  "w-full min-w-0 resize-y rounded-sm border border-input bg-background px-md py-sm",
+                  "text-base text-ink transition-colors outline-none md:text-body-md",
+                  "placeholder:text-muted-foreground",
+                  "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25",
+                  "aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20",
+                  "dark:bg-card",
+                )}
+              />
+            )}
+          </Field>
+
+          <div className="grid gap-lg sm:grid-cols-2">
+            <Field
+              name="previousEditions"
+              label="Previous editions"
+              placeholder="3 editions since 2024"
+              error={errors.previousEditions}
+              defaultValue={values.previousEditions}
+            />
+            <Field
+              name="websiteUrl"
+              label="Website"
+              type="url"
+              placeholder="https://example.org"
+              error={errors.websiteUrl}
+              defaultValue={values.websiteUrl}
+            />
+          </div>
+        </Section>
+      </React.Fragment>
 
       <div className="flex flex-col gap-sm border-t border-border pt-xl sm:flex-row sm:items-center sm:justify-between">
         <p className="text-body-md text-muted-foreground text-pretty">
