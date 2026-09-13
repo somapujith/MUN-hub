@@ -28,21 +28,28 @@ function assertReasonLength(reason: string): void {
 /**
  * Requests a refund against a registration's payment.
  *
- * The caller must either own the registration (a student refunding their
- * own purchase) or hold an admin-tier role (an operator filing a goodwill
- * refund on a student's behalf) — never trust a client-supplied
- * registrationId alone as proof of ownership, per the registration-integrity
- * invariant in CLAUDE.md. Actor identity always comes from `getSession()`.
+ * NEW-3 design choice: restricted to the registration's OWNER only —
+ * dropped the earlier "admin can file on a student's behalf" branch. This
+ * PRD slice has no requirement for an admin-filed goodwill refund, and
+ * keeping it open meant an admin (or a compromised admin session) could
+ * file a REQUESTED row against a student's registration that only an
+ * admin could then cancel — a student who never asked for a refund had no
+ * way to clear their own registration's queue slot. If a future slice needs
+ * admin-filed refunds, reintroduce the override deliberately alongside a
+ * cancel/dismiss path scoped to that case specifically, rather than as a
+ * silent side door here. Actor identity always comes from `getSession()`,
+ * never a client-supplied parameter, per the registration-integrity
+ * invariant in CLAUDE.md.
  *
  * Request-time idempotency guard (defense in depth, not the sole guard —
- * see `approveRefund`'s `payment.status !== 'PAID'` check for the one that
- * actually closes the double-refund exploit): rejects creating a new
- * request if an active (REQUESTED) request already exists for the same
- * payment, so a user spamming this endpoint can't pile up N separate
- * `refund_requests` rows against one payment for an admin to approve N
- * times. This check alone is not race-proof (two concurrent calls can both
- * pass it before either inserts) — that's why `approveRefund` also row-locks
- * the payment and checks its status before refunding.
+ * see `approveRefund`'s two-phase commit for the one that actually closes
+ * the double-refund exploit): rejects creating a new request if an active
+ * (REQUESTED) request already exists for the same payment, and rejects
+ * outright if the payment isn't currently PAID (NEW-4 — a REFUNDED or
+ * FAILED payment has nothing left to refund and shouldn't accrue queue
+ * junk). Neither check is race-proof alone (two concurrent calls can both
+ * pass before either inserts) — that's why `approveRefund` re-validates
+ * everything itself under a row lock before ever calling the provider.
  */
 export async function requestRefund(registrationId: string, reason: string): Promise<RefundRequestRow> {
   const session = await getSession()
@@ -56,12 +63,13 @@ export async function requestRefund(registrationId: string, reason: string): Pro
     .limit(1)
   if (!registration) throw new Error('Registration not found')
 
-  const isOwner = registration.userId === session.userId
-  const isAdmin = (ADMIN_ROLES as readonly string[]).includes(session.role)
-  if (!isOwner && !isAdmin) throw new Error('Forbidden')
+  if (registration.userId !== session.userId) throw new Error('Forbidden')
 
   const [payment] = await db.select().from(payments).where(eq(payments.registrationId, registrationId)).limit(1)
   if (!payment) throw new Error('No payment found for this registration')
+  if (payment.status !== 'PAID') {
+    throw new Error(`Cannot request a refund for a payment with status ${payment.status}`)
+  }
 
   const [existingActiveRequest] = await db
     .select({ id: refundRequests.id })
@@ -87,50 +95,103 @@ export async function requestRefund(registrationId: string, reason: string): Pro
 }
 
 /**
- * Approves and immediately executes the refund via the payments adapter —
- * there is no separate provider-confirmation step in this mock-adapter
- * world, so approval and execution happen atomically in one transaction.
+ * Cancels the caller's own REQUESTED refund request (NEW-3). Restricted to
+ * REQUESTED — once a request has moved to PROCESSING/REFUNDED/REJECTED
+ * there is nothing left to "cancel" (PROCESSING in particular must never be
+ * touched by anything other than `approveRefund`'s own phase 2, since it
+ * means a provider call may already be in flight or committed). Only the
+ * requester may cancel their own request — this is not an admin action.
+ */
+export async function cancelRefundRequest(refundRequestId: string): Promise<RefundRequestRow> {
+  const session = await getSession()
+  if (!session) throw new Error('Forbidden')
+
+  return db.transaction(async (tx) => {
+    const [request] = await tx
+      .select()
+      .from(refundRequests)
+      .where(eq(refundRequests.id, refundRequestId))
+      .for('update')
+      .limit(1)
+    if (!request) throw new Error('Refund request not found')
+    if (request.requestedBy !== session.userId) throw new Error('Forbidden')
+    if (request.status !== 'REQUESTED') {
+      throw new Error(`Invalid transition from ${request.status} to REJECTED`)
+    }
+
+    const [updated] = await tx
+      .update(refundRequests)
+      .set({ status: 'REJECTED', updatedAt: new Date() })
+      .where(eq(refundRequests.id, refundRequestId))
+      .returning()
+
+    await recordAdminAction(tx, session.userId, 'REFUND_REJECTED', 'refund_request', refundRequestId, 'Cancelled by requester')
+
+    return updated
+  })
+}
+
+/**
+ * Approves and executes a refund request via a two-phase commit.
  *
- * Row-locks both the refund_requests row AND the payments row (same
- * `.for('update')` concurrency-safety pattern as
- * `lib/lifecycle/mun-state-machine.ts` / `suspendMun`). The payments lock is
- * the one that actually closes the double-refund exploit: `payments.registrationId`
- * is unique (one payment per registration), but nothing stops a caller from
- * creating multiple `refund_requests` rows against that same payment (see
- * `requestRefund`'s request-time guard, which is best-effort, not race-proof)
- * — each such row has its own id, so a `.for('update')` lock scoped only to
- * `refund_requests.id` would never contend between them, letting an admin
- * approve N rows and trigger N real provider refunds on one payment. Locking
- * the shared `payments` row instead means a second concurrent approval
- * attempt against a different refund_requests row for the same payment
- * blocks on this same lock, and by the time it acquires it the first
- * approval has already flipped `payment.status` to `REFUNDED` — which the
- * `payment.status !== 'PAID'` check below then rejects.
+ * WHY TWO PHASES (round 2 of this fix): round 1 called the payments adapter
+ * inside the same transaction that later wrote REFUNDED, on the theory that
+ * keeping every write after the adapter call small and simple made failure
+ * after a successful provider call vanishingly unlikely. Red-team proved
+ * that reasoning wrong — they forced the FIRST post-adapter write to fail
+ * (an `approver_id` FK violation from a deleted/deactivated admin, a
+ * realistic case) and separately forced the audit insert to fail. In both
+ * cases the provider call had already succeeded (money moved), the
+ * transaction rolled back, and the row reset to REQUESTED with
+ * providerRefundId still null — zero DB trace the refund ever happened, and
+ * a second approval on the same now-REQUESTED row succeeded, refunding
+ * twice. No amount of narrowing "what can fail after the adapter call" ever
+ * closes this: ANY write after an irreversible external call can fail
+ * (FK violation, connection drop, commit failure), so the fix has to be
+ * architectural, not just "make the window smaller."
  *
- * That same check also guards against refunding a payment that was never
- * actually PAID (FAILED/CREATED/PENDING) — approving a refund must never be
- * able to force a registration into REFUNDED from an unrelated state.
+ * The fix: the provider call must never be able to succeed without a
+ * durable, idempotent record surviving independently of whatever happens
+ * next. Concretely:
  *
- * Ordering: every validation (both row locks, both status checks) happens
- * BEFORE calling `mockPaymentsAdapter.refund()`, so the adapter call is the
- * last thing in this function that can plausibly fail or reject. Immediately
- * after it returns, the very first write is persisting `providerRefundId`
- * onto the refund_requests row — before touching payments/registrations or
- * writing the audit row — so if anything after the adapter call did fail,
- * the transaction rollback is the only way that provider result is lost.
- * A real (non-mock) adapter is expected to throw before ever returning a
- * result if the provider call itself failed, which keeps the "provider
- * charged with zero DB trace" window as small as it can be made without a
- * durable pre-commit/intent record — that would need a schema change (e.g.
- * a PROCESSING refund status persisted before the adapter call), which is
- * out of scope for this fix but worth revisiting before a real payments
- * provider replaces the mock adapter.
+ *   PHASE 1 (its own transaction, committed before any external call):
+ *     row-lock refund_requests, re-validate everything (status, payment
+ *     status/ownership/amount — see NEW-1/NEW-2 below), then flip the row
+ *     to PROCESSING and COMMIT. This durably records "we are about to call
+ *     the provider for THIS row" before the provider is ever touched.
+ *
+ *   PROVIDER CALL, outside any DB transaction, keyed by refundRequestId as
+ *     the idempotency key (see lib/payments/adapter.ts).
+ *
+ *   PHASE 2 (a second, separate transaction, after the adapter call
+ *     returns): row-lock the request again, require it still be PROCESSING
+ *     (guards against a concurrent process somehow racing this — see the
+ *     regression test), then write providerRefundId + REFUNDED + update
+ *     payments/registrations + the audit row, all together.
+ *
+ * RECOVERY PATH: if the process crashes/throws between phase 1 committing
+ * and phase 2 starting (including the provider call itself throwing), the
+ * row is left at PROCESSING — NOT reset to REQUESTED. This is the actual
+ * fix, not a detail: a stuck PROCESSING row is visible (it will never
+ * satisfy `status !== 'REQUESTED'`, so `approveRefund` called again on it
+ * throws instead of silently re-running the provider call) and demands
+ * manual attention; a row silently reset to REQUESTED looks exactly like a
+ * fresh, never-touched request and invites exactly the silent second
+ * approval this whole fix exists to prevent. This function does not build
+ * an automatic PROCESSING-sweep/retry mechanism — a stuck PROCESSING row
+ * needs a human to check the payments provider's dashboard for whether the
+ * refund actually landed (using refundRequestId as the idempotency key to
+ * look it up) and then manually resolve the row, or a future retry job that
+ * calls the adapter again with the SAME idempotency key (safe exactly
+ * because real providers de-duplicate on it) and re-attempts phase 2. That
+ * sweep is out of scope for this fix.
  */
 export async function approveRefund(refundRequestId: string): Promise<RefundRequestRow> {
   const session = await getSession()
   requireRole(session, [...ADMIN_ROLES])
 
-  return db.transaction(async (tx) => {
+  // --- Phase 1: validate everything and durably mark PROCESSING. ---
+  const processing = await db.transaction(async (tx) => {
     const [request] = await tx
       .select()
       .from(refundRequests)
@@ -143,20 +204,66 @@ export async function approveRefund(refundRequestId: string): Promise<RefundRequ
     const [payment] = await tx.select().from(payments).where(eq(payments.id, request.paymentId)).for('update').limit(1)
     if (!payment) throw new Error('Payment not found')
     if (!payment.providerPaymentId) throw new Error('Payment has no provider payment id')
-    // Closes CRITICAL #1 (payment-level idempotency) and #2 (payment
-    // precondition) together: a payment already flipped to REFUNDED by a
-    // prior approval — of this request or of a sibling request against the
-    // same payment — fails this check exactly the same way an
-    // unpaid/failed/pending payment does.
+
+    // NEW-1: a refund_requests row's paymentId and registrationId must
+    // actually belong to each other. Nothing upstream currently lets these
+    // drift apart, but approveRefund is the last line of defense before
+    // real money moves and a mismatched registration/payment pair here
+    // would mean crediting a refund against the wrong purchase.
+    if (payment.registrationId !== request.registrationId) {
+      throw new Error('Refund request payment does not match registration')
+    }
+
+    // Closes the original double-refund exploit together with the
+    // PROCESSING guard below: a payment already REFUNDED by a prior
+    // approval, or a payment that was never PAID to begin with
+    // (FAILED/CREATED/PENDING), fails this the same way.
     if (payment.status !== 'PAID') {
       throw new Error(`Cannot refund a payment with status ${payment.status}`)
     }
 
-    // Last thing that can fail before money moves.
-    const { providerRefundId } = await mockPaymentsAdapter.refund(payment.providerPaymentId, request.amount)
+    // NEW-2: never trust the amount snapshotted onto the request row at
+    // request-time — re-check it against the payment's current amount,
+    // read fresh under the same lock, immediately before committing to
+    // PROCESSING (and therefore before the provider is ever called).
+    if (request.amount !== payment.amount) {
+      throw new Error('Refund amount does not match payment amount')
+    }
 
-    // First write after the provider call returns — persists proof the
-    // refund happened before any other write in this transaction.
+    const [updated] = await tx
+      .update(refundRequests)
+      .set({ status: 'PROCESSING', updatedAt: new Date() })
+      .where(eq(refundRequests.id, refundRequestId))
+      .returning()
+
+    return { request: updated, payment }
+  })
+
+  // --- Provider call: outside any transaction, keyed for idempotency. ---
+  // If this throws, the row is left at PROCESSING (see the doc comment
+  // above) rather than being reset — that's the fix.
+  const { providerRefundId } = await mockPaymentsAdapter.refund(
+    processing.payment.providerPaymentId as string,
+    processing.request.amount,
+    refundRequestId,
+  )
+
+  // --- Phase 2: a second, separate transaction that persists the result. ---
+  return db.transaction(async (tx) => {
+    const [request] = await tx
+      .select()
+      .from(refundRequests)
+      .where(eq(refundRequests.id, refundRequestId))
+      .for('update')
+      .limit(1)
+    if (!request) throw new Error('Refund request not found')
+    // Guards against a concurrent process having already moved this row
+    // (e.g. a retry sweep racing this same call) — only the process that
+    // observes PROCESSING here gets to write the terminal REFUNDED state.
+    if (request.status !== 'PROCESSING') {
+      throw new Error(`Invalid transition from ${request.status} to REFUNDED`)
+    }
+
     const [updated] = await tx
       .update(refundRequests)
       .set({
@@ -181,7 +288,9 @@ export async function approveRefund(refundRequestId: string): Promise<RefundRequ
 /**
  * Rejects a refund request. Leaves the registration and payment untouched —
  * a rejection is a decision not to refund, not a state change on the
- * underlying purchase.
+ * underlying purchase. Only legal from REQUESTED — a PROCESSING row must
+ * never be rejected out from under an in-flight/possibly-already-succeeded
+ * provider call.
  */
 export async function rejectRefund(refundRequestId: string, reason: string): Promise<RefundRequestRow> {
   const session = await getSession()
@@ -214,9 +323,13 @@ const LIST_REFUND_REQUESTS_LIMIT = 100
 
 /**
  * Lists pending (REQUESTED) refund requests, for the admin refunds queue.
- * Bounded like `listOrganizers`/`getReviewQueue` elsewhere in the codebase —
- * this grows with total refund-request volume, not per-mun, so it needs a
- * cap before real platform volume rather than an unbounded `SELECT *`.
+ * Deliberately excludes PROCESSING rows — those aren't "pending admin
+ * decision," they're mid-flight/stuck and need the separate manual-
+ * reconciliation path described on `approveRefund`, not a second approve
+ * click from this queue. Bounded like `listOrganizers`/`getReviewQueue`
+ * elsewhere in the codebase — this grows with total refund-request volume,
+ * not per-mun, so it needs a cap before real platform volume rather than an
+ * unbounded `SELECT *`.
  */
 export async function listRefundRequests(): Promise<RefundRequestRow[]> {
   const session = await getSession()

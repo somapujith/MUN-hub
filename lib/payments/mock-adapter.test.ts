@@ -24,6 +24,16 @@ describe('mockPaymentsAdapter', () => {
     const payload = JSON.stringify({ orderId: 'mock_order_1', status: 'paid' })
     expect(mockPaymentsAdapter.verifyWebhookSignature(payload, 'short')).toBe(false)
   })
+
+  it('refunds using the idempotency key so a retried call is recognizable as the same attempt', async () => {
+    const result = await mockPaymentsAdapter.refund('pay_123', 5000, 'refund-request-abc')
+    expect(result.providerRefundId).toBe('mock_refund_refund-request-abc')
+
+    // Same idempotency key -> same providerRefundId, exactly what a real
+    // provider's idempotency-key support guarantees on a retried call.
+    const retried = await mockPaymentsAdapter.refund('pay_123', 5000, 'refund-request-abc')
+    expect(retried.providerRefundId).toBe(result.providerRefundId)
+  })
 })
 
 describe('simulatePaymentOutcome', () => {

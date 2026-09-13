@@ -102,6 +102,7 @@ export const adminActionEnum = pgEnum('admin_action', [
 export const refundStatusEnum = pgEnum('refund_status', [
   'REQUESTED',
   'APPROVED',
+  'PROCESSING',
   'REJECTED',
   'REFUNDED',
 ])
