@@ -1,6 +1,6 @@
 'use server'
 
-import { desc, eq, inArray } from 'drizzle-orm'
+import { desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, munModuleVerifications, organizerApplications, verificationLogs } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
@@ -11,20 +11,48 @@ import type { Mun, MunWithApplication } from '@/lib/types'
 const REVIEW_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
 const PUBLISH_ROLES = ['ADMIN', 'SUPER_ADMIN'] as const
 
+export interface ReviewQueueParams {
+  limit?: number
+  offset?: number
+}
+
+export interface ReviewQueueResult {
+  results: Mun[]
+  total: number
+}
+
 /**
  * Muns awaiting ops/admin action, for the review queue dashboard. Requires
  * OPERATIONS/ADMIN/SUPER_ADMIN — actor is derived from `getSession()`, never
  * accepted as a parameter.
+ *
+ * Paginated (default 20/page) — this grows with total platform submission
+ * volume, not per-mun, so it needs a bound before real organizer counts
+ * (flagged during frontend review: unbounded at 500+ organizers would mean
+ * a multi-thousand-row render on every /admin/review hit).
  */
-export async function getReviewQueue(): Promise<Mun[]> {
+export async function getReviewQueue(params: ReviewQueueParams = {}): Promise<ReviewQueueResult> {
   const session = await getSession()
   requireRole(session, [...REVIEW_ROLES])
 
-  return db
+  const limit = params.limit ?? 20
+  const offset = params.offset ?? 0
+  const whereClause = inArray(muns.status, ['SUBMITTED', 'UNDER_REVIEW'])
+
+  const results = await db
     .select()
     .from(muns)
-    .where(inArray(muns.status, ['SUBMITTED', 'UNDER_REVIEW']))
+    .where(whereClause)
     .orderBy(desc(muns.createdAt))
+    .limit(limit)
+    .offset(offset)
+
+  const [{ count } = { count: 0 }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(muns)
+    .where(whereClause)
+
+  return { results, total: count }
 }
 
 /**
@@ -113,11 +141,6 @@ export async function publishMun(munId: string): Promise<Mun> {
   return transitionMun(munId, 'PUBLISHED', session.userId)
 }
 
-/**
- * All PENDING_REVIEW module-verification rows across every mun, joined to
- * the mun's name, for the MUNHub Verification Console (PRD Section 15).
- * Requires OPERATIONS/ADMIN/SUPER_ADMIN.
- */
 export interface ModuleReviewQueueRow {
   id: string
   munId: string
@@ -127,11 +150,29 @@ export interface ModuleReviewQueueRow {
   organizerConfirmedAt: Date | null
 }
 
-export async function getModuleReviewQueue(): Promise<ModuleReviewQueueRow[]> {
+export interface ModuleReviewQueueResult {
+  results: ModuleReviewQueueRow[]
+  total: number
+}
+
+/**
+ * All PENDING_REVIEW module-verification rows across every mun, joined to
+ * the mun's name, for the MUNHub Verification Console (PRD Section 15).
+ * Requires OPERATIONS/ADMIN/SUPER_ADMIN.
+ *
+ * Paginated (default 20/page) — same reasoning as `getReviewQueue`: this
+ * grows with total platform submission volume, not per-mun. Backed by
+ * `mun_module_verifications_state_idx` (added alongside this change).
+ */
+export async function getModuleReviewQueue(params: ReviewQueueParams = {}): Promise<ModuleReviewQueueResult> {
   const session = await getSession()
   requireRole(session, [...REVIEW_ROLES])
 
-  return db
+  const limit = params.limit ?? 20
+  const offset = params.offset ?? 0
+  const whereClause = eq(munModuleVerifications.state, 'PENDING_REVIEW')
+
+  const results = await db
     .select({
       id: munModuleVerifications.id,
       munId: munModuleVerifications.munId,
@@ -142,6 +183,15 @@ export async function getModuleReviewQueue(): Promise<ModuleReviewQueueRow[]> {
     })
     .from(munModuleVerifications)
     .innerJoin(muns, eq(munModuleVerifications.munId, muns.id))
-    .where(eq(munModuleVerifications.state, 'PENDING_REVIEW'))
+    .where(whereClause)
     .orderBy(desc(munModuleVerifications.organizerConfirmedAt))
+    .limit(limit)
+    .offset(offset)
+
+  const [{ count } = { count: 0 }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(munModuleVerifications)
+    .where(whereClause)
+
+  return { results, total: count }
 }

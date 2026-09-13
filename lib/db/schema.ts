@@ -256,20 +256,27 @@ export const registrationsRelations = relations(registrations, ({ one, many }) =
 // payments
 // ---------------------------------------------------------------------------
 
-export const payments = pgTable('payments', {
-  id: id(),
-  registrationId: text('registration_id')
-    .notNull()
-    .unique()
-    .references(() => registrations.id),
-  provider: text('provider').notNull().default('mock_razorpay'),
-  providerOrderId: text('provider_order_id').notNull().unique(),
-  providerPaymentId: text('provider_payment_id'),
-  amount: integer('amount').notNull(),
-  status: paymentStatusEnum('status').notNull().default('CREATED'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const payments = pgTable(
+  'payments',
+  {
+    id: id(),
+    registrationId: text('registration_id')
+      .notNull()
+      .unique()
+      .references(() => registrations.id),
+    provider: text('provider').notNull().default('mock_razorpay'),
+    providerOrderId: text('provider_order_id').notNull().unique(),
+    providerPaymentId: text('provider_payment_id'),
+    amount: integer('amount').notNull(),
+    status: paymentStatusEnum('status').notNull().default('CREATED'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // getDelegateList (organizer-dashboard.ts) filters registrations joined to
+  // payments by payments.status — needs this index once a mun has enough
+  // delegates for the join+filter to matter.
+  (table) => [index('payments_status_idx').on(table.status)],
+)
 
 export const paymentsRelations = relations(payments, ({ one }) => ({
   registration: one(registrations, {
@@ -406,7 +413,13 @@ export const munModuleVerifications = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('mun_module_verifications_mun_id_idx').on(table.munId)],
+  (table) => [
+    index('mun_module_verifications_mun_id_idx').on(table.munId),
+    // getModuleReviewQueue filters WHERE state = 'PENDING_REVIEW' across every
+    // mun on the platform (not scoped to one mun) — needs its own index once
+    // that table has meaningful row counts across many organizers.
+    index('mun_module_verifications_state_idx').on(table.state),
+  ],
 )
 
 export const munModuleVerificationsRelations = relations(munModuleVerifications, ({ one }) => ({

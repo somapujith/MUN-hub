@@ -66,10 +66,25 @@ describe('getReviewQueue', () => {
     currentToken = await sessionFor(ops.id)
 
     const queue = await getReviewQueue()
-    const ids = queue.map((m) => m.id)
+    const ids = queue.results.map((m) => m.id)
     expect(ids).toContain(submitted.id)
     expect(ids).toContain(underReview.id)
-    expect(queue.every((m) => m.status === 'SUBMITTED' || m.status === 'UNDER_REVIEW')).toBe(true)
+    expect(queue.results.every((m) => m.status === 'SUBMITTED' || m.status === 'UNDER_REVIEW')).toBe(true)
+    expect(queue.total).toBeGreaterThanOrEqual(2)
+  })
+
+  it('paginates with limit/offset', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    for (let i = 0; i < 3; i++) {
+      await makeMun(organizer.id, 'SUBMITTED')
+    }
+
+    const ops = await makeUser('OPERATIONS')
+    currentToken = await sessionFor(ops.id)
+
+    const page1 = await getReviewQueue({ limit: 2, offset: 0 })
+    expect(page1.results.length).toBe(2)
+    expect(page1.total).toBeGreaterThanOrEqual(3)
   })
 })
 
@@ -197,7 +212,8 @@ describe('getModuleReviewQueue', () => {
 
     currentToken = await sessionFor(reviewer.id)
     const queue = await getModuleReviewQueue()
-    expect(queue.some((row) => row.munId === mun.id && row.munName === mun.name)).toBe(true)
+    expect(queue.results.some((row) => row.munId === mun.id && row.munName === mun.name)).toBe(true)
+    expect(queue.total).toBeGreaterThanOrEqual(1)
   })
 
   it('rejects a STUDENT session', async () => {

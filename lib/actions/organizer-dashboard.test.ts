@@ -165,15 +165,52 @@ describe('organizer dashboard queries', () => {
     await asUser(organizer.id)
 
     const allDelegates = await getDelegateList(mun.id)
-    expect(allDelegates.length).toBe(2)
+    expect(allDelegates.results.length).toBe(2)
+    expect(allDelegates.total).toBe(2)
 
     const paidOnly = await getDelegateList(mun.id, { paymentStatus: 'PAID' })
-    expect(paidOnly.length).toBe(1)
-    expect(paidOnly[0].userId).toBe(studentA.id)
+    expect(paidOnly.results.length).toBe(1)
+    expect(paidOnly.results[0].userId).toBe(studentA.id)
+    expect(paidOnly.total).toBe(1)
 
     const pendingOnly = await getDelegateList(mun.id, { paymentStatus: 'PENDING' })
-    expect(pendingOnly.length).toBe(1)
-    expect(pendingOnly[0].userId).toBe(studentB.id)
+    expect(pendingOnly.results.length).toBe(1)
+    expect(pendingOnly.results[0].userId).toBe(studentB.id)
+  })
+
+  it('paginates with limit/offset', async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'Org', email: `org-page-${suffix}@test.com`, role: 'ORGANIZER' })
+      .returning()
+    const [mun] = await db
+      .insert(muns)
+      .values({ organizerId: organizer.id, name: 'Page Mun', slug: `page-mun-${suffix}` })
+      .returning()
+    const [product] = await db
+      .insert(registrationProducts)
+      .values({ munId: mun.id, name: 'Delegate', price: 2000, capacity: 10 })
+      .returning()
+
+    for (let i = 0; i < 3; i++) {
+      const [student] = await db
+        .insert(users)
+        .values({ name: `Student${i}`, email: `stu-page-${i}-${suffix}@test.com`, role: 'STUDENT' })
+        .returning()
+      await db.insert(registrations).values({
+        userId: student.id,
+        munId: mun.id,
+        registrationProductId: product.id,
+        status: 'CONFIRMED',
+      })
+    }
+
+    await asUser(organizer.id)
+
+    const page1 = await getDelegateList(mun.id, { limit: 2, offset: 0 })
+    expect(page1.results.length).toBe(2)
+    expect(page1.total).toBe(3)
   })
 
   afterAll(async () => {

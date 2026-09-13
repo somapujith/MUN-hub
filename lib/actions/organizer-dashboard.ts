@@ -1,9 +1,10 @@
 'use server'
 
-import { and, eq, inArray, sum } from 'drizzle-orm'
+import { and, eq, exists, inArray, sql, sum } from 'drizzle-orm'
 import { getSession } from '@/lib/auth/session'
 import { db } from '@/lib/db/client'
 import { muns, payments, registrationProducts, registrations } from '@/lib/db/schema'
+import type { PaymentStatus } from '@/lib/db/schema-enums'
 
 /**
  * Verifies the current session's user owns the given mun, or holds an
@@ -79,19 +80,44 @@ export async function getMunOverview(munId: string): Promise<MunOverview> {
 
 export interface DelegateFilters {
   committeeId?: string
-  paymentStatus?: string
+  paymentStatus?: PaymentStatus
+  limit?: number
+  offset?: number
 }
 
 export type DelegateRow = Awaited<ReturnType<typeof queryDelegates>>[number]
 
-function queryDelegates(munId: string, filters?: DelegateFilters) {
+/**
+ * `filters.paymentStatus` is pushed into the query as a EXISTS subquery
+ * against `payments` (not fetched-then-`.filter()`'d in application memory
+ * — a mun with thousands of delegates would otherwise pull every row on
+ * every filtered request, flagged during frontend review at BITSMUN-scale
+ * conference sizes). Paginated (default 50/page) for the same reason: this
+ * grows with delegate count, not with anything platform-wide, but a single
+ * conference can still run into the thousands.
+ */
+function buildDelegateConditions(munId: string, filters?: DelegateFilters) {
   const conditions = [eq(registrations.munId, munId)]
   if (filters?.committeeId) {
     conditions.push(eq(registrations.committeeId, filters.committeeId))
   }
+  if (filters?.paymentStatus) {
+    const paymentStatus = filters.paymentStatus
+    conditions.push(
+      exists(
+        db
+          .select({ id: payments.id })
+          .from(payments)
+          .where(and(eq(payments.registrationId, registrations.id), eq(payments.status, paymentStatus))),
+      ),
+    )
+  }
+  return conditions
+}
 
+function queryDelegates(munId: string, filters?: DelegateFilters) {
   return db.query.registrations.findMany({
-    where: and(...conditions),
+    where: and(...buildDelegateConditions(munId, filters)),
     with: {
       user: true,
       committee: true,
@@ -99,23 +125,33 @@ function queryDelegates(munId: string, filters?: DelegateFilters) {
       payment: true,
       registrationProduct: true,
     },
+    limit: filters?.limit ?? 50,
+    offset: filters?.offset ?? 0,
   })
+}
+
+export interface DelegateListResult {
+  results: DelegateRow[]
+  total: number
 }
 
 /**
  * Delegate roster for an organizer's mun, optionally filtered by committee
- * and/or payment status.
+ * and/or payment status, paginated.
  *
  * Requires the current session's user to own the mun or be an
- * ADMIN/SUPER_ADMIN — throws `Forbidden` otherwise. `filters.paymentStatus`
- * is applied against the joined payment row, not silently ignored.
+ * ADMIN/SUPER_ADMIN — throws `Forbidden` otherwise.
  */
-export async function getDelegateList(munId: string, filters?: DelegateFilters): Promise<DelegateRow[]> {
+export async function getDelegateList(munId: string, filters?: DelegateFilters): Promise<DelegateListResult> {
   await assertOwnsOrAdmin(munId)
 
-  const rows = await queryDelegates(munId, filters)
+  const [results, [{ count } = { count: 0 }]] = await Promise.all([
+    queryDelegates(munId, filters),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(registrations)
+      .where(and(...buildDelegateConditions(munId, filters))),
+  ])
 
-  if (!filters?.paymentStatus) return rows
-
-  return rows.filter((row) => row.payment.some((payment) => payment.status === filters.paymentStatus))
+  return { results, total: count }
 }
