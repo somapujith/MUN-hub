@@ -60,32 +60,27 @@ export interface SetupFormState {
  * a value can be changed but never removed. `name` is the exception: it is
  * NOT NULL in the schema and is the mun's identity, so it is required.
  *
- * The `as never` on the return is load-bearing and narrow in blast radius:
- * `UpdateMunDetailsInput` spells these as `field?: string`, but the columns
- * they map to are nullable and Drizzle writes a literal `null` for a `null`
- * value versus skipping the column entirely for `undefined`. Clearing a field
- * therefore requires passing `null` through an input type that doesn't admit
- * it. `lib/**` is frozen contract and out of scope to widen, so the coercion
- * is quarantined to these two helpers rather than sprinkled at call sites.
- * If the contract ever gains `| null`, delete the cast — nothing else changes.
+ * `UpdateMunDetailsInput`'s nullable fields accept `| null` directly (widened
+ * in lib/actions/mun-config.ts after this module flagged the gap), so `null`
+ * here means "clear the column" and `undefined` means "leave it alone" —
+ * no cast needed.
  */
-function optionalText(formData: FormData, field: string): string | undefined {
+function optionalText(formData: FormData, field: string): string | null | undefined {
   const raw = formData.get(field);
   if (raw === null) return undefined;
   const trimmed = String(raw).trim();
-  return (trimmed === "" ? null : trimmed) as never;
+  return trimmed === "" ? null : trimmed;
 }
 
 /**
  * `<input type="date">` value ("YYYY-MM-DD") -> Date, or a cleared write.
- * Same `as never` quarantine as `optionalText` — see the note there.
  */
 function parseDateField(
   formData: FormData,
   field: string,
-): { value: Date | undefined; invalid: boolean } {
+): { value: Date | null | undefined; invalid: boolean } {
   const raw = String(formData.get(field) ?? "").trim();
-  if (raw === "") return { value: null as never, invalid: false };
+  if (raw === "") return { value: null, invalid: false };
 
   // Parsed as UTC midnight (the `YYYY-MM-DD` form is spec'd as UTC), so the
   // stored instant matches the day the organizer picked regardless of where

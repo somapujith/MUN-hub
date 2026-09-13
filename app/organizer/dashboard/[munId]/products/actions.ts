@@ -169,12 +169,10 @@ export async function updateProductAction(
 
   try {
     const session = await getSession();
-    // `deadline` is the one field that can be CLEARED on an edit. Drizzle's
-    // `.set()` skips `undefined` keys, so passing `undefined` for an emptied
-    // date input would silently keep the old deadline. `UpdateRegistrationProductInput`
-    // types `deadline` as `Date | undefined`, so a real null needs the cast —
-    // the column IS nullable (`timestamp('deadline')`, no `.notNull()`), the
-    // input type just doesn't model the clear case.
+    // `deadline` is the one field that can be CLEARED on an edit.
+    // `UpdateRegistrationProductInput.deadline` now accepts `| null` directly
+    // (widened in lib/actions/mun-config.ts after this module flagged the
+    // gap), so passing `null` here genuinely clears the column — no cast.
     const deadline = parseDeadline(values.deadline);
 
     const product = await updateRegistrationProduct(
@@ -184,7 +182,7 @@ export async function updateProductAction(
         price: values.price,
         capacity: values.capacity,
         currency: values.currency,
-        deadline: deadline ?? (null as unknown as undefined),
+        deadline: deadline ?? null,
       },
       session,
     );
