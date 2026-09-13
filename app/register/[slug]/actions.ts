@@ -9,6 +9,17 @@ import {
   getRegistrationById,
   initiateRegistration,
 } from "@/lib/actions/registration";
+import {
+  listAccommodationOptionFields,
+  listAccommodationOptions,
+  type AccommodationOptionField,
+} from "@/lib/actions/accommodation";
+import {
+  isSelectableOption,
+  parseFieldValues,
+  toAnswers,
+  validateFieldValues,
+} from "@/components/registration/accommodation-fields";
 import { simulatePaymentOutcome } from "@/lib/payments/mock-adapter";
 
 /**
@@ -27,7 +38,13 @@ export interface RegisterFormState {
    * Machine-readable reason so the UI can pick the right recovery affordance
    * (e.g. "sold out" points back to the MUN page, "validation" keeps the form).
    */
-  reason?: "validation" | "capacity" | "forbidden" | "closed" | "unknown";
+  reason?:
+    | "validation"
+    | "capacity"
+    | "forbidden"
+    | "closed"
+    | "accommodation"
+    | "unknown";
 }
 
 /** Maps a thrown backend error onto a form state the UI can branch on. */
@@ -56,6 +73,30 @@ function toFormState(error: unknown): RegisterFormState {
       status: "error",
       reason: "validation",
       message: "That registration option is no longer available.",
+    };
+  }
+
+  // Accommodation failures must land the user on the accommodation step, not
+  // the option picker — the seat they chose is fine, the room isn't.
+  if (message === "Accommodation option is at capacity") {
+    return {
+      status: "error",
+      reason: "accommodation",
+      message:
+        "That accommodation sold out while you were filling in the form. No seat or room was reserved and you have not been charged — pick another option or continue without accommodation.",
+    };
+  }
+
+  if (
+    message === "Accommodation option not found" ||
+    message === "Accommodation option is not available" ||
+    message === "Accommodation option does not belong to this mun"
+  ) {
+    return {
+      status: "error",
+      reason: "accommodation",
+      message:
+        "That accommodation option is no longer available. Pick another one or continue without accommodation.",
     };
   }
 
@@ -91,6 +132,11 @@ export async function submitRegistrationAction(
   const experience = String(formData.get("experience") ?? "").trim();
   const dietary = String(formData.get("dietary") ?? "").trim();
   const accommodations = String(formData.get("accommodations") ?? "").trim();
+  // `""` means "No accommodation" — the skip path.
+  const accommodationOptionId = String(formData.get("accommodationOptionId") ?? "").trim();
+  const accommodationFieldValuesRaw = String(
+    formData.get("accommodationFieldValues") ?? "",
+  );
 
   const session = await getSession();
   if (!session) {
@@ -165,6 +211,49 @@ export async function submitRegistrationAction(
     };
   }
 
+  // ---- Accommodation (optional) ------------------------------------------
+  // Re-validated here against freshly-read definitions rather than trusting
+  // the client. `initiateRegistration` also re-checks ownership, status and
+  // capacity transactionally, but it treats `accommodationAnswers` as an
+  // opaque jsonb blob and does NOT validate it — so required/choice checking
+  // has to happen here or it happens nowhere.
+  let accommodationAnswers: Record<string, unknown> | undefined;
+
+  if (accommodationOptionId) {
+    // Scoped to THIS mun, so a foreign option id can't be attached.
+    const options = await listAccommodationOptions(mun.id);
+    const option = options
+      .filter(isSelectableOption)
+      .find((entry) => entry.id === accommodationOptionId);
+
+    if (!option) {
+      return {
+        status: "error",
+        reason: "accommodation",
+        message:
+          "That accommodation option is no longer available. Pick another one or continue without accommodation.",
+      };
+    }
+
+    const fields: AccommodationOptionField[] = await listAccommodationOptionFields(
+      option.id,
+    );
+    const values = parseFieldValues(accommodationFieldValuesRaw);
+    const fieldErrors = validateFieldValues(fields, values);
+
+    if (fieldErrors.length > 0) {
+      return {
+        status: "error",
+        reason: "accommodation",
+        message: fieldErrors.map((error) => error.message).join(" "),
+      };
+    }
+
+    // Built from the field definitions, not from the raw POST — an extra key
+    // a crafted request smuggled in has no matching field and is dropped.
+    accommodationAnswers = toAnswers(fields, values);
+  }
+
   let registrationId: string;
   try {
     // NOTE: no `userId` is passed — `initiateRegistration` derives the actor
@@ -184,6 +273,10 @@ export async function submitRegistrationAction(
         dietary: dietary || null,
         accommodations: accommodations || null,
       },
+      // Skip path: both stay `undefined`, so the column stays NULL and
+      // `initiateRegistration` never enters its accommodation branch at all.
+      accommodationOptionId: accommodationOptionId || undefined,
+      accommodationAnswers,
     });
     registrationId = result.registrationId;
   } catch (error) {
@@ -193,6 +286,35 @@ export async function submitRegistrationAction(
   // A seat is now held for 15 minutes as PAYMENT_PENDING. Only the webhook can
   // promote it to CONFIRMED, so send the user through checkout.
   redirect(`/register/${slug}/pay?registrationId=${encodeURIComponent(registrationId)}`);
+}
+
+/**
+ * Loads the custom field definitions for one accommodation option.
+ *
+ * Called on selection rather than prefetched for every option at page load: a
+ * conference can publish many room types each with many questions, and the
+ * student will only ever fill in one set. Same over-fetch discipline the rest
+ * of this funnel follows.
+ *
+ * The option is re-resolved through `listAccommodationOptions(munId)` so this
+ * can't be used to enumerate another conference's field definitions by id.
+ * Public read, matching `listAccommodationOptionFields` itself — no session
+ * required, because the accommodation page is public.
+ */
+export async function loadAccommodationFieldsAction(
+  slug: string,
+  optionId: string,
+): Promise<AccommodationOptionField[]> {
+  if (!optionId) return [];
+
+  const mun = await getMunBySlug(slug);
+  if (!mun) return [];
+
+  const options = await listAccommodationOptions(mun.id);
+  const option = options.filter(isSelectableOption).find((entry) => entry.id === optionId);
+  if (!option) return [];
+
+  return listAccommodationOptionFields(option.id);
 }
 
 export interface PaymentAvailability {

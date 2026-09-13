@@ -12,6 +12,8 @@ import { hasPassed } from "@/components/registration/deadline";
 import { formatDateRange } from "@/components/shared/date-range";
 import { getMunBySlug } from "@/lib/actions/marketplace";
 import { getProductAvailability } from "@/lib/actions/registration";
+import { listAccommodationOptions } from "@/lib/actions/accommodation";
+import { isSelectableOption } from "@/components/registration/accommodation-fields";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
@@ -124,6 +126,14 @@ export default async function RegisterPage({ params, searchParams }: RegisterPag
     );
   }
 
+  // Accommodation is optional inventory — a MUN with none simply doesn't get
+  // the step. Resolved server-side like everything else this page hands the
+  // form; `listAccommodationOptions` returns soft-deleted ('inactive') rows
+  // too, so filter before they can ever be rendered as selectable.
+  const accommodationOptions = (await listAccommodationOptions(mun.id)).filter(
+    isSelectableOption,
+  );
+
   const [profile] = await db
     .select({
       name: users.name,
@@ -142,6 +152,7 @@ export default async function RegisterPage({ params, searchParams }: RegisterPag
         munName={mun.name}
         products={availability}
         committees={mun.committees}
+        accommodationOptions={accommodationOptions}
         // Deep link from the MUN page's pricing cards
         // (`/register/[slug]?product=<id>`). Validated against this MUN's own
         // products so a stray id can't preselect foreign inventory.

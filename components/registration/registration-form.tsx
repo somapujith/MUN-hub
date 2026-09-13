@@ -13,10 +13,22 @@ import { formatPrice } from "@/components/shared/currency";
 import { ProductOption } from "@/components/registration/product-option";
 import { RegistrationSummary } from "@/components/registration/registration-summary";
 import { StepIndicator } from "@/components/registration/step-indicator";
+import { AccommodationStep } from "@/components/registration/accommodation-step";
 import {
+  emptyValueFor,
+  serializeFieldValues,
+  validateFieldValues,
+  type FieldValue,
+} from "@/components/registration/accommodation-fields";
+import {
+  loadAccommodationFieldsAction,
   submitRegistrationAction,
   type RegisterFormState,
 } from "@/app/register/[slug]/actions";
+import type {
+  AccommodationOption,
+  AccommodationOptionField,
+} from "@/lib/actions/accommodation";
 import type { CommitteeWithPortfolios, RegistrationProduct } from "@/lib/types";
 
 /** A product joined to its live seat count, computed server-side. */
@@ -38,6 +50,12 @@ interface RegistrationFormProps {
   munName: string;
   products: ProductWithAvailability[];
   committees: CommitteeWithPortfolios[];
+  /**
+   * Active accommodation options for this MUN, resolved server-side. An empty
+   * array removes the accommodation step entirely rather than showing a step
+   * whose only choice is "no".
+   */
+  accommodationOptions: AccommodationOption[];
   /** Prefill from the signed-in user's profile — editable, never authoritative. */
   defaults: {
     fullName: string;
@@ -49,8 +67,27 @@ interface RegistrationFormProps {
   preselectedProductId?: string;
 }
 
-const STEPS = ["Option", "Details", "Review"] as const;
-type StepIndex = 0 | 1 | 2;
+/**
+ * STEP ORDER: Option -> Details -> Accommodation -> Review.
+ *
+ * Accommodation sits AFTER Details, not beside the pass picker, for two
+ * reasons. (1) Step 0 already carries the pass radio group plus committee and
+ * portfolio selects; bolting a second priced radio group onto it makes the
+ * first screen the heaviest in the funnel and buries the committee controls.
+ * (2) Accommodation's custom fields are logistics questions (arrival date,
+ * roommate, room sharing) that read as a natural follow-on once the delegate
+ * has already identified themselves — and this way the running total in the
+ * summary grows monotonically, pass then room, ending at Review.
+ *
+ * The step list is derived, not constant: a MUN with no accommodation
+ * inventory renders the original three-step funnel byte-for-byte.
+ */
+const BASE_STEPS = ["Option", "Details", "Review"] as const;
+const ACCOMMODATION_STEPS = ["Option", "Details", "Accommodation", "Review"] as const;
+
+/** Named so the two shapes never get compared by raw index. */
+const STEP_OPTION = 0;
+const STEP_DETAILS = 1;
 
 const initialState: RegisterFormState = { status: "idle" };
 
@@ -59,11 +96,18 @@ export function RegistrationForm({
   munName,
   products,
   committees,
+  accommodationOptions,
   defaults,
   preselectedProductId,
 }: RegistrationFormProps) {
   const [state, formAction] = useActionState(submitRegistrationAction, initialState);
-  const [step, setStep] = React.useState<StepIndex>(0);
+
+  const hasAccommodation = accommodationOptions.length > 0;
+  const steps = hasAccommodation ? ACCOMMODATION_STEPS : BASE_STEPS;
+  const stepAccommodation = hasAccommodation ? 2 : -1;
+  const stepReview = hasAccommodation ? 3 : 2;
+
+  const [step, setStep] = React.useState(STEP_OPTION);
 
   // Prefer the deep-linked product, but only if it's actually purchasable —
   // otherwise fall back to the first option the user could really buy.
@@ -90,8 +134,106 @@ export function RegistrationForm({
     accommodations: "",
   });
 
+  // ---- Accommodation state ------------------------------------------------
+  // `""` is the "No accommodation" sentinel and the default: a student who
+  // never touches this step submits with no option id and no answers, and the
+  // server never enters its accommodation branch.
+  const [accommodationOptionId, setAccommodationOptionId] = React.useState("");
+  const [accommodationFields, setAccommodationFields] = React.useState<
+    AccommodationOptionField[]
+  >([]);
+  const [loadingFields, setLoadingFields] = React.useState(false);
+  const [fieldsError, setFieldsError] = React.useState<string | null>(null);
+  const [fieldValues, setFieldValues] = React.useState<Record<string, FieldValue>>({});
+  const [showFieldErrors, setShowFieldErrors] = React.useState(false);
+  // Bumped to force a refetch after a failed load without changing the option.
+  const [fieldsFetchNonce, setFieldsFetchNonce] = React.useState(0);
+
+  const selectedAccommodation = accommodationOptions.find(
+    (option) => option.id === accommodationOptionId,
+  );
+
+  /**
+   * Fetch the selected option's field definitions on selection.
+   *
+   * Deliberately not prefetched for every option at page load — a conference
+   * can publish many room types with many questions each and the student fills
+   * in exactly one set.
+   *
+   * The `stale` guard matters: options can be clicked faster than the round
+   * trip resolves, and without it a slow response for option A can land after
+   * a fast one for option B and repaint B's form with A's fields.
+   */
+  React.useEffect(() => {
+    if (!accommodationOptionId) {
+      setAccommodationFields([]);
+      setLoadingFields(false);
+      setFieldsError(null);
+      return;
+    }
+
+    let stale = false;
+    setLoadingFields(true);
+    setFieldsError(null);
+
+    loadAccommodationFieldsAction(slug, accommodationOptionId)
+      .then((fields) => {
+        if (stale) return;
+        setAccommodationFields(fields);
+        // Seed every field to its empty value up front. The inputs are
+        // controlled, so a missing key would make React flip them from
+        // uncontrolled to controlled on first keystroke — the same class of
+        // bug as a mutating `defaultValue`, which this form has already been
+        // bitten by once.
+        setFieldValues(
+          Object.fromEntries(fields.map((field) => [field.id, emptyValueFor(field)])),
+        );
+        setLoadingFields(false);
+      })
+      .catch(() => {
+        if (stale) return;
+        setAccommodationFields([]);
+        setFieldsError("We couldn't load the questions for this option.");
+        setLoadingFields(false);
+      });
+
+    return () => {
+      stale = true;
+    };
+  }, [slug, accommodationOptionId, fieldsFetchNonce]);
+
+  // Switching option invalidates the previous option's answers entirely —
+  // field ids don't carry across options, so keeping them would smuggle stale
+  // keys into the submitted blob.
+  const handleAccommodationChange = (nextOptionId: string) => {
+    setAccommodationOptionId(nextOptionId);
+    setFieldValues({});
+    setShowFieldErrors(false);
+  };
+
+  const accommodationErrors = selectedAccommodation
+    ? validateFieldValues(accommodationFields, fieldValues)
+    : [];
+
+  // A student on the skip path is never blocked. Neither is one whose fields
+  // are still in flight or failed to load — but they can't advance either,
+  // because we'd be submitting answers we never validated.
+  const accommodationBlocked = Boolean(
+    selectedAccommodation && (loadingFields || fieldsError || accommodationErrors.length > 0),
+  );
+
+  const handleAccommodationNext = () => {
+    if (accommodationErrors.length > 0) {
+      setShowFieldErrors(true);
+      return;
+    }
+    setStep(stepReview);
+  };
+
   const selected = products.find((entry) => entry.product.id === productId);
   const selectedCommittee = committees.find((committee) => committee.id === committeeId);
+
+  const totalPrice = (selected?.product.price ?? 0) + (selectedAccommodation?.price ?? 0);
 
   // A committee change invalidates any portfolio picked under the old one.
   const handleCommitteeChange = (nextCommitteeId: string) => {
@@ -112,8 +254,18 @@ export function RegistrationForm({
   // `useActionState` result is the source of truth, and each new result object
   // is a fresh identity, so comparing it against the last one we reacted to
   // gives us "a new server error arrived" without a cascading re-render.
-  const serverErrorStep: StepIndex | null =
-    state.reason === "capacity" ? 0 : state.reason === "validation" ? 1 : null;
+  //
+  // "accommodation" resolves to the accommodation step when it exists; if it
+  // doesn't, there is no step that owns the problem, so we leave the user
+  // where they are and let the alert carry the message.
+  const serverErrorStep: number | null =
+    state.reason === "capacity"
+      ? STEP_OPTION
+      : state.reason === "validation"
+        ? STEP_DETAILS
+        : state.reason === "accommodation" && hasAccommodation
+          ? stepAccommodation
+          : null;
 
   const [handledState, setHandledState] = React.useState<RegisterFormState>(initialState);
   const alertRef = React.useRef<HTMLDivElement>(null);
@@ -147,7 +299,17 @@ export function RegistrationForm({
       <input type="hidden" name="registrationProductId" value={productId} />
       <input type="hidden" name="committeeId" value={committeeId} />
       <input type="hidden" name="portfolioId" value={portfolioId} />
-      {activeStep !== 1 && (
+      {/* Empty string = skip path. The server treats "" as "no accommodation"
+          and never touches the accommodation branch. */}
+      <input type="hidden" name="accommodationOptionId" value={accommodationOptionId} />
+      <input
+        type="hidden"
+        name="accommodationFieldValues"
+        value={
+          accommodationOptionId ? serializeFieldValues(fieldValues) : ""
+        }
+      />
+      {activeStep !== STEP_DETAILS && (
         <>
           <input type="hidden" name="fullName" value={details.fullName} />
           <input type="hidden" name="email" value={details.email} />
@@ -159,7 +321,7 @@ export function RegistrationForm({
         </>
       )}
 
-      <StepIndicator steps={STEPS} current={activeStep} />
+      <StepIndicator steps={steps} current={activeStep} />
 
       {state.status === "error" && state.message && (
         <div
@@ -184,7 +346,7 @@ export function RegistrationForm({
 
       <div className="grid grid-cols-1 gap-xl lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
         <div className="flex flex-col gap-lg">
-          {activeStep === 0 && (
+          {activeStep === STEP_OPTION && (
             <StepPanel
               title="Choose your registration"
               description="Pick the pass you want. Seat counts are live — a seat is only held once you start payment."
@@ -258,14 +420,14 @@ export function RegistrationForm({
               )}
 
               <StepNav
-                onNext={() => setStep(1)}
+                onNext={() => setStep(STEP_DETAILS)}
                 nextDisabled={!selected || !isSelectable(selected)}
                 nextLabel="Continue to details"
               />
             </StepPanel>
           )}
 
-          {activeStep === 1 && (
+          {activeStep === STEP_DETAILS && (
             <StepPanel
               title="Delegate details"
               description="These reach the organizing team with your registration."
@@ -326,15 +488,48 @@ export function RegistrationForm({
               </div>
 
               <StepNav
-                onBack={() => setStep(0)}
-                onNext={() => setStep(2)}
+                onBack={() => setStep(STEP_OPTION)}
+                onNext={() => setStep(hasAccommodation ? stepAccommodation : stepReview)}
                 nextDisabled={!detailsComplete}
+                nextLabel={
+                  hasAccommodation ? "Continue to accommodation" : "Review registration"
+                }
+              />
+            </StepPanel>
+          )}
+
+          {hasAccommodation && activeStep === stepAccommodation && (
+            <StepPanel
+              title="Accommodation"
+              description="Optional. Book a room through the conference, or skip this and arrange your own stay."
+            >
+              <AccommodationStep
+                options={accommodationOptions}
+                optionId={accommodationOptionId}
+                onOptionChange={handleAccommodationChange}
+                fields={accommodationFields}
+                loadingFields={loadingFields}
+                loadError={fieldsError}
+                onRetry={() => setFieldsFetchNonce((nonce) => nonce + 1)}
+                values={fieldValues}
+                onValueChange={(fieldId, value) =>
+                  setFieldValues((current) => ({ ...current, [fieldId]: value }))
+                }
+                showErrors={showFieldErrors}
+              />
+
+              <StepNav
+                onBack={() => setStep(STEP_DETAILS)}
+                onNext={handleAccommodationNext}
+                // Blocked only when an option IS selected and its required
+                // fields aren't satisfied. The skip path is never blocked.
+                nextDisabled={accommodationBlocked}
                 nextLabel="Review registration"
               />
             </StepPanel>
           )}
 
-          {activeStep === 2 && selected && (
+          {activeStep === stepReview && selected && (
             <StepPanel
               title="Review and pay"
               description="Check everything below. You'll be taken to a secure checkout to complete payment."
@@ -364,11 +559,26 @@ export function RegistrationForm({
                 {details.accommodations && (
                   <ReviewRow label="Accessibility" value={details.accommodations} />
                 )}
-                <ReviewRow
-                  label="Total due"
-                  value={formatPrice(selected.product.price)}
-                  emphasis
-                />
+                {hasAccommodation && (
+                  <ReviewRow
+                    label="Accommodation"
+                    value={
+                      selectedAccommodation
+                        ? `${selectedAccommodation.name} — ${formatPrice(selectedAccommodation.price)}`
+                        : "None"
+                    }
+                  />
+                )}
+                {selectedAccommodation &&
+                  accommodationFields.map((field) => {
+                    const value = fieldValues[field.id];
+                    const display = Array.isArray(value) ? value.join(", ") : (value ?? "");
+                    if (!display) return null;
+                    return (
+                      <ReviewRow key={field.id} label={field.label} value={display} />
+                    );
+                  })}
+                <ReviewRow label="Total due" value={formatPrice(totalPrice)} emphasis />
               </dl>
 
               <div className="flex items-start gap-xs rounded-md bg-surface-soft px-md py-sm text-body-md text-muted-foreground">
@@ -381,7 +591,13 @@ export function RegistrationForm({
               </div>
 
               <div className="flex flex-wrap items-center gap-sm">
-                <Button type="button" variant="outline" onClick={() => setStep(1)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    setStep(hasAccommodation ? stepAccommodation : STEP_DETAILS)
+                  }
+                >
                   <ArrowLeftIcon aria-hidden />
                   Back
                 </Button>
@@ -399,6 +615,18 @@ export function RegistrationForm({
           portfolioName={
             selectedCommittee?.portfolios.find((p) => p.id === portfolioId)?.name
           }
+          accommodation={
+            selectedAccommodation
+              ? {
+                  name: selectedAccommodation.name,
+                  price: selectedAccommodation.price,
+                }
+              : undefined
+          }
+          // Only advertise an accommodation row for a MUN that actually sells
+          // it — otherwise a "Stay: None" line is noise.
+          showAccommodationRow={hasAccommodation}
+          total={totalPrice}
         />
       </div>
     </form>

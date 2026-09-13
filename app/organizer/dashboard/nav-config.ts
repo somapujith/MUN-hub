@@ -3,6 +3,7 @@ import {
   AwardIcon,
   BadgeCheckIcon,
   BanknoteIcon,
+  BedDoubleIcon,
   CalendarCheck2Icon,
   ChartNoAxesColumnIcon,
   FileTextIcon,
@@ -108,8 +109,15 @@ export const MUN_NAV_GROUP_ORDER: readonly MunNavGroup[] = [
 ];
 
 /**
- * The 15 per-MUN sections from PRD § 5, in PRD order within their groups.
- * Grouping is a readability affordance only; it does not affect routing.
+ * The per-MUN sections, in PRD § 5 order within their groups. Grouping is a
+ * readability affordance only; it does not affect routing.
+ *
+ * This is 16 entries, not the 15 PRD § 5 lists: Accommodation is not a PRD § 5
+ * nav item, but `accommodation_options` / `accommodation_option_fields` are
+ * real tables with a full CRUD surface in `lib/actions/accommodation.ts` and no
+ * other section can configure them. The two "17 nav items" references above
+ * describe the PRD's flat tree, not this array — don't reconcile them by
+ * deleting this entry.
  */
 export const MUN_NAV_SECTIONS: readonly MunNavSection[] = [
   {
@@ -141,6 +149,21 @@ export const MUN_NAV_SECTIONS: readonly MunNavSection[] = [
     segment: "form",
     label: "Registration Form",
     icon: ListChecksIcon,
+    group: "Delegates",
+  },
+  /*
+   * Sits directly after the two "what a delegate buys" sections because that
+   * is what it is: a paid add-on priced into the same order as the pass
+   * (`registrations.accommodationOptionId` hangs off the same registration row,
+   * and one webhook confirms both). Grouping it under Operations alongside
+   * Documents or Conference Day would imply it is logistics an organizer
+   * arranges after the fact, when it is actually inventory they sell up front
+   * and must configure BEFORE registration opens.
+   */
+  {
+    segment: "accommodation",
+    label: "Accommodation",
+    icon: BedDoubleIcon,
     group: "Delegates",
   },
   {
