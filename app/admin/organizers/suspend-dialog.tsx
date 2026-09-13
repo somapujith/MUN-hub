@@ -34,20 +34,24 @@ const fieldClassName = cn(
  */
 export function SuspendDialog({ organizer }: { organizer: OrganizerRow }) {
   const [open, setOpen] = React.useState(false);
+  const [reason, setReason] = React.useState("");
   const [pending, startTransition] = React.useTransition();
   const isSuspending = !organizer.suspended;
 
-  function handleConfirm(formData: FormData) {
-    const reason = String(formData.get("reason") ?? "").trim();
+  function handleConfirm() {
+    const trimmedReason = reason.trim();
 
-    if (isSuspending && !reason) {
+    if (isSuspending && !trimmedReason) {
+      // Belt-and-suspenders — the submit button is already disabled in this
+      // case, so this should be unreachable, but never trust the client
+      // boundary alone.
       toast.error("A reason is required to suspend an organizer.");
       return;
     }
 
     startTransition(async () => {
       const result = isSuspending
-        ? await suspendOrganizerAction(organizer.id, reason)
+        ? await suspendOrganizerAction(organizer.id, trimmedReason)
         : await reinstateOrganizerAction(organizer.id);
 
       if (!result.ok) {
@@ -58,12 +62,23 @@ export function SuspendDialog({ organizer }: { organizer: OrganizerRow }) {
       }
 
       setOpen(false);
+      setReason("");
       toast.success(`${organizer.name} ${isSuspending ? "suspended" : "reinstated"}`, {
         description: isSuspending
           ? "Their login is now blocked. Existing MUNs are unaffected."
           : "Their login access has been restored.",
       });
     });
+  }
+
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      // Dialog can also be dismissed via backdrop/Escape, not just Cancel —
+      // clear the reason either way so a stale draft never reappears on
+      // this organizer's next suspend attempt.
+      setReason("");
+    }
   }
 
   return (
@@ -77,7 +92,7 @@ export function SuspendDialog({ organizer }: { organizer: OrganizerRow }) {
         {isSuspending ? "Suspend" : "Reinstate"}
       </Button>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
@@ -98,6 +113,8 @@ export function SuspendDialog({ organizer }: { organizer: OrganizerRow }) {
                   id={`reason-${organizer.id}`}
                   name="reason"
                   rows={3}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
                   disabled={pending}
                   className={fieldClassName}
                   placeholder="Recorded in the admin action log. Required."
@@ -119,7 +136,7 @@ export function SuspendDialog({ organizer }: { organizer: OrganizerRow }) {
                 type="submit"
                 size="sm"
                 variant={isSuspending ? "destructive" : "default"}
-                disabled={pending}
+                disabled={pending || (isSuspending && !reason.trim())}
               >
                 {pending ? (
                   <Loader2Icon className="animate-spin" aria-hidden />
