@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
 import { getMunSetup } from "./queries";
+import { getConfirmationSummary } from "./confirmation-summary";
 import { SetupTabs } from "./setup-tabs";
 import { DatesVenueForm, GeneralForm } from "./setup-forms";
-import { VerificationPanel } from "./verification-panel";
+import { FinalConfirmationPanel } from "./final-confirmation-panel";
 
 /**
  * MUN Setup (PRD § 9).
@@ -32,12 +33,15 @@ export default async function SetupPage({
 
   if (!mun) notFound();
 
+  const summary = await getConfirmationSummary(munId);
+  if (!summary) notFound();
+
   return (
     <WorkspacePage
       title="MUN setup"
       description="Your conference's core record — how it's named, when it runs, and where delegates are going."
     >
-      <VerificationPanel munId={mun.id} status={mun.status} />
+      <FinalConfirmationPanel munId={mun.id} status={mun.status} summary={summary} />
 
       <SetupTabs
         generalPanel={

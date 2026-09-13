@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
-import { InboxIcon } from "lucide-react";
+import { InboxIcon, LayersIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
+import { Button } from "@/components/ui/button";
 import { getMunForReview, getReviewQueue } from "@/lib/actions/admin-review";
 import { getSession } from "@/lib/auth/session";
 import type { MunWithApplication } from "@/lib/types";
@@ -56,6 +58,10 @@ export default async function AdminReviewPage() {
                 Organizer applications awaiting an ops decision. Every decision is written to the
                 MUN&apos;s verification log.
               </p>
+              <Button variant="link" size="sm" className="h-auto p-0 self-start" render={<Link href="/admin/verification" />}>
+                <LayersIcon aria-hidden />
+                Module verification console
+              </Button>
             </div>
 
             {details.length > 0 && (

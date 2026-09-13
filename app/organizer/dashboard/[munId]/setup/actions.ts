@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/auth/session";
-import { submitMunForVerification, updateMunDetails } from "@/lib/actions/mun-config";
+import { updateMunDetails } from "@/lib/actions/mun-config";
 import type { UpdateMunDetailsInput } from "@/lib/actions/mun-config";
+import { submitFinalConfirmation } from "@/lib/lifecycle/organizer-confirmation";
 
 /**
  * Server-action wrappers for the MUN Setup module.
@@ -228,7 +229,7 @@ export async function saveDatesVenueAction(
 }
 
 // ---------------------------------------------------------------------------
-// Verification submission
+// Final confirmation (Gate 3)
 // ---------------------------------------------------------------------------
 
 export interface SubmitVerificationState {
@@ -237,19 +238,26 @@ export interface SubmitVerificationState {
 }
 
 /**
- * Hands the conference to the review team. Valid from CONTENT_SUBMITTED only —
- * `ALLOWED_TRANSITIONS` in `lib/lifecycle/mun-state-machine.ts` lists
- * `CONTENT_SUBMITTED: ['VERIFICATION']` and VERIFICATION appears as a target
- * from nowhere else.
+ * Gate 3 — the organizer's binding "I confirm this is accurate and
+ * authorized for publication" (PRD §14). Calls `submitFinalConfirmation`
+ * directly, which snapshots mun+committees+portfolios+products into
+ * `organizer_confirmations` and performs the CONTENT_SUBMITTED ->
+ * ORGANIZER_CONFIRMATION -> VERIFICATION hop as two audit-logged steps.
  *
- * The UI disables the button outside that status, but this action does not
- * rely on that: the state machine row-locks the mun and re-validates the
- * transition inside its own DB transaction, so a stale tab that submits twice
- * gets `Invalid transition from VERIFICATION to VERIFICATION` on the second
- * attempt instead of writing a duplicate audit row. That message is mapped to
- * plain copy below rather than surfaced raw.
+ * This replaces the old `submitForVerificationAction` (removed), which
+ * called `submitMunForVerification` — a lighter compatibility shim in
+ * `lib/actions/mun-config.ts` that performs the same two-hop transition but
+ * writes no confirmation snapshot. `FinalConfirmationPanel` is the only
+ * caller of this action; nothing else in the tree still calls the old one.
+ *
+ * Valid from CONTENT_SUBMITTED only. The UI disables the trigger outside
+ * that status, but this action does not rely on that: the state machine
+ * row-locks the mun and re-validates the transition inside its own DB
+ * transaction, so a stale tab that submits twice gets a plain "no longer
+ * awaiting submission" message instead of writing a duplicate audit row or
+ * confirmation snapshot.
  */
-export async function submitForVerificationAction(
+export async function submitFinalConfirmationAction(
   munId: string,
   _prev: SubmitVerificationState,
   _formData: FormData,
@@ -257,11 +265,11 @@ export async function submitForVerificationAction(
   const session = await getSession();
 
   try {
-    await submitMunForVerification(munId, session);
+    await submitFinalConfirmation(munId, session);
   } catch (error) {
     const raw = error instanceof Error ? error.message : "";
 
-    if (raw.startsWith("Invalid transition")) {
+    if (raw.startsWith("Invalid transition") || raw.includes("CONTENT_SUBMITTED")) {
       return {
         status: "error",
         message:
@@ -276,10 +284,10 @@ export async function submitForVerificationAction(
     }
     return {
       status: "error",
-      message: "Something went wrong submitting for verification. Please try again.",
+      message: "Something went wrong submitting your confirmation. Please try again.",
     };
   }
 
   revalidatePath(`/organizer/dashboard/${munId}`, "layout");
-  return { status: "success", message: "Submitted for verification." };
+  return { status: "success", message: "Confirmed and submitted for verification." };
 }
