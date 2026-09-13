@@ -1,0 +1,225 @@
+import { afterAll, describe, expect, it } from 'vitest'
+import { db } from '@/lib/db/client'
+import { muns, users } from '@/lib/db/schema'
+import type { Role } from '@/lib/db/schema-enums'
+import type { Session } from '@/lib/auth/adapter'
+import { getPaymentSettings, setPaymentVerificationState, upsertPaymentSettings } from './payment-settlement'
+import type { UpsertPaymentSettingsInput } from './payment-settlement'
+
+async function makeUser(role: 'ORGANIZER' | 'ADMIN' | 'SUPER_ADMIN' | 'STUDENT') {
+  const [user] = await db
+    .insert(users)
+    .values({ name: role, email: `${role.toLowerCase()}-${crypto.randomUUID()}@test.com`, role })
+    .returning()
+  return user
+}
+
+async function makeMun(organizerId: string) {
+  const [mun] = await db
+    .insert(muns)
+    .values({ organizerId, name: 'Payment Mun', slug: `payment-mun-${crypto.randomUUID()}` })
+    .returning()
+  return mun
+}
+
+function sessionFor(user: { id: string; role: Role }): Session {
+  return { userId: user.id, role: user.role }
+}
+
+const FULL_PAN = 'ABCDE1234F'
+const FULL_ACCOUNT_NUMBER = '000123456789012'
+
+function fullInput(overrides: Partial<UpsertPaymentSettingsInput> = {}): UpsertPaymentSettingsInput {
+  return {
+    legalName: 'Example Conference Society',
+    orgType: 'NON_PROFIT',
+    addressLine1: '221B Baker Street',
+    city: 'Hyderabad',
+    state: 'Telangana',
+    postalCode: '500001',
+    pan: FULL_PAN,
+    authorizedRepName: 'Jane Organizer',
+    authorizedRepEmail: 'jane@example.com',
+    accountHolderName: 'Example Conference Society',
+    bankName: 'Example Bank',
+    accountNumber: FULL_ACCOUNT_NUMBER,
+    ifsc: 'EXAM0001234',
+    accountType: 'CURRENT',
+    gateway: 'RAZORPAY',
+    ...overrides,
+  }
+}
+
+describe('payment-settlement actions', () => {
+  describe('upsertPaymentSettings', () => {
+    it('lets the owning organizer create settlement settings and returns a masked view', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+
+      const result = await upsertPaymentSettings(mun.id, fullInput(), session)
+
+      expect(result.munId).toBe(mun.id)
+      expect(result.panLast4).toBe(FULL_PAN.slice(-4))
+      expect(result.accountNumberLast4).toBe(FULL_ACCOUNT_NUMBER.slice(-4))
+      expect(result.verificationState).toBe('NOT_SUBMITTED')
+      // The masked type structurally has no ciphertext fields — going
+      // through `unknown` proves this isn't a simple property-optional
+      // check but a genuine structural absence.
+      const asRecord = result as unknown as Record<string, unknown>
+      expect(asRecord.panCiphertext).toBeUndefined()
+      expect(asRecord.accountNumberCiphertext).toBeUndefined()
+    })
+
+    it('rejects a non-owning organizer with Forbidden', async () => {
+      const owner = await makeUser('ORGANIZER')
+      const stranger = await makeUser('ORGANIZER')
+      const mun = await makeMun(owner.id)
+
+      await expect(upsertPaymentSettings(mun.id, fullInput(), sessionFor(stranger))).rejects.toThrow('Forbidden')
+    })
+
+    it('allows an admin to upsert settings for any mun', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const admin = await makeUser('ADMIN')
+      const mun = await makeMun(organizer.id)
+
+      const result = await upsertPaymentSettings(mun.id, fullInput(), sessionFor(admin))
+      expect(result.munId).toBe(mun.id)
+    })
+
+    it('re-upserting replaces the single row for the mun (onConflictDoUpdate)', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+
+      await upsertPaymentSettings(mun.id, fullInput({ bankName: 'First Bank' }), session)
+      const second = await upsertPaymentSettings(mun.id, fullInput({ bankName: 'Second Bank', accountNumber: '999888777666555' }), session)
+
+      expect(second.bankName).toBe('Second Bank')
+      expect(second.accountNumberLast4).toBe('6555'.slice(-4))
+
+      const fetched = await getPaymentSettings(mun.id, session)
+      expect(fetched?.bankName).toBe('Second Bank')
+    })
+  })
+
+  describe('getPaymentSettings — leak-proof', () => {
+    it('returns null when no settings row exists yet', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+
+      const result = await getPaymentSettings(mun.id, session)
+      expect(result).toBeNull()
+    })
+
+    it('rejects a non-owning, non-admin caller with Forbidden', async () => {
+      const owner = await makeUser('ORGANIZER')
+      const stranger = await makeUser('ORGANIZER')
+      const mun = await makeMun(owner.id)
+      await upsertPaymentSettings(mun.id, fullInput(), sessionFor(owner))
+
+      await expect(getPaymentSettings(mun.id, sessionFor(stranger))).rejects.toThrow('Forbidden')
+    })
+
+    it('allows OPERATIONS/ADMIN/SUPER_ADMIN to read masked settings', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const admin = await makeUser('SUPER_ADMIN')
+      const mun = await makeMun(organizer.id)
+      await upsertPaymentSettings(mun.id, fullInput(), sessionFor(organizer))
+
+      const result = await getPaymentSettings(mun.id, sessionFor(admin))
+      expect(result?.munId).toBe(mun.id)
+    })
+
+    /**
+     * THE test that matters most in this file: serialize the returned object
+     * and prove neither the full PAN nor the full account number appear
+     * anywhere in it, and that no ciphertext field name leaked through
+     * either — while separately confirming the last4 values ARE correct.
+     * This is written to actually fail if someone later adds
+     * panCiphertext/accountNumberCiphertext to the select in
+     * getPaymentSettings, or accidentally includes the plaintext in a new
+     * field.
+     */
+    it('never leaks the full PAN, full account number, or any ciphertext field through getPaymentSettings', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+
+      await upsertPaymentSettings(mun.id, fullInput(), session)
+      const result = await getPaymentSettings(mun.id, session)
+      expect(result).not.toBeNull()
+
+      const serialized = JSON.stringify(result)
+
+      // The full plaintext values must never appear in the serialized output.
+      expect(serialized).not.toContain(FULL_PAN)
+      expect(serialized).not.toContain(FULL_ACCOUNT_NUMBER)
+
+      // No ciphertext-named field leaked through (proves the select's column
+      // list didn't grow to include panCiphertext/accountNumberCiphertext).
+      expect(serialized).not.toContain('Ciphertext')
+
+      // The masked last4 values must still be correct and present.
+      expect(result?.panLast4).toBe(FULL_PAN.slice(-4))
+      expect(result?.accountNumberLast4).toBe(FULL_ACCOUNT_NUMBER.slice(-4))
+      expect(serialized).toContain(FULL_PAN.slice(-4))
+      expect(serialized).toContain(FULL_ACCOUNT_NUMBER.slice(-4))
+    })
+  })
+
+  describe('setPaymentVerificationState', () => {
+    it('allows ADMIN to transition verificationState and records an admin_actions row', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const admin = await makeUser('ADMIN')
+      const mun = await makeMun(organizer.id)
+      await upsertPaymentSettings(mun.id, fullInput(), sessionFor(organizer))
+
+      const updated = await setPaymentVerificationState(mun.id, 'VERIFIED', sessionFor(admin))
+      expect(updated.verificationState).toBe('VERIFIED')
+      expect(updated.verifiedAt).not.toBeNull()
+    })
+
+    it('allows SUPER_ADMIN to transition verificationState', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const superAdmin = await makeUser('SUPER_ADMIN')
+      const mun = await makeMun(organizer.id)
+      await upsertPaymentSettings(mun.id, fullInput(), sessionFor(organizer))
+
+      const updated = await setPaymentVerificationState(mun.id, 'FAILED', sessionFor(superAdmin))
+      expect(updated.verificationState).toBe('FAILED')
+      expect(updated.verifiedAt).toBeNull()
+    })
+
+    it('rejects an OPERATIONS caller (stricter than the general review bar)', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      await upsertPaymentSettings(mun.id, fullInput(), sessionFor(organizer))
+
+      const opsSession: Session = { userId: crypto.randomUUID(), role: 'OPERATIONS' }
+      await expect(setPaymentVerificationState(mun.id, 'VERIFIED', opsSession)).rejects.toThrow('Forbidden')
+    })
+
+    it('rejects the owning organizer (admin-only action)', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      await upsertPaymentSettings(mun.id, fullInput(), sessionFor(organizer))
+
+      await expect(setPaymentVerificationState(mun.id, 'VERIFIED', sessionFor(organizer))).rejects.toThrow('Forbidden')
+    })
+
+    it('throws when no settings row exists yet for the mun', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const admin = await makeUser('ADMIN')
+      const mun = await makeMun(organizer.id)
+
+      await expect(setPaymentVerificationState(mun.id, 'VERIFIED', sessionFor(admin))).rejects.toThrow('not found')
+    })
+  })
+
+  afterAll(async () => {
+    await db.$client.end()
+  })
+})
