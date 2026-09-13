@@ -1,6 +1,6 @@
 'use server'
 
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { adminActions, verificationLogs } from '@/lib/db/schema'
 import { getSession } from '@/lib/auth/session'
@@ -34,7 +34,7 @@ export async function getAuditHistory(targetType: string, targetId: string): Pro
       createdAt: adminActions.createdAt,
     })
     .from(adminActions)
-    .where(eq(adminActions.targetId, targetId))
+    .where(and(eq(adminActions.targetType, targetType), eq(adminActions.targetId, targetId)))
 
   const lifecycleActions =
     targetType === 'mun'

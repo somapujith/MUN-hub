@@ -68,6 +68,40 @@ describe('getAuditHistory', () => {
     expect(history[0].action).toBe('ORGANIZER_SUSPENDED')
   })
 
+  it('filters by targetType, not just targetId, when two rows share the same targetId', async () => {
+    const admin = await makeUser('ADMIN')
+    const organizer = await makeUser('ORGANIZER')
+    currentToken = await sessionFor(admin.id)
+
+    // Same targetId, different targetType — a real (if unusual) collision
+    // since targetId is a bare text column with no FK, shared across every
+    // target type. getAuditHistory must not return the 'user' row when asked
+    // for 'mun' history on this id, and vice versa.
+    const [mun] = await db
+      .insert(muns)
+      .values({ organizerId: organizer.id, name: 'Collision Mun', slug: `collision-mun-${crypto.randomUUID()}` })
+      .returning()
+
+    await db.insert(adminActions).values({
+      actorId: admin.id,
+      action: 'MUN_SUSPENDED',
+      targetType: 'mun',
+      targetId: mun.id,
+      reason: 'mun row',
+    })
+    await db.insert(adminActions).values({
+      actorId: admin.id,
+      action: 'ORGANIZER_SUSPENDED',
+      targetType: 'user',
+      targetId: mun.id,
+      reason: 'user row with the same id as the mun above',
+    })
+
+    const history = await getAuditHistory('mun', mun.id)
+    expect(history.length).toBe(1)
+    expect(history[0].action).toBe('MUN_SUSPENDED')
+  })
+
   it('throws Forbidden for a STUDENT', async () => {
     const student = await makeUser('STUDENT')
     currentToken = await sessionFor(student.id)

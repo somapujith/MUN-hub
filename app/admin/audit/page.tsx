@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import Link from "next/link";
 import { ScrollTextIcon } from "lucide-react";
 import { desc, eq } from "drizzle-orm";
 import { SiteHeader } from "@/components/layout/site-header";
@@ -6,11 +8,17 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { Badge } from "@/components/ui/badge";
 import { db } from "@/lib/db/client";
 import { adminActions, users } from "@/lib/db/schema";
+import { getSession } from "@/lib/auth/session";
 
 export const metadata: Metadata = {
   title: "Audit Log",
   description: "General admin action history across the platform.",
 };
+
+// Session-scoped reads — never cache or statically prerender this page.
+export const dynamic = "force-dynamic";
+
+const REVIEW_ROLES = ["OPERATIONS", "ADMIN", "SUPER_ADMIN"] as const;
 
 /**
  * General audit-log viewer — the last 100 `admin_actions` rows (append-only
@@ -19,17 +27,26 @@ export const metadata: Metadata = {
  * This is deliberately a flat, un-scoped listing rather than a call into
  * `getAuditHistory` (in `lib/actions/audit-history.ts`): that action merges
  * `admin_actions` + `verification_logs` for one specific `(targetType,
- * targetId)` pair (e.g. one mun's full history) and is meant to be embedded
- * into a target's own detail view once one exists. This page has no single
- * target — it's the platform-wide feed — so it reads `admin_actions`
- * directly instead of round-tripping through a helper built for a different
- * shape of question.
+ * targetId)` pair (e.g. one mun's full history). Each row below links to
+ * `/admin/audit/[targetType]/[targetId]`, which is exactly that per-target
+ * view backed by `getAuditHistory`.
  *
- * Role-gating happens in `app/admin/layout.tsx` (and again inside every
- * action that reads/writes admin data via `requireRole`) — this page does
- * no gating of its own.
+ * Gate in the page as well as in the layout/actions (defense in depth, same
+ * pattern as every other page in this feature — see /admin/review,
+ * /admin/organizers, /admin/registrations, /admin/support). The layout's
+ * redirect is not the only boundary here on purpose: this page reads the DB
+ * directly rather than through a `requireRole`-guarded server action, so
+ * without its own gate it would have none at the page level at all.
  */
 export default async function AuditLogPage() {
+  const session = await getSession();
+  if (!session) {
+    redirect(`/login?redirectTo=${encodeURIComponent("/admin/audit")}`);
+  }
+  if (!REVIEW_ROLES.includes(session.role as (typeof REVIEW_ROLES)[number])) {
+    redirect("/");
+  }
+
   const rows = await db
     .select({
       id: adminActions.id,
@@ -79,7 +96,13 @@ export default async function AuditLogPage() {
                       {row.reason ? ` — ${row.reason}` : ""}
                     </p>
                     <span className="text-body-md text-muted-foreground">
-                      {row.targetType}/{row.targetId} ·{" "}
+                      <Link
+                        href={`/admin/audit/${row.targetType}/${row.targetId}`}
+                        className="underline-offset-2 hover:text-ink hover:underline"
+                      >
+                        {row.targetType}/{row.targetId}
+                      </Link>{" "}
+                      ·{" "}
                       {new Intl.DateTimeFormat("en-IN", {
                         dateStyle: "medium",
                         timeStyle: "short",

@@ -11,6 +11,11 @@ export const metadata: Metadata = {
   description: "At-a-glance counts across every operations queue.",
 };
 
+// Session-scoped reads (transitively, via getReviewQueue/getModuleReviewQueue/
+// listTickets/listPaymentExceptions each calling getSession()/cookies()) —
+// never cache or statically prerender this page.
+export const dynamic = "force-dynamic";
+
 /**
  * Landing page for `/admin` — four at-a-glance counts, one per queue that
  * currently exists. Deliberately four cards, not five: the refund workflow
