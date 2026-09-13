@@ -57,6 +57,13 @@
       "when": 1789321128061,
       "tag": "0007_blushing_ravenous",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789335652498,
+      "tag": "0008_steady_proudstar",
+      "breakpoints": true
     }
   ]
 }
