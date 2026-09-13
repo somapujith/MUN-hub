@@ -2,6 +2,7 @@ import { relations } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
 import {
+  accommodationFieldTypeEnum,
   applicationStatusEnum,
   moduleVerificationStateEnum,
   munModuleEnum,
@@ -214,6 +215,13 @@ export const registrations = pgTable(
     // see docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md
     // Section 6 for why that's deliberately deferred.
     munVersionId: text('mun_version_id').references((): AnyPgColumn => munVersions.id),
+    // Nullable — accommodation is optional. Priced additively into the same
+    // payment as the registration product (one order, one webhook confirms
+    // both) rather than a separate purchase.
+    accommodationOptionId: text('accommodation_option_id').references(
+      (): AnyPgColumn => accommodationOptions.id,
+    ),
+    accommodationAnswers: jsonb('accommodation_answers'),
     formResponses: jsonb('form_responses'),
     status: registrationStatusEnum('status').notNull().default('PENDING'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
@@ -472,4 +480,53 @@ export const munVersions = pgTable(
 export const munVersionsRelations = relations(munVersions, ({ one, many }) => ({
   mun: one(muns, { fields: [munVersions.munId], references: [muns.id] }),
   registrations: many(registrations),
+}))
+
+// ---------------------------------------------------------------------------
+// Accommodation
+// ---------------------------------------------------------------------------
+
+export const accommodationOptions = pgTable(
+  'accommodation_options',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    price: integer('price').notNull(),
+    capacity: integer('capacity').notNull(),
+    description: text('description'),
+    status: text('status').notNull().default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('accommodation_options_mun_id_idx').on(table.munId)],
+)
+
+export const accommodationOptionsRelations = relations(accommodationOptions, ({ one, many }) => ({
+  mun: one(muns, { fields: [accommodationOptions.munId], references: [muns.id] }),
+  fields: many(accommodationOptionFields),
+  registrations: many(registrations),
+}))
+
+export const accommodationOptionFields = pgTable(
+  'accommodation_option_fields',
+  {
+    id: id(),
+    optionId: text('option_id')
+      .notNull()
+      .references(() => accommodationOptions.id, { onDelete: 'cascade' }),
+    fieldType: accommodationFieldTypeEnum('field_type').notNull(),
+    label: text('label').notNull(),
+    required: boolean('required').notNull().default(false),
+    // Choice list for DROPDOWN/CHECKBOX field types — null for TEXT/NUMBER/DATE.
+    choices: jsonb('choices'),
+    displayOrder: integer('display_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('accommodation_option_fields_option_id_idx').on(table.optionId)],
+)
+
+export const accommodationOptionFieldsRelations = relations(accommodationOptionFields, ({ one }) => ({
+  option: one(accommodationOptions, { fields: [accommodationOptionFields.optionId], references: [accommodationOptions.id] }),
 }))

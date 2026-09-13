@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
-import { muns, registrationProducts, registrations, users } from '@/lib/db/schema'
+import { accommodationOptions, muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 
 const mockGetSession = vi.fn()
@@ -33,6 +33,14 @@ async function createProduct(munId: string, capacity: number) {
     .values({ munId, name: 'Delegate', price: 2500, capacity })
     .returning()
   return product
+}
+
+async function createAccommodation(munId: string, capacity: number, price = 1500) {
+  const [option] = await db
+    .insert(accommodationOptions)
+    .values({ munId, name: 'Twin Room', price, capacity })
+    .returning()
+  return option
 }
 
 describe('initiateRegistration', () => {
@@ -184,6 +192,94 @@ describe('initiateRegistration', () => {
     const second = await initiateRegistration({ munId: mun.id, registrationProductId: product.id })
     expect(second.registrationId).toBeTruthy()
     expect(second.registrationId).not.toBe(first.registrationId)
+  })
+
+  describe('accommodation', () => {
+    it('accepts an optional accommodation selection and includes its price in the payment order', async () => {
+      const organizer = await createUser('ORGANIZER')
+      const student = await createUser('STUDENT')
+      const mun = await createMun(organizer.id)
+      const product = await createProduct(mun.id, 10)
+      const accommodation = await createAccommodation(mun.id, 10, 1500)
+
+      mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
+
+      const result = await initiateRegistration({
+        munId: mun.id,
+        registrationProductId: product.id,
+        accommodationOptionId: accommodation.id,
+        accommodationAnswers: { arrivalDate: '2027-03-09' },
+      })
+
+      const [registration] = await db.select().from(registrations).where(eq(registrations.id, result.registrationId))
+      expect(registration?.accommodationOptionId).toBe(accommodation.id)
+      expect(registration?.accommodationAnswers).toEqual({ arrivalDate: '2027-03-09' })
+
+      const [payment] = await db.select().from(payments).where(eq(payments.registrationId, result.registrationId))
+      expect(payment?.amount).toBe(product.price + accommodation.price) // 2500 + 1500 = 4000
+    })
+
+    it('never oversells accommodation capacity under concurrent registrations for the same option', async () => {
+      const organizer = await createUser('ORGANIZER')
+      const mun = await createMun(organizer.id)
+      const product = await createProduct(mun.id, 100)
+      const accommodation = await createAccommodation(mun.id, 2)
+
+      const students = await Promise.all(Array.from({ length: 6 }, () => createUser('STUDENT')))
+      const queue = [...students]
+      mockGetSession.mockImplementation(() => Promise.resolve({ userId: queue.shift()!.id, role: 'STUDENT' }))
+
+      const results = await Promise.allSettled(
+        students.map(() =>
+          initiateRegistration({ munId: mun.id, registrationProductId: product.id, accommodationOptionId: accommodation.id }),
+        ),
+      )
+
+      const succeeded = results.filter((r) => r.status === 'fulfilled')
+      const failed = results.filter((r) => r.status === 'rejected')
+      expect(succeeded.length).toBe(2)
+      expect(failed.length).toBe(4)
+      for (const failure of failed as PromiseRejectedResult[]) {
+        expect(String(failure.reason)).toMatch(/[Aa]ccommodation.*at capacity/)
+      }
+
+      const activeAccommodationRegs = await db
+        .select()
+        .from(registrations)
+        .where(eq(registrations.accommodationOptionId, accommodation.id))
+      const active = activeAccommodationRegs.filter((r) => r.status === 'PENDING' || r.status === 'PAYMENT_PENDING' || r.status === 'CONFIRMED')
+      expect(active.length).toBe(2)
+    })
+
+    it('rejects an accommodation option that belongs to a different mun', async () => {
+      const organizer = await createUser('ORGANIZER')
+      const student = await createUser('STUDENT')
+      const mun = await createMun(organizer.id)
+      const otherMun = await createMun(organizer.id)
+      const product = await createProduct(mun.id, 10)
+      const accommodation = await createAccommodation(otherMun.id, 10)
+
+      mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
+
+      await expect(
+        initiateRegistration({ munId: mun.id, registrationProductId: product.id, accommodationOptionId: accommodation.id }),
+      ).rejects.toThrow('does not belong to this mun')
+    })
+
+    it('rejects an inactive (soft-deleted) accommodation option', async () => {
+      const organizer = await createUser('ORGANIZER')
+      const student = await createUser('STUDENT')
+      const mun = await createMun(organizer.id)
+      const product = await createProduct(mun.id, 10)
+      const accommodation = await createAccommodation(mun.id, 10)
+      await db.update(accommodationOptions).set({ status: 'inactive' }).where(eq(accommodationOptions.id, accommodation.id))
+
+      mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
+
+      await expect(
+        initiateRegistration({ munId: mun.id, registrationProductId: product.id, accommodationOptionId: accommodation.id }),
+      ).rejects.toThrow('not available')
+    })
   })
 
   it('throws Forbidden for an unauthenticated caller and never accepts a client-supplied userId', async () => {

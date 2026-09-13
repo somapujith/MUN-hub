@@ -2,7 +2,7 @@
 
 import { and, count, eq, inArray, lt } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, payments, registrationProducts, registrations } from '@/lib/db/schema'
+import { accommodationOptions, muns, payments, registrationProducts, registrations } from '@/lib/db/schema'
 import { getSession } from '@/lib/auth/session'
 import { mockPaymentsAdapter } from '@/lib/payments/mock-adapter'
 import type { RegistrationInput, RegistrationStatus } from '@/lib/types'
@@ -111,6 +111,46 @@ export async function initiateRegistration(
       throw new Error('Registration product is at capacity')
     }
 
+    // Accommodation is optional. When selected, its capacity gets the exact
+    // same row-lock protection as the registration product above — a room
+    // type selling out is the same overbooking risk, in the same
+    // transaction so both checks serialize together.
+    let accommodationPrice = 0
+    if (input.accommodationOptionId) {
+      const [option] = await tx
+        .select()
+        .from(accommodationOptions)
+        .where(eq(accommodationOptions.id, input.accommodationOptionId))
+        .for('update')
+        .limit(1)
+
+      if (!option) {
+        throw new Error('Accommodation option not found')
+      }
+      if (option.munId !== input.munId) {
+        throw new Error('Accommodation option does not belong to this mun')
+      }
+      if (option.status !== 'active') {
+        throw new Error('Accommodation option is not available')
+      }
+
+      const activeAccommodationSelections = await tx
+        .select({ id: registrations.id })
+        .from(registrations)
+        .where(
+          and(
+            eq(registrations.accommodationOptionId, input.accommodationOptionId),
+            inArray(registrations.status, ACTIVE_REGISTRATION_STATUSES),
+          ),
+        )
+
+      if (activeAccommodationSelections.length >= option.capacity) {
+        throw new Error('Accommodation option is at capacity')
+      }
+
+      accommodationPrice = option.price
+    }
+
     const [created] = await tx
       .insert(registrations)
       .values({
@@ -120,12 +160,14 @@ export async function initiateRegistration(
         committeeId: input.committeeId,
         portfolioId: input.portfolioId,
         formResponses: input.formResponses,
+        accommodationOptionId: input.accommodationOptionId,
+        accommodationAnswers: input.accommodationAnswers,
         status: 'PENDING',
         expiresAt: new Date(Date.now() + RESERVATION_TTL_MS),
       })
       .returning()
 
-    return { ...created, price: product.price, currency: product.currency }
+    return { ...created, price: product.price + accommodationPrice, currency: product.currency }
   })
 
   const order = await mockPaymentsAdapter.createOrder(

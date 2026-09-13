@@ -78,6 +78,14 @@ export const verificationSeverityEnum = pgEnum('verification_severity', [
   'LOW',
 ])
 
+export const accommodationFieldTypeEnum = pgEnum('accommodation_field_type', [
+  'TEXT',
+  'NUMBER',
+  'DATE',
+  'DROPDOWN',
+  'CHECKBOX',
+])
+
 export type Role = (typeof roleEnum.enumValues)[number]
 export type MunStatus = (typeof munStatusEnum.enumValues)[number]
 export type RegistrationStatus = (typeof registrationStatusEnum.enumValues)[number]
@@ -86,3 +94,4 @@ export type ApplicationStatus = (typeof applicationStatusEnum.enumValues)[number
 export type MunModule = (typeof munModuleEnum.enumValues)[number]
 export type ModuleVerificationState = (typeof moduleVerificationStateEnum.enumValues)[number]
 export type VerificationSeverity = (typeof verificationSeverityEnum.enumValues)[number]
+export type AccommodationFieldType = (typeof accommodationFieldTypeEnum.enumValues)[number]

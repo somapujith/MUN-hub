@@ -22,6 +22,9 @@ export interface RegistrationInput {
   committeeId?: string
   portfolioId?: string
   formResponses?: Record<string, unknown>
+  /** Optional — accommodation is priced additively into the same payment. */
+  accommodationOptionId?: string
+  accommodationAnswers?: Record<string, unknown>
 }
 
 export type { RegistrationStatus }
