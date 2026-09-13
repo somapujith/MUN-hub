@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
-import { committees, muns, portfolios, registrationProducts, users } from '@/lib/db/schema'
+import { committees, muns, munModuleVerifications, portfolios, registrationProducts, users } from '@/lib/db/schema'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import {
@@ -322,6 +322,34 @@ describe('mun-config actions', () => {
       await expect(submitMunForVerification(mun.id, sessionFor(organizer))).rejects.toThrow(
         'Invalid transition',
       )
+    })
+  })
+
+  describe('re-verification triggers', () => {
+    it('updateRegistrationProduct triggers re-verification when mun is VERIFIED and price changes', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id, { status: 'VERIFIED' })
+      const session = sessionFor(organizer)
+
+      const product = await createRegistrationProduct({ munId: mun.id, name: 'Delegate', price: 2000, capacity: 100 }, session)
+      await db.insert(munModuleVerifications).values({ munId: mun.id, moduleName: 'registration_products', state: 'VERIFIED' })
+
+      await updateRegistrationProduct(product.id, { price: 3000 }, session)
+
+      const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(updatedMun.status).toBe('VERIFICATION')
+    })
+
+    it('updateRegistrationProduct does NOT trigger re-verification when mun is still DRAFT', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+
+      const product = await createRegistrationProduct({ munId: mun.id, name: 'Delegate', price: 2000, capacity: 100 }, session)
+      await updateRegistrationProduct(product.id, { price: 3000 }, session)
+
+      const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(updatedMun.status).toBe('DRAFT')
     })
   })
 

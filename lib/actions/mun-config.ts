@@ -5,6 +5,7 @@ import { db } from '@/lib/db/client'
 import { committees, muns, portfolios, registrationProducts } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
+import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 import type { Committee, Mun, Portfolio, RegistrationProduct } from '@/lib/types'
 
 // -----------------------------------------------------------------------------
@@ -90,8 +91,14 @@ export async function updateCommittee(
   const munId = await getMunIdForCommittee(id)
   await assertOwnsOrAdmin(munId, session)
 
+  const [existing] = await db.select().from(committees).where(eq(committees.id, id)).limit(1)
+  if (!existing) throw new Error('Committee not found')
+
   const [updated] = await db.update(committees).set(input).where(eq(committees.id, id)).returning()
   if (!updated) throw new Error('Committee not found')
+
+  await triggerReverificationIfNeeded('committees', existing, updated, munId, session!.userId)
+
   return updated
 }
 
@@ -209,7 +216,7 @@ export async function updateRegistrationProduct(
   session: Session | null,
 ): Promise<RegistrationProduct> {
   const [existing] = await db
-    .select({ munId: registrationProducts.munId })
+    .select()
     .from(registrationProducts)
     .where(eq(registrationProducts.id, id))
     .limit(1)
@@ -222,6 +229,9 @@ export async function updateRegistrationProduct(
     .where(eq(registrationProducts.id, id))
     .returning()
   if (!updated) throw new Error('Registration product not found')
+
+  await triggerReverificationIfNeeded('registration_products', existing, updated, existing.munId, session!.userId)
+
   return updated
 }
 
@@ -275,12 +285,18 @@ export async function updateMunDetails(
 ): Promise<Mun> {
   await assertOwnsOrAdmin(munId, session)
 
+  const [existing] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
+  if (!existing) throw new Error('Mun not found')
+
   const [updated] = await db
     .update(muns)
     .set({ ...input, updatedAt: new Date() })
     .where(eq(muns.id, munId))
     .returning()
   if (!updated) throw new Error('Mun not found')
+
+  await triggerReverificationIfNeeded('mun_details', existing, updated, munId, session!.userId)
+
   return updated
 }
 
