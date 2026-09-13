@@ -195,6 +195,20 @@ export async function getMunBySlug(slug: string): Promise<MunDetail | null> {
   }
 }
 
+/**
+ * Slug + updatedAt for every publicly-visible MUN, for sitemap generation.
+ * Deliberately lightweight (no joins, no committees/products) since sitemap
+ * generation can run frequently — don't reuse getMunBySlug/searchMuns here.
+ */
+export async function listPublicMunSlugs(): Promise<{ slug: string; updatedAt: Date }[]> {
+  const rows = await db
+    .select({ slug: muns.slug, updatedAt: muns.updatedAt })
+    .from(muns)
+    .where(inArray(muns.status, DEFAULT_PUBLIC_STATUSES))
+
+  return rows
+}
+
 /** Distinct city/country values across publicly-visible muns, for filter dropdowns. */
 export async function getMarketplaceFacets(): Promise<{ cities: string[]; countries: string[] }> {
   const [cityRows, countryRows] = await Promise.all([

@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
 import { muns, registrationProducts, users } from '@/lib/db/schema'
-import { getMarketplaceFacets, getMunBySlug, searchMuns } from './marketplace'
+import { getMarketplaceFacets, getMunBySlug, listPublicMunSlugs, searchMuns } from './marketplace'
 
 describe('marketplace actions', () => {
   const suffix = Date.now()
@@ -187,6 +187,26 @@ describe('marketplace actions', () => {
       expect(new Set(facets.countries).size).toBe(facets.countries.length)
       expect(facets.cities.every((c) => c !== null)).toBe(true)
       expect(facets.countries.every((c) => c !== null)).toBe(true)
+    })
+  })
+
+  describe('listPublicMunSlugs', () => {
+    it('includes published muns with their slug and updatedAt', async () => {
+      const rows = await listPublicMunSlugs()
+      const match = rows.find((r) => r.slug === publishedMunSlug)
+      expect(match).toBeDefined()
+      expect(match?.updatedAt).toBeInstanceOf(Date)
+    })
+
+    it('excludes DRAFT muns', async () => {
+      const rows = await listPublicMunSlugs()
+      expect(rows.some((r) => r.slug === draftMunSlug)).toBe(false)
+    })
+
+    it('only returns slug and updatedAt fields', async () => {
+      const rows = await listPublicMunSlugs()
+      const match = rows.find((r) => r.slug === publishedMunSlug)
+      expect(match && Object.keys(match).sort()).toEqual(['slug', 'updatedAt'])
     })
   })
 })
