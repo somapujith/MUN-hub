@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, organizerApplications, users, verificationLogs } from '@/lib/db/schema'
+import { muns, munModuleVerifications, organizerApplications, users, verificationLogs } from '@/lib/db/schema'
 import { SESSION_COOKIE_NAME, createSession } from '@/lib/auth/session'
 
 // Mock next/headers `cookies()` so getSession() (called internally by every
@@ -16,7 +16,7 @@ vi.mock('next/headers', () => ({
   }),
 }))
 
-import { getMunForReview, getReviewQueue, publishMun, reviewMunApplication } from './admin-review'
+import { getModuleReviewQueue, getMunForReview, getReviewQueue, publishMun, reviewMunApplication } from './admin-review'
 
 async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' | 'SUPER_ADMIN') {
   const [user] = await db
@@ -185,6 +185,26 @@ describe('publishMun', () => {
     const result = await publishMun(mun.id)
     expect(result.status).toBe('PUBLISHED')
     expect(result.publishedAt).toBeInstanceOf(Date)
+  })
+})
+
+describe('getModuleReviewQueue', () => {
+  it('returns PENDING_REVIEW module rows with mun name, requires reviewer role', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const reviewer = await makeUser('OPERATIONS')
+    const mun = await makeMun(organizer.id, 'VERIFICATION')
+    await db.insert(munModuleVerifications).values({ munId: mun.id, moduleName: 'committees', state: 'PENDING_REVIEW', organizerConfirmedAt: new Date() })
+
+    currentToken = await sessionFor(reviewer.id)
+    const queue = await getModuleReviewQueue()
+    expect(queue.some((row) => row.munId === mun.id && row.munName === mun.name)).toBe(true)
+  })
+
+  it('rejects a STUDENT session', async () => {
+    const student = await makeUser('STUDENT')
+    currentToken = await sessionFor(student.id)
+
+    await expect(getModuleReviewQueue()).rejects.toThrow('Forbidden')
   })
 })
 

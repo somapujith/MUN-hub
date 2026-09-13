@@ -2,7 +2,7 @@
 
 import { desc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, organizerApplications, verificationLogs } from '@/lib/db/schema'
+import { muns, munModuleVerifications, organizerApplications, verificationLogs } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
 import { getSession } from '@/lib/auth/session'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
@@ -96,13 +96,52 @@ export async function reviewMunApplication(
 }
 
 /**
- * Publishes a mun (VERIFICATION -> PUBLISHED). Stricter than review: only
+ * Publishes a mun (VERIFIED -> PUBLISHED). Stricter than review: only
  * ADMIN/SUPER_ADMIN — operations can review applications but only admin
  * publishes to the public marketplace.
+ *
+ * As of the verification/confirmation trust layer, this requires VERIFIED
+ * (not VERIFICATION) — a mun only reaches VERIFIED once all 4 tracked
+ * modules pass module-level review (see lib/lifecycle/module-verification.ts's
+ * `checkAllModulesVerified`), which is a stricter bar than the old flat
+ * mun-level VERIFICATION state.
  */
 export async function publishMun(munId: string): Promise<Mun> {
   const session = await getSession()
   requireRole(session, [...PUBLISH_ROLES])
 
   return transitionMun(munId, 'PUBLISHED', session.userId)
+}
+
+/**
+ * All PENDING_REVIEW module-verification rows across every mun, joined to
+ * the mun's name, for the MUNHub Verification Console (PRD Section 15).
+ * Requires OPERATIONS/ADMIN/SUPER_ADMIN.
+ */
+export interface ModuleReviewQueueRow {
+  id: string
+  munId: string
+  munName: string
+  moduleName: string
+  state: string
+  organizerConfirmedAt: Date | null
+}
+
+export async function getModuleReviewQueue(): Promise<ModuleReviewQueueRow[]> {
+  const session = await getSession()
+  requireRole(session, [...REVIEW_ROLES])
+
+  return db
+    .select({
+      id: munModuleVerifications.id,
+      munId: munModuleVerifications.munId,
+      munName: muns.name,
+      moduleName: munModuleVerifications.moduleName,
+      state: munModuleVerifications.state,
+      organizerConfirmedAt: munModuleVerifications.organizerConfirmedAt,
+    })
+    .from(munModuleVerifications)
+    .innerJoin(muns, eq(munModuleVerifications.munId, muns.id))
+    .where(eq(munModuleVerifications.state, 'PENDING_REVIEW'))
+    .orderBy(desc(munModuleVerifications.organizerConfirmedAt))
 }
