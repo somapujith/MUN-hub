@@ -16,8 +16,9 @@ import {
   SignatureCardTitle,
   SignatureCardDescription,
 } from "@/components/ui/signature-card";
+import { cache } from "react";
 import { getMunBySlug } from "@/lib/actions/marketplace";
-import { getProductAvailability } from "@/lib/actions/registration";
+import { getProductsAvailability } from "@/lib/actions/registration";
 import { cn } from "cn";
 import type { RegistrationProduct } from "@/lib/types";
 
@@ -25,9 +26,13 @@ interface MunDetailPageProps {
   params: Promise<{ slug: string }>;
 }
 
+// generateMetadata and the page body both need the same mun — cache()
+// collapses them into one DB call per request instead of two.
+const loadMun = cache(getMunBySlug);
+
 export async function generateMetadata({ params }: MunDetailPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const mun = await getMunBySlug(slug);
+  const mun = await loadMun(slug);
   if (!mun) return {};
 
   return {
@@ -37,30 +42,29 @@ export async function generateMetadata({ params }: MunDetailPageProps): Promise<
 }
 
 /**
- * Resolves live seat counts per product. Availability is a best-effort
- * enhancement on a public listing page: if the lookup fails (product removed
- * mid-request, DB hiccup), the card falls back to showing plain capacity
+ * Resolves live seat counts for all products in one batched call.
+ * Availability is a best-effort enhancement on a public listing page: if the
+ * lookup fails (DB hiccup), cards fall back to showing plain capacity
  * rather than failing the whole page render.
  */
 async function resolveAvailability(
   products: RegistrationProduct[],
 ): Promise<Map<string, ProductAvailability>> {
-  const entries = await Promise.all(
-    products.map(async (product) => {
-      try {
-        return [product.id, await getProductAvailability(product.id)] as const;
-      } catch {
-        return null;
-      }
-    }),
-  );
+  if (products.length === 0) {
+    return new Map();
+  }
 
-  return new Map(entries.filter((entry): entry is NonNullable<typeof entry> => entry !== null));
+  try {
+    const entries = await getProductsAvailability(products.map((product) => product.id));
+    return new Map(entries);
+  } catch {
+    return new Map();
+  }
 }
 
 export default async function MunDetailPage({ params }: MunDetailPageProps) {
   const { slug } = await params;
-  const mun = await getMunBySlug(slug);
+  const mun = await loadMun(slug);
 
   if (!mun) {
     notFound();
