@@ -158,12 +158,13 @@ export function TicketRow({
               </Button>
             )}
             {/*
-              A NEW ticket's only legal next state is ASSIGNED
-              (ALLOWED_TICKET_TRANSITIONS in lib/actions/support.ts) — "In
-              progress" and "Resolve" only apply once a ticket has been
-              assigned, otherwise updateTicketStatus throws "Invalid ticket
-              transition". Gate both behind `!isUnassigned` so the UI never
-              offers an action the backend state machine will reject.
+              Buttons are gated by ALLOWED_TICKET_TRANSITIONS in
+              lib/actions/support.ts, not just "is it assigned": ASSIGNED can
+              only move to IN_PROGRESS or WAITING, never straight to
+              RESOLVED, so "Resolve" must also check the current status —
+              gating it on `!isUnassigned` alone left it clickable (and
+              throwing "Invalid ticket transition") on a freshly-assigned
+              ticket that hasn't moved to IN_PROGRESS/WAITING yet.
             */}
             {!isUnassigned && ticket.status !== "IN_PROGRESS" && (
               <Button size="sm" variant="outline" disabled={pending} onClick={handleMarkInProgress}>
@@ -171,7 +172,7 @@ export function TicketRow({
                 In progress
               </Button>
             )}
-            {!isUnassigned && (
+            {(ticket.status === "IN_PROGRESS" || ticket.status === "WAITING") && (
               <Button size="sm" disabled={pending} onClick={() => setOpen(true)}>
                 <CheckIcon aria-hidden />
                 Resolve
