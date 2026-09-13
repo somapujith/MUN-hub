@@ -92,19 +92,9 @@ export const adminActionEnum = pgEnum('admin_action', [
   'ORGANIZER_REINSTATED',
   'MUN_UNPUBLISHED',
   'MUN_SUSPENDED',
-  'REFUND_APPROVED',
-  'REFUND_REJECTED',
   'TICKET_ASSIGNED',
   'TICKET_RESOLVED',
   'USER_SUSPENDED',
-])
-
-export const refundStatusEnum = pgEnum('refund_status', [
-  'REQUESTED',
-  'APPROVED',
-  'PROCESSING',
-  'REJECTED',
-  'REFUNDED',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [
@@ -145,7 +135,6 @@ export type ModuleVerificationState = (typeof moduleVerificationStateEnum.enumVa
 export type VerificationSeverity = (typeof verificationSeverityEnum.enumValues)[number]
 export type AccommodationFieldType = (typeof accommodationFieldTypeEnum.enumValues)[number]
 export type AdminAction = (typeof adminActionEnum.enumValues)[number]
-export type RefundStatus = (typeof refundStatusEnum.enumValues)[number]
 export type SupportCategory = (typeof supportCategoryEnum.enumValues)[number]
 export type SupportPriority = (typeof supportPriorityEnum.enumValues)[number]
 export type SupportStatus = (typeof supportStatusEnum.enumValues)[number]

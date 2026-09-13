@@ -9,7 +9,6 @@ import {
   munModuleEnum,
   munStatusEnum,
   paymentStatusEnum,
-  refundStatusEnum,
   registrationStatusEnum,
   roleEnum,
   supportCategoryEnum,
@@ -578,48 +577,6 @@ export const adminActions = pgTable(
 
 export const adminActionsRelations = relations(adminActions, ({ one }) => ({
   actor: one(users, { fields: [adminActions.actorId], references: [users.id] }),
-}))
-
-// ---------------------------------------------------------------------------
-// refund_requests
-// ---------------------------------------------------------------------------
-
-export const refundRequests = pgTable(
-  'refund_requests',
-  {
-    id: id(),
-    registrationId: text('registration_id')
-      .notNull()
-      .references(() => registrations.id),
-    paymentId: text('payment_id')
-      .notNull()
-      .references(() => payments.id),
-    requestedBy: text('requested_by')
-      .notNull()
-      .references(() => users.id),
-    reason: text('reason').notNull(),
-    amount: integer('amount').notNull(),
-    status: refundStatusEnum('status').notNull().default('REQUESTED'),
-    approverId: text('approver_id').references(() => users.id),
-    approvedAt: timestamp('approved_at', { withTimezone: true }),
-    providerRefundId: text('provider_refund_id'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    index('refund_requests_registration_id_idx').on(table.registrationId),
-    index('refund_requests_status_idx').on(table.status),
-  ],
-)
-
-export const refundRequestsRelations = relations(refundRequests, ({ one }) => ({
-  registration: one(registrations, {
-    fields: [refundRequests.registrationId],
-    references: [registrations.id],
-  }),
-  payment: one(payments, { fields: [refundRequests.paymentId], references: [payments.id] }),
-  requester: one(users, { fields: [refundRequests.requestedBy], references: [users.id] }),
-  approver: one(users, { fields: [refundRequests.approverId], references: [users.id] }),
 }))
 
 // ---------------------------------------------------------------------------

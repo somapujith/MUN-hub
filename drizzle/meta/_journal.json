@@ -50,6 +50,13 @@
       "when": 1789316474646,
       "tag": "0006_lying_molten_man",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789321128061,
+      "tag": "0007_blushing_ravenous",
+      "breakpoints": true
     }
   ]
 }
