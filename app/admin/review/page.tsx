@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { InboxIcon, LayersIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, InboxIcon, LayersIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
@@ -16,8 +16,13 @@ export const metadata: Metadata = {
 };
 
 const REVIEW_ROLES = ["OPERATIONS", "ADMIN", "SUPER_ADMIN"] as const;
+const PAGE_SIZE = 20;
 
-export default async function AdminReviewPage() {
+interface AdminReviewPageProps {
+  searchParams: Promise<{ page?: string }>;
+}
+
+export default async function AdminReviewPage({ searchParams }: AdminReviewPageProps) {
   // Gate in the page as well as in the actions. The actions are the real
   // security boundary (they call requireRole against their own getSession),
   // but without this the page would render a shell and then blow up on the
@@ -30,7 +35,14 @@ export default async function AdminReviewPage() {
     redirect("/");
   }
 
-  const queue = await getReviewQueue();
+  const params = await searchParams;
+  const parsedPage = Number.parseInt(params.page ?? "1", 10);
+  const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+
+  const { results: queue, total } = await getReviewQueue({
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+  });
 
   // getReviewQueue returns bare `Mun` rows; the organizer application and the
   // verification-log history (with internalNotes) only come from
@@ -41,6 +53,7 @@ export default async function AdminReviewPage() {
 
   const submittedCount = details.filter((mun) => mun.status === "SUBMITTED").length;
   const underReviewCount = details.filter((mun) => mun.status === "UNDER_REVIEW").length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
@@ -87,14 +100,14 @@ export default async function AdminReviewPage() {
                     Total
                   </dt>
                   <dd className="font-display text-title-lg tabular-nums text-ink">
-                    {details.length}
+                    {total}
                   </dd>
                 </div>
               </dl>
             )}
           </header>
 
-          {details.length === 0 ? (
+          {total === 0 ? (
             <div className="flex flex-col items-center gap-sm rounded-md border border-dashed border-border bg-card px-lg py-section text-center">
               <InboxIcon
                 className="size-8 text-muted-foreground"
@@ -109,13 +122,48 @@ export default async function AdminReviewPage() {
               </p>
             </div>
           ) : (
-            <ol className="flex flex-col gap-sm">
-              {details.map((mun) => (
-                <li key={mun.id}>
-                  <ReviewQueueRow mun={mun} />
-                </li>
-              ))}
-            </ol>
+            <>
+              <ol className="flex flex-col gap-sm">
+                {details.map((mun) => (
+                  <li key={mun.id}>
+                    <ReviewQueueRow mun={mun} />
+                  </li>
+                ))}
+              </ol>
+
+              {totalPages > 1 && (
+                <nav
+                  aria-label="Pagination"
+                  className="mt-xxl flex items-center justify-between gap-md border-t border-border pt-lg"
+                >
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page <= 1}
+                    render={page > 1 ? <Link href={`/admin/review?page=${page - 1}`} /> : undefined}
+                  >
+                    <ChevronLeftIcon aria-hidden />
+                    Previous
+                  </Button>
+
+                  <p className="text-body-md tabular-nums text-muted-foreground">
+                    Page {page} of {totalPages}
+                  </p>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= totalPages}
+                    render={
+                      page < totalPages ? <Link href={`/admin/review?page=${page + 1}`} /> : undefined
+                    }
+                  >
+                    Next
+                    <ChevronRightIcon aria-hidden />
+                  </Button>
+                </nav>
+              )}
+            </>
           )}
         </div>
       </main>
