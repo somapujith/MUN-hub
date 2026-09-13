@@ -14,6 +14,7 @@ import { formatDateRange } from "@/components/shared/date-range";
 import type { MunWithApplication } from "@/lib/types";
 import { ReviewDecisionDialog } from "./review-decision-dialog";
 import { PublishButton } from "./publish-button";
+import { ReinstateMunButton, SuspendMunButton, UnpublishButton } from "./mun-lifecycle-buttons";
 
 /** Absolute + relative submitted-at, because ops scan for staleness first. */
 function formatSubmitted(date: Date): string {
@@ -53,14 +54,26 @@ function MetaItem({
  * `lib/lifecycle/mun-state-machine.ts`, not guessed: a decision
  * (APPROVED/REJECTED/CHANGES_REQUESTED) is only legal from UNDER_REVIEW, and
  * `reviewMunApplication` auto-claims a SUBMITTED mun into UNDER_REVIEW first —
- * so both queue statuses get the same three buttons. Publish is only legal
- * from VERIFICATION, which `getReviewQueue` does not return, so the publish
- * affordance renders only if a VERIFICATION row somehow reaches this list.
+ * so both queue statuses get the same three buttons. Publish/unpublish/
+ * suspend/reinstate are gated the same way against `ALLOWED_TRANSITIONS`
+ * (PUBLISHED -> VERIFIED, PUBLISHED/REGISTRATION_OPEN/... -> SUSPENDED,
+ * SUSPENDED -> VERIFICATION) — note `getReviewQueue` currently only queries
+ * SUBMITTED/UNDER_REVIEW, so in practice only the decide buttons render from
+ * today's default query; these flags exist so the row renders correctly the
+ * moment that query (or a future "all muns" admin view reusing this same
+ * row) surfaces a mun in one of these later-lifecycle statuses.
  */
 export function ReviewQueueRow({ mun }: { mun: MunWithApplication }) {
   const application = mun.organizerApplication;
   const canDecide = mun.status === "SUBMITTED" || mun.status === "UNDER_REVIEW";
   const canPublish = mun.status === "VERIFICATION";
+  const canUnpublish = mun.status === "PUBLISHED";
+  const canSuspend =
+    mun.status === "PUBLISHED" ||
+    mun.status === "REGISTRATION_OPEN" ||
+    mun.status === "REGISTRATION_CLOSED" ||
+    mun.status === "CONFERENCE_ACTIVE";
+  const canReinstate = mun.status === "SUSPENDED";
   const logs = mun.verificationLogs;
   const submittedAt = application?.submittedAt ?? mun.createdAt;
 
@@ -110,6 +123,9 @@ export function ReviewQueueRow({ mun }: { mun: MunWithApplication }) {
               </>
             )}
             {canPublish && <PublishButton munId={mun.id} munName={mun.name} />}
+            {canUnpublish && <UnpublishButton munId={mun.id} munName={mun.name} />}
+            {canSuspend && <SuspendMunButton munId={mun.id} munName={mun.name} />}
+            {canReinstate && <ReinstateMunButton munId={mun.id} munName={mun.name} />}
           </div>
         </div>
 

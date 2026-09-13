@@ -5,6 +5,7 @@ import { db } from '@/lib/db/client'
 import { muns, munModuleVerifications, organizerApplications, verificationLogs } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
 import { getSession } from '@/lib/auth/session'
+import { recordAdminAction } from '@/lib/audit/log'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import type { Mun, MunWithApplication } from '@/lib/types'
 
@@ -139,6 +140,57 @@ export async function publishMun(munId: string): Promise<Mun> {
   requireRole(session, [...PUBLISH_ROLES])
 
   return transitionMun(munId, 'PUBLISHED', session.userId)
+}
+
+/**
+ * Pulls a PUBLISHED mun back to VERIFIED — a pure visibility toggle off the
+ * marketplace, no re-verification needed since the content hasn't changed.
+ * Same role bar as `publishMun` (ADMIN/SUPER_ADMIN only). The status change
+ * and its `admin_actions` audit row commit atomically: both run against one
+ * transaction opened here and handed into `transitionMun` as `externalTx`.
+ */
+export async function unpublishMun(munId: string): Promise<Mun> {
+  const session = await getSession()
+  requireRole(session, [...PUBLISH_ROLES])
+
+  return db.transaction(async (tx) => {
+    const updated = await transitionMun(munId, 'VERIFIED', session.userId, undefined, undefined, tx)
+    await recordAdminAction(tx, session.userId, 'MUN_UNPUBLISHED', 'mun', munId)
+    return updated
+  })
+}
+
+/**
+ * Suspends a mun (reversible hide + stop new registrations) — reachable from
+ * PUBLISHED onward per `ALLOWED_TRANSITIONS`. Requires a non-empty `reason`,
+ * recorded on both the `admin_actions` row and, via `transitionMun`, the
+ * `verificationLogs` row. Same role bar as `publishMun`. Status change +
+ * audit row commit atomically, same pattern as `unpublishMun`.
+ */
+export async function suspendMun(munId: string, reason: string): Promise<Mun> {
+  const session = await getSession()
+  requireRole(session, [...PUBLISH_ROLES])
+
+  return db.transaction(async (tx) => {
+    const updated = await transitionMun(munId, 'SUSPENDED', session.userId, undefined, reason, tx)
+    await recordAdminAction(tx, session.userId, 'MUN_SUSPENDED', 'mun', munId, reason)
+    return updated
+  })
+}
+
+/**
+ * Reinstates a suspended mun — sends it back through VERIFICATION rather than
+ * straight to VERIFIED/PUBLISHED, so it's re-checked before going live again.
+ * Same role bar as `publishMun`. No separate `admin_actions` row: the
+ * `verificationLogs` row `transitionMun` already writes is the audit trail
+ * for this transition, mirroring how every other lifecycle transition (e.g.
+ * `reviewMunApplication`) is recorded.
+ */
+export async function reinstateMun(munId: string): Promise<Mun> {
+  const session = await getSession()
+  requireRole(session, [...PUBLISH_ROLES])
+
+  return transitionMun(munId, 'VERIFICATION', session.userId)
 }
 
 export interface ModuleReviewQueueRow {

@@ -1,7 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { publishMun, reviewMunApplication } from "@/lib/actions/admin-review";
+import {
+  publishMun,
+  reinstateMun,
+  reviewMunApplication,
+  suspendMun,
+  unpublishMun,
+} from "@/lib/actions/admin-review";
 import type { MunStatus } from "@/lib/db/schema-enums";
 
 /**
@@ -62,6 +68,36 @@ export async function submitReviewDecision(
 export async function publishMunAction(munId: string): Promise<ReviewActionResult> {
   try {
     const mun = await publishMun(munId);
+    revalidatePath("/admin/review");
+    return { ok: true, status: mun.status };
+  } catch (error) {
+    return { ok: false, error: toErrorMessage(error) };
+  }
+}
+
+export async function unpublishMunAction(munId: string): Promise<ReviewActionResult> {
+  try {
+    const mun = await unpublishMun(munId);
+    revalidatePath("/admin/review");
+    return { ok: true, status: mun.status };
+  } catch (error) {
+    return { ok: false, error: toErrorMessage(error) };
+  }
+}
+
+export async function suspendMunAction(munId: string, reason: string): Promise<ReviewActionResult> {
+  try {
+    const mun = await suspendMun(munId, reason);
+    revalidatePath("/admin/review");
+    return { ok: true, status: mun.status };
+  } catch (error) {
+    return { ok: false, error: toErrorMessage(error) };
+  }
+}
+
+export async function reinstateMunAction(munId: string): Promise<ReviewActionResult> {
+  try {
+    const mun = await reinstateMun(munId);
     revalidatePath("/admin/review");
     return { ok: true, status: mun.status };
   } catch (error) {

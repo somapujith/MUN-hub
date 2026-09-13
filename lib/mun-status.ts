@@ -48,6 +48,10 @@ const STATUS_META: Record<MunStatus, StatusMeta> = {
 
   REJECTED: { label: "Rejected", tone: "destructive", icon: "x-circle" },
   CANCELLED: { label: "Cancelled", tone: "destructive", icon: "ban" },
+  // Placeholder entry (mechanical, added only to keep this Record<MunStatus, ...>
+  // exhaustive after Task 4 added SUSPENDED) — needs real UI/copy review from
+  // whoever owns UI next, not a design pass from backend.
+  SUSPENDED: { label: "Suspended", tone: "destructive", icon: "ban" },
 
   APPROVED: { label: "Approved", tone: "success", icon: "check" },
   VERIFIED: { label: "Verified", tone: "success", icon: "shield" },

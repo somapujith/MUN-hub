@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, munModuleVerifications, organizerApplications, users, verificationLogs } from '@/lib/db/schema'
+import { adminActions, muns, munModuleVerifications, organizerApplications, users, verificationLogs } from '@/lib/db/schema'
 import { SESSION_COOKIE_NAME, createSession } from '@/lib/auth/session'
 
 // Mock next/headers `cookies()` so getSession() (called internally by every
@@ -16,7 +16,16 @@ vi.mock('next/headers', () => ({
   }),
 }))
 
-import { getModuleReviewQueue, getMunForReview, getReviewQueue, publishMun, reviewMunApplication } from './admin-review'
+import {
+  getModuleReviewQueue,
+  getMunForReview,
+  getReviewQueue,
+  publishMun,
+  reinstateMun,
+  reviewMunApplication,
+  suspendMun,
+  unpublishMun,
+} from './admin-review'
 
 async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' | 'SUPER_ADMIN') {
   const [user] = await db
@@ -31,7 +40,10 @@ async function sessionFor(userId: string) {
   return token
 }
 
-async function makeMun(organizerId: string, status: 'SUBMITTED' | 'UNDER_REVIEW' | 'VERIFICATION' | 'VERIFIED') {
+async function makeMun(
+  organizerId: string,
+  status: 'SUBMITTED' | 'UNDER_REVIEW' | 'VERIFICATION' | 'VERIFIED' | 'PUBLISHED' | 'REGISTRATION_OPEN' | 'SUSPENDED',
+) {
   const [mun] = await db
     .insert(muns)
     .values({
@@ -200,6 +212,83 @@ describe('publishMun', () => {
     const result = await publishMun(mun.id)
     expect(result.status).toBe('PUBLISHED')
     expect(result.publishedAt).toBeInstanceOf(Date)
+  })
+})
+
+describe('unpublishMun', () => {
+  it('transitions PUBLISHED -> VERIFIED and logs MUN_UNPUBLISHED', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'PUBLISHED')
+    const admin = await makeUser('ADMIN')
+    currentToken = await sessionFor(admin.id)
+
+    const updated = await unpublishMun(mun.id)
+    expect(updated.status).toBe('VERIFIED')
+
+    const [log] = await db.select().from(adminActions).where(eq(adminActions.targetId, mun.id))
+    expect(log.action).toBe('MUN_UNPUBLISHED')
+  })
+
+  it('rejects OPERATIONS (stricter than review — only ADMIN/SUPER_ADMIN can unpublish)', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'PUBLISHED')
+    const ops = await makeUser('OPERATIONS')
+    currentToken = await sessionFor(ops.id)
+
+    await expect(unpublishMun(mun.id)).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('suspendMun', () => {
+  it('transitions REGISTRATION_OPEN -> SUSPENDED with reason, logs MUN_SUSPENDED', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'REGISTRATION_OPEN')
+    const admin = await makeUser('ADMIN')
+    currentToken = await sessionFor(admin.id)
+
+    const updated = await suspendMun(mun.id, 'safety concern')
+    expect(updated.status).toBe('SUSPENDED')
+
+    const [log] = await db.select().from(adminActions).where(eq(adminActions.targetId, mun.id))
+    expect(log.action).toBe('MUN_SUSPENDED')
+    expect(log.reason).toBe('safety concern')
+  })
+
+  it('two concurrent suspend calls on the same mun serialize (row lock) — exactly one succeeds', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'PUBLISHED')
+    const admin = await makeUser('ADMIN')
+    currentToken = await sessionFor(admin.id)
+
+    const [r1, r2] = await Promise.allSettled([
+      suspendMun(mun.id, 'reason A'),
+      suspendMun(mun.id, 'reason B'),
+    ])
+    const fulfilled = [r1, r2].filter((r) => r.status === 'fulfilled')
+    const rejected = [r1, r2].filter((r) => r.status === 'rejected')
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+  })
+})
+
+describe('reinstateMun', () => {
+  it('transitions SUSPENDED -> VERIFICATION', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'SUSPENDED')
+    const admin = await makeUser('ADMIN')
+    currentToken = await sessionFor(admin.id)
+
+    const updated = await reinstateMun(mun.id)
+    expect(updated.status).toBe('VERIFICATION')
+  })
+
+  it('rejects OPERATIONS (stricter than review — only ADMIN/SUPER_ADMIN can reinstate)', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'SUSPENDED')
+    const ops = await makeUser('OPERATIONS')
+    currentToken = await sessionFor(ops.id)
+
+    await expect(reinstateMun(mun.id)).rejects.toThrow('Forbidden')
   })
 })
 

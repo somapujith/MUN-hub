@@ -55,6 +55,10 @@ const EXPLANATIONS: Record<MunStatus, string> = {
   COMPLETED: "This conference has finished. Verification is complete.",
   ARCHIVED: "This conference is archived and can no longer be edited or submitted.",
   CANCELLED: "This conference was cancelled and can no longer be edited or submitted.",
+  // Placeholder entry (mechanical, added only to keep this Record<MunStatus, ...>
+  // exhaustive after Task 4 added SUSPENDED) — needs real UI/copy review from
+  // whoever owns UI next, not a design pass from backend.
+  SUSPENDED: "This conference has been suspended by MUN Hub and can no longer be edited or submitted.",
 };
 
 const SUBMITTABLE_STATUS: MunStatus = "CONTENT_SUBMITTED";

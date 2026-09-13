@@ -61,6 +61,33 @@ describe('new lifecycle states (verification/confirmation trust layer)', () => {
   })
 })
 
+describe('SUSPENDED transitions', () => {
+  it('allows PUBLISHED -> SUSPENDED', () => {
+    expect(canTransition('PUBLISHED', 'SUSPENDED')).toBe(true)
+  })
+  it('allows REGISTRATION_OPEN -> SUSPENDED', () => {
+    expect(canTransition('REGISTRATION_OPEN', 'SUSPENDED')).toBe(true)
+  })
+  it('allows SUSPENDED -> VERIFICATION (reinstate re-runs verification)', () => {
+    expect(canTransition('SUSPENDED', 'VERIFICATION')).toBe(true)
+  })
+  it('allows SUSPENDED -> CANCELLED', () => {
+    expect(canTransition('SUSPENDED', 'CANCELLED')).toBe(true)
+  })
+  it('rejects DRAFT -> SUSPENDED', () => {
+    expect(canTransition('DRAFT', 'SUSPENDED')).toBe(false)
+  })
+})
+
+describe('unpublish transition', () => {
+  it('allows PUBLISHED -> VERIFIED (unpublish)', () => {
+    expect(canTransition('PUBLISHED', 'VERIFIED')).toBe(true)
+  })
+  it('rejects REGISTRATION_OPEN -> VERIFIED (registrations exist, must suspend instead)', () => {
+    expect(canTransition('REGISTRATION_OPEN', 'VERIFIED')).toBe(false)
+  })
+})
+
 describe('transitionMun', () => {
   let munId: string
   let reviewerId: string
