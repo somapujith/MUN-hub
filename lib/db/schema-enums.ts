@@ -126,6 +126,11 @@ export const adminActionEnum = pgEnum('admin_action', [
   'TICKET_ASSIGNED',
   'TICKET_RESOLVED',
   'USER_SUSPENDED',
+  // Onboarding go-live pipeline (Task 7) — admin flips a module's
+  // isRequired flag per PRD Section 6 ("optional modules may be configured
+  // by MUNHub"). See lib/lifecycle/module-verification.ts's
+  // setModuleRequirement.
+  'MODULE_REQUIREMENT_CHANGED',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [
