@@ -64,10 +64,27 @@ export const applicationStatusEnum = pgEnum('application_status', [
 ])
 
 export const munModuleEnum = pgEnum('mun_module', [
+  // legacy (retained, remapped to PRD keys via data migration — see drizzle/0010)
   'mun_details',
   'committees',
   'portfolios',
   'registration_products',
+  // PRD Section 38 module keys (15 tracked modules)
+  'BASIC_INFO',
+  'DATES_VENUE',
+  'BRANDING',
+  'COMMITTEES',
+  'PORTFOLIOS',
+  'EXECUTIVE_BOARD',
+  'REGISTRATION_TYPES',
+  'REGISTRATION_FORM',
+  'PRICING_CAPACITY',
+  'PAYMENT_SETTLEMENT',
+  'RULES_DOCUMENTS',
+  'SCHEDULE',
+  'ACCOMMODATION',
+  'CONTACT',
+  'FINAL_REVIEW',
 ])
 
 export const moduleVerificationStateEnum = pgEnum('module_verification_state', [
@@ -76,6 +93,14 @@ export const moduleVerificationStateEnum = pgEnum('module_verification_state', [
   'VERIFIED',
   'CHANGES_REQUESTED',
   'REJECTED',
+])
+
+export const moduleCompletionEnum = pgEnum('module_completion_status', [
+  'NOT_STARTED',
+  'IN_PROGRESS',
+  'ACTION_REQUIRED',
+  'COMPLETE',
+  'LOCKED',
 ])
 
 export const verificationSeverityEnum = pgEnum('verification_severity', [
@@ -138,6 +163,7 @@ export type PaymentStatus = (typeof paymentStatusEnum.enumValues)[number]
 export type ApplicationStatus = (typeof applicationStatusEnum.enumValues)[number]
 export type MunModule = (typeof munModuleEnum.enumValues)[number]
 export type ModuleVerificationState = (typeof moduleVerificationStateEnum.enumValues)[number]
+export type ModuleCompletionStatus = (typeof moduleCompletionEnum.enumValues)[number]
 export type VerificationSeverity = (typeof verificationSeverityEnum.enumValues)[number]
 export type AccommodationFieldType = (typeof accommodationFieldTypeEnum.enumValues)[number]
 export type AdminAction = (typeof adminActionEnum.enumValues)[number]

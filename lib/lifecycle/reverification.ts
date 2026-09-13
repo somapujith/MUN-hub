@@ -4,8 +4,13 @@ import { muns, munModuleVerifications } from '@/lib/db/schema'
 import type { MunModule, MunStatus } from '@/lib/db/schema-enums'
 import { transitionMun } from './mun-state-machine'
 
+// TODO(Task 12): restore to exhaustive Record<MunModule, string[]> once
+// HIGH_IMPACT_FIELDS covers all 15 modules. Widened to Partial here because
+// Task 2 added 15 new MunModule keys and Task 12 owns filling in their real
+// high-impact field lists; a missing key is treated as an empty list (no
+// field ever triggers re-verification for a module not yet listed here).
 /** PRD Section 16's high-impact field list, per module. */
-const HIGH_IMPACT_FIELDS: Record<MunModule, string[]> = {
+const HIGH_IMPACT_FIELDS: Partial<Record<MunModule, string[]>> = {
   mun_details: ['name', 'startDate', 'endDate', 'venue'],
   committees: ['name', 'capacity'],
   portfolios: ['availability'],
@@ -23,7 +28,7 @@ export function detectHighImpactChange(
   before: Record<string, unknown>,
   after: Record<string, unknown>,
 ): boolean {
-  const fields = HIGH_IMPACT_FIELDS[moduleName]
+  const fields = HIGH_IMPACT_FIELDS[moduleName] ?? []
   return fields.some((field) => {
     if (!(field in after)) return false
     const beforeValue = before[field]

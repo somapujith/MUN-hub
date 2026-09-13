@@ -19,8 +19,10 @@ export const metadata: Metadata = {
 const REVIEW_ROLES = ["OPERATIONS", "ADMIN", "SUPER_ADMIN"] as const;
 const PAGE_SIZE = 20;
 
+// TODO(Task 12): restore to exhaustive Record<MunModule, string> once this
+// console's copy covers all 15 PRD modules, not just the 4 legacy ones.
 /** Human labels for the four tracked modules — matches organizer-facing copy. */
-const MODULE_LABELS: Record<MunModule, string> = {
+const MODULE_LABELS: Partial<Record<MunModule, string>> = {
   mun_details: "MUN details",
   committees: "Committees",
   portfolios: "Portfolios",
