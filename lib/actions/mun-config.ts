@@ -1,6 +1,6 @@
 'use server'
 
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { committees, muns, portfolios, registrationProducts } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
@@ -201,9 +201,24 @@ export async function createRegistrationProduct(
   return product
 }
 
-/** Public read, no auth — same reasoning as `listCommittees`/`listPortfolios` above. */
-export async function listRegistrationProducts(munId: string): Promise<RegistrationProduct[]> {
-  return db.select().from(registrationProducts).where(eq(registrationProducts.munId, munId))
+/**
+ * Public read, no auth — same reasoning as `listCommittees`/`listPortfolios`
+ * above. Defaults to active-only (a soft-deleted product shouldn't be
+ * exposed to callers who forget to filter); pass `includeInactive: true`
+ * for admin/organizer views that need to show archived products.
+ */
+export async function listRegistrationProducts(
+  munId: string,
+  options: { includeInactive?: boolean } = {},
+): Promise<RegistrationProduct[]> {
+  return db
+    .select()
+    .from(registrationProducts)
+    .where(
+      options.includeInactive
+        ? eq(registrationProducts.munId, munId)
+        : and(eq(registrationProducts.munId, munId), eq(registrationProducts.status, 'active')),
+    )
 }
 
 export interface UpdateRegistrationProductInput {

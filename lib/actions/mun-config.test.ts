@@ -226,6 +226,22 @@ describe('mun-config actions', () => {
       expect(listA[0].name).toBe('Delegate A')
     })
 
+    it('listRegistrationProducts excludes soft-deleted products by default, includes them with includeInactive', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+
+      const active = await createRegistrationProduct({ munId: mun.id, name: 'Active Product', price: 1000, capacity: 50 }, session)
+      const archived = await createRegistrationProduct({ munId: mun.id, name: 'Archived Product', price: 1000, capacity: 50 }, session)
+      await deleteRegistrationProduct(archived.id, session)
+
+      const activeOnly = await listRegistrationProducts(mun.id)
+      expect(activeOnly.map((p) => p.id)).toEqual([active.id])
+
+      const all = await listRegistrationProducts(mun.id, { includeInactive: true })
+      expect(all.length).toBe(2)
+    })
+
     it('soft-deletes: row still exists with status inactive, excluded from default reads', async () => {
       const organizer = await makeUser('ORGANIZER')
       const mun = await makeMun(organizer.id)

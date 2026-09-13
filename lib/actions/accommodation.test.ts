@@ -45,8 +45,24 @@ describe('accommodation options CRUD', () => {
     expect(updated.price).toBe(1800)
 
     await deleteAccommodationOption(option.id, session)
-    const list = await listAccommodationOptions(mun.id)
+    const list = await listAccommodationOptions(mun.id, { includeInactive: true })
     expect(list.find((o) => o.id === option.id)?.status).toBe('inactive')
+  })
+
+  it('excludes soft-deleted options by default, includes them with includeInactive', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id)
+    const session = sessionFor(organizer)
+
+    const active = await createAccommodationOption({ munId: mun.id, name: 'Active Room', price: 1000, capacity: 10 }, session)
+    const archived = await createAccommodationOption({ munId: mun.id, name: 'Archived Room', price: 1000, capacity: 10 }, session)
+    await deleteAccommodationOption(archived.id, session)
+
+    const activeOnly = await listAccommodationOptions(mun.id)
+    expect(activeOnly.map((o) => o.id)).toEqual([active.id])
+
+    const all = await listAccommodationOptions(mun.id, { includeInactive: true })
+    expect(all.length).toBe(2)
   })
 
   it('rejects a non-owning organizer', async () => {

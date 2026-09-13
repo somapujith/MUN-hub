@@ -1,6 +1,6 @@
 'use server'
 
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { accommodationOptionFields, accommodationOptions, muns } from '@/lib/db/schema'
 import type { AccommodationFieldType } from '@/lib/db/schema-enums'
@@ -103,9 +103,29 @@ export async function deleteAccommodationOption(id: string, session: Session | n
   await db.update(accommodationOptions).set({ status: 'inactive' }).where(eq(accommodationOptions.id, id))
 }
 
-/** Public read, no auth — used by the registration funnel's accommodation step and the organizer dashboard. */
-export async function listAccommodationOptions(munId: string): Promise<AccommodationOption[]> {
-  return db.select().from(accommodationOptions).where(eq(accommodationOptions.munId, munId))
+/**
+ * Public read, no auth — used by the registration funnel's accommodation
+ * step and the organizer dashboard.
+ *
+ * Defaults to active-only: a caller that forgets to filter would otherwise
+ * expose archived (soft-deleted) options — the registration funnel already
+ * filters client-side as a defense-in-depth measure, but that shouldn't be
+ * the only thing preventing it. Pass `includeInactive: true` explicitly for
+ * admin/organizer views that need to show archived options (e.g. with a
+ * "restore" action).
+ */
+export async function listAccommodationOptions(
+  munId: string,
+  options: { includeInactive?: boolean } = {},
+): Promise<AccommodationOption[]> {
+  return db
+    .select()
+    .from(accommodationOptions)
+    .where(
+      options.includeInactive
+        ? eq(accommodationOptions.munId, munId)
+        : and(eq(accommodationOptions.munId, munId), eq(accommodationOptions.status, 'active')),
+    )
 }
 
 // -----------------------------------------------------------------------------
