@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
@@ -65,6 +66,19 @@ import type { MunSummary } from "@/lib/types";
  * (min over active products) added to `MunSummary`/`searchMuns` plus a
  * 'deadline' sort option. That is a lib/ change and deliberately not made here.
  */
+
+export const metadata: Metadata = {
+  title: "MUN Hub — Discover and Register for Model United Nations Conferences",
+  description:
+    "Browse reviewed Model United Nations conferences, compare committees and fees, and register for your next MUN in minutes.",
+  openGraph: {
+    title: "MUN Hub — Discover and Register for Model United Nations Conferences",
+    description:
+      "Browse reviewed Model United Nations conferences, compare committees and fees, and register for your next MUN in minutes.",
+    type: "website",
+    url: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+  },
+};
 
 /** Start-date horizon that counts a registration-open MUN as "closing soon". */
 const CLOSING_SOON_DAYS = 42;
