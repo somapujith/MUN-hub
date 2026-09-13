@@ -156,6 +156,76 @@ export const supportStatusEnum = pgEnum('support_status', [
   'CLOSED',
 ])
 
+// ---------------------------------------------------------------------------
+// Onboarding go-live pipeline — Task 4 net-new module table enums.
+// See docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
+// Section 2.3.
+// ---------------------------------------------------------------------------
+
+export const munMediaKindEnum = pgEnum('mun_media_kind', [
+  'LOGO',
+  'COVER',
+  'GALLERY',
+  'SPONSOR',
+  'ORGANIZER_LOGO',
+])
+
+export const ebRoleEnum = pgEnum('eb_role', [
+  'CHAIR',
+  'VICE_CHAIR',
+  'DIRECTOR',
+  'RAPPORTEUR',
+  'CUSTOM',
+])
+
+export const formFieldTypeEnum = pgEnum('form_field_type', [
+  'SHORT_TEXT',
+  'LONG_TEXT',
+  'EMAIL',
+  'PHONE',
+  'NUMBER',
+  'DROPDOWN',
+  'MULTIPLE_CHOICE',
+  'CHECKBOX',
+  'DATE',
+  'FILE_UPLOAD',
+  'INSTITUTION',
+  'ACADEMIC_YEAR',
+  'MUN_EXPERIENCE',
+  'COMMITTEE_PREFERENCE',
+  'PORTFOLIO_PREFERENCE',
+  'EMERGENCY_CONTACT',
+])
+
+export const munDocumentKindEnum = pgEnum('mun_document_kind', [
+  'RULES',
+  'CODE_OF_CONDUCT',
+  'REFUND_POLICY',
+  'BROCHURE',
+  'HANDBOOK',
+  'DELEGATE_GUIDE',
+  'POSITION_PAPER',
+  'OTHER',
+])
+
+export const scheduleItemKindEnum = pgEnum('schedule_item_kind', [
+  'OPENING_CEREMONY',
+  'COMMITTEE_SESSION',
+  'BREAK',
+  'LUNCH',
+  'CRISIS',
+  'CLOSING_CEREMONY',
+  'AWARDS',
+  'OTHER',
+])
+
+export const paymentVerificationEnum = pgEnum('payment_verification_state', [
+  'NOT_SUBMITTED',
+  'PENDING',
+  'VERIFIED',
+  'FAILED',
+])
+
 export type Role = (typeof roleEnum.enumValues)[number]
 export type MunStatus = (typeof munStatusEnum.enumValues)[number]
 export type RegistrationStatus = (typeof registrationStatusEnum.enumValues)[number]
@@ -170,3 +240,9 @@ export type AdminAction = (typeof adminActionEnum.enumValues)[number]
 export type SupportCategory = (typeof supportCategoryEnum.enumValues)[number]
 export type SupportPriority = (typeof supportPriorityEnum.enumValues)[number]
 export type SupportStatus = (typeof supportStatusEnum.enumValues)[number]
+export type MunMediaKind = (typeof munMediaKindEnum.enumValues)[number]
+export type EbRole = (typeof ebRoleEnum.enumValues)[number]
+export type FormFieldType = (typeof formFieldTypeEnum.enumValues)[number]
+export type MunDocumentKind = (typeof munDocumentKindEnum.enumValues)[number]
+export type ScheduleItemKind = (typeof scheduleItemKindEnum.enumValues)[number]
+export type PaymentVerificationState = (typeof paymentVerificationEnum.enumValues)[number]
