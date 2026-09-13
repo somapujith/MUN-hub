@@ -15,6 +15,13 @@
       "when": 1789297697703,
       "tag": "0001_tiresome_blizzard",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789298325029,
+      "tag": "0002_perfect_the_liberteens",
+      "breakpoints": true
     }
   ]
 }

@@ -56,8 +56,33 @@ export const applicationStatusEnum = pgEnum('application_status', [
   'CHANGES_REQUESTED',
 ])
 
+export const munModuleEnum = pgEnum('mun_module', [
+  'mun_details',
+  'committees',
+  'portfolios',
+  'registration_products',
+])
+
+export const moduleVerificationStateEnum = pgEnum('module_verification_state', [
+  'NOT_SUBMITTED',
+  'PENDING_REVIEW',
+  'VERIFIED',
+  'CHANGES_REQUESTED',
+  'REJECTED',
+])
+
+export const verificationSeverityEnum = pgEnum('verification_severity', [
+  'BLOCKER',
+  'HIGH',
+  'MEDIUM',
+  'LOW',
+])
+
 export type Role = (typeof roleEnum.enumValues)[number]
 export type MunStatus = (typeof munStatusEnum.enumValues)[number]
 export type RegistrationStatus = (typeof registrationStatusEnum.enumValues)[number]
 export type PaymentStatus = (typeof paymentStatusEnum.enumValues)[number]
 export type ApplicationStatus = (typeof applicationStatusEnum.enumValues)[number]
+export type MunModule = (typeof munModuleEnum.enumValues)[number]
+export type ModuleVerificationState = (typeof moduleVerificationStateEnum.enumValues)[number]
+export type VerificationSeverity = (typeof verificationSeverityEnum.enumValues)[number]

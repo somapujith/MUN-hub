@@ -1,11 +1,15 @@
 import { relations } from 'drizzle-orm'
-import { index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import type { AnyPgColumn } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
 import {
   applicationStatusEnum,
+  moduleVerificationStateEnum,
+  munModuleEnum,
   munStatusEnum,
   paymentStatusEnum,
   registrationStatusEnum,
   roleEnum,
+  verificationSeverityEnum,
 } from './schema-enums'
 
 export * from './schema-enums'
@@ -203,6 +207,13 @@ export const registrations = pgTable(
       .references(() => registrationProducts.id),
     committeeId: text('committee_id').references(() => committees.id),
     portfolioId: text('portfolio_id').references(() => portfolios.id),
+    // Nullable, unwired — schema-only for now. Slice 1 of the verification/
+    // confirmation trust layer adds this column so a future slice can pin a
+    // registration to the mun_versions snapshot active at purchase time
+    // (PRD Section 33). initiateRegistration does NOT populate this yet —
+    // see docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md
+    // Section 6 for why that's deliberately deferred.
+    munVersionId: text('mun_version_id').references((): AnyPgColumn => munVersions.id),
     formResponses: jsonb('form_responses'),
     status: registrationStatusEnum('status').notNull().default('PENDING'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
@@ -365,4 +376,100 @@ export const verificationLogs = pgTable(
 export const verificationLogsRelations = relations(verificationLogs, ({ one }) => ({
   mun: one(muns, { fields: [verificationLogs.munId], references: [muns.id] }),
   reviewer: one(users, { fields: [verificationLogs.reviewerId], references: [users.id] }),
+}))
+
+// ---------------------------------------------------------------------------
+// Verification & confirmation trust layer (slice 1) — see
+// docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md
+// ---------------------------------------------------------------------------
+
+export const munModuleVerifications = pgTable(
+  'mun_module_verifications',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    moduleName: munModuleEnum('module_name').notNull(),
+    state: moduleVerificationStateEnum('state').notNull().default('NOT_SUBMITTED'),
+    organizerConfirmedAt: timestamp('organizer_confirmed_at', { withTimezone: true }),
+    lastReviewedAt: timestamp('last_reviewed_at', { withTimezone: true }),
+    lastReviewedBy: text('last_reviewed_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mun_module_verifications_mun_id_idx').on(table.munId)],
+)
+
+export const munModuleVerificationsRelations = relations(munModuleVerifications, ({ one }) => ({
+  mun: one(muns, { fields: [munModuleVerifications.munId], references: [muns.id] }),
+  lastReviewer: one(users, { fields: [munModuleVerifications.lastReviewedBy], references: [users.id] }),
+}))
+
+export const verificationIssues = pgTable(
+  'verification_issues',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    moduleName: munModuleEnum('module_name').notNull(),
+    severity: verificationSeverityEnum('severity').notNull(),
+    reason: text('reason').notNull(),
+    previousValue: text('previous_value'),
+    newValue: text('new_value'),
+    resolved: boolean('resolved').notNull().default(false),
+    raisedBy: text('raised_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (table) => [index('verification_issues_mun_id_idx').on(table.munId)],
+)
+
+export const verificationIssuesRelations = relations(verificationIssues, ({ one }) => ({
+  mun: one(muns, { fields: [verificationIssues.munId], references: [muns.id] }),
+  raiser: one(users, { fields: [verificationIssues.raisedBy], references: [users.id] }),
+}))
+
+export const organizerConfirmations = pgTable(
+  'organizer_confirmations',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    confirmingUserId: text('confirming_user_id')
+      .notNull()
+      .references(() => users.id),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull().defaultNow(),
+    versionNumber: integer('version_number').notNull(),
+    snapshotJson: jsonb('snapshot_json').notNull(),
+  },
+  (table) => [index('organizer_confirmations_mun_id_idx').on(table.munId)],
+)
+
+export const organizerConfirmationsRelations = relations(organizerConfirmations, ({ one }) => ({
+  mun: one(muns, { fields: [organizerConfirmations.munId], references: [muns.id] }),
+  confirmingUser: one(users, { fields: [organizerConfirmations.confirmingUserId], references: [users.id] }),
+}))
+
+export const munVersions = pgTable(
+  'mun_versions',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    versionNumber: integer('version_number').notNull(),
+    snapshotJson: jsonb('snapshot_json').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mun_versions_mun_id_idx').on(table.munId)],
+)
+
+export const munVersionsRelations = relations(munVersions, ({ one, many }) => ({
+  mun: one(muns, { fields: [munVersions.munId], references: [muns.id] }),
+  registrations: many(registrations),
 }))

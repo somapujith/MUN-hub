@@ -31,7 +31,7 @@ async function sessionFor(userId: string) {
   return token
 }
 
-async function makeMun(organizerId: string, status: 'SUBMITTED' | 'UNDER_REVIEW' | 'VERIFICATION') {
+async function makeMun(organizerId: string, status: 'SUBMITTED' | 'UNDER_REVIEW' | 'VERIFICATION' | 'VERIFIED') {
   const [mun] = await db
     .insert(muns)
     .values({
