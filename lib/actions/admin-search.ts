@@ -1,6 +1,6 @@
 'use server'
 
-import { and, eq, ilike, ne, or } from 'drizzle-orm'
+import { and, desc, eq, ilike, ne, or } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { committees, muns, payments, portfolios, registrations, users } from '@/lib/db/schema'
 import { getSession } from '@/lib/auth/session'
@@ -80,6 +80,13 @@ export interface PaymentExceptionRow {
  * (the registration expired/was cancelled after the webhook fired — see
  * CLAUDE.md "Registration integrity" section for the underlying webhook
  * behavior this surfaces).
+ *
+ * Newest-first, capped at 100 rows — this has no pagination yet, so an
+ * explicit ORDER BY + LIMIT keeps a single admin-overview page load from
+ * pulling an unbounded result set as payment exceptions accumulate, while
+ * also guaranteeing a freshly-created exception is always visible on this
+ * one page rather than depending on where it happens to fall in insertion
+ * order.
  */
 export async function listPaymentExceptions(): Promise<PaymentExceptionRow[]> {
   const session = await getSession()
@@ -105,6 +112,8 @@ export async function listPaymentExceptions(): Promise<PaymentExceptionRow[]> {
         and(eq(payments.status, 'PAID'), ne(registrations.status, 'CONFIRMED')),
       ),
     )
+    .orderBy(desc(payments.createdAt))
+    .limit(100)
 
   return rows.map((row) => ({
     registrationId: row.registrationId,

@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { assignTicket, updateTicketStatus } from "@/lib/actions/support";
 
 /**
- * Thin route-local wrappers around the frozen `lib/actions/support` surface
- * — same reasoning as `app/admin/refunds/actions.ts` / `app/admin/organizers/actions.ts`:
+ * Thin route-local wrappers around the `lib/actions/support` surface — same
+ * reasoning as `app/admin/organizers/actions.ts`:
  *   1. The lib actions THROW (`Forbidden`). A client component needs a
  *      structured result it can turn into a toast, not an unhandled server
  *      action rejection.
@@ -33,11 +33,10 @@ function toErrorMessage(error: unknown): string {
 }
 
 export async function assignTicketToSelfAction(
-  ticketId: string,
-  assigneeId: string
+  ticketId: string
 ): Promise<SupportActionResult> {
   try {
-    await assignTicket(ticketId, assigneeId);
+    await assignTicket(ticketId);
     revalidatePath("/admin/support");
     return { ok: true };
   } catch (error) {

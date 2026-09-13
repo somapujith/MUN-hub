@@ -63,7 +63,7 @@ export default async function SupportPage() {
           ) : (
             <div className="divide-y divide-border rounded-md border border-border bg-card">
               {tickets.map((t) => (
-                <TicketRow key={t.id} ticket={t} currentUserId={session.userId} />
+                <TicketRow key={t.id} ticket={t} />
               ))}
             </div>
           )}

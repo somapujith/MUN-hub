@@ -120,10 +120,17 @@ describe('reinstateOrganizer', () => {
 describe('listOrganizers', () => {
   it('returns only ORGANIZER-role users, paginated, with total count', async () => {
     const admin = await makeUser('ADMIN')
-    // Results are ordered by name — the local dev DB has thousands of
-    // accumulated organizer rows from historical test runs (documented in
-    // CLAUDE.md), so a fresh row isn't guaranteed to land on any bounded
-    // page unless it sorts first. "!" sorts before any letter/digit.
+    // Results are ordered by name — the local dev DB has accumulated many
+    // thousands of organizer rows from historical test runs (documented in
+    // CLAUDE.md), so a fresh row is no longer guaranteed to land on a small
+    // bounded page even with a "!" prefix meant to sort first (the "!"
+    // prefix itself has accumulated enough prior rows to push newer ones
+    // off a `limit: 5` page). `listOrganizers` has no name/query filter to
+    // fetch this row directly, so the simplest fix that doesn't depend on
+    // pagination position is a limit generous enough to outrun the
+    // accumulated junk. This increasingly needs a real filter/query
+    // capability as local test data keeps growing — out of scope for this
+    // fix, noted here for whoever picks it up next.
     const [organizer] = await db
       .insert(users)
       .values({ name: `!list-test-org-${Date.now()}`, email: `org-${Date.now()}-${Math.random()}@test.dev`, role: 'ORGANIZER' })
@@ -131,7 +138,7 @@ describe('listOrganizers', () => {
     const student = await makeUser('STUDENT')
     currentToken = await sessionFor(admin.id)
 
-    const { results, total } = await listOrganizers({ limit: 5, offset: 0 })
+    const { results, total } = await listOrganizers({ limit: 1000, offset: 0 })
     expect(Array.isArray(results)).toBe(true)
     expect(typeof total).toBe('number')
     expect(results.some((r) => r.id === organizer.id)).toBe(true)

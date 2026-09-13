@@ -54,15 +54,13 @@ function statusVariant(status: SupportTicketRow["status"]): "secondary" | "info"
  * `useState`-controlled input (never an uncontrolled textarea) so the
  * confirm button's disabled-on-empty gate stays accurate — a Task 3 review
  * caught an uncontrolled textarea breaking exactly this kind of gate in
- * `app/admin/organizers/suspend-dialog.tsx`, and `refund-row.tsx` carries
- * forward the same fix.
+ * `app/admin/organizers/suspend-dialog.tsx`; this component carries forward
+ * the same fix.
  */
 export function TicketRow({
   ticket,
-  currentUserId,
 }: {
   ticket: SupportTicketRow;
-  currentUserId: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const [notes, setNotes] = React.useState("");
@@ -76,7 +74,7 @@ export function TicketRow({
 
   function handleAssignToSelf() {
     startAssign(async () => {
-      const result = await assignTicketToSelfAction(ticket.id, currentUserId);
+      const result = await assignTicketToSelfAction(ticket.id);
       if (!result.ok) {
         toast.error("Could not assign ticket", { description: result.error });
         return;
@@ -159,16 +157,26 @@ export function TicketRow({
                 Assign to me
               </Button>
             )}
-            {ticket.status !== "IN_PROGRESS" && (
+            {/*
+              A NEW ticket's only legal next state is ASSIGNED
+              (ALLOWED_TICKET_TRANSITIONS in lib/actions/support.ts) — "In
+              progress" and "Resolve" only apply once a ticket has been
+              assigned, otherwise updateTicketStatus throws "Invalid ticket
+              transition". Gate both behind `!isUnassigned` so the UI never
+              offers an action the backend state machine will reject.
+            */}
+            {!isUnassigned && ticket.status !== "IN_PROGRESS" && (
               <Button size="sm" variant="outline" disabled={pending} onClick={handleMarkInProgress}>
                 {pendingProgress ? <Loader2Icon className="animate-spin" aria-hidden /> : null}
                 In progress
               </Button>
             )}
-            <Button size="sm" disabled={pending} onClick={() => setOpen(true)}>
-              <CheckIcon aria-hidden />
-              Resolve
-            </Button>
+            {!isUnassigned && (
+              <Button size="sm" disabled={pending} onClick={() => setOpen(true)}>
+                <CheckIcon aria-hidden />
+                Resolve
+              </Button>
+            )}
           </div>
         )}
       </div>
