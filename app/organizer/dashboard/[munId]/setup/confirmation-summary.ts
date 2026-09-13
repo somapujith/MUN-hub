@@ -1,9 +1,6 @@
 import "server-only";
 
-import { asc, eq } from "drizzle-orm";
-import { db } from "@/lib/db/client";
-import { registrationProducts } from "@/lib/db/schema";
-import { listCommittees, listPortfolios } from "@/lib/actions/mun-config";
+import { listCommittees, listPortfolios, listRegistrationProducts } from "@/lib/actions/mun-config";
 import type { Committee, Portfolio, RegistrationProduct } from "@/lib/types";
 import { getMunSetup, type MunSetupRecord } from "./queries";
 
@@ -14,12 +11,8 @@ import { getMunSetup, type MunSetupRecord } from "./queries";
  * visual sync, but this file does not call that action, it only renders what
  * it's about to lock in.
  *
- * Products are read directly rather than through `lib/actions/mun-config.ts`
- * because no `listRegistrationProducts` export exists there (confirmed absent
- * — the Registration Products module hit the same gap and reads the table
- * directly for the same reason, see `../products/queries.ts`). No ownership
- * filter here, same rationale as `getMunSetup`: `[munId]/layout.tsx` already
- * resolved this id through an owner-scoped read before this ever runs.
+ * No ownership filter here, same rationale as `getMunSetup`: `[munId]/layout.tsx`
+ * already resolved this id through an owner-scoped read before this ever runs.
  */
 export interface ConfirmationSummary {
   mun: MunSetupRecord;
@@ -39,11 +32,7 @@ export async function getConfirmationSummary(munId: string): Promise<Confirmatio
     })),
   );
 
-  const products = await db
-    .select()
-    .from(registrationProducts)
-    .where(eq(registrationProducts.munId, munId))
-    .orderBy(asc(registrationProducts.price));
+  const products = await listRegistrationProducts(munId);
 
   return { mun, committees, products };
 }
