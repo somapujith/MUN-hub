@@ -9,7 +9,8 @@ vi.mock('@/lib/auth/session', () => ({
   getSession: () => mockGetSession(),
 }))
 
-const { initiateRegistration, releaseExpiredReservations, getRegistrationById } = await import('./registration')
+const { initiateRegistration, releaseExpiredReservations, getRegistrationById, getProductAvailability, getProductsAvailability } =
+  await import('./registration')
 
 async function createUser(role: 'STUDENT' | 'ORGANIZER' | 'ADMIN' | 'SUPER_ADMIN' = 'STUDENT') {
   const [user] = await db
@@ -324,6 +325,82 @@ describe('releaseExpiredReservations', () => {
 
     const count = await releaseExpiredReservations(product.id)
     expect(count).toBe(1)
+  })
+})
+
+describe('getProductsAvailability', () => {
+  it('returns capacity/taken/available for multiple products in one call, matching getProductAvailability per-product', async () => {
+    const organizer = await createUser('ORGANIZER')
+    const student = await createUser('STUDENT')
+    const mun = await createMun(organizer.id)
+    const productA = await createProduct(mun.id, 10)
+    const productB = await createProduct(mun.id, 5)
+
+    await db.insert(registrations).values([
+      { userId: student.id, munId: mun.id, registrationProductId: productA.id, status: 'CONFIRMED' },
+      { userId: student.id, munId: mun.id, registrationProductId: productB.id, status: 'CONFIRMED' },
+    ])
+
+    const batched = new Map(await getProductsAvailability([productA.id, productB.id]))
+    expect(batched.get(productA.id)).toEqual({ capacity: 10, taken: 1, available: 9 })
+    expect(batched.get(productB.id)).toEqual({ capacity: 5, taken: 1, available: 4 })
+
+    expect(await getProductAvailability(productA.id)).toEqual({ capacity: 10, taken: 1, available: 9 })
+  })
+
+  it('excludes CANCELLED/REFUNDED registrations from taken', async () => {
+    const organizer = await createUser('ORGANIZER')
+    const student = await createUser('STUDENT')
+    const mun = await createMun(organizer.id)
+    const product = await createProduct(mun.id, 10)
+
+    await db.insert(registrations).values([
+      { userId: student.id, munId: mun.id, registrationProductId: product.id, status: 'CONFIRMED' },
+      { userId: student.id, munId: mun.id, registrationProductId: product.id, status: 'CANCELLED' },
+      { userId: student.id, munId: mun.id, registrationProductId: product.id, status: 'REFUNDED' },
+    ])
+
+    const [[, availability]] = await getProductsAvailability([product.id])
+    expect(availability).toEqual({ capacity: 10, taken: 1, available: 9 })
+  })
+
+  it('releases expired reservations across all requested products before counting', async () => {
+    const organizer = await createUser('ORGANIZER')
+    const student = await createUser('STUDENT')
+    const mun = await createMun(organizer.id)
+    const productA = await createProduct(mun.id, 10)
+    const productB = await createProduct(mun.id, 10)
+
+    await db.insert(registrations).values([
+      {
+        userId: student.id,
+        munId: mun.id,
+        registrationProductId: productA.id,
+        status: 'PENDING',
+        expiresAt: new Date(Date.now() - 1000),
+      },
+      {
+        userId: student.id,
+        munId: mun.id,
+        registrationProductId: productB.id,
+        status: 'PAYMENT_PENDING',
+        expiresAt: new Date(Date.now() - 1000),
+      },
+    ])
+
+    const batched = new Map(await getProductsAvailability([productA.id, productB.id]))
+    expect(batched.get(productA.id)?.taken).toBe(0)
+    expect(batched.get(productB.id)?.taken).toBe(0)
+  })
+
+  it('returns an empty array for an empty input without querying', async () => {
+    expect(await getProductsAvailability([])).toEqual([])
+  })
+
+  it('getProductAvailability throws for a nonexistent product', async () => {
+    await expect(getProductAvailability('00000000-0000-0000-0000-000000000000')).rejects.toThrow(
+      'Registration product not found',
+    )
   })
 })
 

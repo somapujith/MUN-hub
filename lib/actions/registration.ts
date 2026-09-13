@@ -272,29 +272,58 @@ async function isMunOrganizer(munId: string, userId: string): Promise<boolean> {
 export async function getProductAvailability(
   registrationProductId: string,
 ): Promise<{ capacity: number; taken: number; available: number }> {
-  await releaseExpiredReservations(registrationProductId)
-
-  const [product] = await db
-    .select({ capacity: registrationProducts.capacity })
-    .from(registrationProducts)
-    .where(eq(registrationProducts.id, registrationProductId))
-    .limit(1)
-
-  if (!product) {
+  const [result] = await getProductsAvailability([registrationProductId])
+  if (!result) {
     throw new Error('Registration product not found')
   }
+  return result[1]
+}
 
-  const [{ taken }] = await db
-    .select({ taken: count() })
-    .from(registrations)
+/**
+ * Batched form of `getProductAvailability` — one release-sweep UPDATE and
+ * one grouped count query across all `registrationProductIds`, instead of
+ * 3 round trips per product. A MUN detail page with N passes previously
+ * made ~3N sequential DB calls to render availability; this makes 3 calls
+ * total regardless of N.
+ */
+export async function getProductsAvailability(
+  registrationProductIds: string[],
+): Promise<Array<[string, { capacity: number; taken: number; available: number }]>> {
+  if (registrationProductIds.length === 0) {
+    return []
+  }
+
+  await db
+    .update(registrations)
+    .set({ status: 'CANCELLED', updatedAt: new Date() })
     .where(
       and(
-        eq(registrations.registrationProductId, registrationProductId),
-        inArray(registrations.status, ACTIVE_REGISTRATION_STATUSES),
+        inArray(registrations.registrationProductId, registrationProductIds),
+        inArray(registrations.status, RELEASABLE_STATUSES),
+        lt(registrations.expiresAt, new Date()),
       ),
     )
 
-  const available = Math.max(product.capacity - taken, 0)
+  const products = await db
+    .select({ id: registrationProducts.id, capacity: registrationProducts.capacity })
+    .from(registrationProducts)
+    .where(inArray(registrationProducts.id, registrationProductIds))
 
-  return { capacity: product.capacity, taken, available }
+  const takenRows = await db
+    .select({ productId: registrations.registrationProductId, taken: count() })
+    .from(registrations)
+    .where(
+      and(
+        inArray(registrations.registrationProductId, registrationProductIds),
+        inArray(registrations.status, ACTIVE_REGISTRATION_STATUSES),
+      ),
+    )
+    .groupBy(registrations.registrationProductId)
+
+  const takenByProduct = new Map(takenRows.map((row) => [row.productId, row.taken]))
+
+  return products.map((product) => {
+    const taken = takenByProduct.get(product.id) ?? 0
+    return [product.id, { capacity: product.capacity, taken, available: Math.max(product.capacity - taken, 0) }]
+  })
 }

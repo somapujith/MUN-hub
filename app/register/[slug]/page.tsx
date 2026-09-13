@@ -11,7 +11,7 @@ import { RegistrationNotice } from "@/components/registration/registration-notic
 import { hasPassed } from "@/components/registration/deadline";
 import { formatDateRange } from "@/components/shared/date-range";
 import { getMunBySlug } from "@/lib/actions/marketplace";
-import { getProductAvailability } from "@/lib/actions/registration";
+import { getProductsAvailability } from "@/lib/actions/registration";
 import { listAccommodationOptions } from "@/lib/actions/accommodation";
 import { isSelectableOption } from "@/components/registration/accommodation-fields";
 import { getSession } from "@/lib/auth/session";
@@ -78,20 +78,20 @@ export default async function RegisterPage({ params, searchParams }: RegisterPag
   }
 
   // ---- Live seat counts ---------------------------------------------------
-  // getProductAvailability also sweeps expired reservations, so these counts
-  // reflect seats actually held right now, not stale PENDING rows.
-  const availability = await Promise.all(
-    mun.registrationProducts.map(async (product) => {
-      const counts = await getProductAvailability(product.id);
-      return {
-        product,
-        ...counts,
-        // Resolved here, on the server, so the client never has to call
-        // Date.now() during render (impure => hydration mismatch).
-        deadlinePassed: hasPassed(product.deadline),
-      };
-    }),
+  // getProductsAvailability also sweeps expired reservations, so these counts
+  // reflect seats actually held right now, not stale PENDING rows. Batched
+  // into one call instead of one getProductAvailability round-trip per
+  // product — same fix as app/mun/[slug]/page.tsx.
+  const availabilityByProduct = new Map(
+    await getProductsAvailability(mun.registrationProducts.map((product) => product.id)),
   );
+  const availability = mun.registrationProducts.map((product) => ({
+    product,
+    ...(availabilityByProduct.get(product.id) ?? { capacity: product.capacity, taken: 0, available: product.capacity }),
+    // Resolved here, on the server, so the client never has to call
+    // Date.now() during render (impure => hydration mismatch).
+    deadlinePassed: hasPassed(product.deadline),
+  }));
 
   if (availability.length === 0) {
     return (

@@ -11,9 +11,25 @@ export const metadata: Metadata = {
   description: "At-a-glance counts across every operations queue.",
 };
 
-// Session-scoped reads (transitively, via getReviewQueue/getModuleReviewQueue/
-// listTickets/listPaymentExceptions each calling getSession()/cookies()) —
-// never cache or statically prerender this page.
+// Each of the four calls below (getReviewQueue, getModuleReviewQueue,
+// listTickets, listPaymentExceptions) independently calls getSession()
+// (-> next/headers cookies()) and requireRole() as its OWN authorization
+// boundary — not a redundant echo of the role-check already done in
+// app/admin/layout.tsx. That's true even though the values rendered here
+// are harmless aggregate counts, not per-record data (see
+// MUNHub_Client_Server_Rendering_PRD.md §21/§46, which requires
+// authorization to be server-side and authoritative, not that harmless
+// aggregates be recomputed with zero caching).
+//
+// Wrapping these calls in `unstable_cache` isn't viable without moving the
+// getSession()/requireRole() calls out of those four functions first (out
+// of scope here — see CLAUDE.md ground rules): unstable_cache's cached
+// callback cannot itself call cookies(), and calling getSession() in this
+// page ahead of a cache boundary just to read the role would still force
+// this route dynamic, so there is no way to shed force-dynamic without
+// changing those functions' signatures. Given this is a low-traffic
+// admin-only dashboard, that refactor isn't worth the added complexity for
+// counts that are cheap to compute.
 export const dynamic = "force-dynamic";
 
 /**
