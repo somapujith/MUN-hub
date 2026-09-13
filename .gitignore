@@ -49,3 +49,8 @@ yarn-error.log*
 next-env.d.ts
 
 .playwright-mcp/
+
+# claude code / superpowers scratch state
+.claude/
+.superpowers/
+/superpowers/
