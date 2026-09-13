@@ -2,25 +2,10 @@
 
 import { and, asc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { accommodationOptionFields, accommodationOptions, muns } from '@/lib/db/schema'
+import { accommodationOptionFields, accommodationOptions } from '@/lib/db/schema'
 import type { AccommodationFieldType } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
-
-/**
- * Same ownership rule as mun-config.ts: the acting session must be the
- * owning organizer of the mun, or ADMIN/SUPER_ADMIN.
- */
-async function assertOwnsOrAdmin(munId: string, session: Session | null): Promise<void> {
-  if (!session) throw new Error('Forbidden')
-  if (session.role === 'ADMIN' || session.role === 'SUPER_ADMIN') return
-
-  const [mun] = await db.select({ organizerId: muns.organizerId }).from(muns).where(eq(muns.id, munId)).limit(1)
-  if (!mun) throw new Error('Mun not found')
-
-  if (mun.organizerId !== session.userId) {
-    throw new Error('Forbidden')
-  }
-}
+import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 
 async function getMunIdForOption(optionId: string): Promise<string> {
   const [option] = await db

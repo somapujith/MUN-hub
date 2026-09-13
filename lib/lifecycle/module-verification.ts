@@ -4,18 +4,10 @@ import { muns, munModuleVerifications, verificationIssues } from '@/lib/db/schem
 import type { MunModule, ModuleVerificationState, VerificationSeverity } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
+import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { transitionMun } from './mun-state-machine'
 
 const TRACKED_MODULES: MunModule[] = ['mun_details', 'committees', 'portfolios', 'registration_products']
-
-async function assertOwnsOrAdmin(munId: string, session: Session | null): Promise<void> {
-  if (!session) throw new Error('Forbidden')
-  if (session.role === 'ADMIN' || session.role === 'SUPER_ADMIN') return
-  const [mun] = await db.select({ organizerId: muns.organizerId }).from(muns).where(eq(muns.id, munId)).limit(1)
-  if (!mun || mun.organizerId !== session.userId) {
-    throw new Error('Forbidden')
-  }
-}
 
 export interface ModuleVerification {
   id: string

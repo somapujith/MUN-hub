@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { committees, muns, portfolios, registrationProducts } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
+import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 import type { Committee, Mun, Portfolio, RegistrationProduct } from '@/lib/types'
@@ -15,26 +16,9 @@ import type { Committee, Mun, Portfolio, RegistrationProduct } from '@/lib/types
 // Every mutation in this file is gated by the same rule: the acting session
 // must either be the owning organizer of the mun (walked up from
 // committee -> mun or portfolio -> committee -> mun when the mutated row
-// isn't the mun itself) or hold role ADMIN/SUPER_ADMIN. This helper is the
-// single place that logic lives — do not re-implement it per entity.
-
-/**
- * Throws `Error('Forbidden')` unless `session` is non-null and is either an
- * ADMIN/SUPER_ADMIN or the organizer that owns `munId` (`mun.organizerId ===
- * session.userId`). Throws `Error('Mun not found')` if `munId` doesn't
- * resolve to a real row (fail fast on a bad id rather than silently denying).
- */
-async function assertOwnsOrAdmin(munId: string, session: Session | null): Promise<void> {
-  if (!session) throw new Error('Forbidden')
-  if (session.role === 'ADMIN' || session.role === 'SUPER_ADMIN') return
-
-  const [mun] = await db.select({ organizerId: muns.organizerId }).from(muns).where(eq(muns.id, munId)).limit(1)
-  if (!mun) throw new Error('Mun not found')
-
-  if (mun.organizerId !== session.userId) {
-    throw new Error('Forbidden')
-  }
-}
+// isn't the mun itself) or hold role ADMIN/SUPER_ADMIN. `assertOwnsOrAdmin`
+// (see lib/auth/ownership.ts) is the single place that logic lives — do not
+// re-implement it per entity.
 
 /** Resolves a committee's owning munId, or throws `Error('Committee not found')`. */
 async function getMunIdForCommittee(committeeId: string): Promise<string> {
