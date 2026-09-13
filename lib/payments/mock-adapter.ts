@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import type { PaymentOrder, PaymentsAdapter } from './adapter'
+import type { PaymentOrder, PaymentsAdapter, RefundResult } from './adapter'
 
 function getWebhookSecret(): string {
   const secret = process.env.MOCK_PAYMENT_WEBHOOK_SECRET
@@ -29,6 +29,15 @@ export const mockPaymentsAdapter: PaymentsAdapter = {
     }
 
     return crypto.timingSafeEqual(expectedBuf, actualBuf)
+  },
+
+  async refund(_providerPaymentId: string, _amount: number): Promise<RefundResult> {
+    // Mock provider — refunds "succeed" immediately with a fake id, same
+    // fire-and-forget shape as createOrder. A real Razorpay adapter would
+    // call the provider's refund API here and could fail/throw; callers
+    // (lib/lifecycle/refund.ts) already run this inside a DB transaction so
+    // a real adapter's rejection would roll back the state change too.
+    return { providerRefundId: `mock_refund_${crypto.randomUUID()}` }
   },
 }
 
