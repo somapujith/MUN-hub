@@ -198,6 +198,31 @@ describe('mun-branding actions', () => {
 
       await expect(reorderGallery(mun.id, [], sessionFor(stranger))).rejects.toThrow('Forbidden')
     })
+
+    it('rejects the whole reorder when one id belongs to a different mun (IDOR), rather than silently reordering the valid subset', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const munA = await makeMun(organizer.id)
+      const munB = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+
+      const ownItem = await uploadMunMedia(
+        { munId: munA.id, kind: 'GALLERY', file: PNG_BUFFER, contentType: 'image/png' },
+        session,
+      )
+      const foreignItem = await uploadMunMedia(
+        { munId: munB.id, kind: 'GALLERY', file: PNG_BUFFER, contentType: 'image/png' },
+        session,
+      )
+
+      await expect(reorderGallery(munA.id, [foreignItem.id, ownItem.id], session)).rejects.toThrow(
+        'One or more ids do not belong to this mun',
+      )
+
+      // The valid item's displayOrder must be untouched — the whole call
+      // rejected, it did not partially succeed on the subset that was valid.
+      const [ownRow] = await db.select().from(munMedia).where(eq(munMedia.id, ownItem.id))
+      expect(ownRow.displayOrder).toBe(0)
+    })
   })
 
   afterAll(async () => {

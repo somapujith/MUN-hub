@@ -1,6 +1,6 @@
 'use server'
 
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { munMedia } from '@/lib/db/schema'
 import type { MunMediaKind } from '@/lib/db/schema-enums'
@@ -103,11 +103,29 @@ export async function uploadMunMedia(input: UploadMunMediaInput, session: Sessio
 
     const [created] = await tx.insert(munMedia).values(values).returning()
 
-    // Storage deletes happen after the DB write commits its intent within
-    // this transaction's scope so a failed insert doesn't orphan a delete of
-    // still-referenced storage — but since delete() here is a fire-and-forget
-    // cleanup of the *old* object (already superseded in the DB row set),
-    // it's safe to issue once the replacement row exists.
+    // storage.delete() of the OLD key runs here, inside the SQL transaction
+    // callback, after the new row's insert but before the callback returns
+    // (i.e. before Postgres commits). It is NOT part of the SQL transaction
+    // itself — storage operations can't participate in a Postgres COMMIT/
+    // ROLLBACK — so this ordering only changes what happens on failure, not
+    // real atomicity between the DB and the storage backend:
+    //   - If storage.delete() throws, this callback throws too, so Drizzle
+    //     rolls back the delete+insert above. The DB then stays consistent
+    //     with the OLD row and OLD storage key — not exploitable, just an
+    //     upload that has to be retried.
+    //   - The real orphan risk runs the OTHER way: storage.upload() of the
+    //     NEW file (above, outside/before this transaction even starts) has
+    //     already happened by this point. If anything from here on throws —
+    //     including this storage.delete() call failing — the transaction
+    //     rolls back the DB insert, but the newly-uploaded object already
+    //     exists in storage with no DB row referencing it. That NEW object
+    //     is the one left orphaned, not the old one being deleted here.
+    // Accepted for now: the mock adapter's upload()/delete() never throw, so
+    // this path isn't exercised today. A real StorageAdapter (e.g. R2) should
+    // either move the upload as late as possible (immediately before this
+    // insert, minimizing the exposure window) or add an out-of-band orphan
+    // sweep — don't copy this ordering into Task 6+ uploads without
+    // addressing that.
     for (const row of existingOfKind) {
       await storage.delete(row.storageKey)
     }
@@ -137,19 +155,31 @@ export async function deleteMunMedia(id: string, session: Session | null): Promi
 
 /**
  * Reorders the GALLERY images for a mun by writing `displayOrder` from the
- * given id order. Owning organizer or admin only. Only touches rows that
- * belong to `munId` — an id from another mun in `orderedIds` is silently
- * ignored rather than allowed to affect this mun's ordering.
+ * given id order. Owning organizer or admin only. IDOR check consistent with
+ * the committeeId cross-mun checks in executive-board.ts/mun-schedule.ts: if
+ * ANY id in `orderedIds` doesn't belong to `munId`, the whole call is
+ * rejected — a caller must never be able to smuggle a foreign mun's media id
+ * into a reorder and have it silently ignored while the rest of the reorder
+ * partially succeeds.
  */
 export async function reorderGallery(munId: string, orderedIds: string[], session: Session | null): Promise<void> {
   await assertOwnsOrAdmin(munId, session)
 
-  const rows = await db.select({ id: munMedia.id }).from(munMedia).where(eq(munMedia.munId, munId))
+  if (orderedIds.length === 0) return
+
+  const rows = await db
+    .select({ id: munMedia.id })
+    .from(munMedia)
+    .where(and(eq(munMedia.munId, munId), inArray(munMedia.id, orderedIds)))
   const validIds = new Set(rows.map((r) => r.id))
+
+  const foreignIds = orderedIds.filter((id) => !validIds.has(id))
+  if (foreignIds.length > 0) {
+    throw new Error('One or more ids do not belong to this mun')
+  }
 
   await db.transaction(async (tx) => {
     for (const [index, id] of orderedIds.entries()) {
-      if (!validIds.has(id)) continue
       await tx.update(munMedia).set({ displayOrder: index }).where(eq(munMedia.id, id))
     }
   })
