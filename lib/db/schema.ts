@@ -3,13 +3,18 @@ import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
 import {
   accommodationFieldTypeEnum,
+  adminActionEnum,
   applicationStatusEnum,
   moduleVerificationStateEnum,
   munModuleEnum,
   munStatusEnum,
   paymentStatusEnum,
+  refundStatusEnum,
   registrationStatusEnum,
   roleEnum,
+  supportCategoryEnum,
+  supportPriorityEnum,
+  supportStatusEnum,
   verificationSeverityEnum,
 } from './schema-enums'
 
@@ -35,6 +40,9 @@ export const users = pgTable('users', {
   institution: text('institution'),
   profileImage: text('profile_image'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  suspended: boolean('suspended').notNull().default(false),
+  suspendedReason: text('suspended_reason'),
+  suspendedAt: timestamp('suspended_at', { withTimezone: true }),
 })
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -542,4 +550,113 @@ export const accommodationOptionFields = pgTable(
 
 export const accommodationOptionFieldsRelations = relations(accommodationOptionFields, ({ one }) => ({
   option: one(accommodationOptions, { fields: [accommodationOptionFields.optionId], references: [accommodationOptions.id] }),
+}))
+
+// ---------------------------------------------------------------------------
+// admin_actions (general audit log — append-only)
+// ---------------------------------------------------------------------------
+
+export const adminActions = pgTable(
+  'admin_actions',
+  {
+    id: id(),
+    actorId: text('actor_id')
+      .notNull()
+      .references(() => users.id),
+    action: adminActionEnum('action').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    reason: text('reason'),
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('admin_actions_target_idx').on(table.targetType, table.targetId),
+    index('admin_actions_actor_id_idx').on(table.actorId),
+  ],
+)
+
+export const adminActionsRelations = relations(adminActions, ({ one }) => ({
+  actor: one(users, { fields: [adminActions.actorId], references: [users.id] }),
+}))
+
+// ---------------------------------------------------------------------------
+// refund_requests
+// ---------------------------------------------------------------------------
+
+export const refundRequests = pgTable(
+  'refund_requests',
+  {
+    id: id(),
+    registrationId: text('registration_id')
+      .notNull()
+      .references(() => registrations.id),
+    paymentId: text('payment_id')
+      .notNull()
+      .references(() => payments.id),
+    requestedBy: text('requested_by')
+      .notNull()
+      .references(() => users.id),
+    reason: text('reason').notNull(),
+    amount: integer('amount').notNull(),
+    status: refundStatusEnum('status').notNull().default('REQUESTED'),
+    approverId: text('approver_id').references(() => users.id),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    providerRefundId: text('provider_refund_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('refund_requests_registration_id_idx').on(table.registrationId),
+    index('refund_requests_status_idx').on(table.status),
+  ],
+)
+
+export const refundRequestsRelations = relations(refundRequests, ({ one }) => ({
+  registration: one(registrations, {
+    fields: [refundRequests.registrationId],
+    references: [registrations.id],
+  }),
+  payment: one(payments, { fields: [refundRequests.paymentId], references: [payments.id] }),
+  requester: one(users, { fields: [refundRequests.requestedBy], references: [users.id] }),
+  approver: one(users, { fields: [refundRequests.approverId], references: [users.id] }),
+}))
+
+// ---------------------------------------------------------------------------
+// support_tickets
+// ---------------------------------------------------------------------------
+
+export const supportTickets = pgTable(
+  'support_tickets',
+  {
+    id: id(),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id),
+    category: supportCategoryEnum('category').notNull(),
+    priority: supportPriorityEnum('priority').notNull().default('NORMAL'),
+    status: supportStatusEnum('status').notNull().default('NEW'),
+    subject: text('subject').notNull(),
+    description: text('description').notNull(),
+    assignedTo: text('assigned_to').references(() => users.id),
+    relatedRegistrationId: text('related_registration_id').references(() => registrations.id),
+    relatedMunId: text('related_mun_id').references(() => muns.id),
+    resolutionNotes: text('resolution_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('support_tickets_status_idx').on(table.status),
+    index('support_tickets_assigned_to_idx').on(table.assignedTo),
+  ],
+)
+
+export const supportTicketsRelations = relations(supportTickets, ({ one }) => ({
+  creator: one(users, { fields: [supportTickets.createdBy], references: [users.id] }),
+  assignee: one(users, { fields: [supportTickets.assignedTo], references: [users.id] }),
+  registration: one(registrations, {
+    fields: [supportTickets.relatedRegistrationId],
+    references: [registrations.id],
+  }),
+  mun: one(muns, { fields: [supportTickets.relatedMunId], references: [muns.id] }),
 }))

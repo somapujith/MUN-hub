@@ -29,6 +29,7 @@ export const munStatusEnum = pgEnum('mun_status', [
   'COMPLETED',
   'ARCHIVED',
   'CANCELLED',
+  'SUSPENDED',
 ])
 
 export const registrationStatusEnum = pgEnum('registration_status', [
@@ -86,6 +87,53 @@ export const accommodationFieldTypeEnum = pgEnum('accommodation_field_type', [
   'CHECKBOX',
 ])
 
+export const adminActionEnum = pgEnum('admin_action', [
+  'ORGANIZER_SUSPENDED',
+  'ORGANIZER_REINSTATED',
+  'MUN_UNPUBLISHED',
+  'MUN_SUSPENDED',
+  'REFUND_APPROVED',
+  'REFUND_REJECTED',
+  'TICKET_ASSIGNED',
+  'TICKET_RESOLVED',
+  'USER_SUSPENDED',
+])
+
+export const refundStatusEnum = pgEnum('refund_status', [
+  'REQUESTED',
+  'APPROVED',
+  'REJECTED',
+  'REFUNDED',
+])
+
+export const supportCategoryEnum = pgEnum('support_category', [
+  'REGISTRATION',
+  'PAYMENT',
+  'REFUND',
+  'MUN_INFO',
+  'ACCOUNT',
+  'CERTIFICATE',
+  'ORGANIZER',
+  'TECHNICAL',
+  'SAFETY_POLICY',
+])
+
+export const supportPriorityEnum = pgEnum('support_priority', [
+  'LOW',
+  'NORMAL',
+  'HIGH',
+  'URGENT',
+])
+
+export const supportStatusEnum = pgEnum('support_status', [
+  'NEW',
+  'ASSIGNED',
+  'IN_PROGRESS',
+  'WAITING',
+  'RESOLVED',
+  'CLOSED',
+])
+
 export type Role = (typeof roleEnum.enumValues)[number]
 export type MunStatus = (typeof munStatusEnum.enumValues)[number]
 export type RegistrationStatus = (typeof registrationStatusEnum.enumValues)[number]
@@ -95,3 +143,8 @@ export type MunModule = (typeof munModuleEnum.enumValues)[number]
 export type ModuleVerificationState = (typeof moduleVerificationStateEnum.enumValues)[number]
 export type VerificationSeverity = (typeof verificationSeverityEnum.enumValues)[number]
 export type AccommodationFieldType = (typeof accommodationFieldTypeEnum.enumValues)[number]
+export type AdminAction = (typeof adminActionEnum.enumValues)[number]
+export type RefundStatus = (typeof refundStatusEnum.enumValues)[number]
+export type SupportCategory = (typeof supportCategoryEnum.enumValues)[number]
+export type SupportPriority = (typeof supportPriorityEnum.enumValues)[number]
+export type SupportStatus = (typeof supportStatusEnum.enumValues)[number]
