@@ -13,6 +13,7 @@ import {
   deleteRegistrationProduct,
   listCommittees,
   listPortfolios,
+  listRegistrationProducts,
   submitMunForVerification,
   updateCommittee,
   updateMunDetails,
@@ -209,6 +210,20 @@ describe('mun-config actions', () => {
 
       const cleared = await updateRegistrationProduct(product.id, { deadline: null }, session)
       expect(cleared.deadline).toBeNull()
+    })
+
+    it('listRegistrationProducts returns only the given mun\'s products, no auth required', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const munA = await makeMun(organizer.id)
+      const munB = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+
+      await createRegistrationProduct({ munId: munA.id, name: 'Delegate A', price: 1000, capacity: 50 }, session)
+      await createRegistrationProduct({ munId: munB.id, name: 'Delegate B', price: 2000, capacity: 50 }, session)
+
+      const listA = await listRegistrationProducts(munA.id)
+      expect(listA.length).toBe(1)
+      expect(listA[0].name).toBe('Delegate A')
     })
 
     it('soft-deletes: row still exists with status inactive, excluded from default reads', async () => {

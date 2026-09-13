@@ -201,6 +201,11 @@ export async function createRegistrationProduct(
   return product
 }
 
+/** Public read, no auth — same reasoning as `listCommittees`/`listPortfolios` above. */
+export async function listRegistrationProducts(munId: string): Promise<RegistrationProduct[]> {
+  return db.select().from(registrationProducts).where(eq(registrationProducts.munId, munId))
+}
+
 export interface UpdateRegistrationProductInput {
   name?: string
   price?: number
