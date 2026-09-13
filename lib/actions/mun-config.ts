@@ -199,7 +199,7 @@ export interface UpdateRegistrationProductInput {
   price?: number
   capacity?: number
   currency?: string
-  deadline?: Date
+  deadline?: Date | null
   status?: string
 }
 
@@ -257,14 +257,14 @@ export async function deleteRegistrationProduct(id: string, session: Session | n
 
 export interface UpdateMunDetailsInput {
   name?: string
-  edition?: string
-  theme?: string
-  description?: string
-  startDate?: Date
-  endDate?: Date
-  venue?: string
-  city?: string
-  country?: string
+  edition?: string | null
+  theme?: string | null
+  description?: string | null
+  startDate?: Date | null
+  endDate?: Date | null
+  venue?: string | null
+  city?: string | null
+  country?: string | null
 }
 
 /** Updates the mun's own editable fields. Organizer-only (or admin) — never touches status. */

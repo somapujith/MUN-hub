@@ -196,6 +196,21 @@ describe('mun-config actions', () => {
       expect(updated.price).toBe(2500)
     })
 
+    it('clears deadline to null without a cast workaround', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+
+      const product = await createRegistrationProduct(
+        { munId: mun.id, name: 'Delegate', price: 2000, capacity: 100, deadline: new Date('2027-01-01') },
+        session,
+      )
+      expect(product.deadline).not.toBeNull()
+
+      const cleared = await updateRegistrationProduct(product.id, { deadline: null }, session)
+      expect(cleared.deadline).toBeNull()
+    })
+
     it('soft-deletes: row still exists with status inactive, excluded from default reads', async () => {
       const organizer = await makeUser('ORGANIZER')
       const mun = await makeMun(organizer.id)
@@ -252,6 +267,15 @@ describe('mun-config actions', () => {
       expect(updated.name).toBe('Renamed MUN')
       expect(updated.city).toBe('Delhi')
       expect(updated.theme).toBe('New Theme')
+    })
+
+    it('clears a nullable field (venue) to null without a cast workaround', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id, { venue: 'Main Hall' })
+      const session = sessionFor(organizer)
+
+      const cleared = await updateMunDetails(mun.id, { venue: null }, session)
+      expect(cleared.venue).toBeNull()
     })
 
     it('rejects a non-owning organizer', async () => {
