@@ -2,6 +2,18 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **2026-09-13 update — Task 6 (Refund workflow) WITHDRAWN, do not implement.**
+> After 4 fix rounds (3 red-team-verified with live exploit reproduction
+> against local Postgres), a concurrent-request race letting a single
+> payment be refunded multiple times could not be closed. The user decided
+> to drop refunds from this slice entirely. All refund code/schema was
+> removed in commit `ea9db10`. Task 6's content below is kept as a
+> historical record of what was built and why it was reverted — skip
+> straight from Task 5 to Task 7 when executing this plan. Any other task's
+> references to `listRefundRequests`/refund UI (e.g. Task 8's overview
+> dashboard, nav shell) must be dropped too — see the SDD ledger for exact
+> adjustments made when Task 8 was actually dispatched.
+
 **Goal:** Build the 7 new admin-workflow tracks from the P0 spec (nav shell,
 general audit log, organizer management, MUN unpublish/suspend, registration
 +payment monitoring, refunds, support tickets) on top of the existing

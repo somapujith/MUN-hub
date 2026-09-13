@@ -4,6 +4,22 @@
 **Source PRD:** `MUNHub_Admin_Workflow_PRD.md`
 **Status:** approved for implementation planning
 
+**2026-09-13 update:** the refund workflow (track 6 below) was fully
+descoped and removed after implementation. Over 4 fix rounds (3
+red-team-verified with live exploit reproduction), a concurrent-request
+race allowing a single payment to be refunded multiple times could not be
+closed with an application-level fix — the last attempt in progress was a
+DB-level partial-unique-index approach when the user decided to drop
+refunds from this slice entirely rather than continue. All refund code,
+schema (`refund_requests` table, `refundStatusEnum`, the two `REFUND_*`
+admin action values), and `PaymentsAdapter.refund()` were removed. See
+`docs/superpowers/plans/2026-09-13-admin-workflow-p0.md` Task 6 notes and
+the SDD ledger for the full incident history if refunds are revisited
+later — the two-phase-commit architecture from round 2 was sound, the
+remaining gap was in request-time concurrency control, and a DB-level
+unique constraint (not another application-level status check) is the
+right next attempt.
+
 ## 1. Scope
 
 Full PRD covers 39 sections / 19 nav items / 6 admin roles — far beyond one slice
@@ -19,14 +35,15 @@ the **P0 list** (PRD section 38), minus what already exists in the codebase:
 - MUN verification (module-level + whole-mun), change-requests, publish gate
   (`lib/lifecycle/*`, `app/admin/verification/`, `app/admin/review/`)
 
-**New in this spec, 7 tracks:**
+**New in this spec, 6 delivered tracks (a 7th, refunds, was descoped — see update above):**
 1. Admin overview + nav shell
 2. General audit log (`admin_actions` table)
 3. Organizer management (list, suspend/reinstate — login-block only, no MUN cascade)
 4. MUN unpublish/suspend actions (publish already exists; unpublish/suspend don't)
 5. Registration + payment monitoring (global search, `PAYMENT_EXCEPTION` flagging)
-6. Refund workflow (request → approval → mock-provider refund)
-7. Support tickets (full lifecycle, student/organizer/admin facing)
+6. Support tickets (full lifecycle, student/organizer/admin facing)
+
+~~Refund workflow (request → approval → mock-provider refund)~~ — descoped, removed.
 
 **Explicitly deferred (P1/P2 per PRD):** results/certificates verification,
 fraud/risk scoring, two-person approval, SLA automation, task
