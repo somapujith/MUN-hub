@@ -184,7 +184,7 @@ describe('requestRefund', () => {
     await requestRefund(registration.id, 'first request')
 
     await expect(requestRefund(registration.id, 'second request')).rejects.toThrow(
-      'A refund request is already pending for this payment',
+      'A refund request is already pending or processing for this payment',
     )
   })
 
@@ -221,6 +221,63 @@ describe('requestRefund', () => {
     await expect(requestRefund(registration.id, 'x')).rejects.toThrow(
       'Cannot request a refund for a payment with status FAILED',
     )
+  })
+
+  // Regression test for round-3's Critical finding: the exact exploit
+  // sequence red-team proved live against round 2's code.
+  //
+  //   1. An approval's phase 2 fails -> the row is stuck at PROCESSING,
+  //      payments.status is still PAID (phase 2 never committed).
+  //   2. The student files a brand new refund request against the SAME
+  //      payment. Round 2's guard only checked for REQUESTED rows, saw
+  //      none (the stuck row is PROCESSING, not REQUESTED), and let it
+  //      through — an ordinary new REQUESTED row with zero relationship to
+  //      the stuck one.
+  //   3. An admin approves the new row normally. Second real provider call,
+  //      a DIFFERENT idempotency key (a different row id) — no dedupe
+  //      possible. Proven: 100000 refunded on a 50000 payment.
+  //
+  // This test reproduces step 1 with the same failure-injection technique
+  // used in the approveRefund PROCESSING regression tests (a nonexistent
+  // approver id triggering the approver_id FK violation in phase 2), then
+  // asserts step 2 — a fresh requestRefund call against the same payment —
+  // is rejected outright, closing the exploit at the point of entry.
+  it('blocks a new request against a payment whose existing request is stuck at PROCESSING', async () => {
+    const { student, registration, payment } = await seedPaidRegistration()
+    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
+    const firstRequest = await requestRefund(registration.id, 'first request')
+
+    // Stall firstRequest at PROCESSING: phase 1 commits fine, the mock
+    // adapter call succeeds, but phase 2's approverId write violates the
+    // FK because this "admin" doesn't exist in `users`.
+    vi.mocked(getSession).mockResolvedValue({ userId: 'nonexistent-admin-id', role: 'ADMIN' })
+    await expect(approveRefund(firstRequest.id)).rejects.toThrow()
+
+    const [stalled] = await db.select().from(refundRequests).where(eq(refundRequests.id, firstRequest.id))
+    expect(stalled.status).toBe('PROCESSING')
+
+    // The payment is still PAID (phase 2 never committed) — exactly the
+    // condition that made it look refundable again to round 2's guard.
+    const [paymentAfterStall] = await db.select().from(payments).where(eq(payments.id, payment.id))
+    expect(paymentAfterStall.status).toBe('PAID')
+
+    // Step 2: the student (the real owner, not an attacker) files a new,
+    // completely ordinary refund request against the same payment. This
+    // MUST be rejected now — round 2 let it through.
+    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
+    await expect(requestRefund(registration.id, 'second request while stuck')).rejects.toThrow(
+      'A refund request is already pending or processing for this payment',
+    )
+
+    // No second refund_requests row was created for an admin to later
+    // approve — only the original, stalled PROCESSING row exists for this
+    // payment.
+    const allRequestsForPayment = await db
+      .select()
+      .from(refundRequests)
+      .where(eq(refundRequests.paymentId, payment.id))
+    expect(allRequestsForPayment).toHaveLength(1)
+    expect(allRequestsForPayment[0]?.status).toBe('PROCESSING')
   })
 })
 
@@ -665,20 +722,49 @@ describe('listRefundRequests', () => {
     expect(results.length).toBe(100)
   })
 
-  it('excludes PROCESSING rows', async () => {
+  // Round-3 fix: round 2 filtered PROCESSING rows out of this list entirely,
+  // making a stuck row invisible to every operator — defeating the whole
+  // point of choosing a visible PROCESSING state over silently resetting to
+  // REQUESTED. This must now include them so a human can find and
+  // reconcile one.
+  it('includes PROCESSING rows alongside REQUESTED ones, so a stuck refund is visible', async () => {
     const { admin, registration, payment } = await seedPaidRegistration()
-    await db.insert(refundRequests).values({
-      registrationId: registration.id,
-      paymentId: payment.id,
-      requestedBy: admin.id,
-      reason: 'stuck mid-flight',
-      amount: payment.amount,
-      status: 'PROCESSING',
-    })
+    // listRefundRequests orders by createdAt and caps at 100 (see the test
+    // above) — other tests in this file leave REQUESTED rows behind with no
+    // teardown between tests, so backdate this row's createdAt to guarantee
+    // it always sorts within the first 100 regardless of what other tests
+    // ran first, instead of coupling this assertion to file execution order.
+    const [stuckRequest] = await db
+      .insert(refundRequests)
+      .values({
+        registrationId: registration.id,
+        paymentId: payment.id,
+        requestedBy: admin.id,
+        reason: 'stuck mid-flight',
+        amount: payment.amount,
+        status: 'PROCESSING',
+        createdAt: new Date(0),
+      })
+      .returning()
 
     vi.mocked(getSession).mockResolvedValue({ userId: admin.id, role: 'ADMIN' })
     const results = await listRefundRequests()
-    expect(results.every((r) => r.status === 'REQUESTED')).toBe(true)
+
+    const found = results.find((r) => r.id === stuckRequest.id)
+    expect(found).toBeDefined()
+    expect(found?.status).toBe('PROCESSING')
+  })
+
+  it('still excludes terminal REFUNDED/REJECTED rows', async () => {
+    const { student, admin, registration } = await seedPaidRegistration()
+    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
+    const req = await requestRefund(registration.id, 'x')
+
+    vi.mocked(getSession).mockResolvedValue({ userId: admin.id, role: 'ADMIN' })
+    await rejectRefund(req.id, 'no')
+
+    const results = await listRefundRequests()
+    expect(results.some((r) => r.id === req.id)).toBe(false)
   })
 
   it('throws Forbidden for a student session', async () => {

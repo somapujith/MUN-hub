@@ -16,9 +16,13 @@ const REVIEW_ROLES = ["OPERATIONS", "ADMIN", "SUPER_ADMIN"] as const;
 
 /**
  * Admin refund queue — lists REQUESTED refund_requests rows for approval or
- * rejection. Approving executes the mock-provider refund atomically (no
- * separate confirmation step); same role-gate pattern as
- * /admin/organizers and /admin/payments.
+ * rejection, plus any PROCESSING rows (round-3 fix: a row stuck mid-flight
+ * in `approveRefund`'s two-phase commit — see `lib/lifecycle/refund.ts` —
+ * needs to be visible here so an operator can find and manually reconcile
+ * it; it renders with no approve/reject actions, see `RefundRow`).
+ * Approving executes the mock-provider refund via a two-phase commit (not a
+ * single-transaction step — see `approveRefund`'s doc comment for why);
+ * same role-gate pattern as /admin/organizers and /admin/payments.
  */
 export default async function RefundsPage() {
   const session = await getSession();

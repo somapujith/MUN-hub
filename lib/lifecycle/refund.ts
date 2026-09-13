@@ -1,6 +1,6 @@
 'use server'
 
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { payments, refundRequests, registrations } from '@/lib/db/schema'
 import { getSession } from '@/lib/auth/session'
@@ -44,11 +44,25 @@ function assertReasonLength(reason: string): void {
  * Request-time idempotency guard (defense in depth, not the sole guard —
  * see `approveRefund`'s two-phase commit for the one that actually closes
  * the double-refund exploit): rejects creating a new request if an active
- * (REQUESTED) request already exists for the same payment, and rejects
- * outright if the payment isn't currently PAID (NEW-4 — a REFUNDED or
- * FAILED payment has nothing left to refund and shouldn't accrue queue
- * junk). Neither check is race-proof alone (two concurrent calls can both
- * pass before either inserts) — that's why `approveRefund` re-validates
+ * (REQUESTED **or** PROCESSING) request already exists for the same
+ * payment, and rejects outright if the payment isn't currently PAID
+ * (NEW-4 — a REFUNDED or FAILED payment has nothing left to refund and
+ * shouldn't accrue queue junk).
+ *
+ * PROCESSING must block here too, not just REQUESTED (round-3 fix — a
+ * round-2 gap): a row stuck at PROCESSING means a provider call may
+ * already have succeeded and `approveRefund`'s phase 2 never committed —
+ * `payments.status` is still PAID in that state (phase 2 never ran), so
+ * without this check the same payment would look completely refundable
+ * again to a fresh `requestRefund` call. That new request would be an
+ * ordinary REQUESTED row with no relationship to the stuck one, an admin
+ * could approve it normally, and the provider would be called a second
+ * time with a different idempotency key (a different row id) — no dedupe
+ * possible, a real second refund. Blocking on PROCESSING here closes that
+ * off at the point of entry, before any of that can happen.
+ *
+ * Neither check is race-proof alone (two concurrent calls can both pass
+ * before either inserts) — that's why `approveRefund` re-validates
  * everything itself under a row lock before ever calling the provider.
  */
 export async function requestRefund(registrationId: string, reason: string): Promise<RefundRequestRow> {
@@ -74,10 +88,15 @@ export async function requestRefund(registrationId: string, reason: string): Pro
   const [existingActiveRequest] = await db
     .select({ id: refundRequests.id })
     .from(refundRequests)
-    .where(and(eq(refundRequests.paymentId, payment.id), eq(refundRequests.status, 'REQUESTED')))
+    .where(
+      and(
+        eq(refundRequests.paymentId, payment.id),
+        inArray(refundRequests.status, ['REQUESTED', 'PROCESSING']),
+      ),
+    )
     .limit(1)
   if (existingActiveRequest) {
-    throw new Error('A refund request is already pending for this payment')
+    throw new Error('A refund request is already pending or processing for this payment')
   }
 
   const [request] = await db
@@ -322,14 +341,27 @@ export async function rejectRefund(refundRequestId: string, reason: string): Pro
 const LIST_REFUND_REQUESTS_LIMIT = 100
 
 /**
- * Lists pending (REQUESTED) refund requests, for the admin refunds queue.
- * Deliberately excludes PROCESSING rows — those aren't "pending admin
- * decision," they're mid-flight/stuck and need the separate manual-
- * reconciliation path described on `approveRefund`, not a second approve
- * click from this queue. Bounded like `listOrganizers`/`getReviewQueue`
- * elsewhere in the codebase — this grows with total refund-request volume,
- * not per-mun, so it needs a cap before real platform volume rather than an
- * unbounded `SELECT *`.
+ * Lists REQUESTED and PROCESSING refund requests, for the admin refunds
+ * queue.
+ *
+ * Round-3 fix: round 2 excluded PROCESSING rows entirely on the theory that
+ * they "aren't pending admin decision." That made them invisible — a
+ * PROCESSING row (money possibly already moved at the provider, phase 2
+ * never committed — see `approveRefund`'s doc comment) had no way for an
+ * operator to even discover it existed, defeating the entire point of
+ * choosing a visible PROCESSING state over silently resetting to REQUESTED.
+ * PROCESSING rows are included here specifically so an operator can find
+ * and manually reconcile them (check the provider's dashboard using the
+ * row's id as the idempotency key, then resolve it directly against the DB
+ * — there is no in-product approve/reject path for PROCESSING, and
+ * `approveRefund`/`rejectRefund` both still correctly refuse to transition
+ * one). The caller (`app/admin/refunds/`) renders `status` to distinguish
+ * an ordinary pending decision from a stuck row needing attention.
+ *
+ * Bounded like `listOrganizers`/`getReviewQueue` elsewhere in the
+ * codebase — this grows with total refund-request volume, not per-mun, so
+ * it needs a cap before real platform volume rather than an unbounded
+ * `SELECT *`.
  */
 export async function listRefundRequests(): Promise<RefundRequestRow[]> {
   const session = await getSession()
@@ -337,7 +369,7 @@ export async function listRefundRequests(): Promise<RefundRequestRow[]> {
   return db
     .select()
     .from(refundRequests)
-    .where(eq(refundRequests.status, 'REQUESTED'))
+    .where(inArray(refundRequests.status, ['REQUESTED', 'PROCESSING']))
     .orderBy(refundRequests.createdAt)
     .limit(LIST_REFUND_REQUESTS_LIMIT)
 }

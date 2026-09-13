@@ -3,7 +3,8 @@
 import * as React from "react";
 import { cn } from "cn";
 import { toast } from "sonner";
-import { CheckIcon, Loader2Icon, XCircleIcon } from "lucide-react";
+import { CheckIcon, Loader2Icon, TriangleAlertIcon, XCircleIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,6 +35,20 @@ const fieldClassName = cn(
  * a Task 3 review caught an uncontrolled textarea breaking the
  * disabled-button gating there, so the reject reason is `useState`-controlled
  * from the start.
+ *
+ * A `PROCESSING` row (round-3 fix) renders with no Approve/Reject actions at
+ * all — `approveRefund`/`rejectRefund` both correctly throw
+ * `Invalid transition from PROCESSING to ...` for one, so offering buttons
+ * that always fail would just be confusing. This state means a provider
+ * call may already have gone through and `approveRefund`'s phase 2 never
+ * committed (see the doc comment on `approveRefund` in
+ * `lib/lifecycle/refund.ts`) — it needs a human to check the payments
+ * provider's dashboard (the refund request's id is the idempotency key used
+ * for that call) and reconcile manually. Surfacing it here at all — instead
+ * of the round-2 behavior of filtering it out of `listRefundRequests`
+ * entirely — is the actual fix: a stuck row that no operator can ever see
+ * is exactly as dangerous as one silently reset to re-approvable, since
+ * either way nobody notices it needs attention.
  */
 export function RefundRow({ request }: { request: RefundRequestRow }) {
   const [open, setOpen] = React.useState(false);
@@ -42,6 +57,7 @@ export function RefundRow({ request }: { request: RefundRequestRow }) {
   const [pendingReject, startReject] = React.useTransition();
 
   const pending = pendingApprove || pendingReject;
+  const isProcessing = request.status === "PROCESSING";
 
   function handleApprove() {
     startApprove(async () => {
@@ -91,28 +107,45 @@ export function RefundRow({ request }: { request: RefundRequestRow }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-sm p-md text-body-md">
       <div className="flex min-w-0 flex-col gap-1">
-        <p className="font-display text-title-sm font-medium text-ink">{formatPrice(request.amount)}</p>
+        <div className="flex flex-wrap items-center gap-xs">
+          <p className="font-display text-title-sm font-medium text-ink">{formatPrice(request.amount)}</p>
+          {isProcessing && (
+            <Badge variant="warning">
+              <TriangleAlertIcon aria-hidden />
+              Stuck processing
+            </Badge>
+          )}
+        </div>
         <p className="truncate text-muted-foreground">{request.reason}</p>
+        {isProcessing && (
+          <p className="flex items-start gap-xs rounded-sm border border-warning/30 bg-warning/15 px-sm py-xs text-body-sm text-warning-text">
+            A provider call may already have gone through and was never confirmed here. Check the
+            payments provider using this request&rsquo;s id ({request.id}) as the idempotency key,
+            then reconcile manually — approve/reject are disabled for this row.
+          </p>
+        )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-xs">
-        <Button
-          size="sm"
-          disabled={pending}
-          onClick={handleApprove}
-        >
-          {pendingApprove ? (
-            <Loader2Icon className="animate-spin" aria-hidden />
-          ) : (
-            <CheckIcon aria-hidden />
-          )}
-          {pendingApprove ? "Approving…" : "Approve"}
-        </Button>
-        <Button size="sm" variant="outline" disabled={pending} onClick={() => setOpen(true)}>
-          <XCircleIcon aria-hidden />
-          Reject
-        </Button>
-      </div>
+      {!isProcessing && (
+        <div className="flex shrink-0 items-center gap-xs">
+          <Button
+            size="sm"
+            disabled={pending}
+            onClick={handleApprove}
+          >
+            {pendingApprove ? (
+              <Loader2Icon className="animate-spin" aria-hidden />
+            ) : (
+              <CheckIcon aria-hidden />
+            )}
+            {pendingApprove ? "Approving…" : "Approve"}
+          </Button>
+          <Button size="sm" variant="outline" disabled={pending} onClick={() => setOpen(true)}>
+            <XCircleIcon aria-hidden />
+            Reject
+          </Button>
+        </div>
+      )}
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="sm:max-w-lg">
