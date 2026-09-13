@@ -14,6 +14,7 @@ const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30 // 30 days, matches session.ts 
  * email. Throws `Error('User not found')` if the email doesn't match a
  * seeded user — this is a dev/demo mock, not real auth, so there is no
  * separate "invalid credentials" case to hide a valid email behind.
+ * Throws `Error('Account suspended')` if the matched user is suspended.
  *
  * Creates a session row via `createSession`, sets it as an httpOnly
  * `mun_hub_session` cookie, and returns the session info.
@@ -22,6 +23,10 @@ export async function signIn(email: string): Promise<{ userId: string; role: Rol
   const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1)
   if (!user) {
     throw new Error('User not found')
+  }
+
+  if (user.suspended) {
+    throw new Error('Account suspended')
   }
 
   const { token, expiresAt } = await createSession(user.id)

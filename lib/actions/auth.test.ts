@@ -63,6 +63,19 @@ describe('signIn', () => {
   it('throws User not found for an email with no seeded user', async () => {
     await expect(signIn(`nobody-${Date.now()}@test.com`)).rejects.toThrow('User not found')
   })
+
+  it('throws Account suspended for a suspended user and does not create a session', async () => {
+    const email = `signin-suspended-${Date.now()}-${Math.random()}@test.com`
+    const [user] = await db
+      .insert(users)
+      .values({ name: 'Suspended User', email, role: 'ORGANIZER', suspended: true })
+      .returning()
+
+    await expect(signIn(user.email)).rejects.toThrow('Account suspended')
+
+    const rows = await db.select().from(sessions).where(eq(sessions.userId, user.id))
+    expect(rows.length).toBe(0)
+  })
 })
 
 describe('signOut', () => {
