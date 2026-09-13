@@ -78,6 +78,13 @@
       "when": 1789336500000,
       "tag": "0010_remap_legacy_mun_modules",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789337869669,
+      "tag": "0011_spotty_johnny_blaze",
+      "breakpoints": true
     }
   ]
 }

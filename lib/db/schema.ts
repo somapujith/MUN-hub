@@ -1,10 +1,11 @@
 import { relations } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
-import { boolean, index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
 import {
   accommodationFieldTypeEnum,
   adminActionEnum,
   applicationStatusEnum,
+  moduleCompletionEnum,
   moduleVerificationStateEnum,
   munModuleEnum,
   munStatusEnum,
@@ -97,6 +98,19 @@ export const muns = pgTable(
     venue: text('venue'),
     city: text('city'),
     country: text('country'),
+    // PRD Section 9/10/22 columns (Task 3, 2026-09-14) — all nullable so
+    // existing rows do not break. venue/city/country above already existed
+    // and are NOT duplicated here.
+    conferenceType: text('conference_type'),
+    targetParticipantType: text('target_participant_type'),
+    addressLine1: text('address_line1'),
+    addressState: text('address_state'),
+    postalCode: text('postal_code'),
+    mapUrl: text('map_url'),
+    registrationOpensAt: timestamp('registration_opens_at', { withTimezone: true }),
+    registrationDeadline: timestamp('registration_deadline', { withTimezone: true }),
+    // Tri-state: PROVIDED | NOT_PROVIDED | null (organizer hasn't answered yet).
+    accommodationProvided: text('accommodation_provided'),
     status: munStatusEnum('status').notNull().default('DRAFT'),
     publishedAt: timestamp('published_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -134,6 +148,9 @@ export const committees = pgTable(
     agenda: text('agenda'),
     description: text('description'),
     capacity: integer('capacity').notNull().default(0),
+    // PRD Section 43 Phase 2 columns (Task 3, 2026-09-14).
+    committeeType: text('committee_type'),
+    portfoliosEnabled: boolean('portfolios_enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('committees_mun_id_idx').on(table.munId)],
@@ -159,6 +176,9 @@ export const portfolios = pgTable(
     name: text('name').notNull(),
     type: text('type'),
     availability: integer('availability').notNull().default(1),
+    // PRD Section 43 Phase 2 columns (Task 3, 2026-09-14).
+    description: text('description'),
+    restrictions: text('restrictions'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('portfolios_committee_id_idx').on(table.committeeId)],
@@ -186,6 +206,10 @@ export const registrationProducts = pgTable(
     capacity: integer('capacity').notNull(),
     deadline: timestamp('deadline', { withTimezone: true }),
     status: text('status').notNull().default('active'),
+    // PRD Section 43 Phase 2 columns (Task 3, 2026-09-14).
+    registrationType: text('registration_type'),
+    earlyBirdPrice: integer('early_bird_price'),
+    earlyBirdDeadline: timestamp('early_bird_deadline', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('registration_products_mun_id_idx').on(table.munId)],
@@ -403,6 +427,9 @@ export const verificationLogsRelations = relations(verificationLogs, ({ one }) =
 // ---------------------------------------------------------------------------
 // Verification & confirmation trust layer (slice 1) — see
 // docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md
+// Extended (Task 3, 2026-09-14) with the completion axis + PRD discriminator
+// columns — see docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
+// Section 3.1.
 // ---------------------------------------------------------------------------
 
 export const munModuleVerifications = pgTable(
@@ -417,6 +444,15 @@ export const munModuleVerifications = pgTable(
     organizerConfirmedAt: timestamp('organizer_confirmed_at', { withTimezone: true }),
     lastReviewedAt: timestamp('last_reviewed_at', { withTimezone: true }),
     lastReviewedBy: text('last_reviewed_by').references(() => users.id),
+    // Completion axis (organizer-facing: "have you filled this in correctly?")
+    // — orthogonal to `state` (reviewer-facing: "has MUNHub verified it?").
+    // See design doc Section 3.1 for why these are two columns on one row.
+    completionStatus: moduleCompletionEnum('completion_status').notNull().default('NOT_STARTED'),
+    isRequired: boolean('is_required').notNull().default(true),
+    completionPercentage: integer('completion_percentage').notNull().default(0),
+    blockingIssueCount: integer('blocking_issue_count').notNull().default(0),
+    lastComputedAt: timestamp('last_computed_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -426,6 +462,12 @@ export const munModuleVerifications = pgTable(
     // mun on the platform (not scoped to one mun) — needs its own index once
     // that table has meaningful row counts across many organizers.
     index('mun_module_verifications_state_idx').on(table.state),
+    // The constraint slice 1's design called for but never shipped. Its
+    // absence was a live bug: getModuleVerificationState's lazy-create is
+    // read-then-insert with no lock, so concurrent first-touches could
+    // create duplicate (munId, moduleName) rows. See drizzle/0011 for the
+    // dedupe-then-constrain migration.
+    uniqueIndex('mun_module_verifications_mun_module_uq').on(table.munId, table.moduleName),
   ],
 )
 
@@ -450,10 +492,28 @@ export const verificationIssues = pgTable(
     raisedBy: text('raised_by')
       .notNull()
       .references(() => users.id),
+    // Discriminator columns (Task 3, 2026-09-14): this table is reused for
+    // both reviewer-raised findings (source: REVIEWER, the original slice-1
+    // use) and machine-raised validation failures (source: AUTOMATED, PRD
+    // Section 24). code/fieldKey are the machine-readable identifiers the
+    // automated validator needs; they stay nullable because reviewer-raised
+    // rows don't have them.
+    code: text('code'),
+    fieldKey: text('field_key'),
+    source: text('source').notNull().default('REVIEWER'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   },
-  (table) => [index('verification_issues_mun_id_idx').on(table.munId)],
+  (table) => [
+    index('verification_issues_mun_id_idx').on(table.munId),
+    // Task 8's blocking-issue-count recompute queries exactly this shape
+    // (mun + module + unresolved) on every progress recomputation.
+    index('verification_issues_mun_module_resolved_idx').on(
+      table.munId,
+      table.moduleName,
+      table.resolved,
+    ),
+  ],
 )
 
 export const verificationIssuesRelations = relations(verificationIssues, ({ one }) => ({
