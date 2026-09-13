@@ -17,13 +17,18 @@ export const munStatusEnum = pgEnum('mun_status', [
   'CHANGES_REQUESTED',
   'ONBOARDING',
   'CONTENT_SUBMITTED',
+  'ORGANIZER_CONFIRMATION',
   'VERIFICATION',
+  'VERIFIED',
   'PUBLISHED',
   'REGISTRATION_OPEN',
   'REGISTRATION_CLOSED',
   'CONFERENCE_ACTIVE',
+  'RESULTS_PENDING',
+  'RESULTS_UNDER_REVIEW',
   'COMPLETED',
   'ARCHIVED',
+  'CANCELLED',
 ])
 
 export const registrationStatusEnum = pgEnum('registration_status', [

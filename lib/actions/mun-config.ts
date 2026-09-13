@@ -290,11 +290,26 @@ export async function updateMunDetails(
 
 /**
  * Moves a mun from CONTENT_SUBMITTED to VERIFICATION via the shared lifecycle
- * state machine (`transitionMun`), which validates the transition and writes
- * the audit row to `verificationLogs`. Organizer (owning) or admin only.
+ * state machine (`transitionMun`), which validates each transition and writes
+ * an audit row to `verificationLogs`. Organizer (owning) or admin only.
+ *
+ * As of the verification/confirmation trust layer
+ * (docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md),
+ * CONTENT_SUBMITTED no longer transitions directly to VERIFICATION — it
+ * passes through ORGANIZER_CONFIRMATION first (PRD Gate 3). This function
+ * now performs both hops so existing callers (the organizer dashboard's
+ * "submit for verification" panel) keep working without a breaking API
+ * change, but it does NOT create an `organizer_confirmations` snapshot row
+ * the way `lib/lifecycle/organizer-confirmation.ts`'s `submitFinalConfirmation`
+ * does — this is a lighter-weight compatibility shim, not the real Gate 3
+ * flow. The organizer dashboard should be migrated to call
+ * `submitFinalConfirmation` directly once its UI is updated to present the
+ * full confirmation summary PRD Section 14 describes; this function can
+ * likely be deleted at that point.
  */
 export async function submitMunForVerification(munId: string, session: Session | null): Promise<Mun> {
   await assertOwnsOrAdmin(munId, session)
   if (!session) throw new Error('Forbidden')
+  await transitionMun(munId, 'ORGANIZER_CONFIRMATION', session.userId)
   return transitionMun(munId, 'VERIFICATION', session.userId)
 }

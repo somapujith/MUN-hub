@@ -178,7 +178,7 @@ describe('publishMun', () => {
 
   it('publishes when actor is ADMIN', async () => {
     const organizer = await makeUser('ORGANIZER')
-    const mun = await makeMun(organizer.id, 'VERIFICATION')
+    const mun = await makeMun(organizer.id, 'VERIFIED')
     const admin = await makeUser('ADMIN')
     currentToken = await sessionFor(admin.id)
 

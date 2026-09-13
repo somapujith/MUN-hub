@@ -13,6 +13,7 @@ export type StatusIcon =
   | "eye"
   | "file-check"
   | "shield-check"
+  | "shield"
   | "rocket"
   | "alert-triangle"
   | "x-circle"
@@ -21,7 +22,10 @@ export type StatusIcon =
   | "ticket"
   | "lock"
   | "radio"
-  | "flag";
+  | "flag"
+  | "hourglass"
+  | "clipboard-check"
+  | "ban";
 
 interface StatusMeta {
   label: string;
@@ -36,19 +40,24 @@ const STATUS_META: Record<MunStatus, StatusMeta> = {
   SUBMITTED: { label: "Submitted", tone: "info", icon: "upload" },
   UNDER_REVIEW: { label: "Under review", tone: "info", icon: "eye" },
   CONTENT_SUBMITTED: { label: "Content submitted", tone: "info", icon: "file-check" },
+  ORGANIZER_CONFIRMATION: { label: "Awaiting organizer confirmation", tone: "info", icon: "clipboard-check" },
   VERIFICATION: { label: "In verification", tone: "info", icon: "shield-check" },
   ONBOARDING: { label: "Onboarding", tone: "info", icon: "rocket" },
 
   CHANGES_REQUESTED: { label: "Changes requested", tone: "warning", icon: "alert-triangle" },
 
   REJECTED: { label: "Rejected", tone: "destructive", icon: "x-circle" },
+  CANCELLED: { label: "Cancelled", tone: "destructive", icon: "ban" },
 
   APPROVED: { label: "Approved", tone: "success", icon: "check" },
+  VERIFIED: { label: "Verified", tone: "success", icon: "shield" },
   PUBLISHED: { label: "Published", tone: "success", icon: "globe" },
   REGISTRATION_OPEN: { label: "Registration open", tone: "success", icon: "ticket" },
 
   REGISTRATION_CLOSED: { label: "Registration closed", tone: "secondary", icon: "lock" },
   CONFERENCE_ACTIVE: { label: "Conference active", tone: "secondary", icon: "radio" },
+  RESULTS_PENDING: { label: "Results pending", tone: "secondary", icon: "hourglass" },
+  RESULTS_UNDER_REVIEW: { label: "Results under review", tone: "info", icon: "eye" },
   COMPLETED: { label: "Completed", tone: "secondary", icon: "flag" },
 };
 

@@ -19,11 +19,17 @@ import {
  *
  * THE STATUS RULE
  * ---------------
- * `ALLOWED_TRANSITIONS` in `lib/lifecycle/mun-state-machine.ts` reads
- * `CONTENT_SUBMITTED: ['VERIFICATION']`, and VERIFICATION is not a target from
- * any other state. So the action is offered from exactly one status:
- * `CONTENT_SUBMITTED`. Everything else gets a disabled control plus a sentence
- * saying why.
+ * ⚠️ STALE as of the verification/confirmation trust layer (2026-09-13,
+ * see docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md):
+ * `ALLOWED_TRANSITIONS` in `lib/lifecycle/mun-state-machine.ts` now reads
+ * `CONTENT_SUBMITTED: ['ORGANIZER_CONFIRMATION']`, not `['VERIFICATION']` —
+ * a new gate (organizer final confirmation, `submitFinalConfirmation` in
+ * `lib/lifecycle/organizer-confirmation.ts`) sits between them. This panel's
+ * "Submit for verification" action likely needs to become "Submit final
+ * confirmation" and call the new action instead once that lands (Task 4 of
+ * the linked plan). Left as-is for now so this file still compiles; whoever
+ * picks up the Organizer Final Confirmation screen should replace this
+ * component's behavior, not just its copy.
  *
  * WHY EXPLAIN INSTEAD OF HIDE
  * ---------------------------
@@ -58,8 +64,16 @@ const EXPLANATIONS: Record<MunStatus, string> = {
   ONBOARDING:
     "You're in onboarding. Once your conference content is marked as submitted, you can send it for verification here.",
   CONTENT_SUBMITTED: "", // The one actionable state — copy lives in the panel body.
+  // TODO(mun-hub-02): placeholder copy — added mechanically from lib/ to
+  // unblock tsc after MunStatus gained 5 new values for the verification/
+  // confirmation trust layer (see docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md).
+  // Please replace with real product copy matching this panel's voice.
+  ORGANIZER_CONFIRMATION:
+    "Waiting on your final confirmation of the submitted details before MUN Hub review begins.",
   VERIFICATION:
     "Already submitted — the review team is verifying your conference content now.",
+  VERIFIED:
+    "Your conference content passed verification. Publish it to make it live on the marketplace.",
   PUBLISHED:
     "This conference is live on the marketplace. Verification is complete.",
   REGISTRATION_OPEN:
@@ -67,8 +81,11 @@ const EXPLANATIONS: Record<MunStatus, string> = {
   REGISTRATION_CLOSED:
     "Registration has closed for this conference. Verification is complete.",
   CONFERENCE_ACTIVE: "The conference is running. Verification is complete.",
+  RESULTS_PENDING: "The conference has ended — results haven't been submitted yet.",
+  RESULTS_UNDER_REVIEW: "Results have been submitted and are under MUN Hub review.",
   COMPLETED: "This conference has finished. Verification is complete.",
   ARCHIVED: "This conference is archived and can no longer be edited or submitted.",
+  CANCELLED: "This conference was cancelled and can no longer be edited or submitted.",
 };
 
 /** The single status from which `submitMunForVerification` is a legal call. */

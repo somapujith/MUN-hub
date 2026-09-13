@@ -21,8 +21,8 @@ describe('canTransition', () => {
     expect(canTransition('CHANGES_REQUESTED', 'SUBMITTED')).toBe(true)
   })
 
-  it('allows VERIFICATION to PUBLISHED', () => {
-    expect(canTransition('VERIFICATION', 'PUBLISHED')).toBe(true)
+  it('disallows VERIFICATION directly to PUBLISHED (must pass through VERIFIED)', () => {
+    expect(canTransition('VERIFICATION', 'PUBLISHED')).toBe(false)
   })
 
   it('treats REJECTED as terminal', () => {
@@ -32,6 +32,32 @@ describe('canTransition', () => {
 
   it('treats ARCHIVED as terminal', () => {
     expect(canTransition('ARCHIVED', 'DRAFT')).toBe(false)
+  })
+})
+
+describe('new lifecycle states (verification/confirmation trust layer)', () => {
+  it('allows CONTENT_SUBMITTED to ORGANIZER_CONFIRMATION', () => {
+    expect(canTransition('CONTENT_SUBMITTED', 'ORGANIZER_CONFIRMATION')).toBe(true)
+  })
+
+  it('allows ORGANIZER_CONFIRMATION to VERIFICATION', () => {
+    expect(canTransition('ORGANIZER_CONFIRMATION', 'VERIFICATION')).toBe(true)
+  })
+
+  it('allows VERIFICATION to VERIFIED', () => {
+    expect(canTransition('VERIFICATION', 'VERIFIED')).toBe(true)
+  })
+
+  it('allows VERIFIED back to VERIFICATION (re-verification)', () => {
+    expect(canTransition('VERIFIED', 'VERIFICATION')).toBe(true)
+  })
+
+  it('allows DRAFT to CANCELLED', () => {
+    expect(canTransition('DRAFT', 'CANCELLED')).toBe(true)
+  })
+
+  it('treats CANCELLED as terminal', () => {
+    expect(canTransition('CANCELLED', 'DRAFT')).toBe(false)
   })
 })
 
@@ -96,7 +122,7 @@ describe('transitionMun', () => {
         organizerId: organizer.id,
         name: 'Publish Path Mun',
         slug: `publish-path-mun-${Date.now()}`,
-        status: 'VERIFICATION',
+        status: 'VERIFIED',
       })
       .returning()
 
