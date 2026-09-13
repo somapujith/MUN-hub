@@ -211,7 +211,12 @@ describe('getModuleReviewQueue', () => {
     await db.insert(munModuleVerifications).values({ munId: mun.id, moduleName: 'committees', state: 'PENDING_REVIEW', organizerConfirmedAt: new Date() })
 
     currentToken = await sessionFor(reviewer.id)
-    const queue = await getModuleReviewQueue()
+    // The local dev DB accumulates historical PENDING_REVIEW rows across test
+    // runs (documented in CLAUDE.md) — order by organizerConfirmedAt desc
+    // means a freshly-created row isn't guaranteed to land on page 1 at the
+    // default limit, so query with a limit large enough to cover accumulated
+    // local junk instead of relying on ordering luck.
+    const queue = await getModuleReviewQueue({ limit: 1000 })
     expect(queue.results.some((row) => row.munId === mun.id && row.munName === mun.name)).toBe(true)
     expect(queue.total).toBeGreaterThanOrEqual(1)
   })
