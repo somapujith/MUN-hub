@@ -6,7 +6,27 @@ import { accommodationOptionFields, accommodationOptions } from '@/lib/db/schema
 import type { AccommodationFieldType } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
-import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+
+// -----------------------------------------------------------------------------
+// accommodation — ACCOMMODATION module (PRD Section 22)
+// -----------------------------------------------------------------------------
+//
+// ACCOMMODATION is a high-impact module (Task 12, HIGH_IMPACT_FIELDS:
+// ['price', 'capacity', 'name', 'status']) — every mutation that touches an
+// accommodation OPTION (which carries those exact fields) calls
+// `assertModuleNotLocked` right after the ownership check, same pattern as
+// mun-config.ts/executive-board.ts/etc. This was missed in this file's
+// original pass — flagged post-review: `recomputeMunProgress` already
+// materializes `completionStatus = 'LOCKED'` on the ACCOMMODATION module row
+// for dashboard display during active review, but without this enforcement
+// the backend silently accepted organizer writes anyway — a dashboard that
+// SHOWS locked while the backend ACCEPTS edits is worse than no lock UI at
+// all. The option-FIELD mutations (label/choices/displayOrder on a custom
+// form field under an option) do NOT touch price/capacity/name/status and
+// are deliberately left unlocked, matching the "only fields that are
+// actually on HIGH_IMPACT_FIELDS force a lock" principle used everywhere
+// else in this codebase (e.g. REGISTRATION_FORM's field-level exemption).
 
 async function getMunIdForOption(optionId: string): Promise<string> {
   const [option] = await db
@@ -46,6 +66,7 @@ export async function createAccommodationOption(
   session: Session | null,
 ): Promise<AccommodationOption> {
   await assertOwnsOrAdmin(input.munId, session)
+  await assertModuleNotLocked(input.munId, 'ACCOMMODATION', session)
   const [option] = await db.insert(accommodationOptions).values(input).returning()
 
   await onModuleDataChanged(input.munId, 'ACCOMMODATION', session!.userId)
@@ -68,6 +89,7 @@ export async function updateAccommodationOption(
 ): Promise<AccommodationOption> {
   const munId = await getMunIdForOption(id)
   await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'ACCOMMODATION', session)
 
   const [updated] = await db
     .update(accommodationOptions)
@@ -91,6 +113,7 @@ export async function updateAccommodationOption(
 export async function deleteAccommodationOption(id: string, session: Session | null): Promise<void> {
   const munId = await getMunIdForOption(id)
   await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'ACCOMMODATION', session)
 
   await db.update(accommodationOptions).set({ status: 'inactive' }).where(eq(accommodationOptions.id, id))
 
@@ -125,6 +148,11 @@ export async function listAccommodationOptions(
 // -----------------------------------------------------------------------------
 // Accommodation option custom fields
 // -----------------------------------------------------------------------------
+//
+// These mutate a custom form field (label/choices/required/displayOrder)
+// attached to an accommodation option — NOT the option's own price/capacity/
+// name/status. None of ACCOMMODATION's HIGH_IMPACT_FIELDS are touched here,
+// so these are deliberately NOT lock-gated (see file header comment).
 
 export interface AccommodationOptionField {
   id: string

@@ -12,9 +12,10 @@ import { createScheduleItem } from '@/lib/actions/mun-schedule'
 import { upsertMunContact } from '@/lib/actions/mun-contact'
 import { upsertPaymentSettings } from '@/lib/actions/payment-settlement'
 import { uploadMunMedia } from '@/lib/actions/mun-branding'
+import { createAccommodationOption } from '@/lib/actions/accommodation'
 
 // -----------------------------------------------------------------------------
-// Task 12 Step 4 — LOCKED enforcement across all 8 wired action files.
+// Task 12 Step 4 — LOCKED enforcement across all 9 wired action files.
 //
 // Rule under test: while a mun is in one of the "under active review"
 // statuses (CONTENT_SUBMITTED, AUTOMATED_VALIDATION, ORGANIZER_CONFIRMATION,
@@ -37,6 +38,14 @@ import { uploadMunMedia } from '@/lib/actions/mun-branding'
 // introduced or is scoped to fix — the wired-action-file tests below
 // therefore use ADMIN (not OPERATIONS) for the "privileged edit succeeds"
 // case, matching what the system actually allows end to end today.
+//
+// ACCOMMODATION (accommodation.ts) added post-review (2026-09-15): this
+// module was missed in the original Step 4 pass despite having a non-empty
+// HIGH_IMPACT_FIELDS list (['price','capacity','name','status']) and already
+// being surfaced as LOCKED on the organizer dashboard via
+// recomputeMunProgress/isModuleLockedForStatus — a real gap where the
+// dashboard claimed a lock the backend didn't enforce. Fixed in
+// accommodation.ts; test added here alongside the other 8.
 // -----------------------------------------------------------------------------
 
 async function makeUser(role: 'ORGANIZER' | 'ADMIN' | 'SUPER_ADMIN' | 'OPERATIONS' | 'STUDENT') {
@@ -260,6 +269,20 @@ describe('LOCKED enforcement wired into action files', () => {
     await expect(upsertPaymentSettings(mun.id, input, sessionFor(admin))).resolves.toMatchObject({
       legalName: 'Org Legal Name',
     })
+  })
+
+  it('accommodation.ts createAccommodationOption: rejects organizer, allows admin, during VERIFICATION', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const admin = await makeUser('ADMIN')
+    const mun = await makeMun(organizer.id, 'VERIFICATION')
+
+    await expect(
+      createAccommodationOption({ munId: mun.id, name: 'Standard Room', price: 2000, capacity: 40 }, sessionFor(organizer)),
+    ).rejects.toThrow(/locked/i)
+
+    await expect(
+      createAccommodationOption({ munId: mun.id, name: 'Standard Room', price: 2000, capacity: 40 }, sessionFor(admin)),
+    ).resolves.toMatchObject({ name: 'Standard Room' })
   })
 
   it('mun-branding.ts uploadMunMedia: EMPTY HIGH_IMPACT_FIELDS module (BRANDING) stays editable for organizers even during VERIFICATION', async () => {
