@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
 import {
@@ -18,6 +18,8 @@ import {
   registrationStatusEnum,
   roleEnum,
   scheduleItemKindEnum,
+  slaStateEnum,
+  submissionStatusEnum,
   supportCategoryEnum,
   supportPriorityEnum,
   supportStatusEnum,
@@ -576,6 +578,73 @@ export const munVersions = pgTable(
 export const munVersionsRelations = relations(munVersions, ({ one, many }) => ({
   mun: one(muns, { fields: [munVersions.munId], references: [muns.id] }),
   registrations: many(registrations),
+}))
+
+// ---------------------------------------------------------------------------
+// mun_submissions — Onboarding go-live pipeline (Task 10). See
+// docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
+// Section 5.1. One row per submission attempt; `submitMunForReview`
+// (lib/lifecycle/go-live.ts) is the only writer of new rows.
+//
+// The partial unique index below — NOT a plain unique on munId — is THE
+// structural fix for the double-submit race, per this project's own memory
+// note (CLAUDE.md: "DB unique constraint is the right next fix" after the
+// withdrawn refund workflow's unresolved double-refund race). A plain unique
+// on munId would permanently break resubmission after a mun is ever
+// published/rejected/withdrawn once, so it must stay partial.
+// ---------------------------------------------------------------------------
+
+export const munSubmissions = pgTable(
+  'mun_submissions',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    submittedBy: text('submitted_by')
+      .notNull()
+      .references(() => users.id),
+    versionNumber: integer('version_number').notNull(),
+    status: submissionStatusEnum('status').notNull().default('SUBMITTED'),
+    progressPercentage: integer('progress_percentage').notNull().default(0),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    reviewStartedAt: timestamp('review_started_at', { withTimezone: true }),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    queuedAt: timestamp('queued_at', { withTimezone: true }),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    slaDeadline: timestamp('sla_deadline', { withTimezone: true }).notNull(),
+    slaState: slaStateEnum('sla_state').notNull().default('ON_TRACK'),
+    slaPausedAt: timestamp('sla_paused_at', { withTimezone: true }),
+    slaPausedTotalMs: integer('sla_paused_total_ms').notNull().default(0),
+    reviewerId: text('reviewer_id').references(() => users.id),
+    munVersionId: text('mun_version_id').references((): AnyPgColumn => munVersions.id),
+    publishIdempotencyKey: text('publish_idempotency_key'),
+    rejectionReason: text('rejection_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('mun_submissions_mun_id_idx').on(table.munId),
+    index('mun_submissions_sla_state_idx').on(table.slaState),
+    index('mun_submissions_status_idx').on(table.status),
+    uniqueIndex('mun_submissions_publish_idempotency_key_uq').on(table.publishIdempotencyKey),
+    // THE partial-unique constraint: one active (non-terminal) submission per
+    // mun. Terminal statuses (PUBLISHED/REJECTED/WITHDRAWN) are excluded from
+    // the predicate so a mun can be resubmitted after any of those. Verify
+    // the generated migration SQL actually carries this WHERE clause — see
+    // the file header comment above.
+    uniqueIndex('mun_submissions_active_per_mun_uq')
+      .on(table.munId)
+      .where(sql`status NOT IN ('PUBLISHED','REJECTED','WITHDRAWN')`),
+  ],
+)
+
+export const munSubmissionsRelations = relations(munSubmissions, ({ one }) => ({
+  mun: one(muns, { fields: [munSubmissions.munId], references: [muns.id] }),
+  submitter: one(users, { fields: [munSubmissions.submittedBy], references: [users.id] }),
+  reviewer: one(users, { fields: [munSubmissions.reviewerId], references: [users.id] }),
+  munVersion: one(munVersions, { fields: [munSubmissions.munVersionId], references: [munVersions.id] }),
 }))
 
 // ---------------------------------------------------------------------------

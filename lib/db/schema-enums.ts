@@ -231,6 +231,32 @@ export const paymentVerificationEnum = pgEnum('payment_verification_state', [
   'FAILED',
 ])
 
+// ---------------------------------------------------------------------------
+// Onboarding go-live pipeline — Task 10 mun_submissions enums. See
+// docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
+// Section 5.1 (submissionStatusEnum) and Section 5.2 (slaStateEnum, which
+// mirrors lib/lifecycle/sla.ts's `SlaState` union — keep the two in sync).
+// ---------------------------------------------------------------------------
+
+export const submissionStatusEnum = pgEnum('submission_status', [
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'CHANGES_REQUESTED',
+  'APPROVED',
+  'REJECTED',
+  'QUEUED',
+  'PUBLISHED',
+  'WITHDRAWN',
+])
+
+export const slaStateEnum = pgEnum('sla_state', [
+  'ON_TRACK',
+  'DUE_SOON',
+  'OVERDUE',
+  'PAUSED',
+  'COMPLETED',
+])
+
 export type Role = (typeof roleEnum.enumValues)[number]
 export type MunStatus = (typeof munStatusEnum.enumValues)[number]
 export type RegistrationStatus = (typeof registrationStatusEnum.enumValues)[number]
@@ -251,3 +277,5 @@ export type FormFieldType = (typeof formFieldTypeEnum.enumValues)[number]
 export type MunDocumentKind = (typeof munDocumentKindEnum.enumValues)[number]
 export type ScheduleItemKind = (typeof scheduleItemKindEnum.enumValues)[number]
 export type PaymentVerificationState = (typeof paymentVerificationEnum.enumValues)[number]
+export type SubmissionStatus = (typeof submissionStatusEnum.enumValues)[number]
+export type SlaStateEnumValue = (typeof slaStateEnum.enumValues)[number]
