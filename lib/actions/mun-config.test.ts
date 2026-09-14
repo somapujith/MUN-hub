@@ -384,13 +384,22 @@ describe('mun-config actions', () => {
     })
   })
 
-  describe('progress engine wiring (Task 8 integration proof)', () => {
-    it('a committee edit moves the mun overallPercentage — proves onModuleDataChanged is actually wired, not just unit-tested in isolation', async () => {
+  describe('progress engine wiring (Task 8 integration proof, updated for Task 9 real validators)', () => {
+    it('a committee edit moves the COMMITTEES module row — proves onModuleDataChanged is actually wired, not just unit-tested in isolation', async () => {
       const organizer = await makeUser('ORGANIZER')
       const mun = await makeMun(organizer.id, { status: 'ONBOARDING' })
       const session = sessionFor(organizer)
 
-      const committee = await createCommittee({ munId: mun.id, name: 'UNGA', capacity: 50 }, session)
+      // Task 9 note: COMMITTEES' real validator (lib/lifecycle/validators/
+      // committees.ts) requires a non-empty agenda, not just a capacity —
+      // this create call now supplies one so the module genuinely reaches
+      // COMPLETE, which is what this test needs to prove wiring (not the
+      // validator's own correctness — that's validators/committees.test.ts's
+      // job).
+      const committee = await createCommittee(
+        { munId: mun.id, name: 'UNGA', agenda: 'General debate', capacity: 50 },
+        session,
+      )
 
       const [committeeModuleRow] = await db
         .select()
@@ -400,15 +409,23 @@ describe('mun-config actions', () => {
       expect(committeeModuleRow.lastComputedAt).not.toBeNull()
       expect(committeeModuleRow.completionStatus).toBe('COMPLETE')
 
-      // Mun-level materialization ran too: ONBOARDING -> READY_FOR_SUBMISSION,
-      // since every stubbed module is COMPLETE with zero blocking issues.
+      // Mun-level materialization ran too, but with Task 9's real validators
+      // the OTHER 14 modules are still empty on this bare test mun — so the
+      // mun correctly stays ACTION_REQUIRED (required work remains), not
+      // READY_FOR_SUBMISSION. What this test proves is narrower and still
+      // correct: `onModuleDataChanged` genuinely ran end to end from the
+      // `createCommittee` action (lastComputedAt is set, completionStatus
+      // reflects the real validator), not that the mun cleared every module.
       const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
-      expect(updatedMun.status).toBe('READY_FOR_SUBMISSION')
+      expect(updatedMun.status).toBe('ACTION_REQUIRED')
 
-      // Now push it back to ACTION_REQUIRED by editing the same committee
-      // while a BLOCKER issue is outstanding, and confirm the UPDATE path
-      // (not just create) re-triggers the engine — the same aggregate that
-      // drives overallPercentage is what flips this materialized status.
+      // Now edit the same committee via the UPDATE path (not just create)
+      // while a BLOCKER issue is outstanding, and confirm the engine
+      // re-runs: the COMMITTEES row is recomputed (still COMPLETE — the
+      // validator only looks at committee data, not verificationIssues),
+      // and the mun-level status stays ACTION_REQUIRED for the same reason
+      // as above, now doubly so (a real BLOCKER issue on top of incomplete
+      // modules).
       await db.insert(verificationIssues).values({
         munId: mun.id,
         moduleName: 'COMMITTEES',
@@ -417,6 +434,12 @@ describe('mun-config actions', () => {
         raisedBy: organizer.id,
       })
       await updateCommittee(committee.id, { capacity: 60 }, session)
+
+      const [committeeModuleRowAfterUpdate] = await db
+        .select()
+        .from(munModuleVerifications)
+        .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'COMMITTEES')))
+      expect(committeeModuleRowAfterUpdate.completionStatus).toBe('COMPLETE')
 
       const [munAfterUpdate] = await db.select().from(muns).where(eq(muns.id, mun.id))
       expect(munAfterUpdate.status).toBe('ACTION_REQUIRED')

@@ -6,6 +6,7 @@ import { getModuleDefinition, TRACKED_MODULES } from './module-registry'
 import { getModuleVerificationState } from './module-verification'
 import { transitionMun } from './mun-state-machine'
 import { triggerReverificationIfNeeded } from './reverification'
+import { loadValidationContext, type MunValidationContext, type ModuleValidationResult } from './validation'
 
 // -----------------------------------------------------------------------------
 // module-completion — progress/completion engine (design doc Section 3.2/3.3)
@@ -59,38 +60,67 @@ export interface MunProgress {
 }
 
 /**
- * Computes ONE module's completion result by calling its registry
- * definition's `validate` function.
+ * Adapts a Task 9 `ModuleValidationResult` (`{ moduleKey, checks, passed }`)
+ * into this file's `ModuleCompletionResult` (`{ completionStatus,
+ * completionPercentage, blockingIssueCount, issues }`) — two different
+ * shapes for two different audiences (validation.ts's is the raw pass/fail
+ * checklist PRD §24/§8 render directly; this file's is the organizer-facing
+ * completion axis on `mun_module_verifications`), derived from the exact
+ * same `checks` array so they can never disagree about the underlying facts.
  *
- * STUB, DELIBERATE AND TEMPORARY (Task 8, lands ahead of Task 9): the
- * `validate` field does not exist on `ModuleDefinition` yet — Task 9 adds it.
- * Until then every module trivially "passes": COMPLETE / 100% / zero
- * blocking issues / no issues. This is not a hardcoded "is Task 9 done yet"
- * check — it is `moduleDefinition.validate?.(ctx)` with the undefined case
- * handled, so the day Task 9 adds real validators to the registry, this
- * function starts doing real work with zero changes here or at any call
- * site.
+ * `completionPercentage` here is satisfied-required-checks / total-required-
+ * checks (BLOCKER-severity checks only count as "required" for this
+ * module-local percentage — a failing HIGH/MEDIUM/LOW informational check
+ * doesn't drag a module's own completion bar down, matching
+ * `modulePassed`'s pass/fail rule one level up). A module with zero BLOCKER
+ * checks (there is always at least one per validator in this registry, but
+ * this guards the corner case defensively) is treated as 100% complete.
+ *
+ * `completionStatus` is COMPLETE when every BLOCKER check passed, else
+ * ACTION_REQUIRED — IN_PROGRESS/NOT_STARTED/LOCKED are states this pure
+ * adapter cannot itself determine (LOCKED needs review-state awareness,
+ * NOT_STARTED/IN_PROGRESS need "has the organizer touched this module at
+ * all" awareness) — those remain the caller's ('mun-config.ts' etc.,
+ * outside this task's scope) responsibility, unchanged from Task 8.
+ */
+function toModuleCompletionResult(result: ModuleValidationResult): ModuleCompletionResult {
+  const blockerChecks = result.checks.filter((c) => c.severity === 'BLOCKER')
+  const totalRequired = blockerChecks.length
+  const satisfiedRequired = blockerChecks.filter((c) => c.passed).length
+  const completionPercentage = totalRequired === 0 ? 100 : Math.round((satisfiedRequired / totalRequired) * 100)
+  const blockingIssueCount = totalRequired - satisfiedRequired
+
+  return {
+    completionStatus: result.passed ? 'COMPLETE' : 'ACTION_REQUIRED',
+    completionPercentage,
+    blockingIssueCount,
+    issues: result.checks
+      .filter((c) => !c.passed)
+      .map((c) => ({ key: c.key, label: c.label, passed: c.passed, severity: c.severity, message: c.message })),
+  }
+}
+
+/**
+ * Computes ONE module's completion result by calling its registry
+ * definition's `validate` function against a `MunValidationContext`.
+ *
+ * Task 9 note: `validate` is now attached to every `MODULE_REGISTRY` entry
+ * (lib/lifecycle/validators/*.ts), so this function does real work instead
+ * of the Task 8 stub. `ctx` is optional and, when omitted, is loaded via
+ * `loadValidationContext(munId)` — but callers that already need the
+ * context for multiple modules in the same call (`recomputeMunProgress`)
+ * MUST pass a pre-loaded `ctx` through, or every one of the 15 modules would
+ * re-run the full batched load, turning "one batched read" into fifteen.
  */
 export async function computeModuleCompletion(
   munId: string,
   moduleKey: MunModule,
-  ctx?: unknown,
+  ctx?: MunValidationContext,
 ): Promise<ModuleCompletionResult> {
-  const moduleDefinition = getModuleDefinition(moduleKey) as {
-    validate?: (context: unknown) => ModuleCompletionResult | Promise<ModuleCompletionResult>
-  }
-
-  const result = await moduleDefinition.validate?.(ctx)
-  if (result) return result
-
-  // --- BEGIN TEMPORARY STUB (remove once every registry entry has `validate`) ---
-  return {
-    completionStatus: 'COMPLETE',
-    completionPercentage: 100,
-    blockingIssueCount: 0,
-    issues: [],
-  }
-  // --- END TEMPORARY STUB ---
+  const context = ctx ?? (await loadValidationContext(munId))
+  const moduleDefinition = getModuleDefinition(moduleKey)
+  const result = moduleDefinition.validate(context)
+  return toModuleCompletionResult(result)
 }
 
 /** Persists one module's freshly-computed completion result to its `mun_module_verifications` row. */
@@ -123,6 +153,11 @@ async function persistModuleCompletion(
  * "12/15 complete" count disagree (e.g. one module moving 40%→60% shifts the
  * average while the COMPLETE count stays the same). Module-count based means
  * the two numbers always describe the same fact.
+ *
+ * Loads the validation context ONCE (Task 9) and reuses it for all 15
+ * `computeModuleCompletion` calls below — the whole point of "one batched
+ * read, then 15 pure functions" (design doc Section 4) would be defeated if
+ * this loop re-fetched the context on every iteration.
  */
 export async function recomputeMunProgress(munId: string, actorId?: string, tx?: Tx): Promise<MunProgress> {
   const run = async (transaction: Tx): Promise<MunProgress> => {
@@ -144,13 +179,17 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
       .where(eq(munModuleVerifications.munId, munId))
     const rowsByModule = new Map(rows.map((r) => [r.moduleName, r]))
 
+    // Single batched read for this whole aggregation pass — see this
+    // function's docstring.
+    const validationContext = await loadValidationContext(munId)
+
     const moduleProgress: ModuleProgressRow[] = []
 
     for (const moduleKey of TRACKED_MODULES) {
       const existingRow = rowsByModule.get(moduleKey)
       const isRequired = existingRow ? existingRow.isRequired : getModuleDefinition(moduleKey).defaultRequired
 
-      const result = await computeModuleCompletion(munId, moduleKey)
+      const result = await computeModuleCompletion(munId, moduleKey, validationContext)
       await persistModuleCompletion(transaction, munId, moduleKey, result)
 
       moduleProgress.push({
@@ -221,6 +260,15 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
  * gap, latent only because no caller yet wrapped `onModuleDataChanged` in an
  * outer transaction. Both functions now accept and honor an optional `tx`.)
  *
+ * Step 1's `computeModuleCompletion` call below does NOT pass a pre-loaded
+ * context, unlike step 2's `recomputeMunProgress` — the two loads are
+ * unavoidably separate here because step 1 needs to persist and read back
+ * BEFORE step 2 recomputes the aggregate from the (now-updated)
+ * `mun_module_verifications` rows; step 2 then does its own single batched
+ * load internally and reuses it across all 15 modules. Net: two context
+ * loads per `onModuleDataChanged` call (one here, one inside
+ * `recomputeMunProgress`), not sixteen.
+ *
  * ---
  * Design decision — does a mun in ONBOARDING move to ACTION_REQUIRED the
  * moment a required module is still incomplete, or does it stay ONBOARDING
@@ -249,15 +297,14 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
  * function at all, so it simply stays at whatever status it was created
  * with (ONBOARDING) until the first module write — at which point this
  * function computes the real aggregate and flips it to ACTION_REQUIRED (data
- * still incomplete after that first touch, which is the overwhelmingly
- * common case — 1 of 15 modules does not clear the bar) or
- * READY_FOR_SUBMISSION (all 15 required modules already COMPLETE, only
- * plausible once `validate` is real in Task 9 and every module happens to
- * already satisfy it). ONBOARDING is therefore never a transition TARGET of
- * this function — only ACTION_REQUIRED and READY_FOR_SUBMISSION are — which
- * matches the brief's explicit instruction that "ONBOARDING is never
- * transitioned TO by this function." The mun can still return to ONBOARDING
- * via other paths (e.g. an explicit organizer action), just not from here.
+ * still incomplete after that first touch — the overwhelmingly common case
+ * now that `validate` performs real checks, Task 9) or READY_FOR_SUBMISSION
+ * (all 15 required modules already COMPLETE). ONBOARDING is therefore never
+ * a transition TARGET of this function — only ACTION_REQUIRED and
+ * READY_FOR_SUBMISSION are — which matches the brief's explicit instruction
+ * that "ONBOARDING is never transitioned TO by this function." The mun can
+ * still return to ONBOARDING via other paths (e.g. an explicit organizer
+ * action), just not from here.
  * ---
  */
 export async function onModuleDataChanged(munId: string, moduleKey: MunModule, actorId: string, tx?: Tx): Promise<void> {
