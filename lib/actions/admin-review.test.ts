@@ -203,6 +203,11 @@ describe('publishMun', () => {
     await expect(publishMun(mun.id)).rejects.toThrow('Forbidden')
   })
 
+  // No active mun_submissions row exists for this mun (created directly in
+  // VERIFIED status, like seed data or a pre-Task-11 mun) — publishMun must
+  // fall back to the original direct transitionMun call unchanged. This test
+  // is unmodified from before Task 11 per the brief's backward-compatibility
+  // requirement.
   it('publishes when actor is ADMIN', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'VERIFIED')
@@ -216,14 +221,20 @@ describe('publishMun', () => {
 })
 
 describe('unpublishMun', () => {
-  it('transitions PUBLISHED -> VERIFIED and logs MUN_UNPUBLISHED', async () => {
+  // INTENTIONAL BEHAVIOR CHANGE (Task 11, 2026-09-14): unpublishMun used to
+  // target VERIFIED. It now targets UNPUBLISHED (spec Section 1.4) — a
+  // status added specifically so "admin pulled this off the marketplace" is
+  // distinguishable from VERIFIED ("content verified, never yet published").
+  // This test was updated to assert the new target; see admin-review.ts's
+  // updated docstring on unpublishMun for the full reasoning.
+  it('transitions PUBLISHED -> UNPUBLISHED and logs MUN_UNPUBLISHED', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'PUBLISHED')
     const admin = await makeUser('ADMIN')
     currentToken = await sessionFor(admin.id)
 
     const updated = await unpublishMun(mun.id)
-    expect(updated.status).toBe('VERIFIED')
+    expect(updated.status).toBe('UNPUBLISHED')
 
     const [log] = await db.select().from(adminActions).where(eq(adminActions.targetId, mun.id))
     expect(log.action).toBe('MUN_UNPUBLISHED')

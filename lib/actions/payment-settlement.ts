@@ -230,22 +230,11 @@ export async function getPaymentSettings(munId: string, session: Session | null)
  * design is built to keep separate (design doc Section 3.1) — see the task
  * brief's explicit carve-out for this function.
  *
- * Enum-value note: `adminActionEnum` (lib/db/schema-enums.ts) does not yet
- * have a value for "payment verification state changed" — design doc
- * Section 7 expects a future slice (Task 11) to add
- * `PAYMENT_DETAILS_CHANGED` and friends. None of the 7 current values
- * (ORGANIZER_SUSPENDED/ORGANIZER_REINSTATED/MUN_UNPUBLISHED/MUN_SUSPENDED/
- * TICKET_ASSIGNED/TICKET_RESOLVED/USER_SUSPENDED) describe this action
- * accurately; the mun-lifecycle ones would actively mislead an auditor
- * reading `admin_actions` (they'd read as "the mun itself was
- * suspended/unpublished", which did not happen here). `TICKET_RESOLVED` is
- * used as the least-wrong placeholder — it is the only value in the enum
- * that represents "an admin closed out a review-style decision on a
- * record" without asserting something false about mun/organizer/user state.
- * `targetType`/`targetId` still correctly identify this as a
- * `mun_payment_settings` row, and `metadata.newVerificationState` records
- * the real outcome, so the audit trail is accurate even though the enum
- * tag is approximate. Replace with a dedicated enum value in Task 11.
+ * Enum-value note (updated Task 11, 2026-09-14): now uses the dedicated
+ * `PAYMENT_DETAILS_CHANGED` value on `adminActionEnum`, replacing the
+ * `TICKET_RESOLVED` placeholder this function used before that value
+ * existed (see git history for the original reasoning on why
+ * `TICKET_RESOLVED` was the least-wrong stand-in).
  */
 export async function setPaymentVerificationState(
   munId: string,
@@ -274,7 +263,7 @@ export async function setPaymentVerificationState(
       .where(eq(munPaymentSettings.munId, munId))
       .returning(MASKED_COLUMNS)
 
-    await recordAdminAction(tx, session.userId, 'TICKET_RESOLVED', 'mun_payment_settings', munId, undefined, {
+    await recordAdminAction(tx, session.userId, 'PAYMENT_DETAILS_CHANGED', 'mun_payment_settings', munId, undefined, {
       newVerificationState: state,
     })
 

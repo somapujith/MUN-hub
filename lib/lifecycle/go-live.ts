@@ -1,14 +1,24 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, munSubmissions, verificationIssues } from '@/lib/db/schema'
+import { adminActions, muns, munSubmissions, munVersions, verificationIssues } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
-import { addBusinessDays, DEFAULT_BUSINESS_CALENDAR } from './sla'
+import { requireRole } from '@/lib/auth/authorize'
+import { recordAdminAction } from '@/lib/audit/log'
+import { addBusinessDays, computeSlaState, DEFAULT_BUSINESS_CALENDAR, type SlaState } from './sla'
 import { validateMunForSubmission, type ValidationCheck } from './validation'
 import { transitionMun } from './mun-state-machine'
 import { recomputeMunProgress } from './module-completion'
+import { buildSnapshot } from './organizer-confirmation'
+
+// Same Drizzle transaction-callback param type used across lib/lifecycle —
+// kept as a local alias rather than an import so this module doesn't take on
+// an extra dependency just for a type.
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 // -----------------------------------------------------------------------------
-// go-live.ts — Submission gate (design doc Section 4.1, PRD §24/§31-33)
+// go-live.ts — Submission gate, review decisions, go-live queue, and the
+// idempotent/concurrency-safe publish action (design doc Section 4.1 and
+// Section 5.2/5.3, PRD §24/§31-33).
 // -----------------------------------------------------------------------------
 //
 // `submitMunForReview` is the organizer-facing entry point that runs the
@@ -16,6 +26,12 @@ import { recomputeMunProgress } from './module-completion'
 // `mun_submissions` SLA clock. See the design doc's Section 4.1 for the
 // exact numbered sequence this function implements — the step numbers in the
 // comments below correspond to that section.
+//
+// `reviewSubmission`, `enqueueForGoLive`, `getGoLiveQueue`, and
+// `publishFromQueue` (Task 11) pick up from there: Gate 2's content-review
+// decision, the admin go-live queue, and the single most consequential write
+// path in the whole plan — the concurrency-safe, idempotent publish. See
+// design doc Section 5.3 for the exact 8-step publish sequence.
 // -----------------------------------------------------------------------------
 
 // Statuses a mun can realistically be submitted from. READY_FOR_SUBMISSION
@@ -187,5 +203,463 @@ export async function submitMunForReview(munId: string, session: Session | null)
       .returning()
 
     return { passed: true, blockers: [], submissionId: submission.id }
+  })
+}
+
+// -----------------------------------------------------------------------------
+// Task 11 — review decisions, go-live queue, idempotent publish.
+// -----------------------------------------------------------------------------
+
+const REVIEW_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
+const PUBLISH_ROLES = ['ADMIN', 'SUPER_ADMIN'] as const
+
+/** Loads the mun's one active (non-terminal) mun_submissions row, row-locked. */
+async function lockActiveSubmission(tx: Tx, munId: string) {
+  const [submission] = await tx
+    .select()
+    .from(munSubmissions)
+    .where(and(eq(munSubmissions.munId, munId), ACTIVE_SUBMISSION_PREDICATE))
+    .for('update')
+    .limit(1)
+  return submission
+}
+
+/**
+ * Loads the mun's most recent `mun_submissions` row, row-locked, with NO
+ * status filter — used only by `publishFromQueue`. Unlike
+ * `lockActiveSubmission` (used by `reviewSubmission`/`enqueueForGoLive`,
+ * which only ever act on a still-active submission), `publishFromQueue`
+ * MUST be able to find the submission even after a prior call already
+ * marked it PUBLISHED — that is exactly the row an idempotent replay needs
+ * to look up. Filtering this lookup by `ACTIVE_SUBMISSION_PREDICATE` would
+ * make every replay after the first successful publish throw "No active
+ * submission found" instead of returning the existing result, defeating
+ * step 2 of the publish sequence entirely.
+ */
+async function lockLatestSubmission(tx: Tx, munId: string) {
+  const [submission] = await tx
+    .select()
+    .from(munSubmissions)
+    .where(eq(munSubmissions.munId, munId))
+    .orderBy(desc(munSubmissions.versionNumber))
+    .for('update')
+    .limit(1)
+  return submission
+}
+
+export type ReviewSubmissionDecision = 'APPROVED' | 'CHANGES_REQUESTED' | 'REJECTED'
+
+export interface ReviewSubmissionOptions {
+  notes?: string
+  reason?: string
+  issues?: { severity: 'BLOCKER' | 'HIGH' | 'MEDIUM' | 'LOW'; reason: string }[]
+}
+
+/**
+ * Gate 2 content-review decision (design doc Section 5, PRD §31-32) —
+ * OPERATIONS/ADMIN/SUPER_ADMIN only. **Never route this through
+ * `reviewMunApplication`** (lib/actions/admin-review.ts) — that is Gate 1
+ * (organizer-application approval, a completely different table and a
+ * completely different point in the mun lifecycle). Mixing the two gates up
+ * is exactly the collision the Gate-1/Gate-2 separation in this design
+ * exists to prevent — see mun-state-machine.ts's header comment.
+ *
+ * Row-locks the **`mun_submissions` row**, not the mun row — the submission
+ * is the entity actually being decided on here, and it is also what
+ * `reviewStartedAt`/`reviewerId`/`decidedAt` live on. Re-checks the
+ * submission's status under the lock before writing (the same lesson Task 7
+ * learned the hard way with `reviewModule`: a lock only serializes the two
+ * writes, it does not by itself stop the second caller from blindly
+ * clobbering the first caller's already-committed decision unless the
+ * precondition is re-checked after acquiring the lock).
+ *
+ *   - APPROVED: mun -> VERIFIED, submission -> APPROVED, `decidedAt`/
+ *     `approvedAt` set.
+ *   - CHANGES_REQUESTED: mun -> ACTION_REQUIRED, submission ->
+ *     CHANGES_REQUESTED, SLA paused (`slaPausedAt` + `slaState = PAUSED`),
+ *     and any `opts.issues` recorded as `verification_issues` rows
+ *     (source: REVIEWER).
+ *   - REJECTED: requires a non-empty `opts.reason` (PRD §28) — throws
+ *     before the transaction even opens if missing/empty. mun -> REJECTED,
+ *     submission -> REJECTED, `rejectionReason` stored, `decidedAt` set.
+ *
+ * Writes one `admin_actions` row in the same transaction as the decision.
+ * `adminActionEnum` has no dedicated CHANGES_REQUESTED value (only
+ * MUN_APPROVED/MUN_REJECTED were in this task's enum list) — for that
+ * decision this uses `MODULE_REVIEWED` as the closest fit (an admin
+ * recorded a review outcome on the submission short of a terminal
+ * accept/reject), matching Task 6's precedent of documenting an
+ * imperfect-fit enum choice rather than inventing one outside this task's
+ * scope. `targetType`/`targetId` (`mun_submission`/the submission id) and
+ * `metadata.decision` keep the audit trail unambiguous regardless of the
+ * enum tag.
+ */
+export async function reviewSubmission(
+  munId: string,
+  decision: ReviewSubmissionDecision,
+  opts: ReviewSubmissionOptions,
+  session: Session | null,
+): Promise<typeof munSubmissions.$inferSelect> {
+  requireRole(session, [...REVIEW_ROLES])
+
+  if (decision === 'REJECTED' && (!opts.reason || opts.reason.trim().length === 0)) {
+    throw new Error('A non-empty reason is required to reject a submission')
+  }
+
+  return db.transaction(async (tx) => {
+    const submission = await lockActiveSubmission(tx, munId)
+    if (!submission) {
+      throw new Error('No active submission found for this mun')
+    }
+
+    const now = new Date()
+    const reviewStartedAt = submission.reviewStartedAt ?? now
+
+    if (opts.issues && opts.issues.length > 0) {
+      await tx.insert(verificationIssues).values(
+        opts.issues.map((issue) => ({
+          munId,
+          moduleName: 'FINAL_REVIEW' as const,
+          severity: issue.severity,
+          reason: issue.reason,
+          raisedBy: session.userId,
+          source: 'REVIEWER',
+        })),
+      )
+    }
+
+    if (decision === 'APPROVED') {
+      await transitionMun(munId, 'VERIFIED', session.userId, opts.notes, undefined, tx)
+
+      const [updated] = await tx
+        .update(munSubmissions)
+        .set({
+          status: 'APPROVED',
+          reviewStartedAt,
+          reviewerId: session.userId,
+          decidedAt: now,
+          approvedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(munSubmissions.id, submission.id))
+        .returning()
+
+      await recordAdminAction(tx, session.userId, 'MUN_APPROVED', 'mun_submission', submission.id, opts.notes, {
+        munId,
+      })
+
+      return updated
+    }
+
+    if (decision === 'CHANGES_REQUESTED') {
+      await transitionMun(munId, 'ACTION_REQUIRED', session.userId, opts.notes, undefined, tx)
+
+      const [updated] = await tx
+        .update(munSubmissions)
+        .set({
+          status: 'CHANGES_REQUESTED',
+          reviewStartedAt,
+          reviewerId: session.userId,
+          slaPausedAt: now,
+          slaState: 'PAUSED',
+          updatedAt: now,
+        })
+        .where(eq(munSubmissions.id, submission.id))
+        .returning()
+
+      // No dedicated enum value for this decision in this task's list — see
+      // docstring. MODULE_REVIEWED is the least-wrong fit: an admin recorded
+      // a review outcome on the submission that is short of a terminal
+      // accept/reject.
+      await recordAdminAction(tx, session.userId, 'MODULE_REVIEWED', 'mun_submission', submission.id, opts.notes, {
+        munId,
+        decision: 'CHANGES_REQUESTED',
+      })
+
+      return updated
+    }
+
+    // REJECTED — opts.reason validated non-empty above.
+    await transitionMun(munId, 'REJECTED', session.userId, opts.notes, opts.reason, tx)
+
+    const [updated] = await tx
+      .update(munSubmissions)
+      .set({
+        status: 'REJECTED',
+        reviewStartedAt,
+        reviewerId: session.userId,
+        decidedAt: now,
+        rejectionReason: opts.reason,
+        updatedAt: now,
+      })
+      .where(eq(munSubmissions.id, submission.id))
+      .returning()
+
+    await recordAdminAction(tx, session.userId, 'MUN_REJECTED', 'mun_submission', submission.id, opts.reason, {
+      munId,
+    })
+
+    return updated
+  })
+}
+
+/**
+ * Admin moves a VERIFIED mun into the go-live queue (design doc Section 5.3)
+ * — ADMIN/SUPER_ADMIN only. Row-locks the active submission (the thing
+ * `queuedAt` lives on) before transitioning the mun.
+ */
+export async function enqueueForGoLive(munId: string, session: Session | null): Promise<typeof munSubmissions.$inferSelect> {
+  requireRole(session, [...PUBLISH_ROLES])
+
+  return db.transaction(async (tx) => {
+    const submission = await lockActiveSubmission(tx, munId)
+    if (!submission) {
+      throw new Error('No active submission found for this mun')
+    }
+
+    await transitionMun(munId, 'GO_LIVE_QUEUE', session.userId, undefined, undefined, tx)
+
+    const [updated] = await tx
+      .update(munSubmissions)
+      .set({ queuedAt: new Date(), updatedAt: new Date() })
+      .where(eq(munSubmissions.id, submission.id))
+      .returning()
+
+    return updated
+  })
+}
+
+export interface GoLiveQueueParams {
+  limit?: number
+  offset?: number
+}
+
+export interface GoLiveQueueRow {
+  munId: string
+  munName: string
+  munStatus: string
+  submissionId: string
+  submissionStatus: string
+  submittedAt: Date | null
+  slaDeadline: Date
+  slaState: SlaState
+  queuedAt: Date | null
+}
+
+export interface GoLiveQueueResult {
+  results: GoLiveQueueRow[]
+  total: number
+}
+
+// Same "grows with platform volume, not per-mun" reasoning as
+// admin-review.ts's getReviewQueue/getModuleReviewQueue — default page size
+// 20, matching that convention exactly.
+const DEFAULT_PAGE_SIZE = 20
+
+const COMPLETED_SUBMISSION_STATUSES = ['PUBLISHED']
+
+/**
+ * Paginated go-live queue: joins mun + active submission data. `slaState` is
+ * **computed on read** via `computeSlaState(input, now, submittedAt)` rather
+ * than trusting the stored column — the stored column is only a point-in-
+ * time snapshot from whenever a transition last wrote it, and a queue view
+ * needs the CURRENT state (design doc Section 5.2). Requires
+ * OPERATIONS/ADMIN/SUPER_ADMIN, same bar as `getReviewQueue`.
+ */
+export async function getGoLiveQueue(params: GoLiveQueueParams = {}, session: Session | null): Promise<GoLiveQueueResult> {
+  requireRole(session, [...REVIEW_ROLES])
+
+  const limit = params.limit ?? DEFAULT_PAGE_SIZE
+  const offset = params.offset ?? 0
+  const now = new Date()
+
+  const rows = await db
+    .select({
+      munId: muns.id,
+      munName: muns.name,
+      munStatus: muns.status,
+      submissionId: munSubmissions.id,
+      submissionStatus: munSubmissions.status,
+      submittedAt: munSubmissions.submittedAt,
+      slaDeadline: munSubmissions.slaDeadline,
+      slaPausedAt: munSubmissions.slaPausedAt,
+      slaPausedTotalMs: munSubmissions.slaPausedTotalMs,
+      queuedAt: munSubmissions.queuedAt,
+    })
+    .from(munSubmissions)
+    .innerJoin(muns, eq(munSubmissions.munId, muns.id))
+    .where(ACTIVE_SUBMISSION_PREDICATE)
+    .orderBy(desc(munSubmissions.submittedAt))
+    .limit(limit)
+    .offset(offset)
+
+  const [{ count } = { count: 0 }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(munSubmissions)
+    .where(ACTIVE_SUBMISSION_PREDICATE)
+
+  const results: GoLiveQueueRow[] = rows.map((row) => ({
+    munId: row.munId,
+    munName: row.munName,
+    munStatus: row.munStatus,
+    submissionId: row.submissionId,
+    submissionStatus: row.submissionStatus,
+    submittedAt: row.submittedAt,
+    slaDeadline: row.slaDeadline,
+    queuedAt: row.queuedAt,
+    slaState: computeSlaState(
+      {
+        slaDeadline: row.slaDeadline,
+        status: row.submissionStatus,
+        slaPausedAt: row.slaPausedAt,
+        slaPausedTotalMs: row.slaPausedTotalMs,
+        completedStatuses: COMPLETED_SUBMISSION_STATUSES,
+      },
+      now,
+      row.submittedAt ?? undefined,
+    ),
+  }))
+
+  return { results, total: count }
+}
+
+export interface PublishFromQueueResult {
+  mun: typeof muns.$inferSelect
+  submission: typeof munSubmissions.$inferSelect
+  munVersionId: string | null
+  replay: boolean
+}
+
+/**
+ * The single most consequential write path in the whole plan — makes a mun
+ * LIVE on the public marketplace. Entirely inside ONE `db.transaction`,
+ * following design doc Section 5.3's 8-step sequence exactly:
+ *
+ *   1. `SELECT ... FOR UPDATE` the `mun_submissions` row — NOT the mun row.
+ *      The submission row is the serialization point because it's the row
+ *      carrying `publishIdempotencyKey`; locking the thing you're about to
+ *      conditionally write is the only lock that actually helps here. Uses
+ *      `lockLatestSubmission` (no status filter) rather than
+ *      `lockActiveSubmission` — a replay after the submission is already
+ *      PUBLISHED must still find this row.
+ *   2. If already PUBLISHED (or `idempotencyKey` matches the stored one):
+ *      return the EXISTING result unchanged — an idempotent replay, not an
+ *      error (PRD §40.11).
+ *   3. Re-run `validateMunForSubmission(munId, { stage: 'PUBLISH' })` against
+ *      LIVE current data — never trust the earlier admin approval, since
+ *      the data may have moved since. A failure throws naming the specific
+ *      failing checks, and the transaction rolls back entirely: the mun
+ *      must never be left sitting in PUBLISHING from a failed attempt (that
+ *      is why `PUBLISHING -> GO_LIVE_QUEUE` exists only as a manual admin
+ *      recovery path for a genuine crash-between-commits scenario, not the
+ *      normal failure path — no automatic recovery logic is built here).
+ *   4. `transitionMun -> PUBLISHING` (audit-logged, `externalTx`).
+ *   5. Create the `mun_versions` snapshot (reusing `buildSnapshot` from
+ *      organizer-confirmation.ts rather than duplicating the read); set
+ *      `submission.munVersionId`.
+ *   6. `transitionMun -> PUBLISHED` — `mun-state-machine.ts`'s existing
+ *      `runTransition` already sets `publishedAt` as a side effect of this
+ *      transition, so this function does not set it again redundantly.
+ *   7. Update the submission row: `status = 'PUBLISHED'`, `publishedAt`,
+ *      `slaState = 'COMPLETED'`, `publishIdempotencyKey` persisted — the
+ *      caller-supplied key if one was passed, otherwise a server-generated
+ *      one (`crypto.randomUUID()`), so every published submission always
+ *      ends up with a real idempotency key on it even if the caller never
+ *      supplied one.
+ *   8. Write an `admin_actions` row with `MUN_PUBLISHED`.
+ *
+ * ADMIN/SUPER_ADMIN only, same bar as the rest of the publish surface.
+ */
+export async function publishFromQueue(
+  munId: string,
+  session: Session | null,
+  idempotencyKey?: string,
+): Promise<PublishFromQueueResult> {
+  requireRole(session, [...PUBLISH_ROLES])
+
+  return db.transaction(async (tx) => {
+    // Step 1: FOR UPDATE lock on the submission row — the serialization
+    // point for this whole function. Two concurrent publishFromQueue calls
+    // for the same mun serialize here; whichever gets the lock second sees
+    // the first caller's already-committed PUBLISHED status in step 2. No
+    // status filter on this lookup (see lockLatestSubmission's docstring) —
+    // a post-publish replay must still find the row.
+    const submission = await lockLatestSubmission(tx, munId)
+    if (!submission) {
+      throw new Error('No submission found for this mun')
+    }
+
+    // Step 2: idempotent replay — either the submission is already
+    // PUBLISHED, or the caller supplied the exact idempotency key already
+    // stored on it. Either way, return the existing result unchanged rather
+    // than throwing or re-running the publish sequence.
+    const isReplay =
+      submission.status === 'PUBLISHED' ||
+      (idempotencyKey !== undefined && idempotencyKey === submission.publishIdempotencyKey)
+    if (isReplay) {
+      const [mun] = await tx.select().from(muns).where(eq(muns.id, munId)).limit(1)
+      if (!mun) throw new Error('Mun not found')
+      return { mun, submission, munVersionId: submission.munVersionId, replay: true }
+    }
+
+    // Step 3: re-validate against LIVE data at the PUBLISH stage. Do not
+    // trust the earlier admin approval — approval happened at T-1day and
+    // the data may have moved (e.g. payment verification regressed).
+    const revalidation = await validateMunForSubmission(munId, { stage: 'PUBLISH' })
+    if (!revalidation.passed) {
+      const failing = revalidation.blockers.map((blocker) => blocker.label).join('; ')
+      throw new Error(`Cannot publish — validation fails at PUBLISH stage: ${failing}`)
+    }
+
+    // Step 4: PUBLISHING (audit-logged, participates in this transaction).
+    await transitionMun(munId, 'PUBLISHING', session.userId, undefined, undefined, tx)
+
+    // Step 5: snapshot into mun_versions, reusing the same builder Gate 3
+    // uses rather than duplicating the 12-table read.
+    const snapshot = await buildSnapshot(munId)
+    const [priorVersion] = await tx
+      .select({ versionNumber: munVersions.versionNumber })
+      .from(munVersions)
+      .where(eq(munVersions.munId, munId))
+      .orderBy(desc(munVersions.versionNumber))
+      .limit(1)
+    const nextVersionNumber = (priorVersion?.versionNumber ?? 0) + 1
+
+    const [version] = await tx
+      .insert(munVersions)
+      .values({ munId, versionNumber: nextVersionNumber, snapshotJson: snapshot })
+      .returning()
+
+    // Step 6: PUBLISHED. mun-state-machine.ts's runTransition sets
+    // publishedAt as an existing side effect of this transition — not
+    // re-set here.
+    const updatedMun = await transitionMun(munId, 'PUBLISHED', session.userId, undefined, undefined, tx)
+
+    // Step 7: finalize the submission row. Persist the caller-supplied
+    // idempotency key if given, otherwise generate one server-side so a
+    // published submission always carries a real key.
+    const finalIdempotencyKey = idempotencyKey ?? crypto.randomUUID()
+    const now = new Date()
+
+    const [updatedSubmission] = await tx
+      .update(munSubmissions)
+      .set({
+        status: 'PUBLISHED',
+        publishedAt: now,
+        slaState: 'COMPLETED',
+        publishIdempotencyKey: finalIdempotencyKey,
+        munVersionId: version.id,
+        updatedAt: now,
+      })
+      .where(eq(munSubmissions.id, submission.id))
+      .returning()
+
+    // Step 8: admin_actions audit row.
+    await recordAdminAction(tx, session.userId, 'MUN_PUBLISHED', 'mun', munId, undefined, {
+      submissionId: submission.id,
+      munVersionId: version.id,
+    })
+
+    return { mun: updatedMun, submission: updatedSubmission, munVersionId: version.id, replay: false }
   })
 }

@@ -15,9 +15,12 @@ import {
   munPaymentSettings,
   organizerApplications,
   munSubmissions,
+  munVersions,
   verificationIssues,
+  adminActions,
 } from '@/lib/db/schema'
-import { submitMunForReview } from './go-live'
+import { enqueueForGoLive, publishFromQueue, reviewSubmission, submitMunForReview } from './go-live'
+import { submitFinalConfirmation } from './organizer-confirmation'
 
 async function makeUser(role: 'ORGANIZER' | 'ADMIN' = 'ORGANIZER') {
   const [user] = await db
@@ -42,6 +45,13 @@ async function makeBareMun(organizerId: string) {
  * shape passes `validateMunForSubmission` at the SUBMIT stage), since this
  * task needs its own "genuinely complete" mun to drive `submitMunForReview`
  * to its success path.
+ *
+ * Deliberately seeds `munPaymentSettings.verificationState: 'PENDING'` —
+ * this is what makes it pass SUBMIT (payment verification is only HIGH
+ * severity pre-publish, see validators/commerce.ts) while still failing
+ * PUBLISH (BLOCKER there) until an admin explicitly verifies it. Task 11's
+ * publish tests rely on this exact gap to prove PUBLISH-stage re-validation
+ * is real.
  */
 async function makeCompleteMun(organizerId: string) {
   const now = new Date()
@@ -127,6 +137,44 @@ async function makeCompleteMun(organizerId: string) {
   })
 
   return mun
+}
+
+/**
+ * Drives a fresh complete mun through submission AND Gate 3's organizer
+ * final confirmation, landing it at VERIFICATION — the status
+ * `reviewSubmission` actually acts from (`ALLOWED_TRANSITIONS`:
+ * ORGANIZER_CONFIRMATION -> VERIFICATION -> {VERIFIED, CHANGES_REQUESTED,
+ * ACTION_REQUIRED, REJECTED}; `submitMunForReview` alone only reaches
+ * ORGANIZER_CONFIRMATION, one hop short). Returns the submission id.
+ */
+async function makeMunAtVerification(organizer: { id: string }) {
+  const mun = await makeCompleteMun(organizer.id)
+  const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
+  if (!submitResult.passed || !submitResult.submissionId) {
+    throw new Error('Fixture setup failed: submitMunForReview did not pass')
+  }
+  await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
+  return { mun, submissionId: submitResult.submissionId }
+}
+
+/**
+ * Drives a fresh complete mun all the way to VERIFIED with an APPROVED
+ * active submission, but stops short of enqueueing. `VERIFIED -> PUBLISHING`
+ * is not itself an allowed transition (only `GO_LIVE_QUEUE -> PUBLISHING`
+ * is) — most `publishFromQueue` tests should use `makeQueuedSubmission`
+ * below instead.
+ */
+async function makeApprovedSubmission(organizer: { id: string }, admin: { id: string }) {
+  const { mun } = await makeMunAtVerification(organizer)
+  const approved = await reviewSubmission(mun.id, 'APPROVED', {}, { userId: admin.id, role: 'ADMIN' })
+  return { mun, submission: approved }
+}
+
+/** Drives a fresh complete mun all the way to GO_LIVE_QUEUE, ready for `publishFromQueue`. */
+async function makeQueuedSubmission(organizer: { id: string }, admin: { id: string }) {
+  const { mun } = await makeApprovedSubmission(organizer, admin)
+  const submission = await enqueueForGoLive(mun.id, { userId: admin.id, role: 'ADMIN' })
+  return { mun, submission }
 }
 
 describe('submitMunForReview', () => {
@@ -266,6 +314,298 @@ describe('submitMunForReview', () => {
     const submissions = await db.select().from(munSubmissions).where(eq(munSubmissions.munId, mun.id))
     expect(submissions.length).toBe(1)
     expect(submissions[0].id).toBe(fulfilled[0].value.submissionId)
+  })
+})
+
+describe('reviewSubmission', () => {
+  it('APPROVED: mun -> VERIFIED, submission -> APPROVED, decidedAt/approvedAt set, logs MUN_APPROVED', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun, submissionId } = await makeMunAtVerification(organizer)
+
+    const updated = await reviewSubmission(mun.id, 'APPROVED', { notes: 'looks good' }, { userId: admin.id, role: 'ADMIN' })
+
+    expect(updated.status).toBe('APPROVED')
+    expect(updated.decidedAt).toBeInstanceOf(Date)
+    expect(updated.approvedAt).toBeInstanceOf(Date)
+    expect(updated.reviewerId).toBe(admin.id)
+    expect(updated.reviewStartedAt).toBeInstanceOf(Date)
+
+    const [munRow] = await db.select().from(muns).where(eq(muns.id, mun.id)).limit(1)
+    expect(munRow.status).toBe('VERIFIED')
+
+    const [log] = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetType, 'mun_submission'), eq(adminActions.targetId, submissionId)))
+    expect(log.action).toBe('MUN_APPROVED')
+  })
+
+  it('CHANGES_REQUESTED: mun -> ACTION_REQUIRED, submission -> CHANGES_REQUESTED, SLA paused', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeMunAtVerification(organizer)
+
+    const beforePause = new Date()
+    const updated = await reviewSubmission(
+      mun.id,
+      'CHANGES_REQUESTED',
+      { notes: 'fix the venue address', issues: [{ severity: 'HIGH', reason: 'Venue address incomplete' }] },
+      { userId: admin.id, role: 'ADMIN' },
+    )
+
+    expect(updated.status).toBe('CHANGES_REQUESTED')
+    expect(updated.slaState).toBe('PAUSED')
+    expect(updated.slaPausedAt).toBeInstanceOf(Date)
+    expect(updated.slaPausedAt!.getTime()).toBeGreaterThanOrEqual(beforePause.getTime())
+
+    const [munRow] = await db.select().from(muns).where(eq(muns.id, mun.id)).limit(1)
+    expect(munRow.status).toBe('ACTION_REQUIRED')
+
+    const issues = await db
+      .select()
+      .from(verificationIssues)
+      .where(and(eq(verificationIssues.munId, mun.id), eq(verificationIssues.source, 'REVIEWER')))
+    expect(issues.some((i) => i.reason === 'Venue address incomplete')).toBe(true)
+  })
+
+  it('REJECTED without a reason throws', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeMunAtVerification(organizer)
+
+    await expect(reviewSubmission(mun.id, 'REJECTED', {}, { userId: admin.id, role: 'ADMIN' })).rejects.toThrow(
+      /non-empty reason/i,
+    )
+    await expect(
+      reviewSubmission(mun.id, 'REJECTED', { reason: '   ' }, { userId: admin.id, role: 'ADMIN' }),
+    ).rejects.toThrow(/non-empty reason/i)
+  })
+
+  it('REJECTED with a reason: mun -> REJECTED, submission -> REJECTED, rejectionReason stored, logs MUN_REJECTED', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeMunAtVerification(organizer)
+
+    const updated = await reviewSubmission(
+      mun.id,
+      'REJECTED',
+      { reason: 'Content violates platform policy' },
+      { userId: admin.id, role: 'ADMIN' },
+    )
+
+    expect(updated.status).toBe('REJECTED')
+    expect(updated.rejectionReason).toBe('Content violates platform policy')
+    expect(updated.decidedAt).toBeInstanceOf(Date)
+
+    const [munRow] = await db.select().from(muns).where(eq(muns.id, mun.id)).limit(1)
+    expect(munRow.status).toBe('REJECTED')
+
+    const [log] = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetType, 'mun_submission'), eq(adminActions.targetId, updated.id)))
+    expect(log.action).toBe('MUN_REJECTED')
+  })
+
+  it('rejects a non-reviewer (ORGANIZER) with Forbidden', async () => {
+    const organizer = await makeUser()
+    const { mun } = await makeMunAtVerification(organizer)
+
+    await expect(
+      reviewSubmission(mun.id, 'APPROVED', {}, { userId: organizer.id, role: 'ORGANIZER' }),
+    ).rejects.toThrow('Forbidden')
+  })
+
+  it('two concurrent review decisions on the same submission leave exactly one winner (row-lock proof)', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeMunAtVerification(organizer)
+
+    const results = await Promise.allSettled([
+      reviewSubmission(mun.id, 'APPROVED', {}, { userId: admin.id, role: 'ADMIN' }),
+      reviewSubmission(mun.id, 'REJECTED', { reason: 'racing decision' }, { userId: admin.id, role: 'ADMIN' }),
+    ])
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled')
+    const rejected = results.filter((r) => r.status === 'rejected')
+
+    // The row lock serializes the two decisions; whichever commits first
+    // wins, and the second must re-check the submission's status under the
+    // lock and refuse to blindly overwrite it (the same lesson as Task 7's
+    // reviewModule fix) — so exactly one succeeds. The loser's transitionMun
+    // call fails because the mun has already left the state its own decision
+    // requires (canTransition rejects VERIFIED/REJECTED -> the other
+    // decision's target).
+    expect(fulfilled.length).toBe(1)
+    expect(rejected.length).toBe(1)
+
+    const [submission] = await db.select().from(munSubmissions).where(eq(munSubmissions.munId, mun.id))
+    expect(['APPROVED', 'REJECTED']).toContain(submission.status)
+  })
+})
+
+describe('enqueueForGoLive', () => {
+  it('moves VERIFIED -> GO_LIVE_QUEUE and sets queuedAt', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeApprovedSubmission(organizer, admin)
+
+    const updated = await enqueueForGoLive(mun.id, { userId: admin.id, role: 'ADMIN' })
+    expect(updated.queuedAt).toBeInstanceOf(Date)
+
+    const [munRow] = await db.select().from(muns).where(eq(muns.id, mun.id)).limit(1)
+    expect(munRow.status).toBe('GO_LIVE_QUEUE')
+  })
+
+  it('rejects a non-ADMIN with Forbidden', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeApprovedSubmission(organizer, admin)
+
+    await expect(enqueueForGoLive(mun.id, { userId: organizer.id, role: 'ORGANIZER' })).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('publishFromQueue', () => {
+  it('happy path: reaches PUBLISHED with publishedAt set and creates a mun_versions row', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeQueuedSubmission(organizer, admin)
+
+    // PUBLISH-stage validation requires payment VERIFIED (BLOCKER there,
+    // unlike SUBMIT where it's only HIGH) — verify it so this mun can
+    // actually reach PUBLISHED.
+    await db
+      .update(munPaymentSettings)
+      .set({ verificationState: 'VERIFIED', verifiedAt: new Date(), verifiedBy: admin.id })
+      .where(eq(munPaymentSettings.munId, mun.id))
+
+    const result = await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })
+
+    expect(result.replay).toBe(false)
+    expect(result.mun.status).toBe('PUBLISHED')
+    expect(result.mun.publishedAt).toBeInstanceOf(Date)
+    expect(result.submission.status).toBe('PUBLISHED')
+    expect(result.submission.publishedAt).toBeInstanceOf(Date)
+    expect(result.submission.slaState).toBe('COMPLETED')
+    expect(result.submission.publishIdempotencyKey).toBeTruthy()
+    expect(result.munVersionId).toBeTruthy()
+
+    const versions = await db.select().from(munVersions).where(eq(munVersions.munId, mun.id))
+    expect(versions.length).toBe(1)
+    expect(versions[0].id).toBe(result.munVersionId)
+
+    const [log] = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetType, 'mun'), eq(adminActions.targetId, mun.id), eq(adminActions.action, 'MUN_PUBLISHED')))
+    expect(log).toBeTruthy()
+  })
+
+  it('idempotency: calling publishFromQueue twice returns the same result and creates exactly ONE version row', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeQueuedSubmission(organizer, admin)
+
+    await db
+      .update(munPaymentSettings)
+      .set({ verificationState: 'VERIFIED', verifiedAt: new Date(), verifiedBy: admin.id })
+      .where(eq(munPaymentSettings.munId, mun.id))
+
+    const first = await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })
+    expect(first.replay).toBe(false)
+
+    const second = await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })
+    expect(second.replay).toBe(true)
+    expect(second.submission.id).toBe(first.submission.id)
+    expect(second.munVersionId).toBe(first.munVersionId)
+    expect(second.mun.status).toBe('PUBLISHED')
+
+    const versions = await db.select().from(munVersions).where(eq(munVersions.munId, mun.id))
+    expect(versions.length).toBe(1)
+
+    // Direct DB query proof — exactly one PUBLISHED submission row for this
+    // mun, not two.
+    const submissions = await db.select().from(munSubmissions).where(eq(munSubmissions.munId, mun.id))
+    expect(submissions.length).toBe(1)
+    expect(submissions[0].status).toBe('PUBLISHED')
+
+    // A supplied idempotencyKey matching the stored one is also a replay.
+    const third = await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' }, first.submission.publishIdempotencyKey!)
+    expect(third.replay).toBe(true)
+
+    const versionsAfterThird = await db.select().from(munVersions).where(eq(munVersions.munId, mun.id))
+    expect(versionsAfterThird.length).toBe(1)
+  })
+
+  it('concurrency: two concurrent calls produce one publish and one no-op replay, with exactly one version row', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeQueuedSubmission(organizer, admin)
+
+    await db
+      .update(munPaymentSettings)
+      .set({ verificationState: 'VERIFIED', verifiedAt: new Date(), verifiedBy: admin.id })
+      .where(eq(munPaymentSettings.munId, mun.id))
+
+    const results = await Promise.allSettled([
+      publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' }),
+      publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' }),
+    ])
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled') as PromiseFulfilledResult<
+      Awaited<ReturnType<typeof publishFromQueue>>
+    >[]
+    // Both calls should fulfill: the row lock serializes them, the first
+    // commits the real publish, and the second — once unblocked — sees the
+    // now-PUBLISHED submission row and takes the idempotent-replay path
+    // rather than erroring.
+    expect(fulfilled.length).toBe(2)
+
+    const replays = fulfilled.filter((r) => r.value.replay)
+    const realPublishes = fulfilled.filter((r) => !r.value.replay)
+    expect(realPublishes.length).toBe(1)
+    expect(replays.length).toBe(1)
+    expect(replays[0].value.submission.id).toBe(realPublishes[0].value.submission.id)
+
+    const versions = await db.select().from(munVersions).where(eq(munVersions.munId, mun.id))
+    expect(versions.length).toBe(1)
+
+    const submissions = await db.select().from(munSubmissions).where(eq(munSubmissions.munId, mun.id))
+    expect(submissions.length).toBe(1)
+    expect(submissions[0].status).toBe('PUBLISHED')
+  })
+
+  it('blocks publish with a specific message when payment verification regressed to PENDING', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeQueuedSubmission(organizer, admin)
+
+    // Payment verification was never advanced past PENDING (makeCompleteMun's
+    // default) — this proves PUBLISH-stage re-validation is real, not
+    // decorative: the mun passed SUBMIT (HIGH there) and was approved, but
+    // publish must re-check live data and block on the same field now being
+    // a BLOCKER at PUBLISH stage.
+    await expect(publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })).rejects.toThrow(
+      /Payment account has been verified by MUNHub/i,
+    )
+
+    const [munRow] = await db.select().from(muns).where(eq(muns.id, mun.id)).limit(1)
+    // Must never be left stranded in PUBLISHING — the whole transaction
+    // rolled back, leaving the mun exactly where it was before this call.
+    expect(munRow.status).toBe('GO_LIVE_QUEUE')
+
+    const versions = await db.select().from(munVersions).where(eq(munVersions.munId, mun.id))
+    expect(versions.length).toBe(0)
+  })
+
+  it('rejects a non-ADMIN with Forbidden', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeQueuedSubmission(organizer, admin)
+
+    await expect(publishFromQueue(mun.id, { userId: organizer.id, role: 'ORGANIZER' })).rejects.toThrow('Forbidden')
   })
 })
 

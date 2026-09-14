@@ -33,8 +33,12 @@ import { validateMunForSubmission } from './validation'
  * with no argument — `panCiphertext`/`accountNumberCiphertext` must never
  * leave this table via any read path, snapshot included. See the security
  * comment on `munPaymentSettings` in lib/db/schema.ts.
+ *
+ * Exported (Task 11, 2026-09-14) — `publishFromQueue` (lib/lifecycle/
+ * go-live.ts) reuses this exact snapshot builder for the `mun_versions` row
+ * it creates at publish time, rather than duplicating the 12-table read.
  */
-async function buildSnapshot(munId: string) {
+export async function buildSnapshot(munId: string) {
   const [mun] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
   const munCommittees = await db.select().from(committees).where(eq(committees.munId, munId))
   const committeeIds = munCommittees.map((c) => c.id)

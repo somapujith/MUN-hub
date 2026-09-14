@@ -131,6 +131,24 @@ export const adminActionEnum = pgEnum('admin_action', [
   // by MUNHub"). See lib/lifecycle/module-verification.ts's
   // setModuleRequirement.
   'MODULE_REQUIREMENT_CHANGED',
+  // Onboarding go-live pipeline (Task 11) — Gate 2 content-review decisions
+  // (lib/lifecycle/go-live.ts's reviewSubmission) and the publish action
+  // (publishFromQueue). MUN_APPROVED/MUN_REJECTED are Gate 2 (mun_submissions
+  // content review) — do NOT confuse with Gate 1's reviewMunApplication,
+  // which is untouched by this task and keeps using its own transitionMun
+  // audit trail via verificationLogs, not admin_actions.
+  'MUN_PUBLISHED',
+  'MUN_APPROVED',
+  'MUN_REJECTED',
+  // MODULE_REVIEWED: reserved for a future per-module-review admin-actions
+  // audit trail distinct from the verification_issues rows reviewModule
+  // already writes (module-verification.ts) — not used by this task, added
+  // now per the brief's explicit enum list so it exists ahead of that need.
+  'MODULE_REVIEWED',
+  // Replaces the TICKET_RESOLVED placeholder documented in
+  // lib/actions/payment-settlement.ts's setPaymentVerificationState — see
+  // that file's updated comment.
+  'PAYMENT_DETAILS_CHANGED',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [
