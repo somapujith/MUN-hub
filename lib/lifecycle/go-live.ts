@@ -4,6 +4,8 @@ import { adminActions, muns, munSubmissions, munVersions, verificationIssues } f
 import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
+import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
+import { buildPublicMunUrl, resolveAdminEmails, resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import { addBusinessDays, computeSlaState, DEFAULT_BUSINESS_CALENDAR, type SlaState } from './sla'
 import { validateMunForSubmission, type ValidationCheck } from './validation'
 import { transitionMun } from './mun-state-machine'
@@ -32,6 +34,18 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 // decision, the admin go-live queue, and the single most consequential write
 // path in the whole plan — the concurrency-safe, idempotent publish. See
 // design doc Section 5.3 for the exact 8-step publish sequence.
+//
+// NOTIFICATION WIRING (Task 12 Step 5): every `notifyPipelineEvent(...)` call
+// in this file happens AFTER its triggering `db.transaction(...)` has
+// already returned/committed — never inside it. A notification failure must
+// never roll back a state change. `notifyPipelineEvent` itself already never
+// throws on delivery failure (it catches per-recipient), but the
+// `resolveAdminEmails`/`resolveMunNotificationContext` calls DO hit the DB
+// and could theoretically fail (e.g. a dropped connection right after the
+// triggering transaction committed) — those are wrapped in their own
+// try/catch, logged, and swallowed, so a notification-resolution failure can
+// never surface as an error from the caller's perspective on an
+// already-successful state change.
 // -----------------------------------------------------------------------------
 
 // Statuses a mun can realistically be submitted from. READY_FOR_SUBMISSION
@@ -56,6 +70,18 @@ export interface SubmitMunForReviewResult {
 }
 
 /**
+ * Fire-and-forget notification helper shared by every call site in this
+ * file. Wraps the recipient-resolution + `notifyPipelineEvent` call in its
+ * own try/catch and logs (never throws) — see the file header comment for
+ * why. Never awaited by the caller in a way that blocks its return value.
+ */
+function notifyAfterCommit(work: () => Promise<void>): void {
+  work().catch((error) => {
+    console.error('[go-live] pipeline notification failed', error)
+  })
+}
+
+/**
  * Organizer submits a mun for MUNHub review (PRD §24). Row-locks the mun,
  * asserts ownership, runs the full 15-module automated validation engine
  * (Task 9), and either:
@@ -76,11 +102,14 @@ export interface SubmitMunForReviewResult {
  * throws a Postgres unique-violation error. The pre-check below only makes
  * the common (non-racing) case throw a friendlier message — it is NOT the
  * primary defense; the DB constraint is.
+ *
+ * On the PASSES path, fires `SUBMISSION_RECEIVED` to the organizer and
+ * `NEW_SUBMISSION` to admins/ops AFTER the transaction commits (Task 12).
  */
 export async function submitMunForReview(munId: string, session: Session | null): Promise<SubmitMunForReviewResult> {
   if (!session) throw new Error('Forbidden')
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     // Step 1: row-lock the mun first, then check status + ownership against
     // the LOCKED row — checking ownership before the lock would leave a
     // TOCTOU gap where a concurrent transfer-of-ownership (were one to ever
@@ -132,7 +161,7 @@ export async function submitMunForReview(munId: string, session: Session | null)
     await transitionMun(munId, 'AUTOMATED_VALIDATION', session.userId, 'Running automated validation', undefined, tx)
 
     // Step 4: run the Task 9 validation engine (stage defaults to SUBMIT).
-    const result = await validateMunForSubmission(munId)
+    const validationResult = await validateMunForSubmission(munId)
 
     // Step 5: mark PRIOR unresolved AUTOMATED-source issues resolved BEFORE
     // inserting new ones, so a resubmission doesn't accumulate stale machine
@@ -149,11 +178,11 @@ export async function submitMunForReview(munId: string, session: Session | null)
         ),
       )
 
-    if (result.blockers.length > 0) {
+    if (validationResult.blockers.length > 0) {
       await tx.insert(verificationIssues).values(
-        result.blockers.map((blocker) => ({
+        validationResult.blockers.map((blocker) => ({
           munId,
-          moduleName: result.modules.find((m) => m.checks.includes(blocker))?.moduleKey ?? 'FINAL_REVIEW',
+          moduleName: validationResult.modules.find((m) => m.checks.includes(blocker))?.moduleKey ?? 'FINAL_REVIEW',
           severity: blocker.severity,
           reason: blocker.message ?? blocker.label,
           raisedBy: session.userId,
@@ -163,12 +192,12 @@ export async function submitMunForReview(munId: string, session: Session | null)
       )
     }
 
-    if (!result.passed) {
+    if (!validationResult.passed) {
       // Step 6: FAILURE — transition to ACTION_REQUIRED and COMMIT (not
       // abort). The issue rows above must survive, so this is a normal
       // return, not a thrown error.
       await transitionMun(munId, 'ACTION_REQUIRED', session.userId, 'Automated validation failed', undefined, tx)
-      return { passed: false, blockers: result.blockers }
+      return { passed: false as const, blockers: validationResult.blockers }
     }
 
     // Step 7: SUCCESS — transition to ORGANIZER_CONFIRMATION and open the
@@ -202,8 +231,28 @@ export async function submitMunForReview(munId: string, session: Session | null)
       })
       .returning()
 
-    return { passed: true, blockers: [], submissionId: submission.id }
+    return { passed: true as const, blockers: [], submissionId: submission.id }
   })
+
+  // Outside the transaction, after commit (Task 12 Step 5). Only on the
+  // PASSES path — a failed submission stays in ACTION_REQUIRED, which is
+  // covered by the existing progress-engine MODULE_ACTION_REQUIRED path
+  // elsewhere, not a SUBMISSION_RECEIVED/NEW_SUBMISSION event here.
+  if (result.passed) {
+    notifyAfterCommit(async () => {
+      const context = await resolveMunNotificationContext(munId)
+      await notifyPipelineEvent({
+        type: 'SUBMISSION_RECEIVED',
+        munId,
+        organizerEmail: context.organizerEmail,
+        munName: context.munName,
+      })
+      const adminEmails = await resolveAdminEmails()
+      await notifyPipelineEvent({ type: 'NEW_SUBMISSION', munId, munName: context.munName, adminEmails })
+    })
+  }
+
+  return result
 }
 
 // -----------------------------------------------------------------------------
@@ -274,14 +323,32 @@ export interface ReviewSubmissionOptions {
  * precondition is re-checked after acquiring the lock).
  *
  *   - APPROVED: mun -> VERIFIED, submission -> APPROVED, `decidedAt`/
- *     `approvedAt` set.
+ *     `approvedAt` set. Notification: `APPROVED` to organizer.
  *   - CHANGES_REQUESTED: mun -> ACTION_REQUIRED, submission ->
  *     CHANGES_REQUESTED, SLA paused (`slaPausedAt` + `slaState = PAUSED`),
  *     and any `opts.issues` recorded as `verification_issues` rows
- *     (source: REVIEWER).
+ *     (source: REVIEWER). Notification: `CHANGES_REQUESTED` to organizer —
+ *     `moduleName` is `'FINAL_REVIEW'` (this is a mun-level Gate 2 decision,
+ *     not a per-module one) and `reason` is `opts.notes`, or a summary of
+ *     `opts.issues` if `opts.notes` wasn't given.
  *   - REJECTED: requires a non-empty `opts.reason` (PRD §28) — throws
  *     before the transaction even opens if missing/empty. mun -> REJECTED,
  *     submission -> REJECTED, `rejectionReason` stored, `decidedAt` set.
+ *     Notification: the `PipelineEvent` union has no dedicated REJECTED
+ *     variant (checked — the 11 organizer + 6 admin events cover
+ *     ONBOARDING_STARTED through SLA_DELAY plus the 4 admin-facing ones;
+ *     none fit a terminal "your mun was rejected" notice). Of the two
+ *     closest shapes, `APPROVED`'s carries no explanation field at all,
+ *     which would be actively misleading for a rejection (silently
+ *     dropping `opts.reason` on the floor); `CHANGES_REQUESTED`'s shape
+ *     does carry a `reason` field the organizer genuinely needs to see, so
+ *     this reuses `CHANGES_REQUESTED` for the REJECTED case rather than
+ *     `APPROVED` — an imperfect fit (subject line reads "Changes requested"
+ *     for what is actually a terminal rejection), but strictly less
+ *     misleading than the alternative, and it is the documented, deliberate
+ *     choice per Task 12's brief rather than an oversight. A dedicated
+ *     REJECTED event is the correct long-term fix and is a natural
+ *     candidate for whoever owns the next `PipelineEvent` revision.
  *
  * Writes one `admin_actions` row in the same transaction as the decision:
  * `MUN_APPROVED`, `MUN_CHANGES_REQUESTED`, or `MUN_REJECTED` respectively —
@@ -306,7 +373,7 @@ export async function reviewSubmission(
     throw new Error('A non-empty reason is required to reject a submission')
   }
 
-  return db.transaction(async (tx) => {
+  const updated = await db.transaction(async (tx) => {
     const submission = await lockActiveSubmission(tx, munId)
     if (!submission) {
       throw new Error('No active submission found for this mun')
@@ -331,7 +398,7 @@ export async function reviewSubmission(
     if (decision === 'APPROVED') {
       await transitionMun(munId, 'VERIFIED', session.userId, opts.notes, undefined, tx)
 
-      const [updated] = await tx
+      const [row] = await tx
         .update(munSubmissions)
         .set({
           status: 'APPROVED',
@@ -348,13 +415,13 @@ export async function reviewSubmission(
         munId,
       })
 
-      return updated
+      return row
     }
 
     if (decision === 'CHANGES_REQUESTED') {
       await transitionMun(munId, 'ACTION_REQUIRED', session.userId, opts.notes, undefined, tx)
 
-      const [updated] = await tx
+      const [row] = await tx
         .update(munSubmissions)
         .set({
           status: 'CHANGES_REQUESTED',
@@ -375,13 +442,13 @@ export async function reviewSubmission(
         munId,
       })
 
-      return updated
+      return row
     }
 
     // REJECTED — opts.reason validated non-empty above.
     await transitionMun(munId, 'REJECTED', session.userId, opts.notes, opts.reason, tx)
 
-    const [updated] = await tx
+    const [row] = await tx
       .update(munSubmissions)
       .set({
         status: 'REJECTED',
@@ -398,8 +465,37 @@ export async function reviewSubmission(
       munId,
     })
 
-    return updated
+    return row
   })
+
+  // Outside the transaction, after commit (Task 12 Step 5).
+  notifyAfterCommit(async () => {
+    const context = await resolveMunNotificationContext(munId)
+
+    if (decision === 'APPROVED') {
+      await notifyPipelineEvent({ type: 'APPROVED', munId, organizerEmail: context.organizerEmail, munName: context.munName })
+      return
+    }
+
+    // CHANGES_REQUESTED and REJECTED both use the CHANGES_REQUESTED event
+    // shape — see the docstring above for why REJECTED reuses it (no
+    // dedicated REJECTED variant exists in the PipelineEvent union).
+    const reason =
+      opts.reason ??
+      opts.notes ??
+      (opts.issues && opts.issues.length > 0 ? opts.issues.map((issue) => issue.reason).join('; ') : 'See review notes.')
+
+    await notifyPipelineEvent({
+      type: 'CHANGES_REQUESTED',
+      munId,
+      organizerEmail: context.organizerEmail,
+      munName: context.munName,
+      moduleName: 'FINAL_REVIEW',
+      reason,
+    })
+  })
+
+  return updated
 }
 
 /**
@@ -568,6 +664,10 @@ export interface PublishFromQueueResult {
  *   8. Write an `admin_actions` row with `MUN_PUBLISHED`.
  *
  * ADMIN/SUPER_ADMIN only, same bar as the rest of the publish surface.
+ *
+ * On the success, NON-REPLAY path only, fires `PUBLISHED` to the organizer
+ * with a `publicUrl` built via `buildPublicMunUrl` (Task 12 Step 5) — a
+ * replay must NOT re-notify, since nothing new actually happened.
  */
 export async function publishFromQueue(
   munId: string,
@@ -576,7 +676,7 @@ export async function publishFromQueue(
 ): Promise<PublishFromQueueResult> {
   requireRole(session, [...PUBLISH_ROLES])
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     // Step 1: FOR UPDATE lock on the submission row — the serialization
     // point for this whole function. Two concurrent publishFromQueue calls
     // for the same mun serialize here; whichever gets the lock second sees
@@ -661,4 +761,21 @@ export async function publishFromQueue(
 
     return { mun: updatedMun, submission: updatedSubmission, munVersionId: version.id, replay: false }
   })
+
+  // Outside the transaction, after commit (Task 12 Step 5). Only on the
+  // success, non-replay path.
+  if (!result.replay) {
+    notifyAfterCommit(async () => {
+      const context = await resolveMunNotificationContext(munId)
+      await notifyPipelineEvent({
+        type: 'PUBLISHED',
+        munId,
+        organizerEmail: context.organizerEmail,
+        munName: context.munName,
+        publicUrl: buildPublicMunUrl(context.slug),
+      })
+    })
+  }
+
+  return result
 }

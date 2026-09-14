@@ -5,6 +5,8 @@ import type { MunModule, ModuleVerificationState, VerificationSeverity } from '@
 import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
+import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
+import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import { getModuleDefinition, TRACKED_MODULES } from './module-registry'
 import { transitionMun } from './mun-state-machine'
 
@@ -167,6 +169,16 @@ const REVIEW_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
  * `checkAllModulesVerified` had already acted on the now-discarded VERIFIED
  * write and auto-advanced the mun — leaving `muns.status` and the module's
  * real (post-clobber) state permanently inconsistent.
+ *
+ * Notification (Task 12 Step 5): on a CHANGES_REQUESTED decision, fires
+ * `MODULE_ACTION_REQUIRED` to the organizer AFTER the transaction commits
+ * (never inside it), summarizing `issues` as plain strings. VERIFIED and
+ * REJECTED decisions do not have a clearly-fitting per-module event in the
+ * `PipelineEvent` union (VERIFIED's natural counterpart, if the mun-level
+ * VERIFIED transition also fires as a side effect via
+ * `checkAllModulesVerified`, is really the mun-level `APPROVED`/reviewer-flow
+ * concept handled in go-live.ts, not a distinct per-module event) — so only
+ * CHANGES_REQUESTED is wired here, matching the task brief's explicit scope.
  */
 export async function reviewModule(
   munId: string,
@@ -223,6 +235,28 @@ export async function reviewModule(
 
   if (decision === 'VERIFIED') {
     await checkAllModulesVerified(munId, session.userId)
+  }
+
+  // Outside the transaction, after commit (Task 12 Step 5). Fire-and-forget:
+  // notifyPipelineEvent itself never throws on delivery failure, but
+  // resolveMunNotificationContext hits the DB and could theoretically fail —
+  // caught and logged here so it can never surface as an error on an
+  // already-successful review decision.
+  if (decision === 'CHANGES_REQUESTED') {
+    resolveMunNotificationContext(munId)
+      .then((context) =>
+        notifyPipelineEvent({
+          type: 'MODULE_ACTION_REQUIRED',
+          munId,
+          organizerEmail: context.organizerEmail,
+          munName: context.munName,
+          moduleName,
+          issues: issues.map((issue) => issue.reason),
+        }),
+      )
+      .catch((error) => {
+        console.error('[module-verification] pipeline notification failed', error)
+      })
   }
 
   return updated
