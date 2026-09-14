@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest'
 import { db } from '@/lib/db/client'
-import { muns, users, munModuleVerifications } from '@/lib/db/schema'
+import { muns, users, munModuleVerifications, verificationIssues } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import {
   getModuleVerificationState,
@@ -175,11 +175,44 @@ describe('reviewModule', () => {
     ).rejects.toThrow('Forbidden')
   })
 
-  it('under two concurrent reviewModule calls on the same PENDING_REVIEW module, exactly one wins', async () => {
+  it('rejects a second review attempt once the module is no longer PENDING_REVIEW', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const reviewer = await makeUser('ADMIN')
+    const mun = await makeMun(organizer.id)
+    await confirmModule(mun.id, 'COMMITTEES', { userId: organizer.id, role: 'ORGANIZER' })
+
+    await reviewModule(mun.id, 'COMMITTEES', 'VERIFIED', [], { userId: reviewer.id, role: 'ADMIN' })
+
+    await expect(
+      reviewModule(mun.id, 'COMMITTEES', 'REJECTED', [{ severity: 'BLOCKER', reason: 'too late' }], {
+        userId: reviewer.id,
+        role: 'ADMIN',
+      }),
+    ).rejects.toThrow(/already reviewed/)
+  })
+
+  it('under two concurrent reviewModule calls on the same PENDING_REVIEW module, exactly one wins and the other is rejected cleanly', async () => {
     const organizer = await makeUser('ORGANIZER')
     const reviewerA = await makeUser('ADMIN')
     const reviewerB = await makeUser('ADMIN')
     const mun = await makeMun(organizer.id)
+
+    // Verify every other required module first, so that whichever concurrent
+    // call below wins with VERIFIED is the one that actually flips
+    // muns.status via checkAllModulesVerified's auto-advance — this is what
+    // lets the assertions below tell "the mun transitioned on the winning
+    // decision" apart from "the mun transitioned on a clobbered write",
+    // which is exactly the failure the reviewer traced through the bug this
+    // test guards against (reviewModule was missing a state-precondition
+    // check under the lock, so a second concurrent call could silently
+    // overwrite the first call's write after checkAllModulesVerified had
+    // already acted on it).
+    const otherModules = ALL_15_MODULES.filter((m) => m !== 'FINAL_REVIEW')
+    for (const moduleName of otherModules) {
+      await confirmModule(mun.id, moduleName, { userId: organizer.id, role: 'ORGANIZER' })
+      await reviewModule(mun.id, moduleName, 'VERIFIED', [], { userId: reviewerA.id, role: 'ADMIN' })
+    }
+
     await confirmModule(mun.id, 'FINAL_REVIEW', { userId: organizer.id, role: 'ORGANIZER' })
 
     const results = await Promise.allSettled([
@@ -190,33 +223,52 @@ describe('reviewModule', () => {
       }),
     ])
 
-    // Both calls started from the same PENDING_REVIEW row. The row lock
-    // serializes them, so both are legally allowed to succeed (there's no
-    // state-precondition rejecting a second review outright in this design —
-    // "review a module" is legal from PENDING_REVIEW regardless of decision).
-    // What must NOT happen is a corrupted/duplicated write: the final
-    // persisted state must be exactly one of the two decisions, and there
-    // must be exactly one verificationIssues row for the REJECTED call (not
-    // zero, not duplicated).
+    // The row lock serializes the two transactions; the state precondition
+    // re-checked under the lock (current.state !== 'PENDING_REVIEW') then
+    // makes whichever call runs second see the row already reviewed and
+    // throw, instead of silently overwriting the winner's write. Exactly one
+    // of the two calls must succeed — never zero (that would mean the lock
+    // itself is broken), never two (that would mean the precondition isn't
+    // actually being enforced under the lock).
     const fulfilled = results.filter((r) => r.status === 'fulfilled') as PromiseFulfilledResult<
       Awaited<ReturnType<typeof reviewModule>>
     >[]
-    expect(fulfilled.length).toBeGreaterThanOrEqual(1)
+    const rejected = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[]
+    expect(fulfilled.length).toBe(1)
+    expect(rejected.length).toBe(1)
+    expect(String(rejected[0].reason)).toMatch(/already reviewed/)
+
+    const winnerIsA = fulfilled[0].value.lastReviewedBy === reviewerA.id
+    const expectedFinalState = winnerIsA ? 'VERIFIED' : 'REJECTED'
 
     const [finalRow] = await db
       .select()
       .from(munModuleVerifications)
       .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'FINAL_REVIEW')))
-    expect(['VERIFIED', 'REJECTED']).toContain(finalRow.state)
+    // The persisted state must reflect ONLY the winning call's decision —
+    // never the decision that got rejected, and never a third/corrupted
+    // value from a partial overlapping write.
+    expect(finalRow.state).toBe(expectedFinalState)
+    expect(finalRow.lastReviewedBy).toBe(winnerIsA ? reviewerA.id : reviewerB.id)
 
-    // Whichever call actually landed last under the lock is reflected
-    // consistently — lastReviewedBy must be whichever of A/B corresponds to
-    // finalRow.state, never a mix, and never null.
-    expect(finalRow.lastReviewedBy).toBeTruthy()
-    if (finalRow.state === 'VERIFIED') {
-      expect(finalRow.lastReviewedBy).toBe(reviewerA.id)
-    } else {
-      expect(finalRow.lastReviewedBy).toBe(reviewerB.id)
+    // The critical end-to-end assertion the reviewer called out: muns.status
+    // must reflect only the winning decision. If A won (VERIFIED), all 15
+    // required modules are now VERIFIED and the mun must have auto-advanced.
+    // If B won (REJECTED), FINAL_REVIEW never reached VERIFIED, so the mun
+    // must still be sitting in VERIFICATION — it must NOT have been advanced
+    // by a VERIFIED write that was later silently discarded.
+    const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+    expect(updatedMun.status).toBe(winnerIsA ? 'VERIFIED' : 'VERIFICATION')
+
+    // Exactly one verificationIssues row from the REJECTED call when it's
+    // the one that actually won — never zero, never duplicated by a
+    // clobbered retry.
+    if (!winnerIsA) {
+      const issueRows = await db
+        .select()
+        .from(verificationIssues)
+        .where(and(eq(verificationIssues.munId, mun.id), eq(verificationIssues.moduleName, 'FINAL_REVIEW')))
+      expect(issueRows.length).toBe(1)
     }
   })
 })

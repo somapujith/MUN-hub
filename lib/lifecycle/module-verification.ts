@@ -136,6 +136,18 @@ const REVIEW_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
  * inserts all happen inside one transaction against a `FOR UPDATE`-locked
  * row, and the issues are inserted as a single batched multi-row insert
  * rather than a loop of individual inserts.
+ *
+ * Precondition, re-checked under the lock (mirrors `confirmModule`): the
+ * module must still be PENDING_REVIEW at the moment this transaction gets
+ * the lock. Without this check, the lock only serializes the two writes —
+ * it does not stop the second (now-unblocked) call from silently
+ * overwriting whatever the first call just committed, with no error and no
+ * signal that its own review was based on stale state. That's a strictly
+ * worse failure than throwing: a reviewer's VERIFIED decision could be
+ * clobbered by a concurrent REJECTED decision (or vice versa) after
+ * `checkAllModulesVerified` had already acted on the now-discarded VERIFIED
+ * write and auto-advanced the mun — leaving `muns.status` and the module's
+ * real (post-clobber) state permanently inconsistent.
  */
 export async function reviewModule(
   munId: string,
@@ -160,6 +172,12 @@ export async function reviewModule(
 
     if (!current) {
       throw new Error(`Internal error: module verification row for mun "${munId}" / module "${moduleName}" is missing`)
+    }
+
+    if (current.state !== 'PENDING_REVIEW') {
+      throw new Error(
+        `Module "${moduleName}" was already reviewed (current state: ${current.state}) — reload and try again`,
+      )
     }
 
     if (issues.length > 0) {
