@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
-import { committees, muns, munModuleVerifications, portfolios, registrationProducts, users } from '@/lib/db/schema'
+import { committees, muns, munModuleVerifications, portfolios, registrationProducts, users, verificationIssues } from '@/lib/db/schema'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import {
@@ -381,6 +381,45 @@ describe('mun-config actions', () => {
 
       const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
       expect(updatedMun.status).toBe('DRAFT')
+    })
+  })
+
+  describe('progress engine wiring (Task 8 integration proof)', () => {
+    it('a committee edit moves the mun overallPercentage — proves onModuleDataChanged is actually wired, not just unit-tested in isolation', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id, { status: 'ONBOARDING' })
+      const session = sessionFor(organizer)
+
+      const committee = await createCommittee({ munId: mun.id, name: 'UNGA', capacity: 50 }, session)
+
+      const [committeeModuleRow] = await db
+        .select()
+        .from(munModuleVerifications)
+        .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'COMMITTEES')))
+      expect(committeeModuleRow).toBeDefined()
+      expect(committeeModuleRow.lastComputedAt).not.toBeNull()
+      expect(committeeModuleRow.completionStatus).toBe('COMPLETE')
+
+      // Mun-level materialization ran too: ONBOARDING -> READY_FOR_SUBMISSION,
+      // since every stubbed module is COMPLETE with zero blocking issues.
+      const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(updatedMun.status).toBe('READY_FOR_SUBMISSION')
+
+      // Now push it back to ACTION_REQUIRED by editing the same committee
+      // while a BLOCKER issue is outstanding, and confirm the UPDATE path
+      // (not just create) re-triggers the engine — the same aggregate that
+      // drives overallPercentage is what flips this materialized status.
+      await db.insert(verificationIssues).values({
+        munId: mun.id,
+        moduleName: 'COMMITTEES',
+        severity: 'BLOCKER',
+        reason: 'Regression-test blocker',
+        raisedBy: organizer.id,
+      })
+      await updateCommittee(committee.id, { capacity: 60 }, session)
+
+      const [munAfterUpdate] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(munAfterUpdate.status).toBe('ACTION_REQUIRED')
     })
   })
 

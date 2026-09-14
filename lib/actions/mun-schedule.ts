@@ -6,6 +6,7 @@ import { committees, munScheduleItems } from '@/lib/db/schema'
 import type { ScheduleItemKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
+import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 
 // -----------------------------------------------------------------------------
 // mun-schedule — SCHEDULE module (PRD Section 21)
@@ -78,6 +79,9 @@ export async function createScheduleItem(input: CreateScheduleItemInput, session
       displayOrder: input.displayOrder ?? 0,
     })
     .returning()
+
+  await onModuleDataChanged(input.munId, 'SCHEDULE', session!.userId)
+
   return created
 }
 
@@ -114,6 +118,9 @@ export async function updateScheduleItem(
     .where(eq(munScheduleItems.id, id))
     .returning()
   if (!updated) throw new Error('Schedule item not found')
+
+  await onModuleDataChanged(existing.munId, 'SCHEDULE', session!.userId)
+
   return updated
 }
 
@@ -127,6 +134,8 @@ export async function deleteScheduleItem(id: string, session: Session | null): P
   await assertOwnsOrAdmin(existing.munId, session)
 
   await db.delete(munScheduleItems).where(eq(munScheduleItems.id, id))
+
+  await onModuleDataChanged(existing.munId, 'SCHEDULE', session!.userId)
 }
 
 /** Public read, no auth — the mun detail page renders the published schedule. */

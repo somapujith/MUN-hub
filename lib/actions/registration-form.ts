@@ -6,6 +6,7 @@ import { munFormFields } from '@/lib/db/schema'
 import type { FormFieldType } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
+import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 
 // -----------------------------------------------------------------------------
 // registration-form — REGISTRATION_FORM module (PRD Section 17)
@@ -152,8 +153,9 @@ export async function createFormField(input: CreateFormFieldInput, session: Sess
     await assertNoConditionalCycle(input.munId, input.fieldKey, input.conditionalOn)
   }
 
+  let created: FormField
   try {
-    const [created] = await db
+    ;[created] = await db
       .insert(munFormFields)
       .values({
         munId: input.munId,
@@ -169,13 +171,16 @@ export async function createFormField(input: CreateFormFieldInput, session: Sess
         conditionalValue: input.conditionalValue ?? null,
       })
       .returning()
-    return created
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw new Error(`fieldKey "${input.fieldKey}" is already used on this mun — fieldKey must be unique per mun`)
     }
     throw error
   }
+
+  await onModuleDataChanged(input.munId, 'REGISTRATION_FORM', session!.userId)
+
+  return created
 }
 
 export interface UpdateFormFieldInput {
@@ -205,20 +210,24 @@ export async function updateFormField(id: string, input: UpdateFormFieldInput, s
     await assertNoConditionalCycle(existing.munId, effectiveFieldKey, input.conditionalOn)
   }
 
+  let updated: FormField
   try {
-    const [updated] = await db
+    ;[updated] = await db
       .update(munFormFields)
       .set(input)
       .where(eq(munFormFields.id, id))
       .returning()
     if (!updated) throw new Error('Form field not found')
-    return updated
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw new Error(`fieldKey "${effectiveFieldKey}" is already used on this mun — fieldKey must be unique per mun`)
     }
     throw error
   }
+
+  await onModuleDataChanged(existing.munId, 'REGISTRATION_FORM', session!.userId)
+
+  return updated
 }
 
 export async function deleteFormField(id: string, session: Session | null): Promise<void> {
@@ -236,6 +245,8 @@ export async function deleteFormField(id: string, session: Session | null): Prom
   }
 
   await db.delete(munFormFields).where(eq(munFormFields.id, id))
+
+  await onModuleDataChanged(existing.munId, 'REGISTRATION_FORM', session!.userId)
 }
 
 export interface ReorderFormFieldsInput {
@@ -271,6 +282,8 @@ export async function reorderFormFields(input: ReorderFormFieldsInput, session: 
         .where(and(eq(munFormFields.id, id), eq(munFormFields.munId, input.munId)))
     }
   })
+
+  await onModuleDataChanged(input.munId, 'REGISTRATION_FORM', session!.userId)
 
   return listFormFields(input.munId)
 }

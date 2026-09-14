@@ -6,6 +6,7 @@ import { committees, munExecutiveBoard } from '@/lib/db/schema'
 import type { EbRole } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
+import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 
 // -----------------------------------------------------------------------------
 // executive-board — EXECUTIVE_BOARD module (PRD Section 14)
@@ -83,6 +84,9 @@ export async function createEbMember(input: CreateEbMemberInput, session: Sessio
       displayOrder: input.displayOrder ?? 0,
     })
     .returning()
+
+  await onModuleDataChanged(input.munId, 'EXECUTIVE_BOARD', session!.userId)
+
   return created
 }
 
@@ -126,6 +130,9 @@ export async function updateEbMember(
     .where(eq(munExecutiveBoard.id, id))
     .returning()
   if (!updated) throw new Error('Executive board member not found')
+
+  await onModuleDataChanged(existing.munId, 'EXECUTIVE_BOARD', session!.userId)
+
   return updated
 }
 
@@ -139,6 +146,8 @@ export async function deleteEbMember(id: string, session: Session | null): Promi
   await assertOwnsOrAdmin(existing.munId, session)
 
   await db.delete(munExecutiveBoard).where(eq(munExecutiveBoard.id, id))
+
+  await onModuleDataChanged(existing.munId, 'EXECUTIVE_BOARD', session!.userId)
 }
 
 /** Public read, no auth — the mun detail page renders the executive board. */

@@ -6,6 +6,7 @@ import { munMedia } from '@/lib/db/schema'
 import type { MunMediaKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
+import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 import { mockStorageAdapter } from '@/lib/storage/mock-adapter'
 import type { StorageAdapter } from '@/lib/storage/adapter'
 
@@ -86,52 +87,57 @@ export async function uploadMunMedia(input: UploadMunMediaInput, session: Sessio
     displayOrder: input.displayOrder ?? 0,
   }
 
+  let created: MunMediaItem
+
   if (!UPSERT_KINDS.includes(input.kind)) {
-    const [created] = await db.insert(munMedia).values(values).returning()
-    return created
+    ;[created] = await db.insert(munMedia).values(values).returning()
+  } else {
+    created = await db.transaction(async (tx) => {
+      const existingOfKind = await tx
+        .select({ id: munMedia.id, storageKey: munMedia.storageKey })
+        .from(munMedia)
+        .where(and(eq(munMedia.munId, input.munId), eq(munMedia.kind, input.kind)))
+
+      for (const row of existingOfKind) {
+        await tx.delete(munMedia).where(eq(munMedia.id, row.id))
+      }
+
+      const [insertedRow] = await tx.insert(munMedia).values(values).returning()
+
+      // storage.delete() of the OLD key runs here, inside the SQL transaction
+      // callback, after the new row's insert but before the callback returns
+      // (i.e. before Postgres commits). It is NOT part of the SQL transaction
+      // itself — storage operations can't participate in a Postgres COMMIT/
+      // ROLLBACK — so this ordering only changes what happens on failure, not
+      // real atomicity between the DB and the storage backend:
+      //   - If storage.delete() throws, this callback throws too, so Drizzle
+      //     rolls back the delete+insert above. The DB then stays consistent
+      //     with the OLD row and OLD storage key — not exploitable, just an
+      //     upload that has to be retried.
+      //   - The real orphan risk runs the OTHER way: storage.upload() of the
+      //     NEW file (above, outside/before this transaction even starts) has
+      //     already happened by this point. If anything from here on throws —
+      //     including this storage.delete() call failing — the transaction
+      //     rolls back the DB insert, but the newly-uploaded object already
+      //     exists in storage with no DB row referencing it. That NEW object
+      //     is the one left orphaned, not the old one being deleted here.
+      // Accepted for now: the mock adapter's upload()/delete() never throw, so
+      // this path isn't exercised today. A real StorageAdapter (e.g. R2) should
+      // either move the upload as late as possible (immediately before this
+      // insert, minimizing the exposure window) or add an out-of-band orphan
+      // sweep — don't copy this ordering into Task 6+ uploads without
+      // addressing that.
+      for (const row of existingOfKind) {
+        await storage.delete(row.storageKey)
+      }
+
+      return insertedRow
+    })
   }
 
-  return db.transaction(async (tx) => {
-    const existingOfKind = await tx
-      .select({ id: munMedia.id, storageKey: munMedia.storageKey })
-      .from(munMedia)
-      .where(and(eq(munMedia.munId, input.munId), eq(munMedia.kind, input.kind)))
+  await onModuleDataChanged(input.munId, 'BRANDING', session!.userId)
 
-    for (const row of existingOfKind) {
-      await tx.delete(munMedia).where(eq(munMedia.id, row.id))
-    }
-
-    const [created] = await tx.insert(munMedia).values(values).returning()
-
-    // storage.delete() of the OLD key runs here, inside the SQL transaction
-    // callback, after the new row's insert but before the callback returns
-    // (i.e. before Postgres commits). It is NOT part of the SQL transaction
-    // itself — storage operations can't participate in a Postgres COMMIT/
-    // ROLLBACK — so this ordering only changes what happens on failure, not
-    // real atomicity between the DB and the storage backend:
-    //   - If storage.delete() throws, this callback throws too, so Drizzle
-    //     rolls back the delete+insert above. The DB then stays consistent
-    //     with the OLD row and OLD storage key — not exploitable, just an
-    //     upload that has to be retried.
-    //   - The real orphan risk runs the OTHER way: storage.upload() of the
-    //     NEW file (above, outside/before this transaction even starts) has
-    //     already happened by this point. If anything from here on throws —
-    //     including this storage.delete() call failing — the transaction
-    //     rolls back the DB insert, but the newly-uploaded object already
-    //     exists in storage with no DB row referencing it. That NEW object
-    //     is the one left orphaned, not the old one being deleted here.
-    // Accepted for now: the mock adapter's upload()/delete() never throw, so
-    // this path isn't exercised today. A real StorageAdapter (e.g. R2) should
-    // either move the upload as late as possible (immediately before this
-    // insert, minimizing the exposure window) or add an out-of-band orphan
-    // sweep — don't copy this ordering into Task 6+ uploads without
-    // addressing that.
-    for (const row of existingOfKind) {
-      await storage.delete(row.storageKey)
-    }
-
-    return created
-  })
+  return created
 }
 
 /** Public read, no auth — the mun detail page and organizer dashboard both render gallery/branding assets. */
@@ -151,6 +157,8 @@ export async function deleteMunMedia(id: string, session: Session | null): Promi
 
   await db.delete(munMedia).where(eq(munMedia.id, id))
   await storage.delete(existing.storageKey)
+
+  await onModuleDataChanged(existing.munId, 'BRANDING', session!.userId)
 }
 
 /**
@@ -183,4 +191,6 @@ export async function reorderGallery(munId: string, orderedIds: string[], sessio
       await tx.update(munMedia).set({ displayOrder: index }).where(eq(munMedia.id, id))
     }
   })
+
+  await onModuleDataChanged(munId, 'BRANDING', session!.userId)
 }

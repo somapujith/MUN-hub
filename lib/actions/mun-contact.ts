@@ -5,6 +5,7 @@ import { db } from '@/lib/db/client'
 import { munContacts } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
+import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 
 // -----------------------------------------------------------------------------
 // mun-contact — CONTACT module (PRD Section 23)
@@ -70,6 +71,9 @@ export async function upsertMunContact(
       set: values,
     })
     .returning()
+
+  await onModuleDataChanged(munId, 'CONTACT', session!.userId)
+
   return result
 }
 

@@ -6,6 +6,7 @@ import { accommodationOptionFields, accommodationOptions } from '@/lib/db/schema
 import type { AccommodationFieldType } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
+import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 
 async function getMunIdForOption(optionId: string): Promise<string> {
   const [option] = await db
@@ -46,6 +47,9 @@ export async function createAccommodationOption(
 ): Promise<AccommodationOption> {
   await assertOwnsOrAdmin(input.munId, session)
   const [option] = await db.insert(accommodationOptions).values(input).returning()
+
+  await onModuleDataChanged(input.munId, 'ACCOMMODATION', session!.userId)
+
   return option
 }
 
@@ -71,6 +75,9 @@ export async function updateAccommodationOption(
     .where(eq(accommodationOptions.id, id))
     .returning()
   if (!updated) throw new Error('Accommodation option not found')
+
+  await onModuleDataChanged(munId, 'ACCOMMODATION', session!.userId)
+
   return updated
 }
 
@@ -86,6 +93,8 @@ export async function deleteAccommodationOption(id: string, session: Session | n
   await assertOwnsOrAdmin(munId, session)
 
   await db.update(accommodationOptions).set({ status: 'inactive' }).where(eq(accommodationOptions.id, id))
+
+  await onModuleDataChanged(munId, 'ACCOMMODATION', session!.userId)
 }
 
 /**
@@ -148,6 +157,9 @@ export async function createAccommodationOptionField(
   }
 
   const [field] = await db.insert(accommodationOptionFields).values(input).returning()
+
+  await onModuleDataChanged(munId, 'ACCOMMODATION', session!.userId)
+
   return field
 }
 
@@ -180,6 +192,9 @@ export async function updateAccommodationOptionField(
     .where(eq(accommodationOptionFields.id, id))
     .returning()
   if (!updated) throw new Error('Accommodation field not found')
+
+  await onModuleDataChanged(munId, 'ACCOMMODATION', session!.userId)
+
   return updated
 }
 
@@ -196,6 +211,8 @@ export async function deleteAccommodationOptionField(id: string, session: Sessio
   await assertOwnsOrAdmin(munId, session)
 
   await db.delete(accommodationOptionFields).where(eq(accommodationOptionFields.id, id))
+
+  await onModuleDataChanged(munId, 'ACCOMMODATION', session!.userId)
 }
 
 /** Public read, no auth — the registration funnel renders these to compose the accommodation step's form. */

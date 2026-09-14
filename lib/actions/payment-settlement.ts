@@ -31,6 +31,7 @@ import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
 import { encryptField } from '@/lib/crypto/field-encryption'
+import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 
 const PUBLISH_ROLES = ['ADMIN', 'SUPER_ADMIN'] as const
 
@@ -190,6 +191,8 @@ export async function upsertPaymentSettings(
     })
     .returning(MASKED_COLUMNS)
 
+  await onModuleDataChanged(munId, 'PAYMENT_SETTLEMENT', session!.userId)
+
   return row
 }
 
@@ -218,6 +221,14 @@ export async function getPaymentSettings(munId: string, session: Session | null)
  * this account. Row-locks the settings row and writes the `admin_actions`
  * row in the same transaction as the state change so the two can never
  * diverge.
+ *
+ * Deliberately does NOT call `onModuleDataChanged` — this is an admin review
+ * action on an already-submitted module (PRD Section 19's off-platform
+ * verification step), not organizer data entry. Re-triggering the
+ * ONBOARDING/ACTION_REQUIRED/READY_FOR_SUBMISSION materialization from an
+ * admin's verification decision would conflate the two axes this whole
+ * design is built to keep separate (design doc Section 3.1) — see the task
+ * brief's explicit carve-out for this function.
  *
  * Enum-value note: `adminActionEnum` (lib/db/schema-enums.ts) does not yet
  * have a value for "payment verification state changed" — design doc
