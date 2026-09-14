@@ -2,11 +2,12 @@
 
 import { and, asc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { munFormFields } from '@/lib/db/schema'
+import { muns, munFormFields } from '@/lib/db/schema'
 import type { FormFieldType } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { forceReverification } from '@/lib/lifecycle/reverification'
 
 // -----------------------------------------------------------------------------
 // registration-form — REGISTRATION_FORM module (PRD Section 17)
@@ -26,6 +27,24 @@ import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 //  4. Deleting a field that another field's `conditionalOn` points at is
 //     rejected, naming the dependent field(s), rather than silently orphaning
 //     the reference.
+//
+// STRUCTURAL RE-VERIFICATION EXCEPTION (Task 12, design doc Section 6):
+// REGISTRATION_FORM's HIGH_IMPACT_FIELDS list is deliberately `[]` — a
+// field-level diff over form field data is not how this module's real
+// high-impact changes show up. `detectHighImpactChange` is a PURE
+// before/after field diff over a single row's fields; it structurally
+// cannot see (a) a field being DELETED (a deleted field simply isn't present
+// in the "after" object — that's an absence, not a diff on a shared key) or
+// (b) an existing registrant-facing behavior change like a field flipping
+// from optional to required after people may have already registered under
+// the old, more lenient form. Both are real "the published form's contract
+// changed" events for a mun that has already been verified — so for those
+// two specific operations, on a mun that is past VERIFIED, this file calls
+// `forceReverification('REGISTRATION_FORM', ...)` DIRECTLY instead of
+// relying on `detectHighImpactChange`/`triggerReverificationIfNeeded`. This
+// is not an inconsistency with the rest of the codebase's re-verification
+// pattern — it's a necessary exception for exactly the two cases the pure
+// diff detector cannot express.
 
 const CHOICE_FIELD_TYPES: readonly FormFieldType[] = ['DROPDOWN', 'MULTIPLE_CHOICE', 'CHECKBOX']
 
@@ -131,6 +150,14 @@ async function findDependents(munId: string, fieldKey: string): Promise<string[]
   return rows.map((row) => row.fieldKey)
 }
 
+/** Mirrors reverification.ts's POST_VERIFICATION_STATUSES membership check for the statuses where "already verified" behavior applies. */
+const POST_VERIFICATION_STATUSES = ['VERIFIED', 'PUBLISHED', 'UNPUBLISHED', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED']
+
+async function isMunPostVerified(munId: string): Promise<boolean> {
+  const [mun] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).limit(1)
+  return !!mun && POST_VERIFICATION_STATUSES.includes(mun.status)
+}
+
 export interface CreateFormFieldInput {
   munId: string
   fieldKey: string
@@ -210,6 +237,14 @@ export async function updateFormField(id: string, input: UpdateFormFieldInput, s
     await assertNoConditionalCycle(existing.munId, effectiveFieldKey, input.conditionalOn)
   }
 
+  // Structural exception (see file header comment): flipping required
+  // false -> true is a registrant-facing contract change that
+  // detectHighImpactChange cannot see, since REGISTRATION_FORM's
+  // HIGH_IMPACT_FIELDS list is deliberately empty. Captured BEFORE the write
+  // so "before" reflects the actual pre-update value, not a race against the
+  // update below.
+  const isOptionalToRequiredFlip = existing.required === false && input.required === true
+
   let updated: FormField
   try {
     ;[updated] = await db
@@ -226,6 +261,10 @@ export async function updateFormField(id: string, input: UpdateFormFieldInput, s
   }
 
   await onModuleDataChanged(existing.munId, 'REGISTRATION_FORM', session!.userId)
+
+  if (isOptionalToRequiredFlip && (await isMunPostVerified(existing.munId))) {
+    await forceReverification('REGISTRATION_FORM', existing.munId, session!.userId)
+  }
 
   return updated
 }
@@ -247,6 +286,14 @@ export async function deleteFormField(id: string, session: Session | null): Prom
   await db.delete(munFormFields).where(eq(munFormFields.id, id))
 
   await onModuleDataChanged(existing.munId, 'REGISTRATION_FORM', session!.userId)
+
+  // Structural exception (see file header comment): a deleted field is an
+  // ABSENCE, not a diff on a shared key, so detectHighImpactChange
+  // structurally cannot see it. Force re-verification directly if the mun is
+  // already past VERIFIED.
+  if (await isMunPostVerified(existing.munId)) {
+    await forceReverification('REGISTRATION_FORM', existing.munId, session!.userId)
+  }
 }
 
 export interface ReorderFormFieldsInput {

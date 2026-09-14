@@ -1,7 +1,7 @@
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
-import { munFormFields, muns, users } from '@/lib/db/schema'
+import { munFormFields, munModuleVerifications, muns, users } from '@/lib/db/schema'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import {
@@ -349,6 +349,125 @@ describe('registration-form actions', () => {
       expect(listA).toHaveLength(2)
       expect(listA[0].fieldKey).toBe('a1')
       expect(listA[1].fieldKey).toBe('a2')
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // Task 12 — structural re-verification exception (design doc Section 6).
+  // detectHighImpactChange cannot see a field deletion or an
+  // optional-to-required flip (REGISTRATION_FORM's HIGH_IMPACT_FIELDS list
+  // is deliberately empty), so registration-form.ts calls
+  // forceReverification directly for those two operations when the mun is
+  // already past VERIFIED.
+  // -----------------------------------------------------------------------
+  describe('structural re-verification exception', () => {
+    async function moduleState(munId: string) {
+      const [row] = await db
+        .select()
+        .from(munModuleVerifications)
+        .where(and(eq(munModuleVerifications.munId, munId), eq(munModuleVerifications.moduleName, 'REGISTRATION_FORM')))
+      return row
+    }
+
+    it('forces re-verification when deleting a field on a post-VERIFIED mun', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+      const field = await createFormField({ munId: mun.id, fieldKey: 'to_delete', fieldType: 'SHORT_TEXT', label: 'D' }, session)
+
+      // Move the mun to VERIFIED and mark the module VERIFIED after field
+      // creation, so onModuleDataChanged's own create-time pass doesn't
+      // interfere with the assertion below.
+      await db.update(muns).set({ status: 'VERIFIED' }).where(eq(muns.id, mun.id))
+      await db
+        .update(munModuleVerifications)
+        .set({ state: 'VERIFIED' })
+        .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'REGISTRATION_FORM')))
+
+      await deleteFormField(field.id, session)
+
+      const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(updatedMun.status).toBe('VERIFICATION')
+
+      const row = await moduleState(mun.id)
+      expect(row?.state).toBe('PENDING_REVIEW')
+    })
+
+    it('forces re-verification when flipping a field from optional to required on a post-VERIFIED mun', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+      const field = await createFormField(
+        { munId: mun.id, fieldKey: 'opt_to_req', fieldType: 'SHORT_TEXT', label: 'O', required: false },
+        session,
+      )
+
+      await db.update(muns).set({ status: 'VERIFIED' }).where(eq(muns.id, mun.id))
+      await db
+        .update(munModuleVerifications)
+        .set({ state: 'VERIFIED' })
+        .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'REGISTRATION_FORM')))
+
+      await updateFormField(field.id, { required: true }, session)
+
+      const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(updatedMun.status).toBe('VERIFICATION')
+
+      const row = await moduleState(mun.id)
+      expect(row?.state).toBe('PENDING_REVIEW')
+    })
+
+    it('does NOT force re-verification for a field delete on a pre-VERIFIED (ONBOARDING) mun', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id, { status: 'ONBOARDING' })
+      const session = sessionFor(organizer)
+      const field = await createFormField({ munId: mun.id, fieldKey: 'onboarding_delete', fieldType: 'SHORT_TEXT', label: 'D' }, session)
+
+      await deleteFormField(field.id, session)
+
+      const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      // onModuleDataChanged may still materialize ACTION_REQUIRED/READY_FOR_SUBMISSION
+      // during onboarding, but it must never reach VERIFICATION from here.
+      expect(updatedMun.status).not.toBe('VERIFICATION')
+    })
+
+    it('does NOT force re-verification for an optional-to-required flip on a pre-VERIFIED (ONBOARDING) mun', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id, { status: 'ONBOARDING' })
+      const session = sessionFor(organizer)
+      const field = await createFormField(
+        { munId: mun.id, fieldKey: 'onboarding_flip', fieldType: 'SHORT_TEXT', label: 'O', required: false },
+        session,
+      )
+
+      await updateFormField(field.id, { required: true }, session)
+
+      const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(updatedMun.status).not.toBe('VERIFICATION')
+    })
+
+    it('does NOT force re-verification for a required-to-optional flip (only optional->required matters) even post-VERIFIED', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+      const field = await createFormField(
+        { munId: mun.id, fieldKey: 'req_to_opt', fieldType: 'SHORT_TEXT', label: 'R', required: true },
+        session,
+      )
+
+      await db.update(muns).set({ status: 'VERIFIED' }).where(eq(muns.id, mun.id))
+      await db
+        .update(munModuleVerifications)
+        .set({ state: 'VERIFIED' })
+        .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'REGISTRATION_FORM')))
+
+      await updateFormField(field.id, { required: false }, session)
+
+      const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(updatedMun.status).toBe('VERIFIED')
+
+      const row = await moduleState(mun.id)
+      expect(row?.state).toBe('VERIFIED')
     })
   })
 
