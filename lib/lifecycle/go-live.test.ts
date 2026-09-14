@@ -247,8 +247,17 @@ describe('submitMunForReview', () => {
     // already-CONTENT_SUBMITTED/ORGANIZER_CONFIRMATION status precondition or
     // hits the friendly "already has an active submission" pre-check or the
     // partial-unique-index constraint itself — any of those is an acceptable
-    // rejection reason, the only invariant that matters is the row count.
-    expect(fulfilled.length + rejected.length).toBe(3)
+    // rejection reason. `fulfilled.length + rejected.length === 3` alone is
+    // a tautology (every settled promise is one or the other, regardless of
+    // distribution) — assert the actual 1/2 split explicitly so a regression
+    // where the row lock stops serializing (e.g. all 3 fulfill, or all 3
+    // reject) is caught here directly, not just indirectly via the final row
+    // count below.
+    expect(fulfilled.length).toBe(1)
+    expect(rejected.length).toBe(2)
+
+    expect(fulfilled[0].value.passed).toBe(true)
+    expect(fulfilled[0].value.submissionId).toBeTruthy()
 
     for (const failure of rejected) {
       expect(String(failure.reason)).toMatch(/already has an active submission|Cannot submit mun for review|Invalid transition|duplicate key|unique constraint/i)
@@ -256,6 +265,7 @@ describe('submitMunForReview', () => {
 
     const submissions = await db.select().from(munSubmissions).where(eq(munSubmissions.munId, mun.id))
     expect(submissions.length).toBe(1)
+    expect(submissions[0].id).toBe(fulfilled[0].value.submissionId)
   })
 })
 
