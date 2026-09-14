@@ -131,8 +131,11 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
 
     // Ensure every tracked module has a row before we read/aggregate — cheap
     // no-op for modules already touched (see getModuleVerificationState).
+    // `transaction` is threaded through so the lazy-create insert
+    // participates in and rolls back with this transaction instead of
+    // running on a separate connection outside it.
     for (const moduleKey of TRACKED_MODULES) {
-      await getModuleVerificationState(munId, moduleKey)
+      await getModuleVerificationState(munId, moduleKey, transaction)
     }
 
     const rows = await transaction
@@ -204,9 +207,19 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
  *   4. Call the existing `triggerReverificationIfNeeded` for the
  *      post-verification high-impact-change path.
  *
- * Runs inside `tx` when the caller already has an open transaction (so this
- * hook's writes commit atomically with the caller's own write); otherwise
- * opens its own.
+ * Runs inside `tx` when the caller already has an open transaction, otherwise
+ * opens its own. **All four steps — including step 1's row lazy-create
+ * (`getModuleVerificationState`) and step 4's re-verification writes
+ * (`triggerReverificationIfNeeded`, and the `transitionMun` call inside it)
+ * — run against that same transaction handle**, so every write this function
+ * makes commits atomically with the caller's own write and rolls back
+ * together if the caller's transaction rolls back. (Fixed after initial
+ * landing: `getModuleVerificationState` and `triggerReverificationIfNeeded`
+ * previously had no `tx` parameter at all and always ran against the
+ * module-level `db` singleton, so when called from here they silently ran on
+ * a separate connection outside any caller's transaction — a real atomicity
+ * gap, latent only because no caller yet wrapped `onModuleDataChanged` in an
+ * outer transaction. Both functions now accept and honor an optional `tx`.)
  *
  * ---
  * Design decision — does a mun in ONBOARDING move to ACTION_REQUIRED the
@@ -250,7 +263,9 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
 export async function onModuleDataChanged(munId: string, moduleKey: MunModule, actorId: string, tx?: Tx): Promise<void> {
   const run = async (transaction: Tx): Promise<void> => {
     // Ensure the row exists before computing/persisting against it.
-    await getModuleVerificationState(munId, moduleKey)
+    // `transaction` threaded through — see getModuleVerificationState's
+    // docstring for why this matters.
+    await getModuleVerificationState(munId, moduleKey, transaction)
 
     // 1. Recompute and persist that ONE module's completion row.
     const moduleResult = await computeModuleCompletion(munId, moduleKey)
@@ -292,7 +307,10 @@ export async function onModuleDataChanged(munId: string, moduleKey: MunModule, a
     // Task 12 later gives a non-empty `HIGH_IMPACT_FIELDS` entry; modules
     // with no entry yet (empty list default) are correctly no-ops via
     // `detectHighImpactChange`'s `fields.some(...)` over an empty array.
-    await triggerReverificationIfNeeded(moduleKey, {}, {}, munId, actorId)
+    // `transaction` threaded through so its reads/writes (and its own
+    // `transitionMun` call, if any) participate in this transaction instead
+    // of running on a separate one.
+    await triggerReverificationIfNeeded(moduleKey, {}, {}, munId, actorId, transaction)
   }
 
   if (tx) {

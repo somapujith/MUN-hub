@@ -193,3 +193,55 @@ describe('onModuleDataChanged — ONBOARDING/ACTION_REQUIRED/READY_FOR_SUBMISSIO
     expect(updated.status).toBe('DRAFT')
   })
 })
+
+describe('onModuleDataChanged — atomicity with a caller-supplied transaction', () => {
+  it('rolls back everything (including the lazy-created module row) when the outer transaction rolls back', async () => {
+    const organizer = await makeUser()
+    const mun = await makeMun(organizer.id, 'ONBOARDING')
+
+    // No module rows exist yet for this fresh mun — calling onModuleDataChanged
+    // inside a transaction that we then force to roll back is the sharpest
+    // possible proof of the atomicity fix: getModuleVerificationState's
+    // lazy-create INSERT must run on the SAME connection as this transaction
+    // for the rollback to undo it. Before the fix, that insert ran on the
+    // module-level `db` singleton (a separate connection) and would have
+    // survived the rollback.
+    const rollbackError = new Error('forced rollback for atomicity test')
+    await expect(
+      db.transaction(async (tx) => {
+        await onModuleDataChanged(mun.id, 'COMMITTEES', organizer.id, tx)
+        throw rollbackError
+      }),
+    ).rejects.toThrow(rollbackError)
+
+    const [row] = await db
+      .select()
+      .from(munModuleVerifications)
+      .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'COMMITTEES')))
+    expect(row).toBeUndefined()
+
+    // The mun-level status flip (ONBOARDING -> READY_FOR_SUBMISSION) must
+    // also have rolled back, since it ran on the same transaction.
+    const [munAfterRollback] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(munAfterRollback.status).toBe('ONBOARDING')
+  })
+
+  it('commits everything (module row + status flip) when the outer transaction commits normally', async () => {
+    const organizer = await makeUser()
+    const mun = await makeMun(organizer.id, 'ONBOARDING')
+
+    await db.transaction(async (tx) => {
+      await onModuleDataChanged(mun.id, 'COMMITTEES', organizer.id, tx)
+    })
+
+    const [row] = await db
+      .select()
+      .from(munModuleVerifications)
+      .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'COMMITTEES')))
+    expect(row).toBeDefined()
+    expect(row.completionStatus).toBe('COMPLETE')
+
+    const [munAfterCommit] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(munAfterCommit.status).toBe('READY_FOR_SUBMISSION')
+  })
+})

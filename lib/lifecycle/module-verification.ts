@@ -35,9 +35,28 @@ export interface ModuleVerification {
  * correct, the second caller should just see the winner's row. Fixed with
  * `onConflictDoNothing` + a follow-up select, so the row exists either way:
  * either this insert won, or someone else's did and we read theirs.
+ *
+ * Accepts an optional `tx` (Drizzle transaction) — when given, every read
+ * and the lazy-create insert run against it instead of the module-level
+ * `db` singleton, so this call's writes participate in the caller's
+ * transaction and roll back with it. Defaults to `db` when omitted,
+ * preserving the exact standalone behavior every existing caller already
+ * relies on. Added because `onModuleDataChanged` (module-completion.ts)
+ * previously called this without threading its own `tx` through — a real
+ * atomicity gap: if the caller's outer transaction later rolled back, this
+ * function's lazy-create insert would NOT roll back with it, having run on
+ * a separate connection. Latent until a caller wraps `onModuleDataChanged`
+ * in an outer transaction (Task 10's `submitMunForReview` is exactly that
+ * caller per the plan) — fixed here ahead of that.
  */
-export async function getModuleVerificationState(munId: string, moduleName: MunModule): Promise<ModuleVerification> {
-  const [existing] = await db
+export async function getModuleVerificationState(
+  munId: string,
+  moduleName: MunModule,
+  tx?: Tx,
+): Promise<ModuleVerification> {
+  const client = tx ?? db
+
+  const [existing] = await client
     .select()
     .from(munModuleVerifications)
     .where(and(eq(munModuleVerifications.munId, munId), eq(munModuleVerifications.moduleName, moduleName)))
@@ -45,12 +64,12 @@ export async function getModuleVerificationState(munId: string, moduleName: MunM
 
   if (existing) return existing
 
-  await db
+  await client
     .insert(munModuleVerifications)
     .values({ munId, moduleName, state: 'NOT_SUBMITTED', isRequired: getModuleDefinition(moduleName).defaultRequired })
     .onConflictDoNothing({ target: [munModuleVerifications.munId, munModuleVerifications.moduleName] })
 
-  const [row] = await db
+  const [row] = await client
     .select()
     .from(munModuleVerifications)
     .where(and(eq(munModuleVerifications.munId, munId), eq(munModuleVerifications.moduleName, moduleName)))
