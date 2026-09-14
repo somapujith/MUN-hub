@@ -6,7 +6,7 @@ import { committees, munScheduleItems } from '@/lib/db/schema'
 import type { ScheduleItemKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
-import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 
 // -----------------------------------------------------------------------------
 // mun-schedule — SCHEDULE module (PRD Section 21)
@@ -14,6 +14,9 @@ import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 //
 // Validation rules: endsAt must be strictly after startsAt, and committeeId
 // (if set) must belong to the same mun — same IDOR check as executive-board.
+//
+// SCHEDULE is a high-impact module (Task 12) — every mutation here calls
+// `assertModuleNotLocked` right after the ownership check.
 
 export interface ScheduleItem {
   id: string
@@ -63,6 +66,7 @@ export interface CreateScheduleItemInput {
 
 export async function createScheduleItem(input: CreateScheduleItemInput, session: Session | null): Promise<ScheduleItem> {
   await assertOwnsOrAdmin(input.munId, session)
+  await assertModuleNotLocked(input.munId, 'SCHEDULE', session)
   validateTimes(input.startsAt, input.endsAt)
   await assertCommitteeBelongsToMun(input.committeeId, input.munId)
 
@@ -103,6 +107,7 @@ export async function updateScheduleItem(
   const [existing] = await db.select().from(munScheduleItems).where(eq(munScheduleItems.id, id)).limit(1)
   if (!existing) throw new Error('Schedule item not found')
   await assertOwnsOrAdmin(existing.munId, session)
+  await assertModuleNotLocked(existing.munId, 'SCHEDULE', session)
 
   const effectiveStartsAt = input.startsAt ?? existing.startsAt
   const effectiveEndsAt = input.endsAt ?? existing.endsAt
@@ -132,6 +137,7 @@ export async function deleteScheduleItem(id: string, session: Session | null): P
     .limit(1)
   if (!existing) throw new Error('Schedule item not found')
   await assertOwnsOrAdmin(existing.munId, session)
+  await assertModuleNotLocked(existing.munId, 'SCHEDULE', session)
 
   await db.delete(munScheduleItems).where(eq(munScheduleItems.id, id))
 

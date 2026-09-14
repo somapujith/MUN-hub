@@ -6,7 +6,7 @@ import { munDocuments } from '@/lib/db/schema'
 import type { MunDocumentKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
-import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 import { mockStorageAdapter } from '@/lib/storage/mock-adapter'
 import type { StorageAdapter } from '@/lib/storage/adapter'
 
@@ -18,6 +18,9 @@ import type { StorageAdapter } from '@/lib/storage/adapter'
 // this file, before touching storage; storage key is always a server-
 // generated UUID under muns/{munId}/documents/, never derived from the
 // caller-supplied filename.
+//
+// RULES_DOCUMENTS is a high-impact module (Task 12) — every mutation here
+// calls `assertModuleNotLocked` right after the ownership check.
 
 const storage: StorageAdapter = mockStorageAdapter
 
@@ -59,6 +62,7 @@ export async function uploadMunDocument(
   session: Session | null,
 ): Promise<MunDocumentItem> {
   await assertOwnsOrAdmin(input.munId, session)
+  await assertModuleNotLocked(input.munId, 'RULES_DOCUMENTS', session)
   validateUpload(input.file, input.contentType)
 
   const key = `muns/${input.munId}/documents/${crypto.randomUUID()}`
@@ -96,6 +100,7 @@ export async function deleteMunDocument(id: string, session: Session | null): Pr
     .limit(1)
   if (!existing) throw new Error('Document not found')
   await assertOwnsOrAdmin(existing.munId, session)
+  await assertModuleNotLocked(existing.munId, 'RULES_DOCUMENTS', session)
 
   await db.delete(munDocuments).where(eq(munDocuments.id, id))
   await storage.delete(existing.storageKey)

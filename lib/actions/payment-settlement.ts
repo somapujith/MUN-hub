@@ -21,6 +21,12 @@
 // value is always the `MaskedPaymentSettings` type, which structurally omits
 // the ciphertext fields entirely (not just marks them optional). There is no
 // decrypt-and-return action anywhere in this codebase (see field-encryption.ts).
+//
+// PAYMENT_SETTLEMENT is a high-impact module AND the single highest-
+// consequence entry in the re-verification table (Task 12, design doc
+// Section 6 — the fraud vector of swapping bank details post-approval).
+// `upsertPaymentSettings` calls `assertModuleNotLocked` right after the
+// ownership check, same as every other high-impact module's write path.
 
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
@@ -31,7 +37,7 @@ import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
 import { encryptField } from '@/lib/crypto/field-encryption'
-import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 
 const PUBLISH_ROLES = ['ADMIN', 'SUPER_ADMIN'] as const
 
@@ -151,6 +157,7 @@ export async function upsertPaymentSettings(
   session: Session | null,
 ): Promise<MaskedPaymentSettings> {
   await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'PAYMENT_SETTLEMENT', session)
 
   const panCiphertext = encryptField(input.pan)
   const accountNumberCiphertext = encryptField(input.accountNumber)
@@ -228,7 +235,9 @@ export async function getPaymentSettings(munId: string, session: Session | null)
  * ONBOARDING/ACTION_REQUIRED/READY_FOR_SUBMISSION materialization from an
  * admin's verification decision would conflate the two axes this whole
  * design is built to keep separate (design doc Section 3.1) — see the task
- * brief's explicit carve-out for this function.
+ * brief's explicit carve-out for this function. Also deliberately does NOT
+ * call `assertModuleNotLocked` — this IS the admin/reviewer action the lock
+ * exists to still permit, not an organizer edit.
  *
  * Enum-value note (updated Task 11, 2026-09-14): now uses the dedicated
  * `PAYMENT_DETAILS_CHANGED` value on `adminActionEnum`, replacing the

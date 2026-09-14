@@ -5,7 +5,7 @@ import { db } from '@/lib/db/client'
 import { munContacts } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
-import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 
 // -----------------------------------------------------------------------------
 // mun-contact — CONTACT module (PRD Section 23)
@@ -15,6 +15,9 @@ import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 // uses `onConflictDoUpdate` against that constraint rather than a
 // read-then-write pattern — the latter has a TOCTOU race between the read
 // and the write that the DB constraint + onConflict clause avoids entirely.
+//
+// CONTACT is a high-impact module (Task 12) — the upsert calls
+// `assertModuleNotLocked` right after the ownership check.
 
 export interface MunContact {
   id: string
@@ -49,6 +52,7 @@ export async function upsertMunContact(
   session: Session | null,
 ): Promise<MunContact> {
   await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'CONTACT', session)
 
   const values = {
     munId,

@@ -6,7 +6,7 @@ import { committees, munExecutiveBoard } from '@/lib/db/schema'
 import type { EbRole } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
-import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 
 // -----------------------------------------------------------------------------
 // executive-board — EXECUTIVE_BOARD module (PRD Section 14)
@@ -18,6 +18,10 @@ import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 //     IDOR check. Without this, an organizer of mun A could attach an EB
 //     member to a committee belonging to mun B by supplying that committee's
 //     id, since committeeId alone doesn't prove same-mun ownership.
+//
+// EXECUTIVE_BOARD is a high-impact module (Task 12) — every mutation here
+// calls `assertModuleNotLocked` right after the ownership check, before any
+// row is touched.
 
 export interface ExecutiveBoardMember {
   id: string
@@ -68,6 +72,7 @@ export interface CreateEbMemberInput {
 
 export async function createEbMember(input: CreateEbMemberInput, session: Session | null): Promise<ExecutiveBoardMember> {
   await assertOwnsOrAdmin(input.munId, session)
+  await assertModuleNotLocked(input.munId, 'EXECUTIVE_BOARD', session)
   validateRole(input.role, input.customRole)
   await assertCommitteeBelongsToMun(input.committeeId, input.munId)
 
@@ -112,6 +117,7 @@ export async function updateEbMember(
     .limit(1)
   if (!existing) throw new Error('Executive board member not found')
   await assertOwnsOrAdmin(existing.munId, session)
+  await assertModuleNotLocked(existing.munId, 'EXECUTIVE_BOARD', session)
 
   const effectiveRole = input.role ?? existing.role
   const effectiveCustomRole = input.customRole !== undefined ? input.customRole : existing.customRole
@@ -144,6 +150,7 @@ export async function deleteEbMember(id: string, session: Session | null): Promi
     .limit(1)
   if (!existing) throw new Error('Executive board member not found')
   await assertOwnsOrAdmin(existing.munId, session)
+  await assertModuleNotLocked(existing.munId, 'EXECUTIVE_BOARD', session)
 
   await db.delete(munExecutiveBoard).where(eq(munExecutiveBoard.id, id))
 

@@ -2,10 +2,11 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, munModuleVerifications, verificationIssues } from '@/lib/db/schema'
 import type { MunModule, MunStatus, ModuleCompletionStatus, ModuleVerificationState } from '@/lib/db/schema-enums'
+import type { Session } from '@/lib/auth/adapter'
 import { getModuleDefinition, TRACKED_MODULES } from './module-registry'
 import { getModuleVerificationState } from './module-verification'
 import { transitionMun } from './mun-state-machine'
-import { triggerReverificationIfNeeded } from './reverification'
+import { isHighImpactModule, triggerReverificationIfNeeded } from './reverification'
 import { loadValidationContext, type MunValidationContext, type ModuleValidationResult } from './validation'
 
 // -----------------------------------------------------------------------------
@@ -20,11 +21,29 @@ import { loadValidationContext, type MunValidationContext, type ModuleValidation
 // `onModuleDataChanged` is the single choke point every module-mutation
 // action calls at the end of a successful write. It is intentionally the only
 // writer of the completion columns — nothing else should ever `UPDATE
-// mun_module_verifications SET completion_status = ...` directly.
+// mun_module_verifications SET completion_status = ...` directly, EXCEPT
+// `assertModuleNotLocked` below, which writes the `LOCKED` completionStatus
+// value specifically (a distinct concern: reflecting "this module is frozen
+// during active review" for the dashboard, not recomputing real completion).
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 const ONBOARDING_STATUSES: MunStatus[] = ['ONBOARDING', 'ACTION_REQUIRED', 'READY_FOR_SUBMISSION']
+
+/**
+ * Statuses where the mun is under active MUNHub review (Task 12 Step 4,
+ * design doc Section 9's "critical-field locking" follow-up, applied here to
+ * exactly the HIGH_IMPACT_FIELDS-non-empty modules). While a mun sits in one
+ * of these, an ORGANIZER edit to a high-impact module must be rejected —
+ * changing the very data a reviewer is currently looking at would silently
+ * invalidate their in-progress review.
+ */
+const UNDER_ACTIVE_REVIEW_STATUSES: MunStatus[] = [
+  'CONTENT_SUBMITTED',
+  'AUTOMATED_VALIDATION',
+  'ORGANIZER_CONFIRMATION',
+  'VERIFICATION',
+]
 
 export interface ValidationIssue {
   key: string
@@ -60,6 +79,66 @@ export interface MunProgress {
 }
 
 /**
+ * LOCKED-state enforcement (Task 12 Step 4, design doc Section 9). Call at
+ * the TOP of every organizer-facing update action whose module has a
+ * non-empty `HIGH_IMPACT_FIELDS` list (see reverification.ts's
+ * `isHighImpactModule` — the single source of truth for which modules this
+ * applies to): mun-config.ts's updateMunDetails/updateCommittee/
+ * updatePortfolio/updateRegistrationProduct (create/delete too, since a
+ * create or delete changes the same underlying data a reviewer is looking
+ * at just as much as an update does), executive-board.ts, mun-documents.ts,
+ * mun-schedule.ts, mun-contact.ts, and payment-settlement.ts's
+ * upsertPaymentSettings.
+ *
+ * Modules with an EMPTY `HIGH_IMPACT_FIELDS` list (BRANDING,
+ * REGISTRATION_FORM, FINAL_REVIEW) are deliberately NOT locked — by the same
+ * design-doc reasoning that keeps them out of re-verification: cosmetic/
+ * cheap-to-fix changes shouldn't be frozen mid-review, and REGISTRATION_FORM
+ * has its own narrower structural exception instead (registration-form.ts).
+ *
+ * Throws `Error('Forbidden')` if `session` is null (never trust an
+ * unauthenticated caller to even learn a mun's status). Admin/ops roles
+ * (ADMIN, SUPER_ADMIN, OPERATIONS) are NEVER blocked — a reviewer correcting
+ * a typo on the very mun they're reviewing is a legitimate workflow this
+ * function must not get in the way of; only an ORGANIZER-role caller (or any
+ * other non-privileged role) is rejected. Throws `Error('Mun not found')` if
+ * `munId` doesn't resolve, matching `assertOwnsOrAdmin`'s existing behavior
+ * for the same case elsewhere in this codebase.
+ *
+ * When it does reject, the thrown message names the module and explains that
+ * review is in progress — organizer-facing UI can show this directly rather
+ * than a bare "Forbidden".
+ */
+export async function assertModuleNotLocked(munId: string, moduleKey: MunModule, session: Session | null): Promise<void> {
+  if (!session) throw new Error('Forbidden')
+  if (session.role === 'ADMIN' || session.role === 'SUPER_ADMIN' || session.role === 'OPERATIONS') return
+  if (!isHighImpactModule(moduleKey)) return
+
+  const [mun] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).limit(1)
+  if (!mun) throw new Error('Mun not found')
+
+  if (UNDER_ACTIVE_REVIEW_STATUSES.includes(mun.status)) {
+    throw new Error(
+      `The "${moduleKey}" module is locked while this mun is under MUNHub review (current status: ${mun.status}) — changes to this module are blocked until review completes. Contact MUNHub support if this is urgent.`,
+    )
+  }
+}
+
+/**
+ * Sets `completionStatus = 'LOCKED'` on every high-impact tracked module's
+ * `mun_module_verifications` row for `munId` — the display-facing
+ * counterpart to `assertModuleNotLocked`'s enforcement. Called from
+ * `onModuleDataChanged`'s aggregate recompute path (via
+ * `recomputeMunProgress`) whenever the mun is currently in one of the
+ * `UNDER_ACTIVE_REVIEW_STATUSES`, so the organizer dashboard reflects LOCKED
+ * without requiring a separate write path that could drift out of sync with
+ * the real enforcement rule above.
+ */
+function isModuleLockedForStatus(moduleKey: MunModule, munStatus: MunStatus): boolean {
+  return isHighImpactModule(moduleKey) && UNDER_ACTIVE_REVIEW_STATUSES.includes(munStatus)
+}
+
+/**
  * Adapts a Task 9 `ModuleValidationResult` (`{ moduleKey, checks, passed }`)
  * into this file's `ModuleCompletionResult` (`{ completionStatus,
  * completionPercentage, blockingIssueCount, issues }`) — two different
@@ -80,8 +159,10 @@ export interface MunProgress {
  * ACTION_REQUIRED — IN_PROGRESS/NOT_STARTED/LOCKED are states this pure
  * adapter cannot itself determine (LOCKED needs review-state awareness,
  * NOT_STARTED/IN_PROGRESS need "has the organizer touched this module at
- * all" awareness) — those remain the caller's ('mun-config.ts' etc.,
- * outside this task's scope) responsibility, unchanged from Task 8.
+ * all" awareness) — LOCKED is now materialized by `persistModuleCompletion`
+ * below (Task 12), overriding this function's COMPLETE/ACTION_REQUIRED
+ * result when the mun is under active review; NOT_STARTED/IN_PROGRESS remain
+ * the caller's responsibility, unchanged from Task 8.
  */
 function toModuleCompletionResult(result: ModuleValidationResult): ModuleCompletionResult {
   const blockerChecks = result.checks.filter((c) => c.severity === 'BLOCKER')
@@ -123,17 +204,30 @@ export async function computeModuleCompletion(
   return toModuleCompletionResult(result)
 }
 
-/** Persists one module's freshly-computed completion result to its `mun_module_verifications` row. */
+/**
+ * Persists one module's freshly-computed completion result to its
+ * `mun_module_verifications` row. Overrides the computed COMPLETE/
+ * ACTION_REQUIRED `completionStatus` with `LOCKED` when the mun is currently
+ * under active review AND this module is high-impact (Task 12) — LOCKED is a
+ * display fact about "is this module currently frozen", layered on top of,
+ * not instead of, the real completion computation (the completion percentage
+ * and blocking-issue count are still the real computed values underneath).
+ */
 async function persistModuleCompletion(
   tx: Tx,
   munId: string,
   moduleKey: MunModule,
   result: ModuleCompletionResult,
+  munStatus: MunStatus,
 ): Promise<void> {
+  const completionStatus: ModuleCompletionStatus = isModuleLockedForStatus(moduleKey, munStatus)
+    ? 'LOCKED'
+    : result.completionStatus
+
   await tx
     .update(munModuleVerifications)
     .set({
-      completionStatus: result.completionStatus,
+      completionStatus,
       completionPercentage: result.completionPercentage,
       blockingIssueCount: result.blockingIssueCount,
       lastComputedAt: new Date(),
@@ -190,11 +284,11 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
       const isRequired = existingRow ? existingRow.isRequired : getModuleDefinition(moduleKey).defaultRequired
 
       const result = await computeModuleCompletion(munId, moduleKey, validationContext)
-      await persistModuleCompletion(transaction, munId, moduleKey, result)
+      await persistModuleCompletion(transaction, munId, moduleKey, result, mun.status)
 
       moduleProgress.push({
         key: moduleKey,
-        completionStatus: result.completionStatus,
+        completionStatus: isModuleLockedForStatus(moduleKey, mun.status) ? 'LOCKED' : result.completionStatus,
         completionPercentage: result.completionPercentage,
         blockingIssueCount: result.blockingIssueCount,
         isRequired,
@@ -314,9 +408,12 @@ export async function onModuleDataChanged(munId: string, moduleKey: MunModule, a
     // docstring for why this matters.
     await getModuleVerificationState(munId, moduleKey, transaction)
 
+    const [mun] = await transaction.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).limit(1)
+    if (!mun) throw new Error('Mun not found')
+
     // 1. Recompute and persist that ONE module's completion row.
     const moduleResult = await computeModuleCompletion(munId, moduleKey)
-    await persistModuleCompletion(transaction, munId, moduleKey, moduleResult)
+    await persistModuleCompletion(transaction, munId, moduleKey, moduleResult, mun.status)
 
     // 2. Recompute the mun's aggregate progress (reuses the same per-module
     // logic, including re-persisting every module's row — see
