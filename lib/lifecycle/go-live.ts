@@ -283,16 +283,16 @@ export interface ReviewSubmissionOptions {
  *     before the transaction even opens if missing/empty. mun -> REJECTED,
  *     submission -> REJECTED, `rejectionReason` stored, `decidedAt` set.
  *
- * Writes one `admin_actions` row in the same transaction as the decision.
- * `adminActionEnum` has no dedicated CHANGES_REQUESTED value (only
- * MUN_APPROVED/MUN_REJECTED were in this task's enum list) — for that
- * decision this uses `MODULE_REVIEWED` as the closest fit (an admin
- * recorded a review outcome on the submission short of a terminal
- * accept/reject), matching Task 6's precedent of documenting an
- * imperfect-fit enum choice rather than inventing one outside this task's
- * scope. `targetType`/`targetId` (`mun_submission`/the submission id) and
- * `metadata.decision` keep the audit trail unambiguous regardless of the
- * enum tag.
+ * Writes one `admin_actions` row in the same transaction as the decision:
+ * `MUN_APPROVED`, `MUN_CHANGES_REQUESTED`, or `MUN_REJECTED` respectively —
+ * all three are dedicated `adminActionEnum` values scoped to this Gate 2
+ * mun-level decision (added post-review: an earlier draft of this function
+ * reused `MODULE_REVIEWED` for the CHANGES_REQUESTED case, which was wrong
+ * — `MODULE_REVIEWED` is reserved for a future *per-module* review audit
+ * trail, a different concept, and reusing it here collided with that
+ * reservation inside the same commit that introduced it). `targetType`/
+ * `targetId` (`mun_submission`/the submission id) keep the audit trail
+ * unambiguous regardless.
  */
 export async function reviewSubmission(
   munId: string,
@@ -367,13 +367,12 @@ export async function reviewSubmission(
         .where(eq(munSubmissions.id, submission.id))
         .returning()
 
-      // No dedicated enum value for this decision in this task's list — see
-      // docstring. MODULE_REVIEWED is the least-wrong fit: an admin recorded
-      // a review outcome on the submission that is short of a terminal
-      // accept/reject.
-      await recordAdminAction(tx, session.userId, 'MODULE_REVIEWED', 'mun_submission', submission.id, opts.notes, {
+      // Dedicated Gate 2 mun-level enum value — see docstring. Do NOT reuse
+      // MODULE_REVIEWED here: that value is reserved for a future
+      // per-module review audit trail (module-verification.ts), a distinct
+      // concept from this mun-level Gate 2 decision.
+      await recordAdminAction(tx, session.userId, 'MUN_CHANGES_REQUESTED', 'mun_submission', submission.id, opts.notes, {
         munId,
-        decision: 'CHANGES_REQUESTED',
       })
 
       return updated

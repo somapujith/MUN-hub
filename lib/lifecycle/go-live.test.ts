@@ -341,7 +341,7 @@ describe('reviewSubmission', () => {
     expect(log.action).toBe('MUN_APPROVED')
   })
 
-  it('CHANGES_REQUESTED: mun -> ACTION_REQUIRED, submission -> CHANGES_REQUESTED, SLA paused', async () => {
+  it('CHANGES_REQUESTED: mun -> ACTION_REQUIRED, submission -> CHANGES_REQUESTED, SLA paused, logs MUN_CHANGES_REQUESTED', async () => {
     const organizer = await makeUser()
     const admin = await makeUser('ADMIN')
     const { mun } = await makeMunAtVerification(organizer)
@@ -367,6 +367,17 @@ describe('reviewSubmission', () => {
       .from(verificationIssues)
       .where(and(eq(verificationIssues.munId, mun.id), eq(verificationIssues.source, 'REVIEWER')))
     expect(issues.some((i) => i.reason === 'Venue address incomplete')).toBe(true)
+
+    // Dedicated Gate 2 mun-level enum value — must NOT be MODULE_REVIEWED,
+    // which is reserved for a distinct, future per-module review audit
+    // trail (module-verification.ts). An earlier draft of reviewSubmission
+    // reused MODULE_REVIEWED here (caught in review); this assertion pins
+    // the fix so it can't silently regress.
+    const [log] = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetType, 'mun_submission'), eq(adminActions.targetId, updated.id)))
+    expect(log.action).toBe('MUN_CHANGES_REQUESTED')
   })
 
   it('REJECTED without a reason throws', async () => {

@@ -133,17 +133,29 @@ export const adminActionEnum = pgEnum('admin_action', [
   'MODULE_REQUIREMENT_CHANGED',
   // Onboarding go-live pipeline (Task 11) — Gate 2 content-review decisions
   // (lib/lifecycle/go-live.ts's reviewSubmission) and the publish action
-  // (publishFromQueue). MUN_APPROVED/MUN_REJECTED are Gate 2 (mun_submissions
-  // content review) — do NOT confuse with Gate 1's reviewMunApplication,
-  // which is untouched by this task and keeps using its own transitionMun
-  // audit trail via verificationLogs, not admin_actions.
+  // (publishFromQueue). MUN_APPROVED/MUN_REJECTED/MUN_CHANGES_REQUESTED are
+  // Gate 2 (mun_submissions content review) — do NOT confuse with Gate 1's
+  // reviewMunApplication, which is untouched by this task and keeps using
+  // its own transitionMun audit trail via verificationLogs, not
+  // admin_actions.
   'MUN_PUBLISHED',
   'MUN_APPROVED',
   'MUN_REJECTED',
+  // Gate 2's CHANGES_REQUESTED decision on a mun_submissions row
+  // (reviewSubmission) — deliberately distinct from MODULE_REVIEWED below.
+  // An earlier draft of this enum reused MODULE_REVIEWED for this case,
+  // which was wrong: it collided with MODULE_REVIEWED's own reserved
+  // per-module meaning within the very same commit (a mun-level Gate 2
+  // decision is not a per-module review). Added post-review to fix that
+  // self-contradiction.
+  'MUN_CHANGES_REQUESTED',
   // MODULE_REVIEWED: reserved for a future per-module-review admin-actions
   // audit trail distinct from the verification_issues rows reviewModule
-  // already writes (module-verification.ts) — not used by this task, added
-  // now per the brief's explicit enum list so it exists ahead of that need.
+  // already writes (module-verification.ts). Genuinely unused by this task
+  // — reviewSubmission's mun-level CHANGES_REQUESTED decision uses the
+  // dedicated MUN_CHANGES_REQUESTED value above instead, so this value
+  // stays reserved for Task 7's future per-module admin_actions row exactly
+  // as originally intended, with no semantic collision.
   'MODULE_REVIEWED',
   // Replaces the TICKET_RESOLVED placeholder documented in
   // lib/actions/payment-settlement.ts's setPaymentVerificationState — see
