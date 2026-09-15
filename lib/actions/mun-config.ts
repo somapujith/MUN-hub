@@ -215,6 +215,11 @@ export interface CreateRegistrationProductInput {
   capacity: number
   currency?: string
   deadline?: Date
+  description?: string
+  allowsIndividual?: boolean
+  allowsDelegation?: boolean
+  displayOrder?: number
+  eligibility?: Record<string, unknown>
 }
 
 export async function createRegistrationProduct(
@@ -259,6 +264,11 @@ export interface UpdateRegistrationProductInput {
   currency?: string
   deadline?: Date | null
   status?: string
+  description?: string
+  allowsIndividual?: boolean
+  allowsDelegation?: boolean
+  displayOrder?: number
+  eligibility?: Record<string, unknown>
 }
 
 export async function updateRegistrationProduct(

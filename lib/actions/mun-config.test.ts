@@ -282,6 +282,33 @@ describe('mun-config actions', () => {
         ),
       ).rejects.toThrow('Forbidden')
     })
+
+    describe('createRegistrationProduct — new field passthrough', () => {
+      it('persists description, allowsIndividual, allowsDelegation, displayOrder, eligibility', async () => {
+        const organizer = await makeUser('ORGANIZER')
+        const mun = await makeMun(organizer.id)
+
+        const product = await createRegistrationProduct(
+          {
+            munId: mun.id,
+            name: 'Reporter Pass',
+            price: 1000,
+            capacity: 20,
+            description: 'For press and media delegates.',
+            allowsIndividual: true,
+            allowsDelegation: false,
+            displayOrder: 2,
+            eligibility: { minAge: 16 },
+          },
+          { userId: organizer.id, role: 'ORGANIZER' },
+        )
+
+        expect(product.description).toBe('For press and media delegates.')
+        expect(product.allowsDelegation).toBe(false)
+        expect(product.displayOrder).toBe(2)
+        expect(product.eligibility).toEqual({ minAge: 16 })
+      })
+    })
   })
 
   describe('updateMunDetails', () => {
