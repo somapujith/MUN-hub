@@ -31,7 +31,7 @@ describe('getAuditHistory', () => {
     await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: admin.id, action: 'PUBLISHED' })
     await db.insert(adminActions).values({ actorId: admin.id, action: 'MUN_SUSPENDED', targetType: 'mun', targetId: mun.id, reason: 'x' })
 
-    const history = await getAuditHistory('mun', mun.id, __actor, actor)
+    const history = await getAuditHistory('mun', mun.id, __actor)
     expect(history.length).toBe(2)
     expect(history.map((h) => h.action)).toEqual(expect.arrayContaining(['PUBLISHED', 'MUN_SUSPENDED']))
     // Sorted oldest-first.
@@ -51,7 +51,7 @@ describe('getAuditHistory', () => {
       reason: 'fraud',
     })
 
-    const history = await getAuditHistory('user', organizer.id, __actor, actor)
+    const history = await getAuditHistory('user', organizer.id, __actor)
     expect(history.length).toBe(1)
     expect(history[0].action).toBe('ORGANIZER_SUSPENDED')
   })
@@ -85,7 +85,7 @@ describe('getAuditHistory', () => {
       reason: 'user row with the same id as the mun above',
     })
 
-    const history = await getAuditHistory('mun', mun.id, __actor, actor)
+    const history = await getAuditHistory('mun', mun.id, __actor)
     expect(history.length).toBe(1)
     expect(history[0].action).toBe('MUN_SUSPENDED')
   })
@@ -93,11 +93,11 @@ describe('getAuditHistory', () => {
   it('throws Forbidden for a STUDENT', async () => {
     const student = await makeUser('STUDENT')
     const __actor = sess(student)
-    await expect(getAuditHistory('mun', 'some-id', __actor, actor)).rejects.toThrow('Forbidden')
+    await expect(getAuditHistory('mun', 'some-id', __actor)).rejects.toThrow('Forbidden')
   })
 
   it('throws Forbidden with no session', async () => {
     const __actor = null as Session | null
-    await expect(getAuditHistory('mun', 'some-id', __actor, actor)).rejects.toThrow('Forbidden')
+    await expect(getAuditHistory('mun', 'some-id', __actor)).rejects.toThrow('Forbidden')
   })
 })

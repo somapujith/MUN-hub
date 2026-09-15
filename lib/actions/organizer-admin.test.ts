@@ -24,7 +24,7 @@ describe('suspendOrganizer', () => {
     const organizer = await makeUser('ORGANIZER')
     const __actor = sess(admin)
 
-    await suspendOrganizer(organizer.id, 'policy violation', __actor, actor)
+    await suspendOrganizer(organizer.id, 'policy violation', __actor)
 
     const [updated] = await db.select().from(users).where(eq(users.id, organizer.id))
     expect(updated.suspended).toBe(true)
@@ -42,14 +42,14 @@ describe('suspendOrganizer', () => {
     const student = await makeUser('STUDENT')
     const __actor = sess(student)
 
-    await expect(suspendOrganizer(organizer.id, 'x', __actor, actor)).rejects.toThrow('Forbidden')
+    await expect(suspendOrganizer(organizer.id, 'x', __actor)).rejects.toThrow('Forbidden')
   })
 
   it('throws Forbidden with no session', async () => {
     const organizer = await makeUser('ORGANIZER')
     const __actor = null as Session | null
 
-    await expect(suspendOrganizer(organizer.id, 'x', __actor, actor)).rejects.toThrow('Forbidden')
+    await expect(suspendOrganizer(organizer.id, 'x', __actor)).rejects.toThrow('Forbidden')
   })
 
   it('allows OPERATIONS to suspend', async () => {
@@ -57,7 +57,7 @@ describe('suspendOrganizer', () => {
     const organizer = await makeUser('ORGANIZER')
     const __actor = sess(ops)
 
-    await suspendOrganizer(organizer.id, 'ops call', __actor, actor)
+    await suspendOrganizer(organizer.id, 'ops call', __actor)
 
     const [updated] = await db.select().from(users).where(eq(users.id, organizer.id))
     expect(updated.suspended).toBe(true)
@@ -80,7 +80,7 @@ describe('reinstateOrganizer', () => {
       .returning()
 
     const __actor = sess(admin)
-    await reinstateOrganizer(organizer.id, __actor, actor)
+    await reinstateOrganizer(organizer.id, __actor)
 
     const [updated] = await db.select().from(users).where(eq(users.id, organizer.id))
     expect(updated.suspended).toBe(false)
@@ -101,7 +101,7 @@ describe('reinstateOrganizer', () => {
     const student = await makeUser('STUDENT')
     const __actor = sess(student)
 
-    await expect(reinstateOrganizer(organizer.id, __actor, actor)).rejects.toThrow('Forbidden')
+    await expect(reinstateOrganizer(organizer.id, __actor)).rejects.toThrow('Forbidden')
   })
 })
 
