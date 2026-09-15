@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { getMunBySlug, searchMuns } from '@/lib/actions/marketplace'
+import { getMarketplaceFacets, getMunBySlug, searchMuns } from '@/lib/actions/marketplace'
 import { listRegistrationProducts } from '@/lib/actions/mun-config'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { munStatusEnum } from '@/lib/db/schema-enums'
@@ -76,6 +76,11 @@ munsRoutes.get('/', async (c) => {
   const params = searchQuerySchema.parse(pickSearchQuery(c.req.query()))
   const result = await searchMuns(params)
   return c.json(result)
+})
+
+munsRoutes.get('/facets', async (c) => {
+  const facets = await getMarketplaceFacets()
+  return c.json(facets)
 })
 
 munsRoutes.get('/:slug/products', async (c) => {
