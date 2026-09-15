@@ -1,4 +1,5 @@
 import type { MunDetail, MunSummary } from "@/types";
+import type { ProductAvailability } from "@/components/mun/registration-product-card";
 
 const daysFromNow = (n: number) => {
   const d = new Date();
@@ -10,6 +11,7 @@ const daysFromNow = (n: number) => {
 export const MOCK_CITIES = ["Hyderabad", "Vellore", "Oxford"] as const;
 export const MOCK_COUNTRIES = ["India", "United Kingdom"] as const;
 
+/** Hyderabad-focused seed-shaped summaries — dates are real Date objects. */
 export const MOCK_MUN_SUMMARIES: MunSummary[] = [
   {
     id: "mun-bitsmun",
@@ -61,7 +63,33 @@ export const MOCK_MUN_SUMMARIES: MunSummary[] = [
     status: "REGISTRATION_OPEN",
     minPrice: 1000,
     coverImage: null,
-    organizerName: "Vista",
+    organizerName: "Vista International School",
+  },
+  {
+    id: "mun-stfrancis",
+    name: "St. Francis College MUN 2025",
+    slug: "st-francis-college-mun-2025",
+    city: "Hyderabad",
+    country: "India",
+    startDate: daysFromNow(35),
+    endDate: daysFromNow(37),
+    status: "REGISTRATION_OPEN",
+    minPrice: 1100,
+    coverImage: null,
+    organizerName: "St. Francis College",
+  },
+  {
+    id: "mun-mun",
+    name: "M-UN 2025",
+    slug: "m-un-2025",
+    city: "Hyderabad",
+    country: "India",
+    startDate: daysFromNow(28),
+    endDate: daysFromNow(30),
+    status: "PUBLISHED",
+    minPrice: 900,
+    coverImage: null,
+    organizerName: "M-UN Secretariat",
   },
   {
     id: "mun-vit",
@@ -119,9 +147,9 @@ function detailFromSummary(s: MunSummary, extra?: Partial<MunDetail>): MunDetail
         description: "Addressing threats to international peace and security.",
         capacity: 15,
         portfolios: [
-          { id: `${committeeId}-usa`, committeeId, name: "United States", country: "USA", capacity: 1 },
-          { id: `${committeeId}-chn`, committeeId, name: "China", country: "CHN", capacity: 1 },
-          { id: `${committeeId}-ind`, committeeId, name: "India", country: "IND", capacity: 1 },
+          { id: `${committeeId}-usa`, committeeId, name: "United States", country: "USA", capacity: 1, availability: 1 },
+          { id: `${committeeId}-chn`, committeeId, name: "China", country: "CHN", capacity: 1, availability: 1 },
+          { id: `${committeeId}-ind`, committeeId, name: "India", country: "IND", capacity: 1, availability: 1 },
         ],
       },
       {
@@ -132,8 +160,8 @@ function detailFromSummary(s: MunSummary, extra?: Partial<MunDetail>): MunDetail
         description: "Promoting and protecting human rights worldwide.",
         capacity: 40,
         portfolios: [
-          { id: `${s.id}-unhrc-bra`, committeeId: `${s.id}-unhrc`, name: "Brazil", country: "BRA", capacity: 1 },
-          { id: `${s.id}-unhrc-zaf`, committeeId: `${s.id}-unhrc`, name: "South Africa", country: "ZAF", capacity: 1 },
+          { id: `${s.id}-unhrc-bra`, committeeId: `${s.id}-unhrc`, name: "Brazil", country: "BRA", capacity: 1, availability: 1 },
+          { id: `${s.id}-unhrc-zaf`, committeeId: `${s.id}-unhrc`, name: "South Africa", country: "ZAF", capacity: 1, availability: 1 },
         ],
       },
     ],
@@ -166,6 +194,12 @@ function detailFromSummary(s: MunSummary, extra?: Partial<MunDetail>): MunDetail
 export const MOCK_MUN_DETAILS: Record<string, MunDetail> = Object.fromEntries(
   MOCK_MUN_SUMMARIES.map((s) => [s.slug, detailFromSummary(s)]),
 );
+
+export function getMarketplaceFacets(): { cities: string[]; countries: string[] } {
+  const cities = [...new Set(MOCK_MUN_SUMMARIES.map((m) => m.city).filter(Boolean) as string[])].sort();
+  const countries = [...new Set(MOCK_MUN_SUMMARIES.map((m) => m.country).filter(Boolean) as string[])].sort();
+  return { cities, countries };
+}
 
 export function searchMockMuns(opts: {
   query?: string;
@@ -215,4 +249,17 @@ export function searchMockMuns(opts: {
 
 export function getMockMunBySlug(slug: string): MunDetail | null {
   return MOCK_MUN_DETAILS[slug] ?? null;
+}
+
+/** Mock seat counts for registration product cards on detail pages. */
+export function getMockProductsAvailability(
+  productIds: string[],
+): Map<string, ProductAvailability> {
+  const map = new Map<string, ProductAvailability>();
+  for (const id of productIds) {
+    const capacity = id.endsWith("-eb") ? 20 : 200;
+    const taken = id.endsWith("-eb") ? 4 : 87;
+    map.set(id, { capacity, taken, available: capacity - taken });
+  }
+  return map;
 }

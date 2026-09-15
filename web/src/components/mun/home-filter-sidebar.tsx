@@ -131,7 +131,7 @@ export function HomeFilterSidebar({ resultCount }: HomeFilterSidebarProps) {
         navigate(qs ? `/?${qs}` : "/");
       });
     },
-    [router, searchParams],
+    [navigate, searchParams],
   );
 
   const selectedStatus = searchParams.get("status") ?? "";

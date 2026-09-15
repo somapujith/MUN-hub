@@ -1,6 +1,5 @@
 import * as React from "react";
-import { Link } from "react-router";
-import { usePathname } from "react-router";
+import { Link, useLocation } from "react-router";
 import { MenuIcon } from "lucide-react";
 import {
   Sheet,
@@ -12,7 +11,10 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { CitySelector } from "@/components/marketplace/city-selector";
-import { signOutAction } from "@/app/actions/session";
+function signOutAction() {
+  // Placeholder until auth API lands (Task 3.7+).
+}
+
 
 /**
  * Mobile collapse for `top-nav`. Per DESIGN-airtable.md § Collapsing Strategy,
@@ -48,7 +50,7 @@ export function SiteHeaderMobileNav({
   selectedCity = "",
 }: SiteHeaderMobileNavProps) {
   const [open, setOpen] = React.useState(false);
-  const pathname = usePathname();
+  const { pathname } = useLocation();
 
   // Close the sheet on navigation — Base UI keeps it open across a client
   // transition otherwise, which strands the user behind an overlay.
@@ -114,7 +116,7 @@ export function SiteHeaderMobileNav({
             List your MUN
           </Button>
           {isSignedIn ? (
-            <form action={signOutAction}>
+            <form onSubmit={(e) => { e.preventDefault(); signOutAction(); }}>
               <Button
                 type="submit"
                 variant="outline"

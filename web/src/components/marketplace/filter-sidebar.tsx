@@ -176,7 +176,7 @@ export function FilterSidebar({ countries, resultCount }: FilterSidebarProps) {
         navigate(qs ? `/muns?${qs}` : "/muns");
       });
     },
-    [router, searchParams],
+    [navigate, searchParams],
   );
 
   const selectedCity = searchParams.get("city") ?? "";

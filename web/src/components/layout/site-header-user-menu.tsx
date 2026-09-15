@@ -10,8 +10,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { signOutAction } from "@/app/actions/session";
 import type { Role } from "@/types/enums";
+
+function signOutAction() {
+  // Placeholder until auth API lands (Task 3.7+).
+}
 
 /**
  * Signed-in cluster for `top-nav`. The trigger is `button-icon-circular`
@@ -69,7 +72,12 @@ export function SiteHeaderUserMenu({
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <form action={signOutAction}>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              signOutAction();
+            }}
+          >
             <DropdownMenuItem
               variant="destructive"
               className="w-full"

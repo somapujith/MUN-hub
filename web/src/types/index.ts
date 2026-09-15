@@ -28,6 +28,8 @@ export interface Portfolio {
   name: string;
   country: string | null;
   capacity: number;
+  /** Remaining seats for this portfolio (schema: integer, default 1). */
+  availability: number;
 }
 
 export interface Committee {
@@ -37,6 +39,7 @@ export interface Committee {
   abbreviation: string | null;
   description: string | null;
   capacity: number;
+  agenda?: string | null;
 }
 
 export interface CommitteeWithPortfolios extends Committee {
@@ -83,3 +86,49 @@ export interface MunSearchResult {
   results: MunSummary[];
   total: number;
 }
+
+/** Shape consumed by dashboard registration cards (mirrors lib/actions/student-dashboard). */
+export interface RegistrationWithMun {
+  id: string;
+  status: import("@/types/enums").RegistrationStatus;
+  registrationProductId: string;
+  committeeId: string | null;
+  portfolioId: string | null;
+  userId: string;
+  expiresAt: Date | null;
+  mun: {
+    id: string;
+    slug: string;
+    name: string;
+    city: string | null;
+    country: string | null;
+    startDate: Date | null;
+    endDate: Date | null;
+  };
+  committee: { name: string } | null;
+  portfolio: { name: string } | null;
+  payment: Array<{ amount: number; status: import("@/types/enums").PaymentStatus }>;
+}
+
+export interface MockRegistrationDetail extends RegistrationWithMun {
+  productName: string;
+  productPrice: number;
+}
+
+export interface UserProfile {
+  name: string;
+  email: string;
+  phone: string | null;
+  institution: string | null;
+}
+
+export type SupportCategory =
+  | "REGISTRATION"
+  | "PAYMENT"
+  | "REFUND"
+  | "MUN_INFO"
+  | "ACCOUNT"
+  | "CERTIFICATE"
+  | "ORGANIZER"
+  | "TECHNICAL"
+  | "SAFETY_POLICY";

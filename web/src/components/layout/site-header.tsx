@@ -1,5 +1,4 @@
 import { Link } from "react-router";
-import { getSession } from "@/mocks/session";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { SiteHeaderMobileNav } from "@/components/layout/site-header-mobile-nav";
@@ -69,15 +68,20 @@ const DASHBOARD_HREF = {
 interface SiteHeaderProps {
   /**
    * Marketplace cities. Pass from a page that already calls
-   * `getMarketplaceFacets()`; omit to hide the city picker entirely.
+   * facet loading; omit to hide the city picker entirely.
    */
   cities?: string[];
   /** Active city from the page's own `?city=` parsing. */
   selectedCity?: string;
+  /** Optional session — pages pass mock/null until API client lands. */
+  session?: { userId: string; role: keyof typeof DASHBOARD_HREF } | null;
 }
 
-export async function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) {
-  const session = await getSession();
+export function SiteHeader({
+  cities,
+  selectedCity = "",
+  session = null,
+}: SiteHeaderProps = {}) {
   const showCityPicker = Boolean(cities && cities.length > 0);
 
   return (

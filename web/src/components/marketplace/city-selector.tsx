@@ -1,4 +1,4 @@
-import { usePathname, useNavigate, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useTransition } from "react";
 import { ChevronDownIcon, MapPinIcon } from "lucide-react";
 import {
@@ -68,7 +68,7 @@ export function CitySelector({
   className,
 }: CitySelectorProps) {
   const navigate = useNavigate();
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const [searchParams] = useSearchParams();
   const [isPending, startTransition] = useTransition();
 
