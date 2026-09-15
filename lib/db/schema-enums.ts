@@ -16,11 +16,17 @@ export const munStatusEnum = pgEnum('mun_status', [
   'REJECTED',
   'CHANGES_REQUESTED',
   'ONBOARDING',
+  'ACTION_REQUIRED',
+  'READY_FOR_SUBMISSION',
+  'AUTOMATED_VALIDATION',
   'CONTENT_SUBMITTED',
   'ORGANIZER_CONFIRMATION',
   'VERIFICATION',
   'VERIFIED',
+  'GO_LIVE_QUEUE',
+  'PUBLISHING',
   'PUBLISHED',
+  'UNPUBLISHED',
   'REGISTRATION_OPEN',
   'REGISTRATION_CLOSED',
   'CONFERENCE_ACTIVE',
@@ -58,10 +64,27 @@ export const applicationStatusEnum = pgEnum('application_status', [
 ])
 
 export const munModuleEnum = pgEnum('mun_module', [
+  // legacy (retained, remapped to PRD keys via data migration — see drizzle/0010)
   'mun_details',
   'committees',
   'portfolios',
   'registration_products',
+  // PRD Section 38 module keys (15 tracked modules)
+  'BASIC_INFO',
+  'DATES_VENUE',
+  'BRANDING',
+  'COMMITTEES',
+  'PORTFOLIOS',
+  'EXECUTIVE_BOARD',
+  'REGISTRATION_TYPES',
+  'REGISTRATION_FORM',
+  'PRICING_CAPACITY',
+  'PAYMENT_SETTLEMENT',
+  'RULES_DOCUMENTS',
+  'SCHEDULE',
+  'ACCOMMODATION',
+  'CONTACT',
+  'FINAL_REVIEW',
 ])
 
 export const moduleVerificationStateEnum = pgEnum('module_verification_state', [
@@ -70,6 +93,14 @@ export const moduleVerificationStateEnum = pgEnum('module_verification_state', [
   'VERIFIED',
   'CHANGES_REQUESTED',
   'REJECTED',
+])
+
+export const moduleCompletionEnum = pgEnum('module_completion_status', [
+  'NOT_STARTED',
+  'IN_PROGRESS',
+  'ACTION_REQUIRED',
+  'COMPLETE',
+  'LOCKED',
 ])
 
 export const verificationSeverityEnum = pgEnum('verification_severity', [
@@ -95,6 +126,41 @@ export const adminActionEnum = pgEnum('admin_action', [
   'TICKET_ASSIGNED',
   'TICKET_RESOLVED',
   'USER_SUSPENDED',
+  // Onboarding go-live pipeline (Task 7) — admin flips a module's
+  // isRequired flag per PRD Section 6 ("optional modules may be configured
+  // by MUNHub"). See lib/lifecycle/module-verification.ts's
+  // setModuleRequirement.
+  'MODULE_REQUIREMENT_CHANGED',
+  // Onboarding go-live pipeline (Task 11) — Gate 2 content-review decisions
+  // (lib/lifecycle/go-live.ts's reviewSubmission) and the publish action
+  // (publishFromQueue). MUN_APPROVED/MUN_REJECTED/MUN_CHANGES_REQUESTED are
+  // Gate 2 (mun_submissions content review) — do NOT confuse with Gate 1's
+  // reviewMunApplication, which is untouched by this task and keeps using
+  // its own transitionMun audit trail via verificationLogs, not
+  // admin_actions.
+  'MUN_PUBLISHED',
+  'MUN_APPROVED',
+  'MUN_REJECTED',
+  // Gate 2's CHANGES_REQUESTED decision on a mun_submissions row
+  // (reviewSubmission) — deliberately distinct from MODULE_REVIEWED below.
+  // An earlier draft of this enum reused MODULE_REVIEWED for this case,
+  // which was wrong: it collided with MODULE_REVIEWED's own reserved
+  // per-module meaning within the very same commit (a mun-level Gate 2
+  // decision is not a per-module review). Added post-review to fix that
+  // self-contradiction.
+  'MUN_CHANGES_REQUESTED',
+  // MODULE_REVIEWED: reserved for a future per-module-review admin-actions
+  // audit trail distinct from the verification_issues rows reviewModule
+  // already writes (module-verification.ts). Genuinely unused by this task
+  // — reviewSubmission's mun-level CHANGES_REQUESTED decision uses the
+  // dedicated MUN_CHANGES_REQUESTED value above instead, so this value
+  // stays reserved for Task 7's future per-module admin_actions row exactly
+  // as originally intended, with no semantic collision.
+  'MODULE_REVIEWED',
+  // Replaces the TICKET_RESOLVED placeholder documented in
+  // lib/actions/payment-settlement.ts's setPaymentVerificationState — see
+  // that file's updated comment.
+  'PAYMENT_DETAILS_CHANGED',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [
@@ -125,6 +191,102 @@ export const supportStatusEnum = pgEnum('support_status', [
   'CLOSED',
 ])
 
+// ---------------------------------------------------------------------------
+// Onboarding go-live pipeline — Task 4 net-new module table enums.
+// See docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
+// Section 2.3.
+// ---------------------------------------------------------------------------
+
+export const munMediaKindEnum = pgEnum('mun_media_kind', [
+  'LOGO',
+  'COVER',
+  'GALLERY',
+  'SPONSOR',
+  'ORGANIZER_LOGO',
+])
+
+export const ebRoleEnum = pgEnum('eb_role', [
+  'CHAIR',
+  'VICE_CHAIR',
+  'DIRECTOR',
+  'RAPPORTEUR',
+  'CUSTOM',
+])
+
+export const formFieldTypeEnum = pgEnum('form_field_type', [
+  'SHORT_TEXT',
+  'LONG_TEXT',
+  'EMAIL',
+  'PHONE',
+  'NUMBER',
+  'DROPDOWN',
+  'MULTIPLE_CHOICE',
+  'CHECKBOX',
+  'DATE',
+  'FILE_UPLOAD',
+  'INSTITUTION',
+  'ACADEMIC_YEAR',
+  'MUN_EXPERIENCE',
+  'COMMITTEE_PREFERENCE',
+  'PORTFOLIO_PREFERENCE',
+  'EMERGENCY_CONTACT',
+])
+
+export const munDocumentKindEnum = pgEnum('mun_document_kind', [
+  'RULES',
+  'CODE_OF_CONDUCT',
+  'REFUND_POLICY',
+  'BROCHURE',
+  'HANDBOOK',
+  'DELEGATE_GUIDE',
+  'POSITION_PAPER',
+  'OTHER',
+])
+
+export const scheduleItemKindEnum = pgEnum('schedule_item_kind', [
+  'OPENING_CEREMONY',
+  'COMMITTEE_SESSION',
+  'BREAK',
+  'LUNCH',
+  'CRISIS',
+  'CLOSING_CEREMONY',
+  'AWARDS',
+  'OTHER',
+])
+
+export const paymentVerificationEnum = pgEnum('payment_verification_state', [
+  'NOT_SUBMITTED',
+  'PENDING',
+  'VERIFIED',
+  'FAILED',
+])
+
+// ---------------------------------------------------------------------------
+// Onboarding go-live pipeline — Task 10 mun_submissions enums. See
+// docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
+// Section 5.1 (submissionStatusEnum) and Section 5.2 (slaStateEnum, which
+// mirrors lib/lifecycle/sla.ts's `SlaState` union — keep the two in sync).
+// ---------------------------------------------------------------------------
+
+export const submissionStatusEnum = pgEnum('submission_status', [
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'CHANGES_REQUESTED',
+  'APPROVED',
+  'REJECTED',
+  'QUEUED',
+  'PUBLISHED',
+  'WITHDRAWN',
+])
+
+export const slaStateEnum = pgEnum('sla_state', [
+  'ON_TRACK',
+  'DUE_SOON',
+  'OVERDUE',
+  'PAUSED',
+  'COMPLETED',
+])
+
 export type Role = (typeof roleEnum.enumValues)[number]
 export type MunStatus = (typeof munStatusEnum.enumValues)[number]
 export type RegistrationStatus = (typeof registrationStatusEnum.enumValues)[number]
@@ -132,9 +294,18 @@ export type PaymentStatus = (typeof paymentStatusEnum.enumValues)[number]
 export type ApplicationStatus = (typeof applicationStatusEnum.enumValues)[number]
 export type MunModule = (typeof munModuleEnum.enumValues)[number]
 export type ModuleVerificationState = (typeof moduleVerificationStateEnum.enumValues)[number]
+export type ModuleCompletionStatus = (typeof moduleCompletionEnum.enumValues)[number]
 export type VerificationSeverity = (typeof verificationSeverityEnum.enumValues)[number]
 export type AccommodationFieldType = (typeof accommodationFieldTypeEnum.enumValues)[number]
 export type AdminAction = (typeof adminActionEnum.enumValues)[number]
 export type SupportCategory = (typeof supportCategoryEnum.enumValues)[number]
 export type SupportPriority = (typeof supportPriorityEnum.enumValues)[number]
 export type SupportStatus = (typeof supportStatusEnum.enumValues)[number]
+export type MunMediaKind = (typeof munMediaKindEnum.enumValues)[number]
+export type EbRole = (typeof ebRoleEnum.enumValues)[number]
+export type FormFieldType = (typeof formFieldTypeEnum.enumValues)[number]
+export type MunDocumentKind = (typeof munDocumentKindEnum.enumValues)[number]
+export type ScheduleItemKind = (typeof scheduleItemKindEnum.enumValues)[number]
+export type PaymentVerificationState = (typeof paymentVerificationEnum.enumValues)[number]
+export type SubmissionStatus = (typeof submissionStatusEnum.enumValues)[number]
+export type SlaStateEnumValue = (typeof slaStateEnum.enumValues)[number]

@@ -4,6 +4,8 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { committees, muns, portfolios, registrationProducts } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
+import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
+import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 import type { Committee, Mun, Portfolio, RegistrationProduct } from '@/lib/types'
@@ -15,26 +17,26 @@ import type { Committee, Mun, Portfolio, RegistrationProduct } from '@/lib/types
 // Every mutation in this file is gated by the same rule: the acting session
 // must either be the owning organizer of the mun (walked up from
 // committee -> mun or portfolio -> committee -> mun when the mutated row
-// isn't the mun itself) or hold role ADMIN/SUPER_ADMIN. This helper is the
-// single place that logic lives — do not re-implement it per entity.
-
-/**
- * Throws `Error('Forbidden')` unless `session` is non-null and is either an
- * ADMIN/SUPER_ADMIN or the organizer that owns `munId` (`mun.organizerId ===
- * session.userId`). Throws `Error('Mun not found')` if `munId` doesn't
- * resolve to a real row (fail fast on a bad id rather than silently denying).
- */
-async function assertOwnsOrAdmin(munId: string, session: Session | null): Promise<void> {
-  if (!session) throw new Error('Forbidden')
-  if (session.role === 'ADMIN' || session.role === 'SUPER_ADMIN') return
-
-  const [mun] = await db.select({ organizerId: muns.organizerId }).from(muns).where(eq(muns.id, munId)).limit(1)
-  if (!mun) throw new Error('Mun not found')
-
-  if (mun.organizerId !== session.userId) {
-    throw new Error('Forbidden')
-  }
-}
+// isn't the mun itself) or hold role ADMIN/SUPER_ADMIN. `assertOwnsOrAdmin`
+// (see lib/auth/ownership.ts) is the single place that logic lives — do not
+// re-implement it per entity.
+//
+// LOCKED enforcement (Task 12, design doc Section 9): COMMITTEES,
+// PORTFOLIOS, REGISTRATION_TYPES/PRICING_CAPACITY, and BASIC_INFO/
+// DATES_VENUE are all high-impact modules (non-empty HIGH_IMPACT_FIELDS —
+// see reverification.ts), so every create/update/delete in this file that
+// touches one of them calls `assertModuleNotLocked` FIRST, right after (or
+// as part of) the ownership check, before touching any row. Admin/ops
+// callers are unaffected — `assertModuleNotLocked` itself carves that out.
+//
+// Re-verification key fix (Task 12): the direct `triggerReverificationIfNeeded`
+// calls below now pass the real PRD module key (`COMMITTEES`,
+// `PRICING_CAPACITY`, `BASIC_INFO`) instead of the legacy pre-PRD key
+// (`committees`, `registration_products`, `mun_details`). HIGH_IMPACT_FIELDS
+// now correctly resolves every legacy key to an empty list (Task 12 Step 1),
+// so a before/after diff keyed to a legacy key can never detect a real
+// high-impact change anymore — it must be keyed to the PRD module whose
+// HIGH_IMPACT_FIELDS entry actually lists the changed fields.
 
 /** Resolves a committee's owning munId, or throws `Error('Committee not found')`. */
 async function getMunIdForCommittee(committeeId: string): Promise<string> {
@@ -72,7 +74,11 @@ export interface CreateCommitteeInput {
 
 export async function createCommittee(input: CreateCommitteeInput, session: Session | null): Promise<Committee> {
   await assertOwnsOrAdmin(input.munId, session)
+  await assertModuleNotLocked(input.munId, 'COMMITTEES', session)
   const [committee] = await db.insert(committees).values(input).returning()
+
+  await onModuleDataChanged(input.munId, 'COMMITTEES', session!.userId)
+
   return committee
 }
 
@@ -90,6 +96,7 @@ export async function updateCommittee(
 ): Promise<Committee> {
   const munId = await getMunIdForCommittee(id)
   await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'COMMITTEES', session)
 
   const [existing] = await db.select().from(committees).where(eq(committees.id, id)).limit(1)
   if (!existing) throw new Error('Committee not found')
@@ -97,7 +104,9 @@ export async function updateCommittee(
   const [updated] = await db.update(committees).set(input).where(eq(committees.id, id)).returning()
   if (!updated) throw new Error('Committee not found')
 
-  await triggerReverificationIfNeeded('committees', existing, updated, munId, session!.userId)
+  // PRD key, not the legacy 'committees' key — see file header comment.
+  await triggerReverificationIfNeeded('COMMITTEES', existing, updated, munId, session!.userId)
+  await onModuleDataChanged(munId, 'COMMITTEES', session!.userId)
 
   return updated
 }
@@ -112,7 +121,10 @@ export async function updateCommittee(
 export async function deleteCommittee(id: string, session: Session | null): Promise<void> {
   const munId = await getMunIdForCommittee(id)
   await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'COMMITTEES', session)
   await db.delete(committees).where(eq(committees.id, id))
+
+  await onModuleDataChanged(munId, 'COMMITTEES', session!.userId)
 }
 
 /**
@@ -142,7 +154,11 @@ export interface CreatePortfolioInput {
 export async function createPortfolio(input: CreatePortfolioInput, session: Session | null): Promise<Portfolio> {
   const munId = await getMunIdForCommittee(input.committeeId)
   await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'PORTFOLIOS', session)
   const [portfolio] = await db.insert(portfolios).values(input).returning()
+
+  await onModuleDataChanged(munId, 'PORTFOLIOS', session!.userId)
+
   return portfolio
 }
 
@@ -160,9 +176,17 @@ export async function updatePortfolio(
   const committeeId = await getCommitteeIdForPortfolio(id)
   const munId = await getMunIdForCommittee(committeeId)
   await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'PORTFOLIOS', session)
+
+  const [existing] = await db.select().from(portfolios).where(eq(portfolios.id, id)).limit(1)
+  if (!existing) throw new Error('Portfolio not found')
 
   const [updated] = await db.update(portfolios).set(input).where(eq(portfolios.id, id)).returning()
   if (!updated) throw new Error('Portfolio not found')
+
+  await triggerReverificationIfNeeded('PORTFOLIOS', existing, updated, munId, session!.userId)
+  await onModuleDataChanged(munId, 'PORTFOLIOS', session!.userId)
+
   return updated
 }
 
@@ -171,7 +195,10 @@ export async function deletePortfolio(id: string, session: Session | null): Prom
   const committeeId = await getCommitteeIdForPortfolio(id)
   const munId = await getMunIdForCommittee(committeeId)
   await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'PORTFOLIOS', session)
   await db.delete(portfolios).where(eq(portfolios.id, id))
+
+  await onModuleDataChanged(munId, 'PORTFOLIOS', session!.userId)
 }
 
 /** Public read, no auth — same reasoning as `listCommittees` above. */
@@ -197,7 +224,13 @@ export async function createRegistrationProduct(
   session: Session | null,
 ): Promise<RegistrationProduct> {
   await assertOwnsOrAdmin(input.munId, session)
+  await assertModuleNotLocked(input.munId, 'REGISTRATION_TYPES', session)
+  await assertModuleNotLocked(input.munId, 'PRICING_CAPACITY', session)
   const [product] = await db.insert(registrationProducts).values(input).returning()
+
+  await onModuleDataChanged(input.munId, 'REGISTRATION_TYPES', session!.userId)
+  await onModuleDataChanged(input.munId, 'PRICING_CAPACITY', session!.userId)
+
   return product
 }
 
@@ -242,6 +275,8 @@ export async function updateRegistrationProduct(
     .limit(1)
   if (!existing) throw new Error('Registration product not found')
   await assertOwnsOrAdmin(existing.munId, session)
+  await assertModuleNotLocked(existing.munId, 'REGISTRATION_TYPES', session)
+  await assertModuleNotLocked(existing.munId, 'PRICING_CAPACITY', session)
 
   const [updated] = await db
     .update(registrationProducts)
@@ -250,7 +285,14 @@ export async function updateRegistrationProduct(
     .returning()
   if (!updated) throw new Error('Registration product not found')
 
-  await triggerReverificationIfNeeded('registration_products', existing, updated, existing.munId, session!.userId)
+  // PRD keys, not the legacy 'registration_products' key — see file header
+  // comment. Both REGISTRATION_TYPES (name/registrationType/status) and
+  // PRICING_CAPACITY (price/capacity/deadline/...) can be affected by this
+  // same update, so both are checked against the real before/after diff.
+  await triggerReverificationIfNeeded('REGISTRATION_TYPES', existing, updated, existing.munId, session!.userId)
+  await triggerReverificationIfNeeded('PRICING_CAPACITY', existing, updated, existing.munId, session!.userId)
+  await onModuleDataChanged(existing.munId, 'REGISTRATION_TYPES', session!.userId)
+  await onModuleDataChanged(existing.munId, 'PRICING_CAPACITY', session!.userId)
 
   return updated
 }
@@ -277,8 +319,13 @@ export async function deleteRegistrationProduct(id: string, session: Session | n
     .limit(1)
   if (!existing) throw new Error('Registration product not found')
   await assertOwnsOrAdmin(existing.munId, session)
+  await assertModuleNotLocked(existing.munId, 'REGISTRATION_TYPES', session)
+  await assertModuleNotLocked(existing.munId, 'PRICING_CAPACITY', session)
 
   await db.update(registrationProducts).set({ status: 'inactive' }).where(eq(registrationProducts.id, id))
+
+  await onModuleDataChanged(existing.munId, 'REGISTRATION_TYPES', session!.userId)
+  await onModuleDataChanged(existing.munId, 'PRICING_CAPACITY', session!.userId)
 }
 
 // -----------------------------------------------------------------------------
@@ -304,6 +351,10 @@ export async function updateMunDetails(
   session: Session | null,
 ): Promise<Mun> {
   await assertOwnsOrAdmin(munId, session)
+  // BASIC_INFO and DATES_VENUE both back onto this same `muns` table update —
+  // lock-check both, since either could be the reason this write is blocked.
+  await assertModuleNotLocked(munId, 'BASIC_INFO', session)
+  await assertModuleNotLocked(munId, 'DATES_VENUE', session)
 
   const [existing] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
   if (!existing) throw new Error('Mun not found')
@@ -315,7 +366,18 @@ export async function updateMunDetails(
     .returning()
   if (!updated) throw new Error('Mun not found')
 
-  await triggerReverificationIfNeeded('mun_details', existing, updated, munId, session!.userId)
+  // PRD keys, not the legacy 'mun_details' key — see file header comment.
+  // BASIC_INFO (name/edition) and DATES_VENUE (startDate/endDate/venue/
+  // city/country/registrationDeadline) both back onto this same table, so
+  // both are checked against the real before/after diff.
+  await triggerReverificationIfNeeded('BASIC_INFO', existing, updated, munId, session!.userId)
+  await triggerReverificationIfNeeded('DATES_VENUE', existing, updated, munId, session!.userId)
+
+  // BASIC_INFO and DATES_VENUE both back onto this same `muns` table (design
+  // doc Section 2.1/2.2 — one table, two tracked module rows), so a single
+  // updateMunDetails call must recompute BOTH module rows, not just one.
+  await onModuleDataChanged(munId, 'BASIC_INFO', session!.userId)
+  await onModuleDataChanged(munId, 'DATES_VENUE', session!.userId)
 
   return updated
 }

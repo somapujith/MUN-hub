@@ -41,12 +41,22 @@ const EXPLANATIONS: Record<MunStatus, string> = {
   CHANGES_REQUESTED: "The review team asked for changes. Address their notes and resubmit your application.",
   ONBOARDING:
     "You're in onboarding. Once your conference content is marked as submitted, you can confirm and submit it here.",
+  // Placeholder entries (mechanical, added only to keep this
+  // Record<MunStatus, ...> exhaustive after Task 1 of the onboarding/go-live
+  // pipeline plan added 6 new MunStatus values) — need real UI/copy review
+  // from whoever owns UI next, not a design pass from backend.
+  ACTION_REQUIRED: "Some onboarding modules need attention before you can submit. Check the checklist above.",
+  READY_FOR_SUBMISSION: "All onboarding modules look complete. You can submit your conference content for review.",
+  AUTOMATED_VALIDATION: "Your submission is being automatically validated. This only takes a moment.",
   CONTENT_SUBMITTED: "", // The one actionable state — copy lives in the panel body.
   ORGANIZER_CONFIRMATION:
     "You've confirmed this submission. MUN Hub verification starts next — you'll be notified of the outcome.",
   VERIFICATION: "Already confirmed — the review team is verifying your conference content now.",
   VERIFIED: "Your conference content passed verification. Publish it to make it live on the marketplace.",
+  GO_LIVE_QUEUE: "Your conference is queued to go live on the marketplace.",
+  PUBLISHING: "Your conference is being published to the marketplace. This only takes a moment.",
   PUBLISHED: "This conference is live on the marketplace. Verification is complete.",
+  UNPUBLISHED: "This conference was pulled from the marketplace by MUN Hub. Contact support for details.",
   REGISTRATION_OPEN: "Registration is open and delegates can sign up. Verification is complete.",
   REGISTRATION_CLOSED: "Registration has closed for this conference. Verification is complete.",
   CONFERENCE_ACTIVE: "The conference is running. Verification is complete.",

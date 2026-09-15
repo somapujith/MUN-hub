@@ -1,16 +1,25 @@
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
-import { boolean, index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
 import {
   accommodationFieldTypeEnum,
   adminActionEnum,
   applicationStatusEnum,
+  ebRoleEnum,
+  formFieldTypeEnum,
+  moduleCompletionEnum,
   moduleVerificationStateEnum,
+  munDocumentKindEnum,
+  munMediaKindEnum,
   munModuleEnum,
   munStatusEnum,
   paymentStatusEnum,
+  paymentVerificationEnum,
   registrationStatusEnum,
   roleEnum,
+  scheduleItemKindEnum,
+  slaStateEnum,
+  submissionStatusEnum,
   supportCategoryEnum,
   supportPriorityEnum,
   supportStatusEnum,
@@ -97,6 +106,19 @@ export const muns = pgTable(
     venue: text('venue'),
     city: text('city'),
     country: text('country'),
+    // PRD Section 9/10/22 columns (Task 3, 2026-09-14) — all nullable so
+    // existing rows do not break. venue/city/country above already existed
+    // and are NOT duplicated here.
+    conferenceType: text('conference_type'),
+    targetParticipantType: text('target_participant_type'),
+    addressLine1: text('address_line1'),
+    addressState: text('address_state'),
+    postalCode: text('postal_code'),
+    mapUrl: text('map_url'),
+    registrationOpensAt: timestamp('registration_opens_at', { withTimezone: true }),
+    registrationDeadline: timestamp('registration_deadline', { withTimezone: true }),
+    // Tri-state: PROVIDED | NOT_PROVIDED | null (organizer hasn't answered yet).
+    accommodationProvided: text('accommodation_provided'),
     status: munStatusEnum('status').notNull().default('DRAFT'),
     publishedAt: timestamp('published_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -117,6 +139,16 @@ export const munsRelations = relations(muns, ({ one, many }) => ({
   achievements: many(achievements),
   verificationLogs: many(verificationLogs),
   organizerApplication: many(organizerApplications),
+  media: many(munMedia),
+  executiveBoard: many(munExecutiveBoard),
+  formFields: many(munFormFields),
+  paymentSettings: one(munPaymentSettings, {
+    fields: [muns.id],
+    references: [munPaymentSettings.munId],
+  }),
+  documents: many(munDocuments),
+  scheduleItems: many(munScheduleItems),
+  contact: one(munContacts, { fields: [muns.id], references: [munContacts.munId] }),
 }))
 
 // ---------------------------------------------------------------------------
@@ -134,6 +166,9 @@ export const committees = pgTable(
     agenda: text('agenda'),
     description: text('description'),
     capacity: integer('capacity').notNull().default(0),
+    // PRD Section 43 Phase 2 columns (Task 3, 2026-09-14).
+    committeeType: text('committee_type'),
+    portfoliosEnabled: boolean('portfolios_enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('committees_mun_id_idx').on(table.munId)],
@@ -159,6 +194,9 @@ export const portfolios = pgTable(
     name: text('name').notNull(),
     type: text('type'),
     availability: integer('availability').notNull().default(1),
+    // PRD Section 43 Phase 2 columns (Task 3, 2026-09-14).
+    description: text('description'),
+    restrictions: text('restrictions'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('portfolios_committee_id_idx').on(table.committeeId)],
@@ -186,6 +224,10 @@ export const registrationProducts = pgTable(
     capacity: integer('capacity').notNull(),
     deadline: timestamp('deadline', { withTimezone: true }),
     status: text('status').notNull().default('active'),
+    // PRD Section 43 Phase 2 columns (Task 3, 2026-09-14).
+    registrationType: text('registration_type'),
+    earlyBirdPrice: integer('early_bird_price'),
+    earlyBirdDeadline: timestamp('early_bird_deadline', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('registration_products_mun_id_idx').on(table.munId)],
@@ -403,6 +445,9 @@ export const verificationLogsRelations = relations(verificationLogs, ({ one }) =
 // ---------------------------------------------------------------------------
 // Verification & confirmation trust layer (slice 1) — see
 // docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md
+// Extended (Task 3, 2026-09-14) with the completion axis + PRD discriminator
+// columns — see docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
+// Section 3.1.
 // ---------------------------------------------------------------------------
 
 export const munModuleVerifications = pgTable(
@@ -417,6 +462,15 @@ export const munModuleVerifications = pgTable(
     organizerConfirmedAt: timestamp('organizer_confirmed_at', { withTimezone: true }),
     lastReviewedAt: timestamp('last_reviewed_at', { withTimezone: true }),
     lastReviewedBy: text('last_reviewed_by').references(() => users.id),
+    // Completion axis (organizer-facing: "have you filled this in correctly?")
+    // — orthogonal to `state` (reviewer-facing: "has MUNHub verified it?").
+    // See design doc Section 3.1 for why these are two columns on one row.
+    completionStatus: moduleCompletionEnum('completion_status').notNull().default('NOT_STARTED'),
+    isRequired: boolean('is_required').notNull().default(true),
+    completionPercentage: integer('completion_percentage').notNull().default(0),
+    blockingIssueCount: integer('blocking_issue_count').notNull().default(0),
+    lastComputedAt: timestamp('last_computed_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -426,6 +480,12 @@ export const munModuleVerifications = pgTable(
     // mun on the platform (not scoped to one mun) — needs its own index once
     // that table has meaningful row counts across many organizers.
     index('mun_module_verifications_state_idx').on(table.state),
+    // The constraint slice 1's design called for but never shipped. Its
+    // absence was a live bug: getModuleVerificationState's lazy-create is
+    // read-then-insert with no lock, so concurrent first-touches could
+    // create duplicate (munId, moduleName) rows. See drizzle/0011 for the
+    // dedupe-then-constrain migration.
+    uniqueIndex('mun_module_verifications_mun_module_uq').on(table.munId, table.moduleName),
   ],
 )
 
@@ -450,10 +510,28 @@ export const verificationIssues = pgTable(
     raisedBy: text('raised_by')
       .notNull()
       .references(() => users.id),
+    // Discriminator columns (Task 3, 2026-09-14): this table is reused for
+    // both reviewer-raised findings (source: REVIEWER, the original slice-1
+    // use) and machine-raised validation failures (source: AUTOMATED, PRD
+    // Section 24). code/fieldKey are the machine-readable identifiers the
+    // automated validator needs; they stay nullable because reviewer-raised
+    // rows don't have them.
+    code: text('code'),
+    fieldKey: text('field_key'),
+    source: text('source').notNull().default('REVIEWER'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   },
-  (table) => [index('verification_issues_mun_id_idx').on(table.munId)],
+  (table) => [
+    index('verification_issues_mun_id_idx').on(table.munId),
+    // Task 8's blocking-issue-count recompute queries exactly this shape
+    // (mun + module + unresolved) on every progress recomputation.
+    index('verification_issues_mun_module_resolved_idx').on(
+      table.munId,
+      table.moduleName,
+      table.resolved,
+    ),
+  ],
 )
 
 export const verificationIssuesRelations = relations(verificationIssues, ({ one }) => ({
@@ -500,6 +578,73 @@ export const munVersions = pgTable(
 export const munVersionsRelations = relations(munVersions, ({ one, many }) => ({
   mun: one(muns, { fields: [munVersions.munId], references: [muns.id] }),
   registrations: many(registrations),
+}))
+
+// ---------------------------------------------------------------------------
+// mun_submissions — Onboarding go-live pipeline (Task 10). See
+// docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
+// Section 5.1. One row per submission attempt; `submitMunForReview`
+// (lib/lifecycle/go-live.ts) is the only writer of new rows.
+//
+// The partial unique index below — NOT a plain unique on munId — is THE
+// structural fix for the double-submit race, per this project's own memory
+// note (CLAUDE.md: "DB unique constraint is the right next fix" after the
+// withdrawn refund workflow's unresolved double-refund race). A plain unique
+// on munId would permanently break resubmission after a mun is ever
+// published/rejected/withdrawn once, so it must stay partial.
+// ---------------------------------------------------------------------------
+
+export const munSubmissions = pgTable(
+  'mun_submissions',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    submittedBy: text('submitted_by')
+      .notNull()
+      .references(() => users.id),
+    versionNumber: integer('version_number').notNull(),
+    status: submissionStatusEnum('status').notNull().default('SUBMITTED'),
+    progressPercentage: integer('progress_percentage').notNull().default(0),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    reviewStartedAt: timestamp('review_started_at', { withTimezone: true }),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    queuedAt: timestamp('queued_at', { withTimezone: true }),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    slaDeadline: timestamp('sla_deadline', { withTimezone: true }).notNull(),
+    slaState: slaStateEnum('sla_state').notNull().default('ON_TRACK'),
+    slaPausedAt: timestamp('sla_paused_at', { withTimezone: true }),
+    slaPausedTotalMs: integer('sla_paused_total_ms').notNull().default(0),
+    reviewerId: text('reviewer_id').references(() => users.id),
+    munVersionId: text('mun_version_id').references((): AnyPgColumn => munVersions.id),
+    publishIdempotencyKey: text('publish_idempotency_key'),
+    rejectionReason: text('rejection_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('mun_submissions_mun_id_idx').on(table.munId),
+    index('mun_submissions_sla_state_idx').on(table.slaState),
+    index('mun_submissions_status_idx').on(table.status),
+    uniqueIndex('mun_submissions_publish_idempotency_key_uq').on(table.publishIdempotencyKey),
+    // THE partial-unique constraint: one active (non-terminal) submission per
+    // mun. Terminal statuses (PUBLISHED/REJECTED/WITHDRAWN) are excluded from
+    // the predicate so a mun can be resubmitted after any of those. Verify
+    // the generated migration SQL actually carries this WHERE clause — see
+    // the file header comment above.
+    uniqueIndex('mun_submissions_active_per_mun_uq')
+      .on(table.munId)
+      .where(sql`status NOT IN ('PUBLISHED','REJECTED','WITHDRAWN')`),
+  ],
+)
+
+export const munSubmissionsRelations = relations(munSubmissions, ({ one }) => ({
+  mun: one(muns, { fields: [munSubmissions.munId], references: [muns.id] }),
+  submitter: one(users, { fields: [munSubmissions.submittedBy], references: [users.id] }),
+  reviewer: one(users, { fields: [munSubmissions.reviewerId], references: [users.id] }),
+  munVersion: one(munVersions, { fields: [munSubmissions.munVersionId], references: [munVersions.id] }),
 }))
 
 // ---------------------------------------------------------------------------
@@ -616,4 +761,240 @@ export const supportTicketsRelations = relations(supportTickets, ({ one }) => ({
     references: [registrations.id],
   }),
   mun: one(muns, { fields: [supportTickets.relatedMunId], references: [muns.id] }),
+}))
+
+// ---------------------------------------------------------------------------
+// Onboarding go-live pipeline — Task 4 net-new module tables (7 tables).
+// See docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
+// Section 2.3. No actions/CRUD land in this task — Tasks 5-6 write the
+// server actions against these tables; this task is schema-only.
+// ---------------------------------------------------------------------------
+
+// mun_media (BRANDING, PRD §11)
+
+export const munMedia = pgTable(
+  'mun_media',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    kind: munMediaKindEnum('kind').notNull(),
+    url: text('url').notNull(),
+    storageKey: text('storage_key').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    displayOrder: integer('display_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mun_media_mun_id_idx').on(table.munId)],
+)
+
+export const munMediaRelations = relations(munMedia, ({ one }) => ({
+  mun: one(muns, { fields: [munMedia.munId], references: [muns.id] }),
+}))
+
+// mun_executive_board (EXECUTIVE_BOARD, PRD §14)
+
+export const munExecutiveBoard = pgTable(
+  'mun_executive_board',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    // Nullable: a Secretary-General is mun-level, a Chair is committee-level.
+    committeeId: text('committee_id').references(() => committees.id),
+    name: text('name').notNull(),
+    role: ebRoleEnum('role').notNull(),
+    // Required iff role = CUSTOM — enforced in the action, not the DB.
+    customRole: text('custom_role'),
+    photoUrl: text('photo_url'),
+    bio: text('bio'),
+    displayOrder: integer('display_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mun_executive_board_mun_id_idx').on(table.munId)],
+)
+
+export const munExecutiveBoardRelations = relations(munExecutiveBoard, ({ one }) => ({
+  mun: one(muns, { fields: [munExecutiveBoard.munId], references: [muns.id] }),
+  committee: one(committees, { fields: [munExecutiveBoard.committeeId], references: [committees.id] }),
+}))
+
+// mun_form_fields (REGISTRATION_FORM, PRD §17)
+
+export const munFormFields = pgTable(
+  'mun_form_fields',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    fieldKey: text('field_key').notNull(),
+    fieldType: formFieldTypeEnum('field_type').notNull(),
+    label: text('label').notNull(),
+    helpText: text('help_text'),
+    required: boolean('required').notNull().default(false),
+    // Non-null iff fieldType is DROPDOWN/MULTIPLE_CHOICE/CHECKBOX — enforced
+    // in the action, not the DB.
+    choices: jsonb('choices'),
+    displayOrder: integer('display_order').notNull().default(0),
+    // Conditional-logic design: single-parent, single-condition model stored
+    // as three columns rather than a jsonb rule AST — see design doc Section
+    // 2.3 for the rationale and the accepted cost (no OR-conditions or
+    // multi-parent dependencies without a migration).
+    conditionalOn: text('conditional_on'),
+    conditionalOperator: text('conditional_operator'),
+    conditionalValue: text('conditional_value'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('mun_form_fields_mun_id_idx').on(table.munId),
+    // conditionalOn references fieldKey, which must be unambiguous within a
+    // mun — see design doc Section 2.3.
+    uniqueIndex('mun_form_fields_mun_key_uq').on(table.munId, table.fieldKey),
+  ],
+)
+
+export const munFormFieldsRelations = relations(munFormFields, ({ one }) => ({
+  mun: one(muns, { fields: [munFormFields.munId], references: [muns.id] }),
+}))
+
+// mun_payment_settings (PAYMENT_SETTLEMENT, PRD §19)
+//
+// SECURITY — write-only ciphertext columns, read this before touching this
+// table. `panCiphertext` and `accountNumberCiphertext` are write-only in this
+// slice: the write path (Task 6) encrypts and stores the full value via
+// lib/crypto/field-encryption.ts, but NO read path in this codebase decrypts
+// them back. `getPaymentSettings(munId)` (Task 6) MUST select columns
+// explicitly and MUST NOT include these two columns in that list — `select()`
+// with no argument is banned against this table for exactly this reason.
+// There is deliberately no `getFullPaymentDetails` or equivalent decrypt-and-
+// return action anywhere in this codebase. A decrypt path with no consumer is
+// pure attack surface with no offsetting benefeit. Do NOT add one without a
+// dedicated threat review — see design doc Section 2.3 and Section 8 (security
+// invariant #7: "Payment plaintext is write-only, encrypted, and structurally
+// unreachable by any read path").
+
+export const munPaymentSettings = pgTable(
+  'mun_payment_settings',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .unique()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    legalName: text('legal_name').notNull(),
+    orgType: text('org_type').notNull(),
+    addressLine1: text('address_line1').notNull(),
+    addressLine2: text('address_line2'),
+    city: text('city').notNull(),
+    state: text('state').notNull(),
+    postalCode: text('postal_code').notNull(),
+    panLast4: text('pan_last4').notNull(),
+    panCiphertext: text('pan_ciphertext').notNull(),
+    gstin: text('gstin'),
+    authorizedRepName: text('authorized_rep_name').notNull(),
+    authorizedRepEmail: text('authorized_rep_email').notNull(),
+    accountHolderName: text('account_holder_name').notNull(),
+    bankName: text('bank_name').notNull(),
+    accountNumberLast4: text('account_number_last4').notNull(),
+    accountNumberCiphertext: text('account_number_ciphertext').notNull(),
+    ifsc: text('ifsc').notNull(),
+    accountType: text('account_type').notNull(),
+    gateway: text('gateway').notNull(),
+    currency: text('currency').notNull().default('INR'),
+    refundPolicy: text('refund_policy'),
+    settlementNotes: text('settlement_notes'),
+    verificationState: paymentVerificationEnum('verification_state').notNull().default('NOT_SUBMITTED'),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    verifiedBy: text('verified_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mun_payment_settings_mun_id_idx').on(table.munId)],
+)
+
+export const munPaymentSettingsRelations = relations(munPaymentSettings, ({ one }) => ({
+  mun: one(muns, { fields: [munPaymentSettings.munId], references: [muns.id] }),
+  verifier: one(users, { fields: [munPaymentSettings.verifiedBy], references: [users.id] }),
+}))
+
+// mun_documents (RULES_DOCUMENTS, PRD §20)
+
+export const munDocuments = pgTable(
+  'mun_documents',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    kind: munDocumentKindEnum('kind').notNull(),
+    title: text('title').notNull(),
+    url: text('url').notNull(),
+    storageKey: text('storage_key').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mun_documents_mun_id_idx').on(table.munId)],
+)
+
+export const munDocumentsRelations = relations(munDocuments, ({ one }) => ({
+  mun: one(muns, { fields: [munDocuments.munId], references: [muns.id] }),
+}))
+
+// mun_schedule_items (SCHEDULE, PRD §21)
+
+export const munScheduleItems = pgTable(
+  'mun_schedule_items',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    committeeId: text('committee_id').references(() => committees.id),
+    title: text('title').notNull(),
+    kind: scheduleItemKindEnum('kind').notNull(),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+    endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+    location: text('location'),
+    displayOrder: integer('display_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mun_schedule_items_mun_id_idx').on(table.munId)],
+)
+
+export const munScheduleItemsRelations = relations(munScheduleItems, ({ one }) => ({
+  mun: one(muns, { fields: [munScheduleItems.munId], references: [muns.id] }),
+  committee: one(committees, { fields: [munScheduleItems.committeeId], references: [committees.id] }),
+}))
+
+// mun_contacts (CONTACT, PRD §23)
+
+export const munContacts = pgTable(
+  'mun_contacts',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .unique()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    officialEmail: text('official_email').notNull(),
+    phone: text('phone'),
+    website: text('website'),
+    socialLinks: jsonb('social_links'),
+    contactPersonName: text('contact_person_name').notNull(),
+    contactPersonRole: text('contact_person_role'),
+    contactPersonEmail: text('contact_person_email').notNull(),
+    contactPersonPhone: text('contact_person_phone'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mun_contacts_mun_id_idx').on(table.munId)],
+)
+
+export const munContactsRelations = relations(munContacts, ({ one }) => ({
+  mun: one(muns, { fields: [munContacts.munId], references: [muns.id] }),
 }))
