@@ -2,7 +2,7 @@ import { createBrowserRouter } from "react-router";
 import { AdminLayout } from "@/layouts/admin-layout";
 import { MunWorkspaceLayout } from "@/layouts/mun-workspace-layout";
 import { RegisterLayout } from "@/layouts/register-layout";
-import { PublicLayout, RootLayout } from "@/layouts/root-layout";
+import { RootLayout } from "@/layouts/root-layout";
 import { WorkspaceLayout } from "@/layouts/workspace-layout";
 import { AdminAuditDetailPage } from "@/pages/admin/audit-detail-page";
 import { AdminAuditPage } from "@/pages/admin/audit-page";
@@ -39,7 +39,7 @@ import { OrganizerResultsPage } from "@/pages/organizer/dashboard/sections/resul
 import { OrganizerSettingsPage } from "@/pages/organizer/dashboard/sections/settings-page";
 import { OrganizerSetupPage } from "@/pages/organizer/dashboard/sections/setup-page";
 import { OrganizerTeamPage } from "@/pages/organizer/dashboard/sections/team-page";
-import { MarketplacePage } from "@/pages/marketplace-page";
+import { MunsPage } from "@/pages/muns-page";
 import { RegisterConfirmationPage } from "@/pages/register/register-confirmation-page";
 import { RegisterPage } from "@/pages/register/register-page";
 import { RegisterPayPage } from "@/pages/register/register-pay-page";
@@ -50,24 +50,19 @@ export const router = createBrowserRouter([
   {
     element: <RootLayout />,
     children: [
+      { index: true, element: <HomePage /> },
+      { path: "muns", element: <MunsPage /> },
+      { path: "mun/:slug", element: <MunDetailPage /> },
+      { path: "login", element: <LoginPage /> },
+      { path: "dashboard", element: <StudentDashboardPage /> },
+      { path: "support/new", element: <SupportNewPage /> },
       {
-        element: <PublicLayout />,
+        path: "register/:slug",
+        element: <RegisterLayout />,
         children: [
-          { index: true, element: <HomePage /> },
-          { path: "muns", element: <MarketplacePage /> },
-          { path: "mun/:slug", element: <MunDetailPage /> },
-          { path: "login", element: <LoginPage /> },
-          { path: "dashboard", element: <StudentDashboardPage /> },
-          { path: "support/new", element: <SupportNewPage /> },
-          {
-            path: "register/:slug",
-            element: <RegisterLayout />,
-            children: [
-              { index: true, element: <RegisterPage /> },
-              { path: "pay", element: <RegisterPayPage /> },
-              { path: "confirmation", element: <RegisterConfirmationPage /> },
-            ],
-          },
+          { index: true, element: <RegisterPage /> },
+          { path: "pay", element: <RegisterPayPage /> },
+          { path: "confirmation", element: <RegisterConfirmationPage /> },
         ],
       },
       { path: "organizer/apply", element: <OrganizerApplyPage /> },

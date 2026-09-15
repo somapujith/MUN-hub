@@ -73,7 +73,7 @@ export function RegistrationSummary({
       </div>
 
       <Link
-        href={`/mun/${slug}`}
+        to={`/mun/${slug}`}
         className="inline-flex items-center gap-xs text-body-md text-link underline-offset-4 hover:underline"
       >
         <ArrowLeftIcon className="size-3.5" aria-hidden />

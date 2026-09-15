@@ -5,6 +5,7 @@ import { SiteHeaderMobileNav } from "@/components/layout/site-header-mobile-nav"
 import { SiteHeaderSearch } from "@/components/layout/site-header-search";
 import { SiteHeaderUserMenu } from "@/components/layout/site-header-user-menu";
 import { CitySelector } from "@/components/marketplace/city-selector";
+import type { Role } from "@/types";
 
 /**
  * `top-nav` — DESIGN-airtable.md § Components.
@@ -74,7 +75,7 @@ interface SiteHeaderProps {
   /** Active city from the page's own `?city=` parsing. */
   selectedCity?: string;
   /** Optional session — pages pass mock/null until API client lands. */
-  session?: { userId: string; role: keyof typeof DASHBOARD_HREF } | null;
+  session?: { userId: string; role: Role } | null;
 }
 
 export function SiteHeader({

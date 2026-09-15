@@ -35,7 +35,7 @@ export function CommitteeList({ committees }: CommitteeListProps) {
 }
 
 function CommitteeCard({ committee }: { committee: CommitteeWithPortfolios }) {
-  const openSeats = committee.portfolios.filter((p) => p.availability > 0).length;
+  const openSeats = committee.portfolios.filter((p) => (p.availability ?? 0) > 0).length;
   const hasPortfolios = committee.portfolios.length > 0;
 
   return (
@@ -72,7 +72,7 @@ function CommitteeCard({ committee }: { committee: CommitteeWithPortfolios }) {
           </p>
           <ul className="mt-xs flex list-none flex-wrap gap-xxs p-0">
             {committee.portfolios.map((portfolio) => {
-              const taken = portfolio.availability === 0;
+              const taken = (portfolio.availability ?? 0) === 0;
               return (
                 <li key={portfolio.id}>
                   <Badge

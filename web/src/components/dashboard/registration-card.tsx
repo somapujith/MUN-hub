@@ -43,7 +43,7 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
               {/* Stretched link: the whole card is the hit target, but the
                   accessible name stays the MUN title only. */}
               <Link
-                href={`/mun/${mun.slug}`}
+                to={`/mun/${mun.slug}`}
                 className="rounded-sm outline-none after:absolute after:inset-0 after:content-[''] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 {mun.name}
