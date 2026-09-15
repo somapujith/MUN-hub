@@ -5,18 +5,19 @@ import { munsRoutes } from './muns'
 import { protectedRoutes } from './protected'
 import { sitemapRoutes } from './sitemap'
 
-/**
- * /api/v1 route bundle — sibling agents mount domain modules here.
- * Mounted by createApp() after CSRF + rate-limit middleware.
- */
+/** Public marketplace, auth, and SEO routes — mount at `/api/v1`. */
+export const publicRoutes = new Hono<{ Variables: AppVariables }>()
+
+publicRoutes.route('/auth', authRoutes)
+publicRoutes.route('/muns', munsRoutes)
+publicRoutes.route('/', sitemapRoutes)
+
+/** Full `/api/v1` bundle — public + protected routes. */
 export const apiV1 = new Hono<{ Variables: AppVariables }>()
 
 apiV1.get('/health', (c) => c.json({ ok: true, requestId: c.get('requestId') }))
 
-apiV1.route('/auth', authRoutes)
-apiV1.route('/muns', munsRoutes)
-apiV1.route('/', sitemapRoutes)
+apiV1.route('/', publicRoutes)
 apiV1.route('/', protectedRoutes)
 
-/** @deprecated Use apiV1 — kept for sibling agents that imported publicRoutes */
-export const publicRoutes = apiV1
+export { protectedRoutes, registrationsRoutes, munConfigRoutes } from './protected'
