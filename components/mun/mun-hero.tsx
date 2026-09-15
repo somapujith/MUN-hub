@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import type { MunDetail } from "@/lib/types";
 
 /**
- * MUN detail hero — `hero-band` (DESIGN-airtable.md § Cards & Containers).
+ * MUN detail hero — `hero-band` (docs/prd/DESIGN-airtable.md § Cards & Containers).
  *
  * White canvas, no gradient, no mesh, no atmospheric backdrop: the doc is
  * explicit that the hero's strength is type + buttons sitting in whitespace

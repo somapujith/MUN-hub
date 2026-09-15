@@ -6,7 +6,7 @@ import { cn } from "cn"
 
 /**
  * Tabs — retuned from the shadcn `base-nova` baseline onto this project's
- * Airtable token set (DESIGN-airtable.md). Three deviations from stock, all
+ * Airtable token set (docs/prd/DESIGN-airtable.md). Three deviations from stock, all
  * deliberate:
  *
  *   1. Type is `{typography.body-md}` (14/400) and `{typography.caption}`

@@ -12,7 +12,7 @@ import {
 import { cn } from "cn";
 
 /**
- * `topic-filter-rail` — DESIGN-airtable.md § Cards & Containers.
+ * `topic-filter-rail` — docs/prd/DESIGN-airtable.md § Cards & Containers.
  *
  * 240px left rail on {colors.canvas}, {typography.body-md}, vertically grouped
  * category headings with sub-bullets. The active item carries a small numeric

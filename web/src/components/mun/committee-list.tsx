@@ -4,7 +4,7 @@ import type { CommitteeWithPortfolios } from "@/types";
 
 /**
  * Committee grid — `demo-grid-card` / `article-card` treatment
- * (DESIGN-airtable.md § Cards & Containers): canvas background, {rounded.md}
+ * (docs/prd/DESIGN-airtable.md § Cards & Containers): canvas background, {rounded.md}
  * (10px), hairline border, flat elevation. Card heights are deliberately left
  * to their content rather than stretched — the doc warns that uniform heights
  * "feel like a spec sheet".

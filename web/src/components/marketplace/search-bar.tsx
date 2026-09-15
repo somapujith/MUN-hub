@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 /**
- * Marketplace search field — DESIGN-airtable.md `text-input` / `text-input-focus`.
+ * Marketplace search field — docs/prd/DESIGN-airtable.md `text-input` / `text-input-focus`.
  * 44px height, {rounded.sm} (6px), hairline border, focus recolors the border to
  * {colors.info-border} and adds the soft ring (both already encoded in
  * <Input>). The submit sits as a near-black `button-primary` at matching height.

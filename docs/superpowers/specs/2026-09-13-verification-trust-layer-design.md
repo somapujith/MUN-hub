@@ -1,7 +1,7 @@
 # Verification & Confirmation Trust Layer — Slice 1: Core Trust Mechanism
 
 **Status:** Approved
-**Source PRD:** `MUNHub_Organizer_Modules_Verification_Confirmation_PRD.md` (full scope — this spec covers only the P0 subset below)
+**Source PRD:** `docs/prd/MUNHub_Organizer_Modules_Verification_Confirmation_PRD.md` (full scope — this spec covers only the P0 subset below)
 **Scope:** the new trust machinery (versioning, module-level verification, organizer confirmation gate, re-verification triggers) applied to modules that already exist: MUN details, committees, portfolios, registration products.
 
 **Explicitly out of scope for this slice** (separate future slices — mostly Phase 2 territory since the underlying features don't exist yet): registration form builder, QR check-in, results/awards, certificates, communications, documents/media versioning, analytics, team permissions beyond what RBAC already has, executive board module (schema exists nowhere yet — would need its own slice), organizer application module changes (existing `organizerApplications` flow is untouched).

@@ -8,7 +8,7 @@ import { SiteHeaderUserMenu } from "@/components/layout/site-header-user-menu";
 import { CitySelector } from "@/components/marketplace/city-selector";
 
 /**
- * `top-nav` — DESIGN-airtable.md § Components.
+ * `top-nav` — docs/prd/DESIGN-airtable.md § Components.
  *
  * A 64px white bar pinned to the top of every page: wordmark at left, then the
  * browse cluster (city picker + search), then the action cluster at right. The

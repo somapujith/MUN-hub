@@ -6,7 +6,7 @@ import { cn } from "cn";
 import type { RegistrationProduct } from "@/types";
 
 /**
- * Registration pass — `pricing-tier-card` (DESIGN-airtable.md § Pricing
+ * Registration pass — `pricing-tier-card` (docs/prd/DESIGN-airtable.md § Pricing
  * Sub-System): canvas background, {rounded.md} (10px), 32px internal padding,
  * price in {typography.pricing-display} (44.8px / 475), a short feature list,
  * and a {component.button-pricing-pill} at the bottom.

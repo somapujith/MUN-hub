@@ -6,7 +6,7 @@ Living context doc. Update this file whenever architecture, scope, or session-sp
 
 ## What this is
 
-Curated MUN (Model United Nations) marketplace + registration + organizer management platform. Full spec: `MUN_Marketplace_PRD.md`. First prototype scope: **PRD Section 28 MVP only** (student MVP + organizer MVP + admin MVP). No Passport, certificates, QR pass, reviews, recommendations — those are Phase 2+, explicitly deferred.
+Curated MUN (Model United Nations) marketplace + registration + organizer management platform. Full spec: `docs/prd/MUN_Marketplace_PRD.md`. First prototype scope: **PRD Section 28 MVP only** (student MVP + organizer MVP + admin MVP). No Passport, certificates, QR pass, reviews, recommendations — those are Phase 2+, explicitly deferred.
 
 Design/plan docs:
 - `docs/superpowers/specs/2026-09-13-mun-hub-mvp-backend-design.md` — architecture decisions
@@ -35,7 +35,7 @@ During the migration, freeze new files under `app/` (existing-page fixes OK). Co
 
 <details><summary>Superseded: pre-migration session split (mun-hub-b2 / mun-hub-02)</summary>
 
-This session (**mun-hub-b2**) owned backend/data: `lib/db/`, `lib/auth/`, `lib/payments/`, `lib/storage/`, `lib/lifecycle/`, `lib/actions/`, `lib/types/`, `lib/notifications/`. UI owned `app/**/page.tsx`, `components/`. **mun-hub-93** built Diplomatic Modernism; **mun-hub-02** rebuilt against `DESIGN-airtable.md`. Coordinate via SendMessage before touching the other side's files.
+This session (**mun-hub-b2**) owned backend/data: `lib/db/`, `lib/auth/`, `lib/payments/`, `lib/storage/`, `lib/lifecycle/`, `lib/actions/`, `lib/types/`, `lib/notifications/`. UI owned `app/**/page.tsx`, `components/`. **mun-hub-93** built Diplomatic Modernism; **mun-hub-02** rebuilt against `docs/prd/DESIGN-airtable.md`. Coordinate via SendMessage before touching the other side's files.
 
 </details>
 
@@ -47,7 +47,7 @@ This session (**mun-hub-b2**) owned backend/data: `lib/db/`, `lib/auth/`, `lib/p
 
 ## UI status (mun-hub-02 rebuild, 2026-09-13 — supersedes the mun-hub-93 "Diplomatic Modernism" notes below)
 
-Full frontend rebuilt against `DESIGN-airtable.md`. All 8 pages done: homepage, marketplace/`muns`, MUN detail, registration funnel (`/register/[slug]`), student dashboard, organizer dashboard + application, admin review queue, sign-in. 4 required review agents run (design-critic, a11y-architect, integration-enforcer, adversarial-coach) with findings fixed — button-contrast tailwind-merge collisions (two instances, both fixed with dedicated variants, not `!important` hacks), dark-mode CTA band invisibility, an open-redirect backslash bypass in login, orphaned components deleted, a11y focus/error-handling gaps. adversarial-coach also found 3 real backend bugs during this pass (see Registration integrity section below) — cross-session review catching backend issues is a good sign the review discipline is working, not just rubber-stamping.
+Full frontend rebuilt against `docs/prd/DESIGN-airtable.md`. All 8 pages done: homepage, marketplace/`muns`, MUN detail, registration funnel (`/register/[slug]`), student dashboard, organizer dashboard + application, admin review queue, sign-in. 4 required review agents run (design-critic, a11y-architect, integration-enforcer, adversarial-coach) with findings fixed — button-contrast tailwind-merge collisions (two instances, both fixed with dedicated variants, not `!important` hacks), dark-mode CTA band invisibility, an open-redirect backslash bypass in login, orphaned components deleted, a11y focus/error-handling gaps. adversarial-coach also found 3 real backend bugs during this pass (see Registration integrity section below) — cross-session review catching backend issues is a good sign the review discipline is working, not just rubber-stamping.
 
 Committed as `fde91a2` (71 files) on mun-hub-02's side. tsc clean, 97/97 tests passing.
 
@@ -92,7 +92,7 @@ Local Docker Postgres (`docker-compose.yml`, `npm run db:up`) is what tests actu
 
 ## Verification & Confirmation Trust Layer (slice 1, landed 2026-09-13)
 
-New PRD: `MUNHub_Organizer_Modules_Verification_Confirmation_PRD.md`. Full design: `docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md`. Implementation plan: `docs/superpowers/plans/2026-09-13-verification-trust-layer.md` (7 tasks, all landed). This is "slice 1" — the core trust mechanism only, applied to modules that already existed (mun details, committees, portfolios, registration products). Registration form builder, QR check-in, results/awards, certificates, communications are deliberately out of scope for this slice (see spec doc Section 6).
+New PRD: `docs/prd/MUNHub_Organizer_Modules_Verification_Confirmation_PRD.md`. Full design: `docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md`. Implementation plan: `docs/superpowers/plans/2026-09-13-verification-trust-layer.md` (7 tasks, all landed). This is "slice 1" — the core trust mechanism only, applied to modules that already existed (mun details, committees, portfolios, registration products). Registration form builder, QR check-in, results/awards, certificates, communications are deliberately out of scope for this slice (see spec doc Section 6).
 
 **Lifecycle change:** `MunStatus` gained 5 values — `ORGANIZER_CONFIRMATION`, `VERIFIED`, `RESULTS_PENDING`, `RESULTS_UNDER_REVIEW`, `CANCELLED`. The path is now `CONTENT_SUBMITTED → ORGANIZER_CONFIRMATION → VERIFICATION → VERIFIED → PUBLISHED`, not the old `CONTENT_SUBMITTED → VERIFICATION → PUBLISHED`. **`publishMun` now requires `VERIFIED`, not `VERIFICATION`** — a real behavior change, not just a rename. `VERIFIED`/`PUBLISHED`/`REGISTRATION_OPEN` can transition back to `VERIFICATION` (that's the re-verification path). `CANCELLED` is reachable from most non-terminal states.
 
@@ -110,7 +110,7 @@ New PRD: `MUNHub_Organizer_Modules_Verification_Confirmation_PRD.md`. Full desig
 
 ## Organizer Onboarding & Go-Live Pipeline (landed 2026-09-14, extends the trust-layer slice above — does not replace it)
 
-New PRD: `MUNHub_Organizer_Onboarding_Go_Live_Pipeline_PRD.md`. Full design: `docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md`. Implementation plan: `docs/superpowers/plans/2026-09-14-onboarding-go-live-pipeline.md` (13 tasks, all landed). `mun_module_verifications`/`verification_issues`/`organizer_confirmations`/`mun_versions` from the trust-layer slice above are all reused and widened, not duplicated.
+New PRD: `docs/prd/MUNHub_Organizer_Onboarding_Go_Live_Pipeline_PRD.md`. Full design: `docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md`. Implementation plan: `docs/superpowers/plans/2026-09-14-onboarding-go-live-pipeline.md` (13 tasks, all landed). `mun_module_verifications`/`verification_issues`/`organizer_confirmations`/`mun_versions` from the trust-layer slice above are all reused and widened, not duplicated.
 
 **The single most important thing for a future agent not to get wrong — Gate-1 vs Gate-2 vocabulary.** `SUBMITTED`/`UNDER_REVIEW`/`APPROVED`/`CHANGES_REQUESTED` are reused by TWO completely different review gates that happen to share English words:
 

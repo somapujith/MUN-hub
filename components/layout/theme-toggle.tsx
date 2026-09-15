@@ -6,7 +6,7 @@ import { MoonIcon, SunIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 /**
- * `button-icon-circular` — DESIGN-airtable.md § Buttons.
+ * `button-icon-circular` — docs/prd/DESIGN-airtable.md § Buttons.
  *
  * 40 × 40 canvas surface with a hairline border and {colors.ink} icon. The doc
  * notes 40px sits just under WCAG's 44px recommendation but that the centered

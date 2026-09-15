@@ -54,3 +54,6 @@ next-env.d.ts
 .claude/
 .superpowers/
 /superpowers/
+
+# stray build/scratch dirs
+.dist/

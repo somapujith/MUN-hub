@@ -24,7 +24,7 @@ import type { MunSummary } from "@/lib/types";
 
 /**
  * Homepage — a browse-first "shelf" surface (carousel -> city pills -> status
- * rows), rendered in the DESIGN-airtable.md editorial system.
+ * rows), rendered in the docs/prd/DESIGN-airtable.md editorial system.
  *
  * Band order:
  *   1. carousel       rotating `signature-card` promos (coral/forest/dark)

@@ -3,7 +3,7 @@ import { Input as InputPrimitive } from "@base-ui/react/input"
 import { cn } from "cn"
 
 /**
- * `text-input` — DESIGN-airtable.md § Inputs & Forms.
+ * `text-input` — docs/prd/DESIGN-airtable.md § Inputs & Forms.
  * Canvas background, {colors.ink} text, {typography.body-md}, {rounded.sm}
  * (6px), 12px x 16px padding, 44px height, 1px {colors.hairline} border.
  * Focus recolors the border to {colors.info-border} (`--ring`).

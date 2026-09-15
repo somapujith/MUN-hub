@@ -21,7 +21,7 @@ import type { MunSummary } from "@/types";
 /**
  * Rotating promo banner — a full-bleed `signature-card` per slide, cycling
  * coral -> forest -> dark so consecutive slides never repeat a surface mode
- * (DESIGN-airtable.md Don't #5). This is the one place the homepage shows the
+ * (docs/prd/DESIGN-airtable.md Don't #5). This is the one place the homepage shows the
  * same structural band more than once in a row, which is exactly why the
  * surface rotates underneath it.
  *

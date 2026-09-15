@@ -10,7 +10,7 @@ Vite + React 19 frontend that will replace the Next.js `app/**` tree.
 | UI | **React 19** + TypeScript |
 | Routing | **React Router v7 data-router mode only** (`createBrowserRouter`) — not framework mode; **no loaders for data fetching** |
 | Server state | **TanStack Query** (`@tanstack/react-query` v5) |
-| Styling | **Tailwind CSS v4** (`@tailwindcss/vite` preferred) + `DESIGN-airtable.md` tokens ported from `app/globals.css` |
+| Styling | **Tailwind CSS v4** (`@tailwindcss/vite` preferred) + `docs/prd/DESIGN-airtable.md` tokens ported from `app/globals.css` |
 | Head / titles | **react-helmet-async** (browser tab titles; crawler HTML is a backend prerender concern) |
 | Theme | **next-themes** (framework-agnostic despite the name) |
 

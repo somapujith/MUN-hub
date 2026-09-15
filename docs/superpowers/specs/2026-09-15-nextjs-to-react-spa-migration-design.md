@@ -534,7 +534,7 @@ The **37 `revalidatePath` calls are the highest-risk mechanical port**: each is 
 
 ### 5.5 What ports cheaply vs. what is a rewrite
 
-- **Cheap (import swaps, ~1-2 days):** all of `components/ui` (shadcn primitives), `components/mun`, `components/marketplace`, `components/dashboard`, `components/organizer`, `components/registration` - 8,100 LOC of plain React. Tailwind v4 + `DESIGN-airtable.md` tokens and `app/globals.css` move as-is (Vite has first-class Tailwind v4 support via `@tailwindcss/vite`).
+- **Cheap (import swaps, ~1-2 days):** all of `components/ui` (shadcn primitives), `components/mun`, `components/marketplace`, `components/dashboard`, `components/organizer`, `components/registration` - 8,100 LOC of plain React. Tailwind v4 + `docs/prd/DESIGN-airtable.md` tokens and `app/globals.css` move as-is (Vite has first-class Tailwind v4 support via `@tailwindcss/vite`).
 - **Real rewrite (~44 files):** every Server Component page body. `async function Page() { const x = await someAction() }` becomes `function Page() { const {data} = useQuery(...) }`, plus loading and error states SSR previously made implicit.
 - **Delete (~9 files):** the route-local `actions.ts` wrappers. Error mapping -> server middleware (Section 3.4); user-facing copy -> the client code -> copy map.
 

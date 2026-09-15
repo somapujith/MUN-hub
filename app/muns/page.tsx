@@ -19,7 +19,7 @@ import {
  *
  * White canvas throughout, ink type, `topic-filter-rail` on the left at 240px,
  * `text-input` search on top, `demo-grid-card` results. The alternating
- * signature-card rhythm from DESIGN-airtable.md is a long-scroll editorial
+ * signature-card rhythm from docs/prd/DESIGN-airtable.md is a long-scroll editorial
  * device and is deliberately NOT applied here; the one brand-voltage moment is
  * the cream empty state inside <MunCardGrid>.
  */

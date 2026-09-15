@@ -4,7 +4,7 @@ import { cn } from "cn"
 
 /**
  * Signature surface cards — the brand's voltage moments
- * (DESIGN-airtable.md § Cards & Containers).
+ * (docs/prd/DESIGN-airtable.md § Cards & Containers).
  *
  * These are full-bleed color surfaces that punctuate a long-scroll editorial
  * page every two or three screens. They are NOT accents on small elements —

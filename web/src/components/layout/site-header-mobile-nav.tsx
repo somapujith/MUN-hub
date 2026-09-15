@@ -17,7 +17,7 @@ function signOutAction() {
 
 
 /**
- * Mobile collapse for `top-nav`. Per DESIGN-airtable.md § Collapsing Strategy,
+ * Mobile collapse for `top-nav`. Per docs/prd/DESIGN-airtable.md § Collapsing Strategy,
  * the nav collapses to a hamburger below 768px and "the menu opens as a
  * full-screen sheet rather than a dropdown" — <SheetContent> is w-full until
  * the `sm` breakpoint, which gives exactly that.

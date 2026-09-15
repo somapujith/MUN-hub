@@ -15,7 +15,7 @@ import { PRICE_OPTIONS, STATUS_OPTIONS } from "@/lib/home-filters";
 import { cn } from "cn";
 
 /**
- * `topic-filter-rail` — DESIGN-airtable.md § Cards & Containers — on the
+ * `topic-filter-rail` — docs/prd/DESIGN-airtable.md § Cards & Containers — on the
  * homepage, mirrored to the right of the shelves.
  *
  * Structurally the same rail as `components/marketplace/filter-sidebar.tsx`

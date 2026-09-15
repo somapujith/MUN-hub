@@ -2,7 +2,7 @@ import * as React from "react"
 import { cn } from "cn"
 
 /**
- * Content card — DESIGN-airtable.md `demo-grid-card` / `article-card`.
+ * Content card — docs/prd/DESIGN-airtable.md `demo-grid-card` / `article-card`.
  * Canvas background, {rounded.md} (10px), hairline border, 16px internal
  * padding at `sm` and 24px at default. Flat: elevation is a hairline, not a
  * shadow ("color-block first, shadow second").

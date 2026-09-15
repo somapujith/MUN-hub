@@ -7,7 +7,7 @@ import { cn } from "cn";
 import type { MunSummary } from "@/types";
 
 /**
- * MUN listing card — `demo-grid-card` treatment (DESIGN-airtable.md
+ * MUN listing card — `demo-grid-card` treatment (docs/prd/DESIGN-airtable.md
  * § Cards & Containers) adapted for a search result: {colors.canvas} surface,
  * {rounded.md} (10px), hairline border, 16px internal padding, flat elevation
  * ("color-block first, shadow second" — no drop shadow anywhere).

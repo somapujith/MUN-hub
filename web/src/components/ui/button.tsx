@@ -3,7 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 /**
- * Airtable editorial button system (DESIGN-airtable.md § Buttons).
+ * Airtable editorial button system (docs/prd/DESIGN-airtable.md § Buttons).
  *
  * The system documents Default and Active/Pressed only — hover is deliberately
  * restrained to a minimal tone shift, never a color change. Primary is

@@ -15,7 +15,7 @@ import type { MunSummary } from "@/lib/types";
 /**
  * Results grid — 3-up at desktop, 2 at tablet, 1 at mobile, {spacing.lg} (24px)
  * gutters per the doc's grid spec. Card heights are uniform on purpose: the
- * uneven-height rule in DESIGN-airtable.md is for marketing demo grids, and a
+ * uneven-height rule in docs/prd/DESIGN-airtable.md is for marketing demo grids, and a
  * search surface has to stay scannable.
  *
  * The empty state is the single place this utility page reaches for brand

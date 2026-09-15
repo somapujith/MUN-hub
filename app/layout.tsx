@@ -6,7 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 
 // Haas Grotesk / Haas Groot Disp are licensed and unavailable. Per
-// DESIGN-airtable.md "Note on Font Substitutes", Inter (variable) is the closest
+// docs/prd/DESIGN-airtable.md "Note on Font Substitutes", Inter (variable) is the closest
 // open substitute for both text and display roles. Both variables point at the
 // same variable family; the display role differs by weight/tracking, not family,
 // and the pricing sub-system's 475/575 mid-weights are reachable because the

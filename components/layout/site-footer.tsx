@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 /**
- * `footer` — DESIGN-airtable.md § Navigation Variants.
+ * `footer` — docs/prd/DESIGN-airtable.md § Navigation Variants.
  *
  * Light surface ({colors.canvas}), multi-column link list at desktop, type in
  * {typography.body-md}, footer links in {colors.muted}. Vertical padding is the

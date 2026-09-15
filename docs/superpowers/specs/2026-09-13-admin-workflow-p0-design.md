@@ -1,7 +1,7 @@
 # Admin Workflow P0 — Design
 
 **Date:** 2026-09-13
-**Source PRD:** `MUNHub_Admin_Workflow_PRD.md`
+**Source PRD:** `docs/prd/MUNHub_Admin_Workflow_PRD.md`
 **Status:** approved for implementation planning
 
 **2026-09-13 update:** the refund workflow (track 6 below) was fully

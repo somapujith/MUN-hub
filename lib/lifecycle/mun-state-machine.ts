@@ -10,7 +10,7 @@ import type { Mun } from '@/lib/types'
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 /**
- * Allowed forward transitions per MUNHub_Organizer_Modules_Verification_Confirmation_PRD.md
+ * Allowed forward transitions per docs/prd/MUNHub_Organizer_Modules_Verification_Confirmation_PRD.md
  * Section 2, extended by docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
  * Section 1.6 with the organizer onboarding / go-live pipeline states.
  *

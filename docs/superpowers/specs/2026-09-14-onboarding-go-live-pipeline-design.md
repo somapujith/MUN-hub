@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-09-14
-**Source PRD:** `MUNHub_Organizer_Onboarding_Go_Live_Pipeline_PRD.md`
+**Source PRD:** `docs/prd/MUNHub_Organizer_Onboarding_Go_Live_Pipeline_PRD.md`
 **Supersedes scope of:** `docs/superpowers/specs/2026-09-13-verification-trust-layer-design.md` (slice 1 — extended, not replaced)
 **Implementation plan:** `docs/superpowers/plans/2026-09-14-onboarding-go-live-pipeline.md`
 

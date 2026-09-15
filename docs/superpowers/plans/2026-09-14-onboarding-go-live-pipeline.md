@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the full 15-module onboarding -> validation -> confirmation -> review -> go-live-queue -> publish pipeline from `MUNHub_Organizer_Onboarding_Go_Live_Pipeline_PRD.md`, by **extending** the slice-1 verification trust layer rather than building PRD Section 37 parallel tables.
+**Goal:** Build the full 15-module onboarding -> validation -> confirmation -> review -> go-live-queue -> publish pipeline from `docs/prd/MUNHub_Organizer_Onboarding_Go_Live_Pipeline_PRD.md`, by **extending** the slice-1 verification trust layer rather than building PRD Section 37 parallel tables.
 
 **Architecture:** One unified pipeline. `mun_module_verifications` gains a completion axis alongside its existing verification axis. A code-based `MODULE_REGISTRY` of 15 entries (each with a pure `validate` function) replaces the hardcoded 4-element `TRACKED_MODULES`. Seven net-new tables back the seven modules with no schema today. One genuinely new table, `mun_submissions`, carries the SLA clock and publish idempotency.
 

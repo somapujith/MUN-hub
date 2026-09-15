@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (or subagent-driven-development) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the Next.js `app/**` frontend with a Vite + React Router v7 (data-router mode) + TanStack Query SPA under `/web`, preserving 1:1 URLs and the `DESIGN-airtable.md` visual system, while never trusting client-supplied `userId`/`role`.
+**Goal:** Replace the Next.js `app/**` frontend with a Vite + React Router v7 (data-router mode) + TanStack Query SPA under `/web`, preserving 1:1 URLs and the `docs/prd/DESIGN-airtable.md` visual system, while never trusting client-supplied `userId`/`role`.
 
 **Specs (authority order):**
 1. Frontend design: `docs/superpowers/specs/2026-09-15-vite-frontend-migration-design.md`
@@ -11,7 +11,7 @@
 
 **Owner:** frontend session (`worktree-vite-frontend-migration`). Backend peer owns Phases 0–2 in `nextjs-to-react-migration`. Phase 7 is joint.
 
-**Design system:** preserve `DESIGN-airtable.md` + `app/globals.css` tokens (coral/forest/cream/dark-navy signature cards, Haas Grotesk → Inter substitute, hierarchical radius, 96px rhythm). Do not invent a new look.
+**Design system:** preserve `docs/prd/DESIGN-airtable.md` + `app/globals.css` tokens (coral/forest/cream/dark-navy signature cards, Haas Grotesk → Inter substitute, hierarchical radius, 96px rhythm). Do not invent a new look.
 
 ---
 
