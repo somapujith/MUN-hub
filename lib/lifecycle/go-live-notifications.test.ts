@@ -132,9 +132,64 @@ async function makeCompleteMun(organizerId: string) {
   return mun
 }
 
-/** Polls until the fire-and-forget notification promise chain has had a chance to settle. */
-async function flushMicrotasks() {
-  await new Promise((resolve) => setTimeout(resolve, 20))
+/**
+ * Polls `notifyPipelineEventMock`'s call count instead of guessing a fixed
+ * sleep duration.
+ *
+ * Root-cause fix (2026-09-15, post-review): the original helper was
+ * `await new Promise(r => setTimeout(r, 20))` — a hardcoded 20ms bet on how
+ * long the fire-and-forget `notifyAfterCommit` call (real DB queries to
+ * resolve admin emails / mun context, then `notifyPipelineEvent`) takes to
+ * land. Under full-suite load (more concurrent DB connections and event-loop
+ * contention than running this file alone) that budget was not always
+ * enough — a PREVIOUS test's still-in-flight notification promise would
+ * resolve late, landing its call into the mock during the NEXT test's
+ * window: after that next test's own setup but before its assertion. That
+ * is exactly the reviewer-caught failure in `submitMunForReview does NOT
+ * notify on the automated-validation-failure path` (mock unexpectedly
+ * called with NEW_SUBMISSION — really the PRIOR test's own submission
+ * notification, arriving late).
+ *
+ * Fix, round 1: resolve as soon as the mock has actually been called at
+ * least `minCalls` times (checked every 5ms), rather than sleeping a fixed
+ * amount and hoping.
+ *
+ * Fix, round 2 (this version) — delta-based, not absolute: several tests in
+ * this file call `waitForNotifications` more than once in a row WITHOUT
+ * clearing the mock in between (e.g. the "replay does NOT re-fire" test
+ * calls it after `reviewSubmission`, again after `enqueueForGoLive`'s
+ * caller, again after the first `publishFromQueue`, only clearing right
+ * before the replay call). An absolute `calls.length >= minCalls` check is
+ * satisfied instantly by calls already sitting in the mock from an EARLIER
+ * step in the same test — so a later `waitForNotifications(1)` call could
+ * return immediately without the actual new call (from the action under
+ * test at that point) having landed yet, then a subsequent `mockClear()`
+ * would wipe it before the assertion ever sees it, OR — the actual observed
+ * failure — a genuinely late call from an earlier step would still be
+ * in-flight, land after a `mockClear()` that an EARLIER `waitForNotifications`
+ * call's premature return allowed to run too soon, and get miscounted
+ * against the WRONG step's assertion.
+ *
+ * Capturing the call count at entry as a baseline and waiting for that many
+ * NEW calls (`calls.length - baseline >= minCalls`) fixes this for every
+ * call site regardless of whether the mock was cleared since the last call —
+ * each `waitForNotifications` invocation now only ever counts calls that
+ * land after it starts, never calls counted by a previous invocation.
+ */
+async function waitForNotifications(minCalls = 1, timeoutMs = 300): Promise<void> {
+  const baseline = notifyPipelineEventMock.mock.calls.length
+  const deadline = Date.now() + timeoutMs
+  while (notifyPipelineEventMock.mock.calls.length - baseline < minCalls && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  if (minCalls === 0) {
+    // No early exit is possible for "prove nothing arrives" — wait out the
+    // full window so a call landing near the deadline is still caught.
+    const remaining = deadline - Date.now()
+    if (remaining > 0) {
+      await new Promise((resolve) => setTimeout(resolve, remaining))
+    }
+  }
 }
 
 describe('go-live.ts pipeline notification wiring', () => {
@@ -149,7 +204,8 @@ describe('go-live.ts pipeline notification wiring', () => {
     const result = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     expect(result.passed).toBe(true)
 
-    await flushMicrotasks()
+    // Two events expected on this path (SUBMISSION_RECEIVED + NEW_SUBMISSION).
+    await waitForNotifications(2)
 
     const eventTypes = notifyPipelineEventMock.mock.calls.map((call) => (call[0] as { type: string }).type)
     expect(eventTypes).toContain('SUBMISSION_RECEIVED')
@@ -171,7 +227,7 @@ describe('go-live.ts pipeline notification wiring', () => {
     const result = await submitMunForReview(bareMun.id, { userId: organizer.id, role: 'ORGANIZER' })
     expect(result.passed).toBe(false)
 
-    await flushMicrotasks()
+    await waitForNotifications(0)
 
     expect(notifyPipelineEventMock).not.toHaveBeenCalled()
   })
@@ -183,10 +239,14 @@ describe('go-live.ts pipeline notification wiring', () => {
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
+    // Drain the submission's own SUBMISSION_RECEIVED/NEW_SUBMISSION calls
+    // before clearing, so a late-arriving one from THIS setup doesn't bleed
+    // into the assertion below.
+    await waitForNotifications(2)
     notifyPipelineEventMock.mockClear()
 
     await reviewSubmission(mun.id, 'APPROVED', {}, { userId: admin.id, role: 'ADMIN' })
-    await flushMicrotasks()
+    await waitForNotifications(1)
 
     const approvedCall = notifyPipelineEventMock.mock.calls.find((call) => (call[0] as { type: string }).type === 'APPROVED')
     expect(approvedCall?.[0]).toMatchObject({ type: 'APPROVED', munId: mun.id })
@@ -199,10 +259,11 @@ describe('go-live.ts pipeline notification wiring', () => {
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
+    await waitForNotifications(2)
     notifyPipelineEventMock.mockClear()
 
     await reviewSubmission(mun.id, 'CHANGES_REQUESTED', { notes: 'Fix the venue address' }, { userId: admin.id, role: 'ADMIN' })
-    await flushMicrotasks()
+    await waitForNotifications(1)
 
     const call = notifyPipelineEventMock.mock.calls.find((c) => (c[0] as { type: string }).type === 'CHANGES_REQUESTED')
     expect(call?.[0]).toMatchObject({ type: 'CHANGES_REQUESTED', munId: mun.id, reason: 'Fix the venue address' })
@@ -215,10 +276,11 @@ describe('go-live.ts pipeline notification wiring', () => {
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
+    await waitForNotifications(2)
     notifyPipelineEventMock.mockClear()
 
     await reviewSubmission(mun.id, 'REJECTED', { reason: 'Fabricated committee list' }, { userId: admin.id, role: 'ADMIN' })
-    await flushMicrotasks()
+    await waitForNotifications(1)
 
     const call = notifyPipelineEventMock.mock.calls.find((c) => (c[0] as { type: string }).type === 'CHANGES_REQUESTED')
     expect(call?.[0]).toMatchObject({ reason: 'Fabricated committee list' })
@@ -231,14 +293,20 @@ describe('go-live.ts pipeline notification wiring', () => {
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
+    await waitForNotifications(2)
+    notifyPipelineEventMock.mockClear()
+
     await reviewSubmission(mun.id, 'APPROVED', {}, { userId: admin.id, role: 'ADMIN' })
+    await waitForNotifications(1)
+    notifyPipelineEventMock.mockClear()
+
     await enqueueForGoLive(mun.id, { userId: admin.id, role: 'ADMIN' })
     notifyPipelineEventMock.mockClear()
 
     const result = await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })
     expect(result.replay).toBe(false)
 
-    await flushMicrotasks()
+    await waitForNotifications(1)
 
     const call = notifyPipelineEventMock.mock.calls.find((c) => (c[0] as { type: string }).type === 'PUBLISHED')
     expect(call?.[0]).toMatchObject({ type: 'PUBLISHED', munId: mun.id })
@@ -252,16 +320,24 @@ describe('go-live.ts pipeline notification wiring', () => {
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
+    await waitForNotifications(2)
+    notifyPipelineEventMock.mockClear()
+
     await reviewSubmission(mun.id, 'APPROVED', {}, { userId: admin.id, role: 'ADMIN' })
+    await waitForNotifications(1)
+    notifyPipelineEventMock.mockClear()
+
     await enqueueForGoLive(mun.id, { userId: admin.id, role: 'ADMIN' })
+    notifyPipelineEventMock.mockClear()
+
     await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })
-    await flushMicrotasks()
+    await waitForNotifications(1)
     notifyPipelineEventMock.mockClear()
 
     const replayResult = await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })
     expect(replayResult.replay).toBe(true)
 
-    await flushMicrotasks()
+    await waitForNotifications(0)
 
     expect(notifyPipelineEventMock).not.toHaveBeenCalled()
   })
