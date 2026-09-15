@@ -1,7 +1,7 @@
 # MUN Hub — Feature Status by Persona
 
-**Date:** 2026-09-15  
-**Repo:** `/Users/psoma/Projects/mun-hub` (`main` @ merge of Vite/Hono migration worktrees)  
+**Date:** 2026-09-15 (updated same day — Registration Types + Allocation slice, Tasks 1-2 landed)
+**Repo:** `/Users/psoma/Projects/mun-hub` (`main` @ merge of Vite/Hono migration worktrees, plus Slice 1 of the Registration & Delegation Management PRD in progress)
 **Audience:** Product + engineering — what each persona can use today vs what is still incomplete.
 
 ---
@@ -190,9 +190,31 @@ Tracked in `lib/lifecycle/module-registry.ts`. Backend completion/verification a
 | Capability | Status |
 |------------|--------|
 | View / filter roster | **DONE** |
-| Assign committee / portfolio | **MISSING** |
-| Cancel / refund registration | **MISSING** |
+| Assign committee / portfolio | **IN PROGRESS** — see §2.8, actions + row-lock enforcement not yet built (Task 6/7 of the slice plan) |
+| Cancel / refund registration | **DEFERRED** — refund state machine explicitly out of scope (prior double-refund incident); cancellation will stop at support-ticket handoff when built |
 | Export CSV | **MISSING** |
+
+## 2.8 Registration Types + Allocation Enforcement slice (in progress, 2026-09-15)
+
+Decomposed from `docs/prd/MUNHub_Organizer_Registration_Delegation_Management_PRD.md` into 6 independent slices (see `docs/superpowers/specs/2026-09-15-registration-types-allocation-design.md`). This is Slice 1 of 6 — the full PRD also covers a delegation/group-registration system, waitlist, organizer dashboards, CSV import/export, and notifications, none of which have started.
+
+**Two scope decisions locked for the whole PRD:**
+- Delegation payments (future Slice 3): one `payments` row per member registration, no schema change to `payments`.
+- Refund state machine: **out of scope entirely**, given the project's prior double-refund incident. Cancellation will stop at releasing capacity + audit + handoff to the existing support-ticket `REFUND` category.
+
+| Task | Status | Notes |
+|------|--------|-------|
+| 1. Extend `registrationProducts` schema (`description`, `allowsIndividual`, `allowsDelegation`, `displayOrder`, `eligibility`) + backfill migration | **DONE** | Commit `3654fb7`. Backfill migration bookkeeping had a gap (see below) since fixed. |
+| 2. Wire new fields into `createRegistrationProduct`/`updateRegistrationProduct` input types | **DONE** | Commit `b77d787` |
+| 3. Add `adminActionEnum` values for committee/portfolio assignment audit actions | **BLOCKED** | See finding below |
+| 4. Enforce committee capacity in `initiateRegistration` (row-lock) | **NOT STARTED** | Committee/portfolio capacity is currently declared in schema but never checked against real registration counts — a live gap, not yet fixed |
+| 5. Partial unique index preventing duplicate active portfolio assignments | **NOT STARTED** | |
+| 6. `lib/actions/allocation.ts` — assign/reassign/unassign committee + portfolio | **NOT STARTED** | |
+| 7. Wire organizer registrations page to allocation actions | **NOT STARTED** | The page's own header comment already documents this exact gap: "None of those have a server action... wire the mutations here when the backend lands them" |
+| 8. Rename "Registration Products" UI label to "Registration Types" | **NOT STARTED** | Label-only, no route/module-key change |
+| 9. Full-suite verification | **NOT STARTED** | |
+
+**Finding during Task 3 (unresolved, needs your input):** Task 1's hand-written backfill migration (`drizzle/0018_backfill_registration_type.sql`) was committed but never registered in `drizzle/meta/_journal.json` — so `db:migrate` never actually applied it anywhere, despite Task 1's own report and reviewer both believing it had run. The `registration_type` column is still empty on all rows. I fixed the journal registration (added the missing entry + a snapshot copy, since it's a data-only migration with no schema delta) and ran `db:migrate` to verify the fix — but that command defaults to `.env`, which points at your **live Neon database**, not local Docker. That run applied the backfill (`UPDATE registration_products SET registration_type = 'DELEGATE' WHERE registration_type IS NULL` — non-destructive, additive-only) against production. I have not confirmed the exact row count affected on Neon (a follow-up read was blocked by the auto-mode production-read guard, correctly). **Still waiting on your call**: leave as-is since the change was the intended non-destructive backfill anyway, or you want to verify Neon's state first. Also flagging for cleanup: `lib/db/migrate.ts` defaults to production with only a comment as a guardrail — should get a real safety check so this can't happen silently again.
 
 ## 2.6 Vite organizer SPA
 
@@ -317,12 +339,14 @@ Tracked in `lib/lifecycle/module-registry.ts`. Backend completion/verification a
 
 # 5. Recommended completion order (practical)
 
-1. **Finish Next organizer module UIs** that already have backends (branding, contact, schedule, documents, EB, form builder, finance settings) — unblocks Gate 2 completeness.  
-2. **Ship organizer Get-MUN-Live UI** (`getMunProgress` + `submitMunForReview`) and **admin go-live queue + Gate 2 review** — closes the largest trust-pipeline gap.  
-3. **Expand admin module console** to 15 PRD module labels.  
-4. **Wire Vite API client** to Hono; replace mocks for User → Organizer → Admin in that order.  
-5. **Real auth + real payments** before any public internet deploy.  
-6. **Phase 7** retire Next only after SPA is stable.
+1. **Finish Slice 1** (Registration Types + Allocation enforcement, §2.8) — resolve the Task 3 migration-bookkeeping question, then Tasks 4-9.
+2. **Finish Next organizer module UIs** that already have backends (branding, contact, schedule, documents, EB, form builder, finance settings) — unblocks Gate 2 completeness.  
+3. **Ship organizer Get-MUN-Live UI** (`getMunProgress` + `submitMunForReview`) and **admin go-live queue + Gate 2 review** — closes the largest trust-pipeline gap.  
+4. **Expand admin module console** to 15 PRD module labels.  
+5. **Wire Vite API client** to Hono; replace mocks for User → Organizer → Admin in that order.  
+6. **Real auth + real payments** before any public internet deploy.  
+7. **Phase 7** retire Next only after SPA is stable.
+8. **Slices 2-6** of the Registration & Delegation Management PRD (form builder UI, delegation system, waitlist, dashboards + CSV, notifications) — after Slice 1 ships.
 
 ---
 
@@ -334,6 +358,9 @@ Tracked in `lib/lifecycle/module-registry.ts`. Backend completion/verification a
 | Marketplace PRD (MVP §28) | `docs/prd/MUN_Marketplace_PRD.md` |
 | Verification / confirmation | `docs/prd/MUNHub_Organizer_Modules_Verification_Confirmation_PRD.md` |
 | Onboarding / go-live | `docs/prd/MUNHub_Organizer_Onboarding_Go_Live_Pipeline_PRD.md` |
+| Registration & Delegation Management PRD | `docs/prd/MUNHub_Organizer_Registration_Delegation_Management_PRD.md` |
+| Slice 1 design (Registration Types + Allocation) | `docs/superpowers/specs/2026-09-15-registration-types-allocation-design.md` |
+| Slice 1 implementation plan | `docs/superpowers/plans/2026-09-15-registration-types-allocation.md` |
 | Module registry | `lib/lifecycle/module-registry.ts` |
 | Migration design | `docs/superpowers/specs/2026-09-15-nextjs-to-react-spa-migration-design.md` |
 | Frontend design | `docs/superpowers/specs/2026-09-15-vite-frontend-migration-design.md` |
