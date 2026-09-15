@@ -1,5 +1,3 @@
-'use server'
-
 import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { committees, muns, portfolios, registrationProducts, users } from '@/lib/db/schema'

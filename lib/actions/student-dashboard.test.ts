@@ -1,22 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
 import { muns, registrationProducts, registrations, users } from '@/lib/db/schema'
-import { createSession, SESSION_COOKIE_NAME } from '@/lib/auth/session'
+import type { Session } from '@/lib/auth/adapter'
 
-// Only the Next.js-specific plumbing is stubbed here — `cookies()` requires a
-// live request scope that doesn't exist under Vitest. The stub is backed by a
-// real `sessions` row created via the real `createSession()`, so `getSession()`
-// itself (the actual auth-derivation: cookie lookup -> sessions/users join ->
-// expiry check) runs unmocked against the real database.
-let currentToken: string | undefined
-
-vi.mock('next/headers', () => ({
-  cookies: async () => ({
-    get: (name: string) => (name === SESSION_COOKIE_NAME && currentToken ? { value: currentToken } : undefined),
-  }),
-}))
-
-const { getUpcomingRegistrations, getPastRegistrations } = await import('./student-dashboard')
+import { getUpcomingRegistrations, getPastRegistrations } from './student-dashboard'
 
 describe('student dashboard queries', () => {
   let studentId: string
@@ -112,31 +99,28 @@ describe('student dashboard queries', () => {
   })
 
   it('throws Forbidden with no session', async () => {
-    currentToken = undefined
-    await expect(getUpcomingRegistrations()).rejects.toThrow('Forbidden')
-    await expect(getPastRegistrations()).rejects.toThrow('Forbidden')
+    await expect(getUpcomingRegistrations(null)).rejects.toThrow('Forbidden')
+    await expect(getPastRegistrations(null)).rejects.toThrow('Forbidden')
   })
 
   it('splits upcoming vs past correctly and includes the joined payment', async () => {
-    const session = await createSession(studentId)
-    currentToken = session.token
+    const session: Session = { userId: studentId, role: 'STUDENT' }
 
-    const upcoming = await getUpcomingRegistrations()
+    const upcoming = await getUpcomingRegistrations(session)
     expect(upcoming.length).toBe(1)
     expect(upcoming[0].mun.name).toBe('Future Mun')
     expect(upcoming[0].payment.length).toBe(1)
     expect(upcoming[0].payment[0].status).toBe('PAID')
 
-    const past = await getPastRegistrations()
+    const past = await getPastRegistrations(session)
     expect(past.length).toBe(1)
     expect(past[0].mun.name).toBe('Past Mun')
   })
 
   it('never returns another user\'s registrations', async () => {
-    const session = await createSession(studentId)
-    currentToken = session.token
+    const session: Session = { userId: studentId, role: 'STUDENT' }
 
-    const upcoming = await getUpcomingRegistrations()
+    const upcoming = await getUpcomingRegistrations(session)
     expect(upcoming.every((r) => r.userId === studentId)).toBe(true)
   })
 

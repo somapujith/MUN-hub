@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { SupportForm } from "./support-form";
 
 export const metadata: Metadata = {

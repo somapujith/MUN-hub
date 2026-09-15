@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { getMunBySlug } from "@/lib/actions/marketplace";
 import {
   getProductAvailability,
@@ -256,28 +256,31 @@ export async function submitRegistrationAction(
 
   let registrationId: string;
   try {
-    // NOTE: no `userId` is passed — `initiateRegistration` derives the actor
-    // from the session itself. Passing one would be an IDOR (see the action's
+    // NOTE: no `userId` is passed — actor comes from `session` resolved
+    // above. Passing a client userId would be an IDOR (see the action's
     // doc comment).
-    const result = await initiateRegistration({
-      munId: mun.id,
-      registrationProductId: product.id,
-      committeeId: committee?.id,
-      portfolioId: portfolio?.id,
-      formResponses: {
-        fullName,
-        email,
-        phone: phone || null,
-        institution,
-        experience: experience || null,
-        dietary: dietary || null,
-        accommodations: accommodations || null,
+    const result = await initiateRegistration(
+      {
+        munId: mun.id,
+        registrationProductId: product.id,
+        committeeId: committee?.id,
+        portfolioId: portfolio?.id,
+        formResponses: {
+          fullName,
+          email,
+          phone: phone || null,
+          institution,
+          experience: experience || null,
+          dietary: dietary || null,
+          accommodations: accommodations || null,
+        },
+        // Skip path: both stay `undefined`, so the column stays NULL and
+        // `initiateRegistration` never enters its accommodation branch at all.
+        accommodationOptionId: accommodationOptionId || undefined,
+        accommodationAnswers,
       },
-      // Skip path: both stay `undefined`, so the column stays NULL and
-      // `initiateRegistration` never enters its accommodation branch at all.
-      accommodationOptionId: accommodationOptionId || undefined,
-      accommodationAnswers,
-    });
+      session,
+    );
     registrationId = result.registrationId;
   } catch (error) {
     return toFormState(error);
@@ -357,7 +360,7 @@ export async function completeMockPaymentAction(formData: FormData): Promise<voi
   }
 
   // Throws Forbidden for a non-owner; returns null for an unknown id.
-  const registration = await getRegistrationById(registrationId);
+  const registration = await getRegistrationById(registrationId, session);
   if (!registration) {
     redirect(`/register/${slug}`);
   }

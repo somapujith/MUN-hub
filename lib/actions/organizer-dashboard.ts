@@ -1,29 +1,9 @@
-'use server'
-
 import { and, eq, exists, inArray, sql, sum } from 'drizzle-orm'
-import { getSession } from '@/lib/auth/session'
+import type { Session } from '@/lib/auth/adapter'
+import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { db } from '@/lib/db/client'
-import { muns, payments, registrationProducts, registrations } from '@/lib/db/schema'
+import { payments, registrationProducts, registrations } from '@/lib/db/schema'
 import type { PaymentStatus } from '@/lib/db/schema-enums'
-
-/**
- * Verifies the current session's user owns the given mun, or holds an
- * ADMIN/SUPER_ADMIN role. Throws `Forbidden` otherwise.
- *
- * IDOR: the acting user/role always comes from `getSession()` — callers
- * never pass a session or userId in.
- */
-async function assertOwnsOrAdmin(munId: string): Promise<void> {
-  const session = await getSession()
-  if (!session) throw new Error('Forbidden')
-  if (session.role === 'ADMIN' || session.role === 'SUPER_ADMIN') return
-
-  const [mun] = await db.select({ organizerId: muns.organizerId }).from(muns).where(eq(muns.id, munId)).limit(1)
-
-  if (!mun || mun.organizerId !== session.userId) {
-    throw new Error('Forbidden')
-  }
-}
 
 export interface MunOverview {
   totalRegistrations: number
@@ -38,11 +18,13 @@ const COUNTABLE_REGISTRATION_STATUSES = ['CONFIRMED', 'ATTENDED'] as const
  * Aggregate stats for an organizer's mun dashboard: registration count,
  * revenue collected, payments still pending, and remaining seat capacity.
  *
- * Requires the current session's user to own the mun or be an
- * ADMIN/SUPER_ADMIN — throws `Forbidden` otherwise.
+ * Requires the caller-supplied `session` to own the mun or be an
+ * ADMIN/SUPER_ADMIN — throws `Forbidden` otherwise. Missing mun throws
+ * `Mun not found` (shared `assertOwnsOrAdmin`; previously this file's local
+ * helper folded not-found into Forbidden).
  */
-export async function getMunOverview(munId: string): Promise<MunOverview> {
-  await assertOwnsOrAdmin(munId)
+export async function getMunOverview(munId: string, session: Session | null): Promise<MunOverview> {
+  await assertOwnsOrAdmin(munId, session)
 
   const [totalRegistrations, revenueRow, pendingPayments, products] = await Promise.all([
     db.$count(
@@ -139,11 +121,15 @@ export interface DelegateListResult {
  * Delegate roster for an organizer's mun, optionally filtered by committee
  * and/or payment status, paginated.
  *
- * Requires the current session's user to own the mun or be an
+ * Requires the caller-supplied `session` to own the mun or be an
  * ADMIN/SUPER_ADMIN — throws `Forbidden` otherwise.
  */
-export async function getDelegateList(munId: string, filters?: DelegateFilters): Promise<DelegateListResult> {
-  await assertOwnsOrAdmin(munId)
+export async function getDelegateList(
+  munId: string,
+  filters: DelegateFilters | undefined,
+  session: Session | null,
+): Promise<DelegateListResult> {
+  await assertOwnsOrAdmin(munId, session)
 
   const [results, [{ count } = { count: 0 }]] = await Promise.all([
     queryDelegates(munId, filters),

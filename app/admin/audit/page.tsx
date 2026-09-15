@@ -8,7 +8,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { Badge } from "@/components/ui/badge";
 import { db } from "@/lib/db/client";
 import { adminActions, users } from "@/lib/db/schema";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 
 export const metadata: Metadata = {
   title: "Audit Log",

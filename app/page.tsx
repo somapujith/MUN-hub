@@ -18,7 +18,7 @@ import {
   searchMuns,
   type MunSearchResult,
 } from "@/lib/actions/marketplace";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { resolvePriceBand, resolveStatusFilter } from "@/lib/home-filters";
 import type { MunSummary } from "@/lib/types";
 

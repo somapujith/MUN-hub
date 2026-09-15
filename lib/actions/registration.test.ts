@@ -1,16 +1,9 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
 import { accommodationOptions, muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 
-const mockGetSession = vi.fn()
-
-vi.mock('@/lib/auth/session', () => ({
-  getSession: () => mockGetSession(),
-}))
-
-const { initiateRegistration, releaseExpiredReservations, getRegistrationById, getProductAvailability, getProductsAvailability } =
-  await import('./registration')
+import { initiateRegistration, releaseExpiredReservations, getRegistrationById, getProductAvailability, getProductsAvailability } from './registration'
 
 async function createUser(role: 'STUDENT' | 'ORGANIZER' | 'ADMIN' | 'SUPER_ADMIN' = 'STUDENT') {
   const [user] = await db
@@ -45,9 +38,6 @@ async function createAccommodation(munId: string, capacity: number, price = 1500
 }
 
 describe('initiateRegistration', () => {
-  beforeEach(() => {
-    mockGetSession.mockReset()
-  })
 
   it('creates a PENDING->PAYMENT_PENDING registration and a payment order when capacity available', async () => {
     const organizer = await createUser('ORGANIZER')
@@ -55,9 +45,8 @@ describe('initiateRegistration', () => {
     const mun = await createMun(organizer.id)
     const product = await createProduct(mun.id, 10)
 
-    mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
 
-    const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id })
+    const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, { userId: student.id, role: 'STUDENT' })
 
     expect(result.registrationId).toBeTruthy()
     expect(result.orderId).toMatch(/^mock_order_/)
@@ -86,10 +75,9 @@ describe('initiateRegistration', () => {
       status: 'CONFIRMED',
     })
 
-    mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
 
     await expect(
-      initiateRegistration({ munId: mun.id, registrationProductId: product.id }),
+      initiateRegistration({ munId: mun.id, registrationProductId: product.id }, { userId: student.id, role: 'STUDENT' }),
     ).rejects.toThrow('Registration product is at capacity')
   })
 
@@ -108,9 +96,8 @@ describe('initiateRegistration', () => {
       expiresAt: new Date(Date.now() - 60_000),
     })
 
-    mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
 
-    const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id })
+    const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, { userId: student.id, role: 'STUDENT' })
     expect(result.registrationId).toBeTruthy()
 
     const [expired] = await db
@@ -129,17 +116,16 @@ describe('initiateRegistration', () => {
     const students = await Promise.all(Array.from({ length: 10 }, () => createUser('STUDENT')))
 
     // Each concurrent caller must be a DISTINCT user — since initiateRegistration
-    // now also rejects a second active registration from the same user, reusing
+    // also rejects a second active registration from the same user, reusing
     // one session across all 10 calls would make most of them fail with "already
     // have an active registration" instead of exercising the capacity race.
-    // getSession() is called synchronously near the top of each invocation, so
-    // popping the next student off a queue on each mock invocation correctly
-    // assigns one distinct student per concurrent call.
-    const queue = [...students]
-    mockGetSession.mockImplementation(() => Promise.resolve({ userId: queue.shift()!.id, role: 'STUDENT' }))
-
     const results = await Promise.allSettled(
-      students.map(() => initiateRegistration({ munId: mun.id, registrationProductId: product.id })),
+      students.map((student) =>
+        initiateRegistration(
+          { munId: mun.id, registrationProductId: product.id },
+          { userId: student.id, role: 'STUDENT' },
+        ),
+      ),
     )
 
     const succeeded = results.filter((r) => r.status === 'fulfilled')
@@ -165,13 +151,12 @@ describe('initiateRegistration', () => {
     const mun = await createMun(organizer.id)
     const product = await createProduct(mun.id, 10)
 
-    mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
 
-    const first = await initiateRegistration({ munId: mun.id, registrationProductId: product.id })
+    const first = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, { userId: student.id, role: 'STUDENT' })
     expect(first.registrationId).toBeTruthy()
 
     await expect(
-      initiateRegistration({ munId: mun.id, registrationProductId: product.id }),
+      initiateRegistration({ munId: mun.id, registrationProductId: product.id }, { userId: student.id, role: 'STUDENT' }),
     ).rejects.toThrow('You already have an active registration for this product')
   })
 
@@ -181,16 +166,15 @@ describe('initiateRegistration', () => {
     const mun = await createMun(organizer.id)
     const product = await createProduct(mun.id, 10)
 
-    mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
 
-    const first = await initiateRegistration({ munId: mun.id, registrationProductId: product.id })
+    const first = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, { userId: student.id, role: 'STUDENT' })
 
     await db
       .update(registrations)
       .set({ status: 'CANCELLED' })
       .where(eq(registrations.id, first.registrationId))
 
-    const second = await initiateRegistration({ munId: mun.id, registrationProductId: product.id })
+    const second = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, { userId: student.id, role: 'STUDENT' })
     expect(second.registrationId).toBeTruthy()
     expect(second.registrationId).not.toBe(first.registrationId)
   })
@@ -203,14 +187,13 @@ describe('initiateRegistration', () => {
       const product = await createProduct(mun.id, 10)
       const accommodation = await createAccommodation(mun.id, 10, 1500)
 
-      mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
 
       const result = await initiateRegistration({
         munId: mun.id,
         registrationProductId: product.id,
         accommodationOptionId: accommodation.id,
         accommodationAnswers: { arrivalDate: '2027-03-09' },
-      })
+      }, { userId: student.id, role: 'STUDENT' })
 
       const [registration] = await db.select().from(registrations).where(eq(registrations.id, result.registrationId))
       expect(registration?.accommodationOptionId).toBe(accommodation.id)
@@ -227,12 +210,17 @@ describe('initiateRegistration', () => {
       const accommodation = await createAccommodation(mun.id, 2)
 
       const students = await Promise.all(Array.from({ length: 6 }, () => createUser('STUDENT')))
-      const queue = [...students]
-      mockGetSession.mockImplementation(() => Promise.resolve({ userId: queue.shift()!.id, role: 'STUDENT' }))
 
       const results = await Promise.allSettled(
-        students.map(() =>
-          initiateRegistration({ munId: mun.id, registrationProductId: product.id, accommodationOptionId: accommodation.id }),
+        students.map((student) =>
+          initiateRegistration(
+            {
+              munId: mun.id,
+              registrationProductId: product.id,
+              accommodationOptionId: accommodation.id,
+            },
+            { userId: student.id, role: 'STUDENT' },
+          ),
         ),
       )
 
@@ -260,10 +248,9 @@ describe('initiateRegistration', () => {
       const product = await createProduct(mun.id, 10)
       const accommodation = await createAccommodation(otherMun.id, 10)
 
-      mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
 
       await expect(
-        initiateRegistration({ munId: mun.id, registrationProductId: product.id, accommodationOptionId: accommodation.id }),
+        initiateRegistration({ munId: mun.id, registrationProductId: product.id, accommodationOptionId: accommodation.id }, { userId: student.id, role: 'STUDENT' }),
       ).rejects.toThrow('does not belong to this mun')
     })
 
@@ -275,10 +262,9 @@ describe('initiateRegistration', () => {
       const accommodation = await createAccommodation(mun.id, 10)
       await db.update(accommodationOptions).set({ status: 'inactive' }).where(eq(accommodationOptions.id, accommodation.id))
 
-      mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
 
       await expect(
-        initiateRegistration({ munId: mun.id, registrationProductId: product.id, accommodationOptionId: accommodation.id }),
+        initiateRegistration({ munId: mun.id, registrationProductId: product.id, accommodationOptionId: accommodation.id }, { userId: student.id, role: 'STUDENT' }),
       ).rejects.toThrow('not available')
     })
   })
@@ -288,12 +274,11 @@ describe('initiateRegistration', () => {
     const mun = await createMun(organizer.id)
     const product = await createProduct(mun.id, 10)
 
-    mockGetSession.mockResolvedValue(null)
 
     await expect(
       // @ts-expect-error -- intentionally probing that a userId field, even if
       // someone tried to smuggle one in, cannot bypass session derivation.
-      initiateRegistration({ munId: mun.id, registrationProductId: product.id, userId: 'attacker-controlled-id' }),
+      initiateRegistration({ munId: mun.id, registrationProductId: product.id, userId: 'attacker-controlled-id' }, null),
     ).rejects.toThrow('Forbidden')
   })
 })
@@ -405,15 +390,14 @@ describe('getProductsAvailability', () => {
 })
 
 describe('getRegistrationById', () => {
-  beforeEach(() => {
-    mockGetSession.mockReset()
-  })
+  const studentSession = (userId: string) => ({ userId, role: 'STUDENT' as const })
+  const adminSession = (userId: string) => ({ userId, role: 'ADMIN' as const })
+
 
   it('returns null when the registration does not exist', async () => {
     const organizer = await createUser('ORGANIZER')
-    mockGetSession.mockResolvedValue({ userId: organizer.id, role: 'ORGANIZER' })
 
-    const result = await getRegistrationById('00000000-0000-0000-0000-000000000000')
+    const result = await getRegistrationById('00000000-0000-0000-0000-000000000000', { userId: organizer.id, role: 'ORGANIZER' })
     expect(result).toBeNull()
   })
 
@@ -427,9 +411,8 @@ describe('getRegistrationById', () => {
       .values({ userId: student.id, munId: mun.id, registrationProductId: product.id, status: 'PENDING' })
       .returning()
 
-    mockGetSession.mockResolvedValue({ userId: student.id, role: 'STUDENT' })
 
-    const result = await getRegistrationById(reg.id)
+    const result = await getRegistrationById(reg.id, { userId: student.id, role: 'STUDENT' })
     expect(result?.id).toBe(reg.id)
   })
 
@@ -444,9 +427,8 @@ describe('getRegistrationById', () => {
       .values({ userId: student.id, munId: mun.id, registrationProductId: product.id, status: 'PENDING' })
       .returning()
 
-    mockGetSession.mockResolvedValue({ userId: admin.id, role: 'ADMIN' })
 
-    const result = await getRegistrationById(reg.id)
+    const result = await getRegistrationById(reg.id, { userId: admin.id, role: 'ADMIN' })
     expect(result?.id).toBe(reg.id)
   })
 
@@ -460,9 +442,8 @@ describe('getRegistrationById', () => {
       .values({ userId: student.id, munId: mun.id, registrationProductId: product.id, status: 'PENDING' })
       .returning()
 
-    mockGetSession.mockResolvedValue({ userId: organizer.id, role: 'ORGANIZER' })
 
-    const result = await getRegistrationById(reg.id)
+    const result = await getRegistrationById(reg.id, { userId: organizer.id, role: 'ORGANIZER' })
     expect(result?.id).toBe(reg.id)
   })
 
@@ -477,14 +458,12 @@ describe('getRegistrationById', () => {
       .values({ userId: student.id, munId: mun.id, registrationProductId: product.id, status: 'PENDING' })
       .returning()
 
-    mockGetSession.mockResolvedValue({ userId: stranger.id, role: 'STUDENT' })
 
-    await expect(getRegistrationById(reg.id)).rejects.toThrow('Forbidden')
+    await expect(getRegistrationById(reg.id, { userId: stranger.id, role: 'STUDENT' })).rejects.toThrow('Forbidden')
   })
 
   it('throws Forbidden for an unauthenticated caller', async () => {
-    mockGetSession.mockResolvedValue(null)
-    await expect(getRegistrationById('00000000-0000-0000-0000-000000000000')).rejects.toThrow('Forbidden')
+    await expect(getRegistrationById('00000000-0000-0000-0000-000000000000', null)).rejects.toThrow('Forbidden')
   })
 })
 

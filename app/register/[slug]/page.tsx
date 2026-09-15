@@ -14,7 +14,7 @@ import { getMunBySlug } from "@/lib/actions/marketplace";
 import { getProductsAvailability } from "@/lib/actions/registration";
 import { listAccommodationOptions } from "@/lib/actions/accommodation";
 import { isSelectableOption } from "@/components/registration/accommodation-fields";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";

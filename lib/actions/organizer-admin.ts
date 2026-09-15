@@ -1,10 +1,8 @@
-'use server'
-
 import { eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { users } from '@/lib/db/schema'
-import { getSession } from '@/lib/auth/session'
 import { requireRole } from '@/lib/auth/authorize'
+import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
 import type { User } from '@/lib/types'
 
@@ -28,14 +26,17 @@ export interface ListOrganizersResult {
 /**
  * Paginated list of organizer accounts (role = ORGANIZER only), for the
  * admin organizer-management console. Requires OPERATIONS/ADMIN/SUPER_ADMIN
- * — actor is derived from `getSession()`, never accepted as a parameter.
+ * — actor is derived from the caller-supplied `session`, never accepted as
+ * a client-trusted value.
  *
  * Same pagination reasoning as `getReviewQueue`/`getModuleReviewQueue`
  * (lib/actions/admin-review.ts): this grows with total organizer count, not
  * per-mun, so it needs a bound before real platform volume.
  */
-export async function listOrganizers(params: ListOrganizersParams = {}): Promise<ListOrganizersResult> {
-  const session = await getSession()
+export async function listOrganizers(
+  params: ListOrganizersParams = {},
+  session: Session | null,
+): Promise<ListOrganizersResult> {
   requireRole(session, [...ADMIN_ROLES])
 
   const limit = params.limit ?? 20
@@ -73,8 +74,7 @@ export async function listOrganizers(params: ListOrganizersParams = {}): Promise
  * or suspends a specific MUN separately if the content itself is the
  * problem. Requires OPERATIONS/ADMIN/SUPER_ADMIN.
  */
-export async function suspendOrganizer(userId: string, reason: string): Promise<void> {
-  const session = await getSession()
+export async function suspendOrganizer(userId: string, reason: string, session: Session | null): Promise<void> {
   requireRole(session, [...ADMIN_ROLES])
 
   await db.transaction(async (tx) => {
@@ -91,8 +91,7 @@ export async function suspendOrganizer(userId: string, reason: string): Promise<
  * Clears a suspension, restoring the organizer's login access. Requires
  * OPERATIONS/ADMIN/SUPER_ADMIN.
  */
-export async function reinstateOrganizer(userId: string): Promise<void> {
-  const session = await getSession()
+export async function reinstateOrganizer(userId: string, session: Session | null): Promise<void> {
   requireRole(session, [...ADMIN_ROLES])
 
   await db.transaction(async (tx) => {

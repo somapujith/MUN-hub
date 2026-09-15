@@ -2,7 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import type { Session } from "@/lib/auth/adapter";
 import type { Role } from "@/lib/db/schema-enums";
 

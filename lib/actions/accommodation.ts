@@ -1,5 +1,3 @@
-'use server'
-
 import { and, asc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { accommodationOptionFields, accommodationOptions } from '@/lib/db/schema'

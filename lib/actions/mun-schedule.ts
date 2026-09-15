@@ -1,5 +1,3 @@
-'use server'
-
 import { asc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { committees, munScheduleItems } from '@/lib/db/schema'

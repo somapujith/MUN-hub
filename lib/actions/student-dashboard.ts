@@ -1,10 +1,8 @@
-'use server'
-
 import { eq } from 'drizzle-orm'
-import { getSession } from '@/lib/auth/session'
 import { db } from '@/lib/db/client'
 import { registrations } from '@/lib/db/schema'
 import type { RegistrationStatus } from '@/lib/db/schema-enums'
+import type { Session } from '@/lib/auth/adapter'
 
 /**
  * Registration row joined with everything a dashboard card needs to render:
@@ -32,11 +30,11 @@ function fetchRegistrationsForUser(userId: string) {
  * status in (PENDING, PAYMENT_PENDING, CONFIRMED) AND the mun's startDate is
  * in the future.
  *
- * IDOR: the acting user is derived from `getSession()` — never accept a
- * `userId` parameter from the caller. Throws `Forbidden` if unauthenticated.
+ * IDOR: the acting user is derived from the caller-supplied `session` —
+ * never accept a `userId` parameter from the caller. Throws `Forbidden` if
+ * unauthenticated.
  */
-export async function getUpcomingRegistrations(): Promise<RegistrationWithMun[]> {
-  const session = await getSession()
+export async function getUpcomingRegistrations(session: Session | null): Promise<RegistrationWithMun[]> {
   if (!session) throw new Error('Forbidden')
 
   const now = new Date()
@@ -51,11 +49,11 @@ export async function getUpcomingRegistrations(): Promise<RegistrationWithMun[]>
  * Registrations for the current session's user that are "past": status in
  * (ATTENDED, NO_SHOW) OR the mun's startDate is in the past.
  *
- * IDOR: the acting user is derived from `getSession()` — never accept a
- * `userId` parameter from the caller. Throws `Forbidden` if unauthenticated.
+ * IDOR: the acting user is derived from the caller-supplied `session` —
+ * never accept a `userId` parameter from the caller. Throws `Forbidden` if
+ * unauthenticated.
  */
-export async function getPastRegistrations(): Promise<RegistrationWithMun[]> {
-  const session = await getSession()
+export async function getPastRegistrations(session: Session | null): Promise<RegistrationWithMun[]> {
   if (!session) throw new Error('Forbidden')
 
   const now = new Date()

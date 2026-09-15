@@ -1,5 +1,3 @@
-'use server'
-
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { munMedia } from '@/lib/db/schema'

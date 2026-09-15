@@ -1,9 +1,7 @@
-'use server'
-
 import { and, count, eq, inArray, lt } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { accommodationOptions, muns, payments, registrationProducts, registrations } from '@/lib/db/schema'
-import { getSession } from '@/lib/auth/session'
+import type { Session } from '@/lib/auth/adapter'
 import { mockPaymentsAdapter } from '@/lib/payments/mock-adapter'
 import type { RegistrationInput, RegistrationStatus } from '@/lib/types'
 
@@ -37,15 +35,15 @@ export async function releaseExpiredReservations(registrationProductId: string):
 }
 
 /**
- * Reserves a seat and starts the payment flow for the *currently
- * authenticated* user.
+ * Reserves a seat and starts the payment flow for the authenticated user
+ * identified by the caller-supplied `session`.
  *
- * SECURITY (IDOR): the acting user is derived exclusively from
- * `getSession()` — this function does NOT accept a caller-supplied
- * `userId`. `RegistrationInput.userId` is typed optional specifically so it
- * can never be required/trusted from the caller; it is ignored here even if
- * present. A previous draft accepted `userId` as an input field, which let
- * any caller register as an arbitrary user — do not reintroduce that.
+ * SECURITY (IDOR): the acting user is derived exclusively from `session` —
+ * this function does NOT accept a caller-supplied `userId`.
+ * `RegistrationInput.userId` is typed optional specifically so it can never
+ * be required/trusted from the caller; it is ignored here even if present.
+ * A previous draft accepted `userId` as an input field, which let any
+ * caller register as an arbitrary user — do not reintroduce that.
  *
  * Throws `Error('Forbidden')` if there is no active session.
  * Throws `Error('Registration product is at capacity')` if full.
@@ -63,8 +61,8 @@ export async function releaseExpiredReservations(registrationProductId: string):
  */
 export async function initiateRegistration(
   input: Omit<RegistrationInput, 'userId'>,
+  session: Session | null,
 ): Promise<{ registrationId: string; orderId: string }> {
-  const session = await getSession()
   if (!session) {
     throw new Error('Forbidden')
   }
@@ -222,8 +220,10 @@ export interface RegistrationWithDetails {
  * Throws `Error('Forbidden')` if the registration exists but the caller is
  * not authorized to view it.
  */
-export async function getRegistrationById(registrationId: string): Promise<RegistrationWithDetails | null> {
-  const session = await getSession()
+export async function getRegistrationById(
+  registrationId: string,
+  session: Session | null,
+): Promise<RegistrationWithDetails | null> {
   if (!session) {
     throw new Error('Forbidden')
   }

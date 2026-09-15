@@ -7,7 +7,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getModuleReviewQueue } from "@/lib/actions/admin-review";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import type { MunModule } from "@/lib/db/schema-enums";
 import { ModuleReviewDialog } from "./module-review-dialog";
 
@@ -53,7 +53,7 @@ export default async function VerificationConsolePage({
   const { results: queue, total } = await getModuleReviewQueue({
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
-  });
+  }, session);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (

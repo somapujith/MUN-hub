@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { SiteHeaderMobileNav } from "@/components/layout/site-header-mobile-nav";

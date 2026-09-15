@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { reviewModule, type IssueInput } from "@/lib/lifecycle/module-verification";
 import type { MunModule, VerificationSeverity } from "@/lib/db/schema-enums";
 

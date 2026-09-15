@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { submitOrganizerApplication } from "@/lib/actions/organizer-application";
 
 export interface ApplyFormState {

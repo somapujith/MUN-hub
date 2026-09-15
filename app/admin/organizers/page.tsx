@@ -6,7 +6,7 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
 import { listOrganizers } from "@/lib/actions/organizer-admin";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { OrganizerRow } from "./organizer-row";
 
 export const metadata: Metadata = {
@@ -27,7 +27,7 @@ export default async function OrganizersPage() {
     redirect("/");
   }
 
-  const { results, total } = await listOrganizers({ limit: 50 });
+  const { results, total } = await listOrganizers({ limit: 50 }, session);
   const suspendedCount = results.filter((organizer) => organizer.suspended).length;
 
   return (

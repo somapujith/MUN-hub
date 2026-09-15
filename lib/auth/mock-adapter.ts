@@ -10,13 +10,15 @@ import { createSession, destroySession } from './session'
  * same `AuthAdapter` interface later; call sites never change.
  */
 export const mockAuthAdapter: AuthAdapter = {
-  async signIn(email: string): Promise<Session> {
+  async signIn(email: string): Promise<{ session: Session; token: string; expiresAt: Date }> {
     const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1)
     if (!user) {
       throw new Error('Invalid credentials')
     }
 
-    return { userId: user.id, role: user.role }
+    const { token, expiresAt } = await createSession(user.id)
+
+    return { session: { userId: user.id, role: user.role }, token, expiresAt }
   },
 
   async signOut(sessionToken: string): Promise<void> {

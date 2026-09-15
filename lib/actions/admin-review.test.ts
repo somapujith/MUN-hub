@@ -1,20 +1,8 @@
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { adminActions, muns, munModuleVerifications, organizerApplications, users, verificationLogs } from '@/lib/db/schema'
-import { SESSION_COOKIE_NAME, createSession } from '@/lib/auth/session'
-
-// Mock next/headers `cookies()` so getSession() (called internally by every
-// admin-review action) can read a token we control per-test, without a real
-// Next.js request context. Each test sets `currentToken` before calling the
-// action under test.
-let currentToken: string | undefined
-
-vi.mock('next/headers', () => ({
-  cookies: async () => ({
-    get: (name: string) => (name === SESSION_COOKIE_NAME && currentToken ? { value: currentToken } : undefined),
-  }),
-}))
+import type { Session } from '@/lib/auth/adapter'
 
 import {
   getModuleReviewQueue,
@@ -35,9 +23,8 @@ async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' |
   return user
 }
 
-async function sessionFor(userId: string) {
-  const { token } = await createSession(userId)
-  return token
+function sess(user: { id: string; role: Session['role'] }): Session {
+  return { userId: user.id, role: user.role }
 }
 
 async function makeMun(
@@ -59,13 +46,13 @@ async function makeMun(
 describe('getReviewQueue', () => {
   it('throws Forbidden for a STUDENT', async () => {
     const student = await makeUser('STUDENT')
-    currentToken = await sessionFor(student.id)
-    await expect(getReviewQueue()).rejects.toThrow('Forbidden')
+    const __actor = sess(student)
+    await expect(getReviewQueue({}, __actor)).rejects.toThrow('Forbidden')
   })
 
   it('throws Forbidden with no session', async () => {
-    currentToken = undefined
-    await expect(getReviewQueue()).rejects.toThrow('Forbidden')
+    const __actor = null as Session | null
+    await expect(getReviewQueue({}, __actor)).rejects.toThrow('Forbidden')
   })
 
   it('returns SUBMITTED and UNDER_REVIEW muns for OPERATIONS', async () => {
@@ -75,9 +62,9 @@ describe('getReviewQueue', () => {
     await makeMun(organizer.id, 'VERIFICATION') // should NOT appear
 
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
+    const __actor = sess(ops)
 
-    const queue = await getReviewQueue()
+    const queue = await getReviewQueue({}, __actor)
     const ids = queue.results.map((m) => m.id)
     expect(ids).toContain(submitted.id)
     expect(ids).toContain(underReview.id)
@@ -92,9 +79,9 @@ describe('getReviewQueue', () => {
     }
 
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
+    const __actor = sess(ops)
 
-    const page1 = await getReviewQueue({ limit: 2, offset: 0 })
+    const page1 = await getReviewQueue({ limit: 2, offset: 0 }, __actor)
     expect(page1.results.length).toBe(2)
     expect(page1.total).toBeGreaterThanOrEqual(3)
   })
@@ -104,8 +91,8 @@ describe('getMunForReview', () => {
   it('throws Forbidden for an ORGANIZER', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'SUBMITTED')
-    currentToken = await sessionFor(organizer.id)
-    await expect(getMunForReview(mun.id)).rejects.toThrow('Forbidden')
+    const __actor = sess(organizer)
+    await expect(getMunForReview(mun.id, __actor)).rejects.toThrow('Forbidden')
   })
 
   it('returns mun + organizerApplication + verificationLogs (with internalNotes) for ADMIN', async () => {
@@ -117,9 +104,9 @@ describe('getMunForReview', () => {
       .values({ munId: mun.id, reviewerId: organizer.id, action: 'UNDER_REVIEW', notes: 'public note', internalNotes: 'secret ops note' })
 
     const admin = await makeUser('ADMIN')
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
-    const result = await getMunForReview(mun.id)
+    const result = await getMunForReview(mun.id, __actor)
     expect(result.id).toBe(mun.id)
     expect(result.organizerApplication?.organizerId).toBe(organizer.id)
     expect(result.verificationLogs.length).toBeGreaterThanOrEqual(1)
@@ -128,8 +115,8 @@ describe('getMunForReview', () => {
 
   it('throws Mun not found for a non-existent mun', async () => {
     const admin = await makeUser('ADMIN')
-    currentToken = await sessionFor(admin.id)
-    await expect(getMunForReview('does-not-exist')).rejects.toThrow('Mun not found')
+    const __actor = sess(admin)
+    await expect(getMunForReview('does-not-exist', __actor)).rejects.toThrow('Mun not found')
   })
 })
 
@@ -138,9 +125,9 @@ describe('reviewMunApplication', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'UNDER_REVIEW')
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
+    const __actor = sess(ops)
 
-    const result = await reviewMunApplication(mun.id, 'APPROVED', 'looks good')
+    const result = await reviewMunApplication(mun.id, 'APPROVED', 'looks good', undefined, __actor)
     expect(result.status).toBe('APPROVED')
 
     const logs = await db.select().from(verificationLogs).where(eq(verificationLogs.munId, mun.id))
@@ -151,18 +138,18 @@ describe('reviewMunApplication', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'UNDER_REVIEW')
     const student = await makeUser('STUDENT')
-    currentToken = await sessionFor(student.id)
+    const __actor = sess(student)
 
-    await expect(reviewMunApplication(mun.id, 'APPROVED')).rejects.toThrow('Forbidden')
+    await expect(reviewMunApplication(mun.id, 'APPROVED', undefined, undefined, __actor)).rejects.toThrow('Forbidden')
   })
 
   it('reviews a mun straight from SUBMITTED (as returned by getReviewQueue) by claiming it into UNDER_REVIEW first', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'SUBMITTED')
     const admin = await makeUser('ADMIN')
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
-    const result = await reviewMunApplication(mun.id, 'APPROVED', 'approved on first review')
+    const result = await reviewMunApplication(mun.id, 'APPROVED', 'approved on first review', undefined, __actor)
     expect(result.status).toBe('APPROVED')
 
     const logs = await db
@@ -178,9 +165,9 @@ describe('reviewMunApplication', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'UNDER_REVIEW')
     const admin = await makeUser('ADMIN')
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
-    const result = await reviewMunApplication(mun.id, 'CHANGES_REQUESTED', 'fix dates', 'organizer is slow to respond')
+    const result = await reviewMunApplication(mun.id, 'CHANGES_REQUESTED', 'fix dates', 'organizer is slow to respond', __actor)
     expect(result.status).toBe('CHANGES_REQUESTED')
 
     const logs = await db
@@ -198,9 +185,9 @@ describe('publishMun', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'VERIFICATION')
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
+    const __actor = sess(ops)
 
-    await expect(publishMun(mun.id)).rejects.toThrow('Forbidden')
+    await expect(publishMun(mun.id, __actor)).rejects.toThrow('Forbidden')
   })
 
   // No active mun_submissions row exists for this mun (created directly in
@@ -212,9 +199,9 @@ describe('publishMun', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'VERIFIED')
     const admin = await makeUser('ADMIN')
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
-    const result = await publishMun(mun.id)
+    const result = await publishMun(mun.id, __actor)
     expect(result.status).toBe('PUBLISHED')
     expect(result.publishedAt).toBeInstanceOf(Date)
   })
@@ -231,9 +218,9 @@ describe('unpublishMun', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'PUBLISHED')
     const admin = await makeUser('ADMIN')
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
-    const updated = await unpublishMun(mun.id)
+    const updated = await unpublishMun(mun.id, __actor)
     expect(updated.status).toBe('UNPUBLISHED')
 
     const [log] = await db.select().from(adminActions).where(eq(adminActions.targetId, mun.id))
@@ -244,9 +231,9 @@ describe('unpublishMun', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'PUBLISHED')
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
+    const __actor = sess(ops)
 
-    await expect(unpublishMun(mun.id)).rejects.toThrow('Forbidden')
+    await expect(unpublishMun(mun.id, __actor)).rejects.toThrow('Forbidden')
   })
 })
 
@@ -255,9 +242,9 @@ describe('suspendMun', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'REGISTRATION_OPEN')
     const admin = await makeUser('ADMIN')
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
-    const updated = await suspendMun(mun.id, 'safety concern')
+    const updated = await suspendMun(mun.id, 'safety concern', __actor)
     expect(updated.status).toBe('SUSPENDED')
 
     const [log] = await db.select().from(adminActions).where(eq(adminActions.targetId, mun.id))
@@ -269,11 +256,11 @@ describe('suspendMun', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'PUBLISHED')
     const admin = await makeUser('ADMIN')
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
     const [r1, r2] = await Promise.allSettled([
-      suspendMun(mun.id, 'reason A'),
-      suspendMun(mun.id, 'reason B'),
+      suspendMun(mun.id, 'reason A', __actor),
+      suspendMun(mun.id, 'reason B', __actor),
     ])
     const fulfilled = [r1, r2].filter((r) => r.status === 'fulfilled')
     const rejected = [r1, r2].filter((r) => r.status === 'rejected')
@@ -287,9 +274,9 @@ describe('reinstateMun', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'SUSPENDED')
     const admin = await makeUser('ADMIN')
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
-    const updated = await reinstateMun(mun.id)
+    const updated = await reinstateMun(mun.id, __actor)
     expect(updated.status).toBe('VERIFICATION')
   })
 
@@ -297,9 +284,9 @@ describe('reinstateMun', () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'SUSPENDED')
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
+    const __actor = sess(ops)
 
-    await expect(reinstateMun(mun.id)).rejects.toThrow('Forbidden')
+    await expect(reinstateMun(mun.id, __actor)).rejects.toThrow('Forbidden')
   })
 })
 
@@ -310,22 +297,22 @@ describe('getModuleReviewQueue', () => {
     const mun = await makeMun(organizer.id, 'VERIFICATION')
     await db.insert(munModuleVerifications).values({ munId: mun.id, moduleName: 'committees', state: 'PENDING_REVIEW', organizerConfirmedAt: new Date() })
 
-    currentToken = await sessionFor(reviewer.id)
+    const __actor = sess(reviewer)
     // The local dev DB accumulates historical PENDING_REVIEW rows across test
     // runs (documented in CLAUDE.md) — order by organizerConfirmedAt desc
     // means a freshly-created row isn't guaranteed to land on page 1 at the
     // default limit, so query with a limit large enough to cover accumulated
     // local junk instead of relying on ordering luck.
-    const queue = await getModuleReviewQueue({ limit: 1000 })
+    const queue = await getModuleReviewQueue({ limit: 1000 }, __actor)
     expect(queue.results.some((row) => row.munId === mun.id && row.munName === mun.name)).toBe(true)
     expect(queue.total).toBeGreaterThanOrEqual(1)
   })
 
   it('rejects a STUDENT session', async () => {
     const student = await makeUser('STUDENT')
-    currentToken = await sessionFor(student.id)
+    const __actor = sess(student)
 
-    await expect(getModuleReviewQueue()).rejects.toThrow('Forbidden')
+    await expect(getModuleReviewQueue({}, __actor)).rejects.toThrow('Forbidden')
   })
 })
 

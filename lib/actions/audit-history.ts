@@ -1,9 +1,7 @@
-'use server'
-
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { adminActions, verificationLogs } from '@/lib/db/schema'
-import { getSession } from '@/lib/auth/session'
+import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
 
 const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
@@ -22,8 +20,11 @@ export interface AuditEntry {
  * returns admin_actions rows only. Requires OPERATIONS/ADMIN/SUPER_ADMIN,
  * same as every other admin-facing read in this codebase.
  */
-export async function getAuditHistory(targetType: string, targetId: string): Promise<AuditEntry[]> {
-  const session = await getSession()
+export async function getAuditHistory(
+  targetType: string,
+  targetId: string,
+  session: Session | null,
+): Promise<AuditEntry[]> {
   requireRole(session, [...ADMIN_ROLES])
 
   const generalActions = await db

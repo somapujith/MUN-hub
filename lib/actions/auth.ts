@@ -1,13 +1,8 @@
-'use server'
-
-import { cookies } from 'next/headers'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { users } from '@/lib/db/schema'
-import { SESSION_COOKIE_NAME, createSession, destroySession } from '@/lib/auth/session'
+import { createSession, destroySession } from '@/lib/auth/session'
 import type { Role } from '@/lib/db/schema-enums'
-
-const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30 // 30 days, matches session.ts SESSION_TTL_MS
 
 /**
  * MVP mock "sign in": no password check, just look up a seeded user by
@@ -16,10 +11,14 @@ const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30 // 30 days, matches session.ts 
  * separate "invalid credentials" case to hide a valid email behind.
  * Throws `Error('Account suspended')` if the matched user is suspended.
  *
- * Creates a session row via `createSession`, sets it as an httpOnly
- * `mun_hub_session` cookie, and returns the session info.
+ * Creates a session row via `createSession` and returns the raw token +
+ * expiry. Does NOT touch cookies — the caller (an HTTP-layer route
+ * handler) is responsible for setting the session cookie using the
+ * returned `token`/`expiresAt`.
  */
-export async function signIn(email: string): Promise<{ userId: string; role: Role }> {
+export async function signIn(
+  email: string
+): Promise<{ userId: string; role: Role; token: string; expiresAt: Date }> {
   const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1)
   if (!user) {
     throw new Error('User not found')
@@ -31,31 +30,17 @@ export async function signIn(email: string): Promise<{ userId: string; role: Rol
 
   const { token, expiresAt } = await createSession(user.id)
 
-  const cookieStore = await cookies()
-  cookieStore.set(SESSION_COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: COOKIE_MAX_AGE_SECONDS,
-    expires: expiresAt,
-  })
-
-  return { userId: user.id, role: user.role }
+  return { userId: user.id, role: user.role, token, expiresAt }
 }
 
 /**
- * Reads the current `mun_hub_session` cookie token, invalidates the
- * corresponding session row via `destroySession` (idempotent — no-op if
- * there's no cookie or the session is already gone), and clears the cookie.
+ * Invalidates a session by its token via `destroySession` (idempotent —
+ * no-op if the token is empty/missing or the session is already gone).
+ * Does NOT touch cookies — the caller is responsible for reading the
+ * token out of the request and clearing the cookie itself.
  */
-export async function signOut(): Promise<void> {
-  const cookieStore = await cookies()
-  const token = cookieStore.get(SESSION_COOKIE_NAME)?.value
-
+export async function signOut(token: string): Promise<void> {
   if (token) {
     await destroySession(token)
   }
-
-  cookieStore.delete(SESSION_COOKIE_NAME)
 }
