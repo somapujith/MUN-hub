@@ -1,6 +1,6 @@
 export { csrfMiddleware } from './csrf'
-export { errorHandler, mapError } from './error'
-export type { ApiErrorCode } from './error'
+export { errorHandler, mapThrownError } from './error'
+export type { ErrorCode } from './error'
 export { rateLimitMiddleware } from './rate-limit'
 export { requireAuth } from './require-auth'
 export { requireRole } from './require-role'

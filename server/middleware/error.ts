@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import { ZodError } from 'zod'
-import type { AppEnv } from '../types'
+import type { AppVariables } from '../src/types'
 
 export type ErrorCode =
   | 'FORBIDDEN'
@@ -75,7 +75,7 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   return { status: 500, code: 'INTERNAL', message: 'Internal server error' }
 }
 
-export function errorHandler(error: unknown, c: Context<AppEnv>): Response {
+export function errorHandler(error: unknown, c: Context<{ Variables: AppVariables }>): Response {
   const requestId = c.get('requestId') ?? crypto.randomUUID()
   const mapped = mapThrownError(error)
 
