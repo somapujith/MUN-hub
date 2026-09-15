@@ -228,6 +228,13 @@ export const registrationProducts = pgTable(
     registrationType: text('registration_type'),
     earlyBirdPrice: integer('early_bird_price'),
     earlyBirdDeadline: timestamp('early_bird_deadline', { withTimezone: true }),
+    // Registration Types PRD (Slice 1, 2026-09-15) — see
+    // docs/superpowers/specs/2026-09-15-registration-types-allocation-design.md.
+    description: text('description'),
+    allowsIndividual: boolean('allows_individual').notNull().default(true),
+    allowsDelegation: boolean('allows_delegation').notNull().default(false),
+    displayOrder: integer('display_order').notNull().default(0),
+    eligibility: jsonb('eligibility'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('registration_products_mun_id_idx').on(table.munId)],

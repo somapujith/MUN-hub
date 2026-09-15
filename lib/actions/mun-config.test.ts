@@ -446,6 +446,23 @@ describe('mun-config actions', () => {
     })
   })
 
+  describe('createRegistrationProduct — Slice 1 fields', () => {
+    it('defaults allowsIndividual to true and allowsDelegation to false', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+
+      const product = await createRegistrationProduct(
+        { munId: mun.id, name: 'Delegate', price: 1500, capacity: 100 },
+        sessionFor(organizer),
+      )
+
+      expect(product.allowsIndividual).toBe(true)
+      expect(product.allowsDelegation).toBe(false)
+      expect(product.displayOrder).toBe(0)
+      expect(product.description).toBeNull()
+    })
+  })
+
   afterAll(async () => {
     await db.$client.end()
   })
