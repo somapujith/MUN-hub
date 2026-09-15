@@ -11,6 +11,7 @@ import { config } from 'dotenv'
 config({ path: '.env' })
 
 import { eq } from 'drizzle-orm'
+import { seedFullGoLiveModules, type GoLiveModuleTables } from './seed-go-live-modules'
 
 type SchemaModule = typeof import('./schema')
 type ClientModule = typeof import('./client')
@@ -23,7 +24,7 @@ type RegistrationProducts = SchemaModule['registrationProducts']
 type NewUser = Users['$inferInsert']
 type NewMun = Muns['$inferInsert']
 
-interface Tables {
+interface Tables extends GoLiveModuleTables {
   users: Users
   muns: Muns
   committees: Committees
@@ -56,6 +57,21 @@ interface MunSeed {
   organizer: OrganizerSeed
   committees?: { name: string; agenda: string }[]
   registrationProducts?: { name: string; price: number; capacity: number }[]
+  /**
+   * When true, seedMun also seeds all 7 net-new go-live module tables
+   * (branding, executive board, form fields, payment settlement, documents,
+   * schedule, contact) via lib/db/seed-go-live-modules.ts, plus the mun-level
+   * DATES_VENUE/ACCOMMODATION fields (venue, addressLine1,
+   * registrationOpensAt, registrationDeadline, accommodationProvided) via
+   * `goLiveDemoMunFields` below, so this mun's go-live dashboard renders at or
+   * near 100% complete (Task 13, 2026-09-15). Set ONLY on the 2 generic demo
+   * MUNs (Oxford, VIT) — deliberately left unset on the 6 real Hyderabad
+   * conferences per CLAUDE.md: those have real names/dates/committees and
+   * inventing fake executive board members or bank/payment details for a real
+   * organization would misrepresent it. A realistic ACTION_REQUIRED state for
+   * those 6 is better demo material than eight identical green dashboards.
+   */
+  fullGoLiveDemo?: boolean
 }
 
 const MUN_SEEDS: MunSeed[] = [
@@ -65,6 +81,7 @@ const MUN_SEEDS: MunSeed[] = [
     city: 'Oxford',
     country: 'UK',
     organizer: { name: 'Oxford MUN Society', email: 'organizer@munhub.test' },
+    fullGoLiveDemo: true,
   },
   {
     name: 'VIT MUN 2027',
@@ -72,6 +89,7 @@ const MUN_SEEDS: MunSeed[] = [
     city: 'Vellore',
     country: 'India',
     organizer: { name: 'VIT MUN Committee', email: 'organizer-vit@munhub.test' },
+    fullGoLiveDemo: true,
   },
   // --- Real Hyderabad MUN conferences (researched 2026-09-13, sources noted
   // in commit message) — placeholder registration fees since no conference
@@ -211,9 +229,34 @@ const REGISTRATION_PRODUCT_SEEDS = [
   { name: 'Press', price: 1500, capacity: 20 },
 ]
 
+/**
+ * Mun-level fields DATES_VENUE and ACCOMMODATION need beyond what the base
+ * seed already sets (start/end date, city, country) — only applied to
+ * `fullGoLiveDemo` muns (Task 13, 2026-09-15). Ordering matches
+ * lib/lifecycle/validators/content.ts#validateDatesVenue's BLOCKER checks:
+ * registrationOpensAt < registrationDeadline < startDate < endDate.
+ * ACCOMMODATION uses the PRD §22 opt-out (`NOT_PROVIDED`) rather than
+ * fabricating accommodation options, since that module's validator
+ * (validators/operations.ts#validateAccommodation) treats the opt-out alone
+ * as a full, trivial pass.
+ */
+function goLiveDemoMunFields(startDate: Date) {
+  const dayMs = 24 * 60 * 60 * 1000
+  return {
+    venue: 'Demo Conference Center',
+    addressLine1: '1 Demo Conference Way',
+    registrationOpensAt: new Date(startDate.getTime() - 60 * dayMs),
+    registrationDeadline: new Date(startDate.getTime() - 7 * dayMs),
+    accommodationProvided: 'NOT_PROVIDED' as const,
+  }
+}
+
 async function seedMun(db: Db, tables: Tables, organizerId: string, seed: MunSeed) {
   const { muns, committees, portfolios, registrationProducts } = tables
   const [existingMun] = await db.select().from(muns).where(eq(muns.slug, seed.slug)).limit(1)
+
+  let mun: Muns['$inferSelect']
+  let committeeRows: Committees['$inferSelect'][]
 
   if (existingMun) {
     const targetStartDate = new Date(seed.startDate ?? '2027-03-10')
@@ -222,8 +265,13 @@ async function seedMun(db: Db, tables: Tables, organizerId: string, seed: MunSee
     const datesDrifted =
       existingMun.startDate?.getTime() !== targetStartDate.getTime() ||
       existingMun.endDate?.getTime() !== targetEndDate.getTime()
+    // Only backfill go-live demo fields for the 2 generic demo MUNs, and only
+    // if they haven't been set yet (venue is null on every mun until this
+    // runs) — avoids clobbering a value someone edited via the organizer UI
+    // on a later re-seed.
+    const goLiveFieldsMissing = Boolean(seed.fullGoLiveDemo) && existingMun.venue == null
 
-    if (organizerDrifted || datesDrifted) {
+    if (organizerDrifted || datesDrifted || goLiveFieldsMissing) {
       // Backfill fields that have drifted from the current seed definition —
       // without this, re-running the seed script against an already-seeded
       // DB leaves stale values in place forever (bit us twice already: once
@@ -231,73 +279,96 @@ async function seedMun(db: Db, tables: Tables, organizerId: string, seed: MunSee
       // researched in the past that never got projected forward).
       const [updated] = await db
         .update(muns)
-        .set({ organizerId, startDate: targetStartDate, endDate: targetEndDate })
+        .set({
+          organizerId,
+          startDate: targetStartDate,
+          endDate: targetEndDate,
+          ...(goLiveFieldsMissing ? goLiveDemoMunFields(targetStartDate) : {}),
+        })
         .where(eq(muns.id, existingMun.id))
         .returning()
       console.log(
-        `  - MUN "${seed.name}" already exists (slug: ${seed.slug}), backfilled${organizerDrifted ? ' organizerId' : ''}${datesDrifted ? ' dates' : ''}.`,
+        `  - MUN "${seed.name}" already exists (slug: ${seed.slug}), backfilled${organizerDrifted ? ' organizerId' : ''}${datesDrifted ? ' dates' : ''}${goLiveFieldsMissing ? ' go-live demo fields' : ''}.`,
       )
-      return updated
+      mun = updated
+    } else {
+      console.log(`  - MUN "${seed.name}" already exists (slug: ${seed.slug}), skipping.`)
+      mun = existingMun
     }
-    console.log(`  - MUN "${seed.name}" already exists (slug: ${seed.slug}), skipping.`)
-    return existingMun
-  }
+    committeeRows = await db.select().from(committees).where(eq(committees.munId, mun.id))
+  } else {
+    const targetStartDate = new Date(seed.startDate ?? '2027-03-10')
+    const munValues: NewMun = {
+      organizerId,
+      name: seed.name,
+      slug: seed.slug,
+      edition: seed.edition ?? '2027',
+      theme: seed.theme ?? 'Diplomacy in a Fractured World',
+      description:
+        seed.description ??
+        `${seed.name} brings together delegates from across the region for three days of high-stakes committee debate, crisis simulation, and diplomacy.`,
+      startDate: targetStartDate,
+      endDate: new Date(seed.endDate ?? '2027-03-12'),
+      city: seed.city,
+      country: seed.country,
+      status: 'PUBLISHED',
+      publishedAt: new Date(),
+      ...(seed.fullGoLiveDemo ? goLiveDemoMunFields(targetStartDate) : {}),
+    }
 
-  const munValues: NewMun = {
-    organizerId,
-    name: seed.name,
-    slug: seed.slug,
-    edition: seed.edition ?? '2027',
-    theme: seed.theme ?? 'Diplomacy in a Fractured World',
-    description:
-      seed.description ??
-      `${seed.name} brings together delegates from across the region for three days of high-stakes committee debate, crisis simulation, and diplomacy.`,
-    startDate: new Date(seed.startDate ?? '2027-03-10'),
-    endDate: new Date(seed.endDate ?? '2027-03-12'),
-    city: seed.city,
-    country: seed.country,
-    status: 'PUBLISHED',
-    publishedAt: new Date(),
-  }
+    const [created] = await db.insert(muns).values(munValues).returning()
+    mun = created
+    console.log(`  - Created MUN "${mun.name}" (slug: ${mun.slug})`)
 
-  const [mun] = await db.insert(muns).values(munValues).returning()
-  console.log(`  - Created MUN "${mun.name}" (slug: ${mun.slug})`)
+    const committeeSeeds = seed.committees ?? COMMITTEE_SEEDS
+    committeeRows = []
+    for (const committeeSeed of committeeSeeds) {
+      const [committee] = await db
+        .insert(committees)
+        .values({
+          munId: mun.id,
+          name: committeeSeed.name,
+          agenda: committeeSeed.agenda,
+          capacity: 30,
+        })
+        .returning()
+      committeeRows.push(committee)
 
-  const committeeSeeds = seed.committees ?? COMMITTEE_SEEDS
-  for (const committeeSeed of committeeSeeds) {
-    const [committee] = await db
-      .insert(committees)
-      .values({
+      await db.insert(portfolios).values(
+        PORTFOLIO_SEEDS.map((portfolioSeed) => ({
+          committeeId: committee.id,
+          name: portfolioSeed.name,
+          type: portfolioSeed.type,
+          availability: 1,
+        })),
+      )
+
+      console.log(`    - Created committee "${committee.name}" with ${PORTFOLIO_SEEDS.length} portfolios`)
+    }
+
+    const productSeeds = seed.registrationProducts ?? REGISTRATION_PRODUCT_SEEDS
+    await db.insert(registrationProducts).values(
+      productSeeds.map((productSeed) => ({
         munId: mun.id,
-        name: committeeSeed.name,
-        agenda: committeeSeed.agenda,
-        capacity: 30,
-      })
-      .returning()
-
-    await db.insert(portfolios).values(
-      PORTFOLIO_SEEDS.map((portfolioSeed) => ({
-        committeeId: committee.id,
-        name: portfolioSeed.name,
-        type: portfolioSeed.type,
-        availability: 1,
+        name: productSeed.name,
+        price: productSeed.price,
+        capacity: productSeed.capacity,
       })),
     )
 
-    console.log(`    - Created committee "${committee.name}" with ${PORTFOLIO_SEEDS.length} portfolios`)
+    console.log(`    - Created ${productSeeds.length} registration products`)
   }
 
-  const productSeeds = seed.registrationProducts ?? REGISTRATION_PRODUCT_SEEDS
-  await db.insert(registrationProducts).values(
-    productSeeds.map((productSeed) => ({
+  if (seed.fullGoLiveDemo) {
+    await seedFullGoLiveModules({
+      db,
+      tables,
       munId: mun.id,
-      name: productSeed.name,
-      price: productSeed.price,
-      capacity: productSeed.capacity,
-    })),
-  )
-
-  console.log(`    - Created ${productSeeds.length} registration products`)
+      munName: mun.name,
+      organizerId,
+      committees: committeeRows,
+    })
+  }
 
   return mun
 }
@@ -306,8 +377,36 @@ async function main() {
   // Dynamic import: see the note above config() for why this must not be a
   // static top-level import.
   const { db } = await import('./client')
-  const { users, muns, committees, portfolios, registrationProducts } = await import('./schema')
-  const tables: Tables = { users, muns, committees, portfolios, registrationProducts }
+  const {
+    users,
+    muns,
+    committees,
+    portfolios,
+    registrationProducts,
+    munMedia,
+    munExecutiveBoard,
+    munFormFields,
+    munPaymentSettings,
+    munDocuments,
+    munScheduleItems,
+    munContacts,
+    organizerApplications,
+  } = await import('./schema')
+  const tables: Tables = {
+    users,
+    muns,
+    committees,
+    portfolios,
+    registrationProducts,
+    munMedia,
+    munExecutiveBoard,
+    munFormFields,
+    munPaymentSettings,
+    munDocuments,
+    munScheduleItems,
+    munContacts,
+    organizerApplications,
+  }
 
   console.log('Seeding users...')
   const admin = await upsertUserByEmail(db, users, {

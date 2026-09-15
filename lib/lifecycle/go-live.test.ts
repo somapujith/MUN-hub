@@ -19,7 +19,7 @@ import {
   verificationIssues,
   adminActions,
 } from '@/lib/db/schema'
-import { enqueueForGoLive, publishFromQueue, reviewSubmission, submitMunForReview } from './go-live'
+import { enqueueForGoLive, getGoLiveQueue, publishFromQueue, reviewSubmission, submitMunForReview } from './go-live'
 import { submitFinalConfirmation } from './organizer-confirmation'
 
 async function makeUser(role: 'ORGANIZER' | 'ADMIN' = 'ORGANIZER') {
@@ -475,6 +475,64 @@ describe('enqueueForGoLive', () => {
     const { mun } = await makeApprovedSubmission(organizer, admin)
 
     await expect(enqueueForGoLive(mun.id, { userId: organizer.id, role: 'ORGANIZER' })).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('getGoLiveQueue', () => {
+  it('rejects a non-reviewer (ORGANIZER) with Forbidden', async () => {
+    const organizer = await makeUser()
+    await expect(getGoLiveQueue({}, { userId: organizer.id, role: 'ORGANIZER' })).rejects.toThrow('Forbidden')
+  })
+
+  it('rejects an unauthenticated caller with Forbidden', async () => {
+    await expect(getGoLiveQueue({}, null)).rejects.toThrow('Forbidden')
+  })
+
+  it('lists a GO_LIVE_QUEUE mun with its active submission and an ON_TRACK slaState', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun, submission } = await makeQueuedSubmission(organizer, admin)
+
+    const { results, total } = await getGoLiveQueue({ limit: 1000 }, { userId: admin.id, role: 'ADMIN' })
+
+    const row = results.find((r) => r.munId === mun.id)
+    expect(row).toBeDefined()
+    expect(row!.submissionId).toBe(submission.id)
+    expect(row!.munStatus).toBe('GO_LIVE_QUEUE')
+    expect(row!.queuedAt).toBeInstanceOf(Date)
+    expect(row!.slaState).toBe('ON_TRACK')
+    expect(total).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not list a mun once its submission is PUBLISHED (ACTIVE_SUBMISSION_PREDICATE excludes it)', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeQueuedSubmission(organizer, admin)
+
+    // PUBLISH-stage validation requires payment VERIFIED (BLOCKER there,
+    // unlike SUBMIT where it's only HIGH) — same pattern as
+    // 'publishFromQueue > happy path' below.
+    await db
+      .update(munPaymentSettings)
+      .set({ verificationState: 'VERIFIED', verifiedAt: new Date(), verifiedBy: admin.id })
+      .where(eq(munPaymentSettings.munId, mun.id))
+
+    await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })
+
+    const { results } = await getGoLiveQueue({ limit: 1000 }, { userId: admin.id, role: 'ADMIN' })
+    expect(results.find((r) => r.munId === mun.id)).toBeUndefined()
+  })
+
+  it('paginates with limit/offset', async () => {
+    const organizerA = await makeUser()
+    const organizerB = await makeUser()
+    const admin = await makeUser('ADMIN')
+    await makeQueuedSubmission(organizerA, admin)
+    await makeQueuedSubmission(organizerB, admin)
+
+    const page1 = await getGoLiveQueue({ limit: 1, offset: 0 }, { userId: admin.id, role: 'ADMIN' })
+    expect(page1.results.length).toBe(1)
+    expect(page1.total).toBeGreaterThanOrEqual(2)
   })
 })
 
