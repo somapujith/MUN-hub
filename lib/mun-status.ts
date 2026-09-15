@@ -44,6 +44,19 @@ const STATUS_META: Record<MunStatus, StatusMeta> = {
   VERIFICATION: { label: "In verification", tone: "info", icon: "shield-check" },
   ONBOARDING: { label: "Onboarding", tone: "info", icon: "rocket" },
 
+  // Placeholder entries (mechanical, added only to keep this
+  // Record<MunStatus, ...> exhaustive after Task 1 of the onboarding/go-live
+  // pipeline plan added 6 new MunStatus values) — need real UI/copy review
+  // from whoever owns UI next, not a design pass from backend. See
+  // docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
+  // Section 1.5 for what these states mean.
+  ACTION_REQUIRED: { label: "Action required", tone: "warning", icon: "alert-triangle" },
+  READY_FOR_SUBMISSION: { label: "Ready for submission", tone: "info", icon: "check" },
+  AUTOMATED_VALIDATION: { label: "Automated validation", tone: "info", icon: "hourglass" },
+  GO_LIVE_QUEUE: { label: "Go-live queue", tone: "info", icon: "rocket" },
+  PUBLISHING: { label: "Publishing", tone: "info", icon: "upload" },
+  UNPUBLISHED: { label: "Unpublished", tone: "muted", icon: "archive" },
+
   CHANGES_REQUESTED: { label: "Changes requested", tone: "warning", icon: "alert-triangle" },
 
   REJECTED: { label: "Rejected", tone: "destructive", icon: "x-circle" },
@@ -55,7 +68,9 @@ const STATUS_META: Record<MunStatus, StatusMeta> = {
 
   APPROVED: { label: "Approved", tone: "success", icon: "check" },
   VERIFIED: { label: "Verified", tone: "success", icon: "shield" },
-  PUBLISHED: { label: "Published", tone: "success", icon: "globe" },
+  // Label is "Live" per spec Section 1.3 — PUBLISHED is the enum value that
+  // stays; LIVE is a display label only, never a separate MunStatus value.
+  PUBLISHED: { label: "Live", tone: "success", icon: "globe" },
   REGISTRATION_OPEN: { label: "Registration open", tone: "success", icon: "ticket" },
 
   REGISTRATION_CLOSED: { label: "Registration closed", tone: "secondary", icon: "lock" },

@@ -88,6 +88,64 @@ describe('unpublish transition', () => {
   })
 })
 
+describe('onboarding / go-live pipeline states (2026-09-14 plan, Task 1)', () => {
+  it('allows ONBOARDING to ACTION_REQUIRED', () => {
+    expect(canTransition('ONBOARDING', 'ACTION_REQUIRED')).toBe(true)
+  })
+
+  it('allows ACTION_REQUIRED to READY_FOR_SUBMISSION', () => {
+    expect(canTransition('ACTION_REQUIRED', 'READY_FOR_SUBMISSION')).toBe(true)
+  })
+
+  it('allows READY_FOR_SUBMISSION to CONTENT_SUBMITTED', () => {
+    expect(canTransition('READY_FOR_SUBMISSION', 'CONTENT_SUBMITTED')).toBe(true)
+  })
+
+  it('allows CONTENT_SUBMITTED to AUTOMATED_VALIDATION', () => {
+    expect(canTransition('CONTENT_SUBMITTED', 'AUTOMATED_VALIDATION')).toBe(true)
+  })
+
+  it('allows AUTOMATED_VALIDATION to ORGANIZER_CONFIRMATION', () => {
+    expect(canTransition('AUTOMATED_VALIDATION', 'ORGANIZER_CONFIRMATION')).toBe(true)
+  })
+
+  it('allows VERIFIED to GO_LIVE_QUEUE', () => {
+    expect(canTransition('VERIFIED', 'GO_LIVE_QUEUE')).toBe(true)
+  })
+
+  it('allows GO_LIVE_QUEUE to PUBLISHING', () => {
+    expect(canTransition('GO_LIVE_QUEUE', 'PUBLISHING')).toBe(true)
+  })
+
+  it('allows PUBLISHING to PUBLISHED', () => {
+    expect(canTransition('PUBLISHING', 'PUBLISHED')).toBe(true)
+  })
+
+  it('allows PUBLISHED to UNPUBLISHED', () => {
+    expect(canTransition('PUBLISHED', 'UNPUBLISHED')).toBe(true)
+  })
+
+  it('allows UNPUBLISHED to GO_LIVE_QUEUE', () => {
+    expect(canTransition('UNPUBLISHED', 'GO_LIVE_QUEUE')).toBe(true)
+  })
+
+  it('rejects ONBOARDING to PUBLISHED', () => {
+    expect(canTransition('ONBOARDING', 'PUBLISHED')).toBe(false)
+  })
+
+  it('rejects GO_LIVE_QUEUE to PUBLISHED (must pass through PUBLISHING)', () => {
+    expect(canTransition('GO_LIVE_QUEUE', 'PUBLISHED')).toBe(false)
+  })
+
+  it('rejects ACTION_REQUIRED to CONTENT_SUBMITTED (must reach READY_FOR_SUBMISSION first)', () => {
+    expect(canTransition('ACTION_REQUIRED', 'CONTENT_SUBMITTED')).toBe(false)
+  })
+
+  it('rejects UNPUBLISHED to PUBLISHED', () => {
+    expect(canTransition('UNPUBLISHED', 'PUBLISHED')).toBe(false)
+  })
+})
+
 describe('transitionMun', () => {
   let munId: string
   let reviewerId: string
