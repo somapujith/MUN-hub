@@ -42,12 +42,10 @@ export function createApp() {
   // Webhooks: outside CSRF and outside /api/v1 (spec Section 4.4)
   app.route('/webhooks', webhooks)
 
-  const protectedApi = new Hono<{ Variables: AppVariables }>()
-  protectedApi.use('*', csrfMiddleware)
-  protectedApi.use('*', rateLimitMiddleware)
-  protectedApi.route('/', apiV1)
-
-  app.route('/api/v1', protectedApi)
+  // CSRF + rate-limit scoped to /api/v1 only
+  app.use('/api/v1/*', csrfMiddleware)
+  app.use('/api/v1/*', rateLimitMiddleware)
+  app.route('/api/v1', apiV1)
 
   app.onError(errorHandler)
 
