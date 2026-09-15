@@ -12,6 +12,7 @@ import {
 } from "@/components/organizer/registration-filter-bar";
 import { getDelegateList, type DelegateFilters } from "@/lib/actions/organizer-dashboard";
 import { listCommittees } from "@/lib/actions/mun-config";
+import { requireOrganizerActor } from "../../auth";
 import { munSectionHref } from "../../nav-config";
 
 /**
@@ -33,9 +34,9 @@ import { munSectionHref } from "../../nav-config";
  * § 17's other six filters (portfolio, registration type, date, institution,
  * city, attendance) are not in `DelegateFilters` and are not faked client-side.
  *
- * No auth or ownership check here: `../../layout.tsx` gates the route and
- * `getDelegateList` re-derives the actor from `getSession()` and calls
- * `assertOwnsOrAdmin` itself.
+ * Route gate: `../../layout.tsx` + `requireOrganizerActor` below. Ownership
+ * is enforced again inside `getDelegateList` via shared `assertOwnsOrAdmin`
+ * with the explicit session we pass.
  */
 
 export const metadata: Metadata = { title: "Registrations" };
@@ -56,6 +57,7 @@ export default async function RegistrationsPage({
 }: PageProps<"/organizer/dashboard/[munId]/registrations">) {
   const { munId } = await params;
   const query = await searchParams;
+  const session = await requireOrganizerActor();
 
   const rawCommittee = typeof query.committee === "string" ? query.committee : "";
   const paymentStatus = parsePaymentStatus(
@@ -81,7 +83,7 @@ export default async function RegistrationsPage({
     offset: (page - 1) * PAGE_SIZE,
   };
 
-  const { results: rows, total } = await getDelegateList(munId, filters);
+  const { results: rows, total } = await getDelegateList(munId, filters, session);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const basePath = munSectionHref(munId, "registrations");

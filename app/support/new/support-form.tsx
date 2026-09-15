@@ -8,7 +8,7 @@ import { CheckCircle2Icon, Loader2Icon, SendIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createTicket } from "@/lib/actions/support";
+import { createTicketAction } from "./actions";
 import type { SupportCategory } from "@/lib/db/schema-enums";
 
 const CATEGORIES: { value: SupportCategory; label: string }[] = [
@@ -45,12 +45,11 @@ const textareaClassName = cn(
  * `app/admin/organizers/suspend-dialog.tsx` (Task 3 review) applies to any
  * disabled-button gate, not just admin dialogs.
  *
- * Calls `createTicket` (a `'use server'` action) directly rather than going
- * through a route-local `actions.ts` wrapper: unlike the admin queue, there
+ * Calls `createTicketAction` (route-local server action) which resolves the
+ * session and forwards to lib `createTicket`. Unlike the admin queue, there
  * is no list to `revalidatePath` after submit — the form just swaps to a
- * confirmation state — and `createTicket` only throws `Forbidden`, which
- * can't happen here since the page already redirects unauthenticated users
- * before this component ever renders.
+ * confirmation state. `Forbidden` can't happen here since the page already
+ * redirects unauthenticated users before this component ever renders.
  */
 export function SupportForm() {
   const [category, setCategory] = React.useState<SupportCategory>("TECHNICAL");
@@ -68,7 +67,7 @@ export function SupportForm() {
 
     startTransition(async () => {
       try {
-        await createTicket({
+        await createTicketAction({
           category,
           subject: subject.trim(),
           description: description.trim(),

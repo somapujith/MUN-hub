@@ -9,7 +9,7 @@ import { formatDateRange } from "@/components/shared/date-range";
 import { formatPrice } from "@/components/shared/currency";
 import { getMunBySlug } from "@/lib/actions/marketplace";
 import { getRegistrationById } from "@/lib/actions/registration";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { db } from "@/lib/db/client";
 import { committees, portfolios, registrationProducts } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -62,7 +62,7 @@ export default async function ConfirmationPage({
   // state directly instead of letting the throw propagate.
   let registration;
   try {
-    registration = await getRegistrationById(registrationId);
+    registration = await getRegistrationById(registrationId, session);
   } catch {
     return (
       <div className="flex min-h-full flex-1 flex-col bg-background">

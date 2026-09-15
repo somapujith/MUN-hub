@@ -1,10 +1,8 @@
-'use server'
-
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { supportTickets } from '@/lib/db/schema'
-import { getSession } from '@/lib/auth/session'
 import { requireRole } from '@/lib/auth/authorize'
+import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
 import type { SupportCategory, SupportPriority, SupportStatus } from '@/lib/db/schema-enums'
 
@@ -41,11 +39,13 @@ export interface CreateTicketInput {
 
 /**
  * Any authenticated user (student/organizer/admin) can open a ticket. Actor
- * is always derived from `getSession()` — never accept a client-supplied
- * `createdBy`, same rule as every other actor-scoped action in this codebase.
+ * is always derived from the caller-supplied `session` — never accept a
+ * client-supplied `createdBy`, same rule as every other actor-scoped action.
  */
-export async function createTicket(input: CreateTicketInput): Promise<SupportTicketRow> {
-  const session = await getSession()
+export async function createTicket(
+  input: CreateTicketInput,
+  session: Session | null,
+): Promise<SupportTicketRow> {
   if (!session) throw new Error('Forbidden')
 
   const [ticket] = await db
@@ -72,8 +72,10 @@ export async function createTicket(input: CreateTicketInput): Promise<SupportTic
  * volume for this MVP is low enough that an unbounded read is acceptable;
  * revisit with real pagination if that stops being true.
  */
-export async function listTickets(filters: { status?: SupportStatus } = {}): Promise<SupportTicketRow[]> {
-  const session = await getSession()
+export async function listTickets(
+  filters: { status?: SupportStatus } = {},
+  session: Session | null,
+): Promise<SupportTicketRow[]> {
   requireRole(session, [...ADMIN_ROLES])
 
   if (filters.status) {
@@ -95,8 +97,7 @@ export async function listTickets(filters: { status?: SupportStatus } = {}): Pro
  * parameter here would let any caller reaching this action assign a ticket
  * to a third party it never authenticated as.
  */
-export async function assignTicket(ticketId: string): Promise<SupportTicketRow> {
-  const session = await getSession()
+export async function assignTicket(ticketId: string, session: Session | null): Promise<SupportTicketRow> {
   requireRole(session, [...ADMIN_ROLES])
 
   return db.transaction(async (tx) => {
@@ -127,9 +128,9 @@ export async function assignTicket(ticketId: string): Promise<SupportTicketRow> 
 export async function updateTicketStatus(
   ticketId: string,
   status: SupportStatus,
-  resolutionNotes?: string,
+  resolutionNotes: string | undefined,
+  session: Session | null,
 ): Promise<SupportTicketRow> {
-  const session = await getSession()
   requireRole(session, [...ADMIN_ROLES])
 
   return db.transaction(async (tx) => {

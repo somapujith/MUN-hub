@@ -1,5 +1,3 @@
-'use server'
-
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { munContacts } from '@/lib/db/schema'

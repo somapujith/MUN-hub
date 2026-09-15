@@ -1,11 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
 import { users, supportTickets, adminActions } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { createTicket, listTickets, assignTicket, updateTicketStatus } from './support'
-
-vi.mock('@/lib/auth/session', () => ({ getSession: vi.fn() }))
-import { getSession } from '@/lib/auth/session'
 
 describe('createTicket', () => {
   it('creates a NEW ticket with default NORMAL priority', async () => {
@@ -13,17 +10,14 @@ describe('createTicket', () => {
       .insert(users)
       .values({ name: 'S', email: `s-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
       .returning()
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-
-    const ticket = await createTicket({ category: 'PAYMENT', subject: 'Payment failed', description: 'x' })
+    const ticket = await createTicket({ category: 'PAYMENT', subject: 'Payment failed', description: 'x' }, { userId: student.id, role: 'STUDENT' })
     expect(ticket.status).toBe('NEW')
     expect(ticket.priority).toBe('NORMAL')
     expect(ticket.createdBy).toBe(student.id)
   })
 
   it('throws Forbidden with no session', async () => {
-    vi.mocked(getSession).mockResolvedValue(null)
-    await expect(createTicket({ category: 'PAYMENT', subject: 'x', description: 'x' })).rejects.toThrow('Forbidden')
+    await expect(createTicket({ category: 'PAYMENT', subject: 'x', description: 'x' }, null)).rejects.toThrow('Forbidden')
   })
 })
 
@@ -37,11 +31,9 @@ describe('assignTicket', () => {
       .insert(users)
       .values({ name: 'A', email: `a-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
       .returning()
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-    const ticket = await createTicket({ category: 'ACCOUNT', subject: 'x', description: 'x' })
+    const ticket = await createTicket({ category: 'ACCOUNT', subject: 'x', description: 'x' }, { userId: student.id, role: 'STUDENT' })
 
-    vi.mocked(getSession).mockResolvedValue({ userId: admin.id, role: 'ADMIN' })
-    const assigned = await assignTicket(ticket.id)
+    const assigned = await assignTicket(ticket.id, { userId: admin.id, role: 'ADMIN' })
     expect(assigned.status).toBe('ASSIGNED')
     expect(assigned.assignedTo).toBe(admin.id)
 
@@ -63,16 +55,13 @@ describe('assignTicket', () => {
       .values({ name: 'A-two', email: `a-two-${crypto.randomUUID()}@test.dev`, role: 'OPERATIONS' })
       .returning()
 
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-    const ticketOne = await createTicket({ category: 'ACCOUNT', subject: 'x', description: 'x' })
-    const ticketTwo = await createTicket({ category: 'ACCOUNT', subject: 'y', description: 'y' })
+    const ticketOne = await createTicket({ category: 'ACCOUNT', subject: 'x', description: 'x' }, { userId: student.id, role: 'STUDENT' })
+    const ticketTwo = await createTicket({ category: 'ACCOUNT', subject: 'y', description: 'y' }, { userId: student.id, role: 'STUDENT' })
 
-    vi.mocked(getSession).mockResolvedValue({ userId: adminOne.id, role: 'ADMIN' })
-    const assignedOne = await assignTicket(ticketOne.id)
+    const assignedOne = await assignTicket(ticketOne.id, { userId: adminOne.id, role: 'ADMIN' })
     expect(assignedOne.assignedTo).toBe(adminOne.id)
 
-    vi.mocked(getSession).mockResolvedValue({ userId: adminTwo.id, role: 'OPERATIONS' })
-    const assignedTwo = await assignTicket(ticketTwo.id)
+    const assignedTwo = await assignTicket(ticketTwo.id, { userId: adminTwo.id, role: 'OPERATIONS' })
     expect(assignedTwo.assignedTo).toBe(adminTwo.id)
     expect(assignedTwo.assignedTo).not.toBe(adminOne.id)
   })
@@ -82,10 +71,9 @@ describe('assignTicket', () => {
       .insert(users)
       .values({ name: 'S2b', email: `s2b-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
       .returning()
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-    const ticket = await createTicket({ category: 'ACCOUNT', subject: 'x', description: 'x' })
+    const ticket = await createTicket({ category: 'ACCOUNT', subject: 'x', description: 'x' }, { userId: student.id, role: 'STUDENT' })
 
-    await expect(assignTicket(ticket.id)).rejects.toThrow('Forbidden')
+    await expect(assignTicket(ticket.id, { userId: student.id, role: 'STUDENT' })).rejects.toThrow('Forbidden')
   })
 })
 
@@ -99,13 +87,11 @@ describe('updateTicketStatus', () => {
       .insert(users)
       .values({ name: 'A2', email: `a2-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
       .returning()
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' })
+    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' }, { userId: student.id, role: 'STUDENT' })
 
-    vi.mocked(getSession).mockResolvedValue({ userId: admin.id, role: 'ADMIN' })
-    await assignTicket(ticket.id)
-    await updateTicketStatus(ticket.id, 'IN_PROGRESS')
-    const resolved = await updateTicketStatus(ticket.id, 'RESOLVED', 'fixed it')
+    await assignTicket(ticket.id, { userId: admin.id, role: 'ADMIN' })
+    await updateTicketStatus(ticket.id, 'IN_PROGRESS', undefined, { userId: admin.id, role: 'ADMIN' })
+    const resolved = await updateTicketStatus(ticket.id, 'RESOLVED', 'fixed it', { userId: admin.id, role: 'ADMIN' })
     expect(resolved.status).toBe('RESOLVED')
     expect(resolved.resolutionNotes).toBe('fixed it')
 
@@ -123,12 +109,10 @@ describe('updateTicketStatus', () => {
       .insert(users)
       .values({ name: 'A2b', email: `a2b-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
       .returning()
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' })
+    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' }, { userId: student.id, role: 'STUDENT' })
 
-    vi.mocked(getSession).mockResolvedValue({ userId: admin.id, role: 'ADMIN' })
-    await assignTicket(ticket.id)
-    const inProgress = await updateTicketStatus(ticket.id, 'IN_PROGRESS')
+    await assignTicket(ticket.id, { userId: admin.id, role: 'ADMIN' })
+    const inProgress = await updateTicketStatus(ticket.id, 'IN_PROGRESS', undefined, { userId: admin.id, role: 'ADMIN' })
     expect(inProgress.status).toBe('IN_PROGRESS')
 
     const logs = await db.select().from(adminActions).where(eq(adminActions.targetId, ticket.id))
@@ -142,10 +126,9 @@ describe('updateTicketStatus', () => {
       .insert(users)
       .values({ name: 'S4', email: `s4-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
       .returning()
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' })
+    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' }, { userId: student.id, role: 'STUDENT' })
 
-    await expect(updateTicketStatus(ticket.id, 'RESOLVED')).rejects.toThrow('Forbidden')
+    await expect(updateTicketStatus(ticket.id, 'RESOLVED', undefined, { userId: student.id, role: 'STUDENT' })).rejects.toThrow('Forbidden')
   })
 
   it('allows a valid transition: ASSIGNED -> WAITING', async () => {
@@ -157,12 +140,10 @@ describe('updateTicketStatus', () => {
       .insert(users)
       .values({ name: 'A3', email: `a3-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
       .returning()
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' })
+    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' }, { userId: student.id, role: 'STUDENT' })
 
-    vi.mocked(getSession).mockResolvedValue({ userId: admin.id, role: 'ADMIN' })
-    await assignTicket(ticket.id)
-    const waiting = await updateTicketStatus(ticket.id, 'WAITING')
+    await assignTicket(ticket.id, { userId: admin.id, role: 'ADMIN' })
+    const waiting = await updateTicketStatus(ticket.id, 'WAITING', undefined, { userId: admin.id, role: 'ADMIN' })
     expect(waiting.status).toBe('WAITING')
   })
 
@@ -175,11 +156,9 @@ describe('updateTicketStatus', () => {
       .insert(users)
       .values({ name: 'A4', email: `a4-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
       .returning()
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' })
+    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' }, { userId: student.id, role: 'STUDENT' })
 
-    vi.mocked(getSession).mockResolvedValue({ userId: admin.id, role: 'ADMIN' })
-    await expect(updateTicketStatus(ticket.id, 'RESOLVED', 'skip ahead')).rejects.toThrow(
+    await expect(updateTicketStatus(ticket.id, 'RESOLVED', 'skip ahead', { userId: admin.id, role: 'ADMIN' })).rejects.toThrow(
       'Invalid ticket transition',
     )
   })
@@ -193,15 +172,13 @@ describe('updateTicketStatus', () => {
       .insert(users)
       .values({ name: 'A5', email: `a5-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
       .returning()
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' })
+    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' }, { userId: student.id, role: 'STUDENT' })
 
-    vi.mocked(getSession).mockResolvedValue({ userId: admin.id, role: 'ADMIN' })
-    await assignTicket(ticket.id)
-    await updateTicketStatus(ticket.id, 'IN_PROGRESS')
-    await updateTicketStatus(ticket.id, 'RESOLVED', 'done')
+    await assignTicket(ticket.id, { userId: admin.id, role: 'ADMIN' })
+    await updateTicketStatus(ticket.id, 'IN_PROGRESS', undefined, { userId: admin.id, role: 'ADMIN' })
+    await updateTicketStatus(ticket.id, 'RESOLVED', 'done', { userId: admin.id, role: 'ADMIN' })
 
-    await expect(updateTicketStatus(ticket.id, 'RESOLVED', 'done again')).rejects.toThrow(
+    await expect(updateTicketStatus(ticket.id, 'RESOLVED', 'done again', { userId: admin.id, role: 'ADMIN' })).rejects.toThrow(
       'Invalid ticket transition',
     )
   })
@@ -215,35 +192,30 @@ describe('updateTicketStatus', () => {
       .insert(users)
       .values({ name: 'A6', email: `a6-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
       .returning()
-    vi.mocked(getSession).mockResolvedValue({ userId: student.id, role: 'STUDENT' })
-    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' })
+    const ticket = await createTicket({ category: 'TECHNICAL', subject: 'x', description: 'x' }, { userId: student.id, role: 'STUDENT' })
 
-    vi.mocked(getSession).mockResolvedValue({ userId: admin.id, role: 'ADMIN' })
-    await assignTicket(ticket.id)
-    await updateTicketStatus(ticket.id, 'IN_PROGRESS')
-    await updateTicketStatus(ticket.id, 'RESOLVED', 'done')
-    await updateTicketStatus(ticket.id, 'CLOSED')
+    await assignTicket(ticket.id, { userId: admin.id, role: 'ADMIN' })
+    await updateTicketStatus(ticket.id, 'IN_PROGRESS', undefined, { userId: admin.id, role: 'ADMIN' })
+    await updateTicketStatus(ticket.id, 'RESOLVED', 'done', { userId: admin.id, role: 'ADMIN' })
+    await updateTicketStatus(ticket.id, 'CLOSED', undefined, { userId: admin.id, role: 'ADMIN' })
 
-    await expect(updateTicketStatus(ticket.id, 'NEW')).rejects.toThrow('Invalid ticket transition')
+    await expect(updateTicketStatus(ticket.id, 'NEW', undefined, { userId: admin.id, role: 'ADMIN' })).rejects.toThrow('Invalid ticket transition')
   })
 })
 
 describe('listTickets', () => {
   it('filters by status', async () => {
-    vi.mocked(getSession).mockResolvedValue({ userId: 'admin-x', role: 'OPERATIONS' })
-    const results = await listTickets({ status: 'NEW' })
+    const results = await listTickets({ status: 'NEW' }, { userId: 'admin-x', role: 'OPERATIONS' })
     expect(Array.isArray(results)).toBe(true)
     expect(results.every((t) => t.status === 'NEW')).toBe(true)
   })
 
   it('returns all tickets with no filter', async () => {
-    vi.mocked(getSession).mockResolvedValue({ userId: 'admin-x', role: 'OPERATIONS' })
-    const results = await listTickets()
+    const results = await listTickets({}, { userId: 'admin-x', role: 'OPERATIONS' })
     expect(Array.isArray(results)).toBe(true)
   })
 
   it('throws Forbidden for a student', async () => {
-    vi.mocked(getSession).mockResolvedValue({ userId: 'student-x', role: 'STUDENT' })
-    await expect(listTickets()).rejects.toThrow('Forbidden')
+    await expect(listTickets({}, { userId: 'student-x', role: 'STUDENT' })).rejects.toThrow('Forbidden')
   })
 })

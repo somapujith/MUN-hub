@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { reinstateOrganizer, suspendOrganizer } from "@/lib/actions/organizer-admin";
+import { getSession } from "@/app/lib/session";
 
 /**
  * Thin route-local wrappers around the frozen `lib/actions/organizer-admin`
@@ -38,7 +39,7 @@ export async function suspendOrganizerAction(
   reason: string
 ): Promise<OrganizerActionResult> {
   try {
-    await suspendOrganizer(userId, reason);
+    await suspendOrganizer(userId, reason, await getSession());
     revalidatePath("/admin/organizers");
     return { ok: true };
   } catch (error) {
@@ -48,7 +49,7 @@ export async function suspendOrganizerAction(
 
 export async function reinstateOrganizerAction(userId: string): Promise<OrganizerActionResult> {
   try {
-    await reinstateOrganizer(userId);
+    await reinstateOrganizer(userId, await getSession());
     revalidatePath("/admin/organizers");
     return { ok: true };
   } catch (error) {

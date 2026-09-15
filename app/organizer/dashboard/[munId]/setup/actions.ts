@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { updateMunDetails } from "@/lib/actions/mun-config";
 import type { UpdateMunDetailsInput } from "@/lib/actions/mun-config";
 import { submitFinalConfirmation } from "@/lib/lifecycle/organizer-confirmation";

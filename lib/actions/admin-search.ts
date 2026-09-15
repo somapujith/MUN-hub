@@ -1,10 +1,8 @@
-'use server'
-
 import { and, desc, eq, ilike, ne, or } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { committees, muns, payments, portfolios, registrations, users } from '@/lib/db/schema'
-import { getSession } from '@/lib/auth/session'
 import { requireRole } from '@/lib/auth/authorize'
+import type { Session } from '@/lib/auth/adapter'
 
 const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
 
@@ -27,8 +25,10 @@ export interface RegistrationSearchResult {
  * `payments.registrationId` is unique (one payment per registration), so the
  * left join can't fan a registration out into duplicate rows.
  */
-export async function searchRegistrations(query: string): Promise<RegistrationSearchResult[]> {
-  const session = await getSession()
+export async function searchRegistrations(
+  query: string,
+  session: Session | null,
+): Promise<RegistrationSearchResult[]> {
   requireRole(session, [...ADMIN_ROLES])
 
   const pattern = `%${query}%`
@@ -88,8 +88,7 @@ export interface PaymentExceptionRow {
  * one page rather than depending on where it happens to fall in insertion
  * order.
  */
-export async function listPaymentExceptions(): Promise<PaymentExceptionRow[]> {
-  const session = await getSession()
+export async function listPaymentExceptions(session: Session | null): Promise<PaymentExceptionRow[]> {
   requireRole(session, [...ADMIN_ROLES])
 
   const rows = await db

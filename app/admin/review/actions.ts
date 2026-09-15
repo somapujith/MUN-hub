@@ -9,6 +9,7 @@ import {
   unpublishMun,
 } from "@/lib/actions/admin-review";
 import type { MunStatus } from "@/lib/db/schema-enums";
+import { getSession } from "@/app/lib/session";
 
 /**
  * Thin route-local wrappers around the frozen `lib/actions/admin-review`
@@ -24,8 +25,8 @@ import type { MunStatus } from "@/lib/db/schema-enums";
  *      decided row lingers in the client router cache and the UI looks
  *      optimistic/fake even though the DB moved.
  *
- * Authorization is NOT re-implemented here. `reviewMunApplication` /
- * `publishMun` derive the actor from `getSession()` and call `requireRole`
+ * Authorization is NOT re-implemented here. These wrappers resolve the
+ * session once and pass it into the lib actions, which call `requireRole`
  * themselves; adding a second check here would be a stale duplicate.
  */
 
@@ -52,11 +53,13 @@ export async function submitReviewDecision(
   internalNotes?: string
 ): Promise<ReviewActionResult> {
   try {
+    const session = await getSession();
     const mun = await reviewMunApplication(
       munId,
       decision,
       notes?.trim() || undefined,
-      internalNotes?.trim() || undefined
+      internalNotes?.trim() || undefined,
+      session,
     );
     revalidatePath("/admin/review");
     return { ok: true, status: mun.status };
@@ -67,7 +70,7 @@ export async function submitReviewDecision(
 
 export async function publishMunAction(munId: string): Promise<ReviewActionResult> {
   try {
-    const mun = await publishMun(munId);
+    const mun = await publishMun(munId, await getSession());
     revalidatePath("/admin/review");
     return { ok: true, status: mun.status };
   } catch (error) {
@@ -77,7 +80,7 @@ export async function publishMunAction(munId: string): Promise<ReviewActionResul
 
 export async function unpublishMunAction(munId: string): Promise<ReviewActionResult> {
   try {
-    const mun = await unpublishMun(munId);
+    const mun = await unpublishMun(munId, await getSession());
     revalidatePath("/admin/review");
     return { ok: true, status: mun.status };
   } catch (error) {
@@ -87,7 +90,7 @@ export async function unpublishMunAction(munId: string): Promise<ReviewActionRes
 
 export async function suspendMunAction(munId: string, reason: string): Promise<ReviewActionResult> {
   try {
-    const mun = await suspendMun(munId, reason);
+    const mun = await suspendMun(munId, reason, await getSession());
     revalidatePath("/admin/review");
     return { ok: true, status: mun.status };
   } catch (error) {
@@ -97,7 +100,7 @@ export async function suspendMunAction(munId: string, reason: string): Promise<R
 
 export async function reinstateMunAction(munId: string): Promise<ReviewActionResult> {
   try {
-    const mun = await reinstateMun(munId);
+    const mun = await reinstateMun(munId, await getSession());
     revalidatePath("/admin/review");
     return { ok: true, status: mun.status };
   } catch (error) {

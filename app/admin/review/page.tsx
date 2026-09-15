@@ -6,7 +6,7 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
 import { getMunForReview, getReviewQueue } from "@/lib/actions/admin-review";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import type { MunWithApplication } from "@/lib/types";
 import { ReviewQueueRow } from "./review-queue-row";
 
@@ -39,16 +39,19 @@ export default async function AdminReviewPage({ searchParams }: AdminReviewPageP
   const parsedPage = Number.parseInt(params.page ?? "1", 10);
   const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
 
-  const { results: queue, total } = await getReviewQueue({
-    limit: PAGE_SIZE,
-    offset: (page - 1) * PAGE_SIZE,
-  });
+  const { results: queue, total } = await getReviewQueue(
+    {
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    },
+    session,
+  );
 
   // getReviewQueue returns bare `Mun` rows; the organizer application and the
   // verification-log history (with internalNotes) only come from
   // getMunForReview. Fetched in parallel — the alternative is an N+1 waterfall.
   const details: MunWithApplication[] = await Promise.all(
-    queue.map((mun) => getMunForReview(mun.id))
+    queue.map((mun) => getMunForReview(mun.id, session))
   );
 
   const submittedCount = details.filter((mun) => mun.status === "SUBMITTED").length;

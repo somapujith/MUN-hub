@@ -1,5 +1,3 @@
-'use server'
-
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { committees, muns, portfolios, registrationProducts } from '@/lib/db/schema'

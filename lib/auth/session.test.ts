@@ -1,20 +1,7 @@
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
 import { users } from '@/lib/db/schema'
-
-// `next/headers` cookies() requires a real Next.js request context, which
-// Vitest doesn't provide — same mocking pattern as lib/actions/auth.test.ts.
-const cookieStore = {
-  set: vi.fn(),
-  get: vi.fn(),
-  delete: vi.fn(),
-}
-
-vi.mock('next/headers', () => ({
-  cookies: async () => cookieStore,
-}))
-
-import { createSession, getSession } from './session'
+import { createSession, getSessionByToken } from './session'
 
 async function makeUser(overrides: Partial<typeof users.$inferInsert> = {}) {
   const email = `session-test-${Date.now()}-${Math.random()}@test.dev`
@@ -25,28 +12,54 @@ async function makeUser(overrides: Partial<typeof users.$inferInsert> = {}) {
   return user
 }
 
-describe('getSession with suspended user', () => {
-  afterEach(() => {
-    vi.clearAllMocks()
+describe('getSessionByToken', () => {
+  it('returns the actor identity for a valid, unexpired token', async () => {
+    const user = await makeUser({ suspended: false })
+    const { token } = await createSession(user.id)
+
+    const session = await getSessionByToken(token)
+    expect(session).toEqual({ userId: user.id, role: user.role })
+  })
+
+  it('returns null for a nonexistent token', async () => {
+    const session = await getSessionByToken('this-token-does-not-exist')
+    expect(session).toBeNull()
+  })
+
+  it('returns null for an empty token', async () => {
+    const session = await getSessionByToken('')
+    expect(session).toBeNull()
+  })
+
+  it('returns null for an expired token', async () => {
+    const user = await makeUser({ suspended: false })
+    const { token } = await createSession(user.id)
+
+    // Directly expire the session row rather than waiting out the 30-day TTL.
+    const { sessions } = await import('@/lib/db/schema')
+    const { eq } = await import('drizzle-orm')
+    await db
+      .update(sessions)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(sessions.token, token))
+
+    const session = await getSessionByToken(token)
+    expect(session).toBeNull()
   })
 
   it('returns null for a suspended user even with a valid session token', async () => {
     const user = await makeUser({ suspended: true })
-
     const { token } = await createSession(user.id)
-    cookieStore.get.mockReturnValue({ value: token })
 
-    const session = await getSession()
+    const session = await getSessionByToken(token)
     expect(session).toBeNull()
   })
 
   it('still returns the session for a non-suspended user with a valid token', async () => {
     const user = await makeUser({ suspended: false })
-
     const { token } = await createSession(user.id)
-    cookieStore.get.mockReturnValue({ value: token })
 
-    const session = await getSession()
+    const session = await getSessionByToken(token)
     expect(session).toEqual({ userId: user.id, role: user.role })
   })
 })

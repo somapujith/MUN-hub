@@ -5,7 +5,7 @@ import { ArrowRightIcon, CheckIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 
 export const metadata: Metadata = {
   title: "Application submitted",

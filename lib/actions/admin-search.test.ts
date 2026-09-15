@@ -1,21 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
 import { muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
-import { SESSION_COOKIE_NAME, createSession } from '@/lib/auth/session'
-
-// Mock next/headers `cookies()` so getSession() (called internally by every
-// admin-search action) can read a token we control per-test, without a real
-// Next.js request context. Same pattern as lib/actions/admin-review.test.ts
-// and lib/actions/organizer-admin.test.ts.
-let currentToken: string | undefined
-
-vi.mock('next/headers', () => ({
-  cookies: async () => ({
-    get: (name: string) => (name === SESSION_COOKIE_NAME && currentToken ? { value: currentToken } : undefined),
-  }),
-}))
-
 import { listPaymentExceptions, searchRegistrations } from './admin-search'
+import type { Session } from '@/lib/auth/adapter'
 
 async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' | 'SUPER_ADMIN') {
   const [user] = await db
@@ -25,9 +12,8 @@ async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' |
   return user
 }
 
-async function sessionFor(userId: string) {
-  const { token } = await createSession(userId)
-  return token
+function sess(user: { id: string; role: Session['role'] }): Session {
+  return { userId: user.id, role: user.role }
 }
 
 async function seedRegistrationWithPayment(
@@ -70,64 +56,56 @@ describe('searchRegistrations', () => {
   it('finds a registration by student name substring', async () => {
     const { student, registration } = await seedRegistrationWithPayment('PAID', 'CONFIRMED')
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
 
-    const results = await searchRegistrations(student.name)
+    const results = await searchRegistrations(student.name, sess(ops))
     expect(results.some((r) => r.registrationId === registration.id)).toBe(true)
   })
 
   it('finds a registration by mun name substring', async () => {
     const { mun, registration } = await seedRegistrationWithPayment('PAID', 'CONFIRMED')
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
 
-    const results = await searchRegistrations(mun.name)
+    const results = await searchRegistrations(mun.name, sess(ops))
     expect(results.some((r) => r.registrationId === registration.id)).toBe(true)
   })
 
-  it('throws Forbidden for a student session', async () => {
+  it('throws Forbidden for a STUDENT', async () => {
     const student = await makeUser('STUDENT')
-    currentToken = await sessionFor(student.id)
-    await expect(searchRegistrations('anything')).rejects.toThrow('Forbidden')
+    await expect(searchRegistrations('anything', sess(student))).rejects.toThrow('Forbidden')
   })
 
   it('throws Forbidden with no session', async () => {
-    currentToken = undefined
-    await expect(searchRegistrations('anything')).rejects.toThrow('Forbidden')
+    await expect(searchRegistrations('anything', null)).rejects.toThrow('Forbidden')
   })
 })
 
 describe('listPaymentExceptions', () => {
-  it('includes a FAILED payment', async () => {
+  it('includes FAILED payments', async () => {
     const { registration } = await seedRegistrationWithPayment('FAILED', 'PAYMENT_PENDING')
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
 
-    const exceptions = await listPaymentExceptions()
-    expect(exceptions.some((e) => e.registrationId === registration.id)).toBe(true)
+    const exceptions = await listPaymentExceptions(sess(ops))
+    expect(exceptions.some((e) => e.registrationId === registration.id && e.reason === 'PAYMENT_FAILED')).toBe(true)
   })
 
-  it('includes a PAID payment whose registration is not CONFIRMED (webhook/registration mismatch)', async () => {
+  it('includes PAID payments whose registration is not CONFIRMED', async () => {
     const { registration } = await seedRegistrationWithPayment('PAID', 'CANCELLED')
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
 
-    const exceptions = await listPaymentExceptions()
-    expect(exceptions.some((e) => e.registrationId === registration.id)).toBe(true)
+    const exceptions = await listPaymentExceptions(sess(ops))
+    expect(exceptions.some((e) => e.registrationId === registration.id && e.reason === 'CONFIRMATION_MISMATCH')).toBe(true)
   })
 
-  it('excludes a normal PAID + CONFIRMED pair', async () => {
+  it('excludes a healthy PAID+CONFIRMED payment', async () => {
     const { registration } = await seedRegistrationWithPayment('PAID', 'CONFIRMED')
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
 
-    const exceptions = await listPaymentExceptions()
+    const exceptions = await listPaymentExceptions(sess(ops))
     expect(exceptions.some((e) => e.registrationId === registration.id)).toBe(false)
   })
 
-  it('throws Forbidden for a student session', async () => {
+  it('throws Forbidden for a STUDENT', async () => {
     const student = await makeUser('STUDENT')
-    currentToken = await sessionFor(student.id)
-    await expect(listPaymentExceptions()).rejects.toThrow('Forbidden')
+    await expect(listPaymentExceptions(sess(student))).rejects.toThrow('Forbidden')
   })
 })

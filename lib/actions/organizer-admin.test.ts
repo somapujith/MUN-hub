@@ -1,19 +1,8 @@
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { adminActions, users } from '@/lib/db/schema'
-import { SESSION_COOKIE_NAME, createSession } from '@/lib/auth/session'
-
-// Mock next/headers `cookies()` so getSession() (called internally by every
-// organizer-admin action) can read a token we control per-test, without a
-// real Next.js request context. Same pattern as lib/actions/admin-review.test.ts.
-let currentToken: string | undefined
-
-vi.mock('next/headers', () => ({
-  cookies: async () => ({
-    get: (name: string) => (name === SESSION_COOKIE_NAME && currentToken ? { value: currentToken } : undefined),
-  }),
-}))
+import type { Session } from '@/lib/auth/adapter'
 
 import { listOrganizers, reinstateOrganizer, suspendOrganizer } from './organizer-admin'
 
@@ -25,18 +14,17 @@ async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' |
   return user
 }
 
-async function sessionFor(userId: string) {
-  const { token } = await createSession(userId)
-  return token
+function sess(user: { id: string; role: Session['role'] }): Session {
+  return { userId: user.id, role: user.role }
 }
 
 describe('suspendOrganizer', () => {
   it('sets suspended=true, suspendedReason, suspendedAt, and logs ORGANIZER_SUSPENDED', async () => {
     const admin = await makeUser('ADMIN')
     const organizer = await makeUser('ORGANIZER')
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
-    await suspendOrganizer(organizer.id, 'policy violation')
+    await suspendOrganizer(organizer.id, 'policy violation', __actor)
 
     const [updated] = await db.select().from(users).where(eq(users.id, organizer.id))
     expect(updated.suspended).toBe(true)
@@ -52,24 +40,24 @@ describe('suspendOrganizer', () => {
   it('throws Forbidden for a non-admin session', async () => {
     const organizer = await makeUser('ORGANIZER')
     const student = await makeUser('STUDENT')
-    currentToken = await sessionFor(student.id)
+    const __actor = sess(student)
 
-    await expect(suspendOrganizer(organizer.id, 'x')).rejects.toThrow('Forbidden')
+    await expect(suspendOrganizer(organizer.id, 'x', __actor)).rejects.toThrow('Forbidden')
   })
 
   it('throws Forbidden with no session', async () => {
     const organizer = await makeUser('ORGANIZER')
-    currentToken = undefined
+    const __actor = null as Session | null
 
-    await expect(suspendOrganizer(organizer.id, 'x')).rejects.toThrow('Forbidden')
+    await expect(suspendOrganizer(organizer.id, 'x', __actor)).rejects.toThrow('Forbidden')
   })
 
   it('allows OPERATIONS to suspend', async () => {
     const ops = await makeUser('OPERATIONS')
     const organizer = await makeUser('ORGANIZER')
-    currentToken = await sessionFor(ops.id)
+    const __actor = sess(ops)
 
-    await suspendOrganizer(organizer.id, 'ops call')
+    await suspendOrganizer(organizer.id, 'ops call', __actor)
 
     const [updated] = await db.select().from(users).where(eq(users.id, organizer.id))
     expect(updated.suspended).toBe(true)
@@ -91,8 +79,8 @@ describe('reinstateOrganizer', () => {
       })
       .returning()
 
-    currentToken = await sessionFor(admin.id)
-    await reinstateOrganizer(organizer.id)
+    const __actor = sess(admin)
+    await reinstateOrganizer(organizer.id, __actor)
 
     const [updated] = await db.select().from(users).where(eq(users.id, organizer.id))
     expect(updated.suspended).toBe(false)
@@ -111,9 +99,9 @@ describe('reinstateOrganizer', () => {
   it('throws Forbidden for a non-admin session', async () => {
     const organizer = await makeUser('ORGANIZER')
     const student = await makeUser('STUDENT')
-    currentToken = await sessionFor(student.id)
+    const __actor = sess(student)
 
-    await expect(reinstateOrganizer(organizer.id)).rejects.toThrow('Forbidden')
+    await expect(reinstateOrganizer(organizer.id, __actor)).rejects.toThrow('Forbidden')
   })
 })
 
@@ -136,9 +124,9 @@ describe('listOrganizers', () => {
       .values({ name: `!list-test-org-${Date.now()}`, email: `org-${Date.now()}-${Math.random()}@test.dev`, role: 'ORGANIZER' })
       .returning()
     const student = await makeUser('STUDENT')
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
-    const { results, total } = await listOrganizers({ limit: 1000, offset: 0 })
+    const { results, total } = await listOrganizers({ limit: 1000, offset: 0 }, __actor)
     expect(Array.isArray(results)).toBe(true)
     expect(typeof total).toBe('number')
     expect(results.some((r) => r.id === organizer.id)).toBe(true)
@@ -151,27 +139,27 @@ describe('listOrganizers', () => {
     for (let i = 0; i < 3; i++) {
       await makeUser('ORGANIZER')
     }
-    currentToken = await sessionFor(admin.id)
+    const __actor = sess(admin)
 
-    const page1 = await listOrganizers({ limit: 2, offset: 0 })
+    const page1 = await listOrganizers({ limit: 2, offset: 0 }, __actor)
     expect(page1.results.length).toBe(2)
     expect(page1.total).toBeGreaterThanOrEqual(3)
   })
 
   it('allows OPERATIONS role', async () => {
     const ops = await makeUser('OPERATIONS')
-    currentToken = await sessionFor(ops.id)
+    const __actor = sess(ops)
 
-    const { results, total } = await listOrganizers({ limit: 5 })
+    const { results, total } = await listOrganizers({ limit: 5 }, __actor)
     expect(Array.isArray(results)).toBe(true)
     expect(typeof total).toBe('number')
   })
 
   it('throws Forbidden for a non-admin session', async () => {
     const organizer = await makeUser('ORGANIZER')
-    currentToken = await sessionFor(organizer.id)
+    const __actor = sess(organizer)
 
-    await expect(listOrganizers()).rejects.toThrow('Forbidden')
+    await expect(listOrganizers({}, __actor)).rejects.toThrow('Forbidden')
   })
 })
 

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { RegistrationCard } from "@/components/dashboard/registration-card";
 import { DashboardEmptyState } from "@/components/dashboard/dashboard-empty-state";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { getPastRegistrations, getUpcomingRegistrations } from "@/lib/actions/student-dashboard";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
@@ -40,8 +40,8 @@ export default async function DashboardPage() {
     .limit(1);
 
   const [upcoming, past] = await Promise.all([
-    getUpcomingRegistrations(),
-    getPastRegistrations(),
+    getUpcomingRegistrations(session),
+    getPastRegistrations(session),
   ]);
 
   const hasAnyRegistration = upcoming.length > 0 || past.length > 0;

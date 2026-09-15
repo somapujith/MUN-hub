@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { assignTicket, updateTicketStatus } from "@/lib/actions/support";
+import { getSession } from "@/app/lib/session";
 
 /**
  * Thin route-local wrappers around the `lib/actions/support` surface — same
@@ -36,7 +37,7 @@ export async function assignTicketToSelfAction(
   ticketId: string
 ): Promise<SupportActionResult> {
   try {
-    await assignTicket(ticketId);
+    await assignTicket(ticketId, await getSession());
     revalidatePath("/admin/support");
     return { ok: true };
   } catch (error) {
@@ -49,7 +50,7 @@ export async function resolveTicketAction(
   resolutionNotes: string
 ): Promise<SupportActionResult> {
   try {
-    await updateTicketStatus(ticketId, "RESOLVED", resolutionNotes);
+    await updateTicketStatus(ticketId, "RESOLVED", resolutionNotes, await getSession());
     revalidatePath("/admin/support");
     return { ok: true };
   } catch (error) {
@@ -59,7 +60,7 @@ export async function resolveTicketAction(
 
 export async function markTicketInProgressAction(ticketId: string): Promise<SupportActionResult> {
   try {
-    await updateTicketStatus(ticketId, "IN_PROGRESS");
+    await updateTicketStatus(ticketId, "IN_PROGRESS", undefined, await getSession());
     revalidatePath("/admin/support");
     return { ok: true };
   } catch (error) {

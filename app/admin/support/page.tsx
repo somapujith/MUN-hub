@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { LifeBuoyIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { listTickets } from "@/lib/actions/support";
 import { TicketRow } from "./ticket-row";
 
@@ -33,7 +33,7 @@ export default async function SupportPage() {
     redirect("/");
   }
 
-  const tickets = await listTickets();
+  const tickets = await listTickets({}, session);
 
   return (
     <div className="flex min-h-full flex-1 flex-col">

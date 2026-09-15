@@ -5,31 +5,17 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { getModuleReviewQueue, getReviewQueue } from "@/lib/actions/admin-review";
 import { listPaymentExceptions } from "@/lib/actions/admin-search";
 import { listTickets } from "@/lib/actions/support";
+import { getSession } from "@/app/lib/session";
 
 export const metadata: Metadata = {
   title: "Admin overview",
   description: "At-a-glance counts across every operations queue.",
 };
 
-// Each of the four calls below (getReviewQueue, getModuleReviewQueue,
-// listTickets, listPaymentExceptions) independently calls getSession()
-// (-> next/headers cookies()) and requireRole() as its OWN authorization
-// boundary — not a redundant echo of the role-check already done in
-// app/admin/layout.tsx. That's true even though the values rendered here
-// are harmless aggregate counts, not per-record data (see
-// MUNHub_Client_Server_Rendering_PRD.md §21/§46, which requires
-// authorization to be server-side and authoritative, not that harmless
-// aggregates be recomputed with zero caching).
-//
-// Wrapping these calls in `unstable_cache` isn't viable without moving the
-// getSession()/requireRole() calls out of those four functions first (out
-// of scope here — see CLAUDE.md ground rules): unstable_cache's cached
-// callback cannot itself call cookies(), and calling getSession() in this
-// page ahead of a cache boundary just to read the role would still force
-// this route dynamic, so there is no way to shed force-dynamic without
-// changing those functions' signatures. Given this is a low-traffic
-// admin-only dashboard, that refactor isn't worth the added complexity for
-// counts that are cheap to compute.
+// Session-scoped admin overview — still dynamic. The four queue actions
+// now take an explicit `session` (resolved once below) instead of each
+// calling getSession() internally; requireRole inside each action remains
+// the authoritative auth boundary (layout gate is UX only).
 export const dynamic = "force-dynamic";
 
 /**
@@ -47,11 +33,12 @@ export const dynamic = "force-dynamic";
  * action via `requireRole`) — this page does no gating of its own.
  */
 export default async function AdminOverviewPage() {
+  const session = await getSession();
   const [applications, modules, tickets, exceptions] = await Promise.all([
-    getReviewQueue({ limit: 1 }),
-    getModuleReviewQueue({ limit: 1 }),
-    listTickets({ status: "NEW" }),
-    listPaymentExceptions(),
+    getReviewQueue({ limit: 1 }, session),
+    getModuleReviewQueue({ limit: 1 }, session),
+    listTickets({ status: "NEW" }, session),
+    listPaymentExceptions(session),
   ]);
 
   const cards = [

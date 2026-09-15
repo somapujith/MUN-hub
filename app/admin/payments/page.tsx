@@ -4,7 +4,7 @@ import { AlertTriangleIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Badge } from "@/components/ui/badge";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 import { listPaymentExceptions } from "@/lib/actions/admin-search";
 import { formatPrice } from "@/components/shared/currency";
 
@@ -36,7 +36,7 @@ export default async function PaymentsPage() {
     redirect("/");
   }
 
-  const exceptions = await listPaymentExceptions();
+  const exceptions = await listPaymentExceptions(session);
 
   return (
     <div className="flex min-h-full flex-1 flex-col">

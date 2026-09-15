@@ -1,5 +1,4 @@
 import crypto from 'node:crypto'
-import { cookies } from 'next/headers'
 import { and, eq, gt } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { sessions, users } from '@/lib/db/schema'
@@ -9,18 +8,21 @@ export const SESSION_COOKIE_NAME = 'mun_hub_session'
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
 
 /**
- * Reads the `mun_hub_session` cookie (a session TOKEN, never a raw userId),
- * looks it up in the `sessions` table joined to `users`, and returns the
- * actor's identity — or null if there's no valid, unexpired session, or if
- * the user has been suspended (a suspended user's existing session tokens
- * are rejected immediately, not just blocked at future sign-in).
+ * Looks up a session TOKEN (never a raw userId) in the `sessions` table
+ * joined to `users`, and returns the actor's identity — or null if there's
+ * no valid, unexpired session, or if the user has been suspended (a
+ * suspended user's existing session tokens are rejected immediately, not
+ * just blocked at future sign-in).
+ *
+ * The caller (HTTP-layer middleware) is responsible for reading the token
+ * out of the `mun_hub_session` cookie — this function has no ambient
+ * request context and never reads cookies itself.
  *
  * Every server action that reads/writes a specific user's data MUST derive
- * the actor from this function, never from a client-supplied parameter.
+ * the actor from a session resolved this way, never from a client-supplied
+ * parameter.
  */
-export async function getSession(): Promise<Session | null> {
-  const cookieStore = await cookies()
-  const token = cookieStore.get(SESSION_COOKIE_NAME)?.value
+export async function getSessionByToken(token: string): Promise<Session | null> {
   if (!token) return null
 
   const [row] = await db

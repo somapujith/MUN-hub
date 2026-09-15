@@ -1,25 +1,11 @@
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
 import { muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
-import { createSession, SESSION_COOKIE_NAME } from '@/lib/auth/session'
+import type { Session } from '@/lib/auth/adapter'
+import { getMunOverview, getDelegateList } from './organizer-dashboard'
 
-// Same approach as student-dashboard.test.ts: only `next/headers` is stubbed
-// (it requires a live request scope that doesn't exist under Vitest); the
-// stub is backed by a real `sessions` row from the real `createSession()`, so
-// `getSession()` itself runs unmocked against the real database.
-let currentToken: string | undefined
-
-vi.mock('next/headers', () => ({
-  cookies: async () => ({
-    get: (name: string) => (name === SESSION_COOKIE_NAME && currentToken ? { value: currentToken } : undefined),
-  }),
-}))
-
-const { getMunOverview, getDelegateList } = await import('./organizer-dashboard')
-
-async function asUser(userId: string) {
-  const session = await createSession(userId)
-  currentToken = session.token
+function sess(user: { id: string; role: Session['role'] }): Session {
+  return { userId: user.id, role: user.role }
 }
 
 describe('organizer dashboard queries', () => {
@@ -66,9 +52,7 @@ describe('organizer dashboard queries', () => {
       status: 'PENDING',
     })
 
-    await asUser(organizer.id)
-
-    const overview = await getMunOverview(mun.id)
+    const overview = await getMunOverview(mun.id, sess(organizer))
     expect(overview.totalRegistrations).toBe(1) // only CONFIRMED+ATTENDED count
     expect(overview.revenue).toBe(2000)
     expect(overview.pendingPayments).toBe(1)
@@ -90,10 +74,8 @@ describe('organizer dashboard queries', () => {
       .values({ organizerId: owner.id, name: 'Locked Mun', slug: `locked-mun-${suffix}` })
       .returning()
 
-    await asUser(stranger.id)
-
-    await expect(getMunOverview(mun.id)).rejects.toThrow('Forbidden')
-    await expect(getDelegateList(mun.id)).rejects.toThrow('Forbidden')
+    await expect(getMunOverview(mun.id, sess(stranger))).rejects.toThrow('Forbidden')
+    await expect(getDelegateList(mun.id, undefined, sess(stranger))).rejects.toThrow('Forbidden')
   })
 
   it('allows an admin to access any mun', async () => {
@@ -111,9 +93,7 @@ describe('organizer dashboard queries', () => {
       .values({ organizerId: owner.id, name: 'Admin Mun', slug: `admin-mun-${suffix}` })
       .returning()
 
-    await asUser(admin.id)
-
-    const overview = await getMunOverview(mun.id)
+    const overview = await getMunOverview(mun.id, sess(admin))
     expect(overview.totalRegistrations).toBe(0)
   })
 
@@ -162,18 +142,16 @@ describe('organizer dashboard queries', () => {
       status: 'PENDING',
     })
 
-    await asUser(organizer.id)
-
-    const allDelegates = await getDelegateList(mun.id)
+    const allDelegates = await getDelegateList(mun.id, undefined, sess(organizer))
     expect(allDelegates.results.length).toBe(2)
     expect(allDelegates.total).toBe(2)
 
-    const paidOnly = await getDelegateList(mun.id, { paymentStatus: 'PAID' })
+    const paidOnly = await getDelegateList(mun.id, { paymentStatus: 'PAID' }, sess(organizer))
     expect(paidOnly.results.length).toBe(1)
     expect(paidOnly.results[0].userId).toBe(studentA.id)
     expect(paidOnly.total).toBe(1)
 
-    const pendingOnly = await getDelegateList(mun.id, { paymentStatus: 'PENDING' })
+    const pendingOnly = await getDelegateList(mun.id, { paymentStatus: 'PENDING' }, sess(organizer))
     expect(pendingOnly.results.length).toBe(1)
     expect(pendingOnly.results[0].userId).toBe(studentB.id)
   })
@@ -206,11 +184,24 @@ describe('organizer dashboard queries', () => {
       })
     }
 
-    await asUser(organizer.id)
-
-    const page1 = await getDelegateList(mun.id, { limit: 2, offset: 0 })
+    const page1 = await getDelegateList(mun.id, { limit: 2, offset: 0 }, sess(organizer))
     expect(page1.results.length).toBe(2)
     expect(page1.total).toBe(3)
+  })
+
+
+  it('throws Mun not found for a missing mun id (shared assertOwnsOrAdmin)', async () => {
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'OrgMissing', email: `org-missing-${Date.now()}@test.com`, role: 'ORGANIZER' })
+      .returning()
+
+    await expect(
+      getMunOverview('00000000-0000-0000-0000-000000000000', sess(organizer)),
+    ).rejects.toThrow('Mun not found')
+    await expect(
+      getDelegateList('00000000-0000-0000-0000-000000000000', undefined, sess(organizer)),
+    ).rejects.toThrow('Mun not found')
   })
 
   afterAll(async () => {

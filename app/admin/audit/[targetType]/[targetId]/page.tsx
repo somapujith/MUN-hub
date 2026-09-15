@@ -7,7 +7,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getAuditHistory } from "@/lib/actions/audit-history";
-import { getSession } from "@/lib/auth/session";
+import { getSession } from "@/app/lib/session";
 
 export const metadata: Metadata = {
   title: "Audit History",
@@ -44,7 +44,7 @@ export default async function AuditTargetPage({ params }: AuditTargetPageProps) 
   }
 
   const { targetType, targetId } = await params;
-  const entries = await getAuditHistory(targetType, targetId);
+  const entries = await getAuditHistory(targetType, targetId, session);
 
   return (
     <div className="flex min-h-full flex-1 flex-col">

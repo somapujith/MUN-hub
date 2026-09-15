@@ -1,10 +1,8 @@
-'use server'
-
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, munModuleVerifications, munSubmissions, organizerApplications, verificationLogs } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
-import { getSession } from '@/lib/auth/session'
+import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { publishFromQueue, type PublishFromQueueResult } from '@/lib/lifecycle/go-live'
@@ -32,16 +30,19 @@ export interface ReviewQueueResult {
 
 /**
  * Muns awaiting ops/admin action, for the review queue dashboard. Requires
- * OPERATIONS/ADMIN/SUPER_ADMIN — actor is derived from `getSession()`, never
- * accepted as a parameter.
+ * OPERATIONS/ADMIN/SUPER_ADMIN — actor is derived from the caller-supplied
+ * `session` (resolved by the HTTP layer from the request), never trusted
+ * from any other input.
  *
  * Paginated (default 20/page) — this grows with total platform submission
  * volume, not per-mun, so it needs a bound before real organizer counts
  * (flagged during frontend review: unbounded at 500+ organizers would mean
  * a multi-thousand-row render on every /admin/review hit).
  */
-export async function getReviewQueue(params: ReviewQueueParams = {}): Promise<ReviewQueueResult> {
-  const session = await getSession()
+export async function getReviewQueue(
+  params: ReviewQueueParams = {},
+  session: Session | null,
+): Promise<ReviewQueueResult> {
   requireRole(session, [...REVIEW_ROLES])
 
   const limit = params.limit ?? 20
@@ -70,8 +71,7 @@ export async function getReviewQueue(params: ReviewQueueParams = {}): Promise<Re
  * is the internal review view, unlike the public MUN detail page. Requires
  * OPERATIONS/ADMIN/SUPER_ADMIN.
  */
-export async function getMunForReview(munId: string): Promise<MunWithApplication> {
-  const session = await getSession()
+export async function getMunForReview(munId: string, session: Session | null): Promise<MunWithApplication> {
   requireRole(session, [...REVIEW_ROLES])
 
   const [mun] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
@@ -121,10 +121,10 @@ export async function getMunForReview(munId: string): Promise<MunWithApplication
 export async function reviewMunApplication(
   munId: string,
   decision: 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED',
-  notes?: string,
-  internalNotes?: string,
+  notes: string | undefined,
+  internalNotes: string | undefined,
+  session: Session | null,
 ): Promise<Mun> {
-  const session = await getSession()
   requireRole(session, [...REVIEW_ROLES])
 
   const [mun] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
@@ -160,8 +160,7 @@ export async function reviewMunApplication(
  * why the pre-existing `publishMun` test (admin-review.test.ts) still passes
  * without modification.
  */
-export async function publishMun(munId: string): Promise<Mun> {
-  const session = await getSession()
+export async function publishMun(munId: string, session: Session | null): Promise<Mun> {
   requireRole(session, [...PUBLISH_ROLES])
 
   const [activeSubmission] = await db
@@ -201,8 +200,7 @@ export async function publishMun(munId: string): Promise<Mun> {
  * and its `admin_actions` audit row commit atomically: both run against one
  * transaction opened here and handed into `transitionMun` as `externalTx`.
  */
-export async function unpublishMun(munId: string): Promise<Mun> {
-  const session = await getSession()
+export async function unpublishMun(munId: string, session: Session | null): Promise<Mun> {
   requireRole(session, [...PUBLISH_ROLES])
 
   return db.transaction(async (tx) => {
@@ -219,8 +217,7 @@ export async function unpublishMun(munId: string): Promise<Mun> {
  * `verificationLogs` row. Same role bar as `publishMun`. Status change +
  * audit row commit atomically, same pattern as `unpublishMun`.
  */
-export async function suspendMun(munId: string, reason: string): Promise<Mun> {
-  const session = await getSession()
+export async function suspendMun(munId: string, reason: string, session: Session | null): Promise<Mun> {
   requireRole(session, [...PUBLISH_ROLES])
 
   return db.transaction(async (tx) => {
@@ -238,8 +235,7 @@ export async function suspendMun(munId: string, reason: string): Promise<Mun> {
  * for this transition, mirroring how every other lifecycle transition (e.g.
  * `reviewMunApplication`) is recorded.
  */
-export async function reinstateMun(munId: string): Promise<Mun> {
-  const session = await getSession()
+export async function reinstateMun(munId: string, session: Session | null): Promise<Mun> {
   requireRole(session, [...PUBLISH_ROLES])
 
   return transitionMun(munId, 'VERIFICATION', session.userId)
@@ -268,8 +264,10 @@ export interface ModuleReviewQueueResult {
  * grows with total platform submission volume, not per-mun. Backed by
  * `mun_module_verifications_state_idx` (added alongside this change).
  */
-export async function getModuleReviewQueue(params: ReviewQueueParams = {}): Promise<ModuleReviewQueueResult> {
-  const session = await getSession()
+export async function getModuleReviewQueue(
+  params: ReviewQueueParams = {},
+  session: Session | null,
+): Promise<ModuleReviewQueueResult> {
   requireRole(session, [...REVIEW_ROLES])
 
   const limit = params.limit ?? 20
