@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { zValidator } from '../lib/zod-validator'
 import { z } from 'zod'
 import {
   enqueueForGoLive,
@@ -8,7 +8,7 @@ import {
   reviewSubmission,
   submitMunForReview,
 } from '@/lib/lifecycle/go-live'
-import type { AppEnv } from '../types'
+import type { AppVariables } from '../src/types'
 
 const reviewBodySchema = z
   .object({
@@ -40,7 +40,7 @@ const queueQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).optional(),
 })
 
-export const goLiveRoutes = new Hono<AppEnv>()
+export const goLiveRoutes = new Hono<{ Variables: AppVariables }>()
   .post('/muns/:munId/actions/submit-for-review', async (c) => {
     const munId = c.req.param('munId')
     const session = c.get('session')

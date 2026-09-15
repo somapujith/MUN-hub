@@ -1,5 +1,5 @@
 import { createMiddleware } from 'hono/factory'
-import type { AppEnv } from '../types'
+import type { AppVariables } from '../src/types'
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
@@ -11,7 +11,7 @@ const ALLOWED_ORIGINS = new Set([
 ])
 
 /** Origin/Referer allowlist for mutating /api/v1 routes (spec §4.4). Skipped in Vitest. */
-export const csrfMiddleware = createMiddleware<AppEnv>(async (c, next) => {
+export const csrfMiddleware = createMiddleware<{ Variables: AppVariables }>(async (c, next) => {
   if (process.env.VITEST === 'true') {
     await next()
     return
