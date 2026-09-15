@@ -1,3 +1,117 @@
+import * as React from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Helmet } from "react-helmet-async";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { CreditCardIcon, LockIcon, ShieldCheckIcon } from "lucide-react";
+import { SiteHeader } from "@/components/layout/site-header";
+import { SiteFooter } from "@/components/layout/site-footer";
+import { Button } from "@/components/ui/button";
+import { RegistrationNotice } from "@/components/registration/registration-notice";
+import { ReservationCountdown } from "@/components/registration/reservation-countdown";
+import { hasPassed } from "@/components/registration/deadline";
+import { formatPrice } from "@/components/shared/currency";
+import { queryKeys } from "@/api/query-keys";
+import { getMockMunBySlug } from "@/mocks/data";
+import { fetchRegistrationById, mockCompletePayment } from "@/mocks/registrations";
+import { useSession } from "@/hooks/use-session";
+import { NotFoundPage } from "@/pages/not-found-page";
+
 export function RegisterPayPage() {
-  return <h1>Register — Pay</h1>;
+  const { slug = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const registrationId = searchParams.get("registrationId");
+  const error = searchParams.get("error");
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { data: session } = useSession();
+  const [paying, setPaying] = React.useState(false);
+
+  const mun = getMockMunBySlug(slug);
+  if (!mun) return <NotFoundPage />;
+  if (!registrationId) {
+    navigate(`/register/${slug}`, { replace: true });
+    return null;
+  }
+
+  const regQuery = useQuery({
+    queryKey: queryKeys.registration(registrationId),
+    queryFn: () => fetchRegistrationById(registrationId),
+  });
+  const registration = regQuery.data;
+
+  if (regQuery.isPending) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col">
+        <SiteHeader session={session ?? null} />
+        <main className="mx-auto w-full max-w-2xl flex-1 px-lg py-xxl" aria-busy="true" />
+        <SiteFooter />
+      </div>
+    );
+  }
+  if (!registration) return <NotFoundPage />;
+
+  if (registration.status !== "PAYMENT_PENDING" && registration.status !== "PENDING") {
+    navigate(`/register/${slug}/confirmation?registrationId=${encodeURIComponent(registrationId)}`, { replace: true });
+    return null;
+  }
+
+  const expired = registration.expiresAt ? hasPassed(registration.expiresAt) : false;
+
+  async function handlePay(outcome: "success" | "failure") {
+    setPaying(true);
+    await mockCompletePayment(registrationId!, outcome);
+    await queryClient.invalidateQueries({ queryKey: queryKeys.registration(registrationId!) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.dashboardUpcoming() });
+    navigate(`/register/${slug}/confirmation?registrationId=${encodeURIComponent(registrationId!)}`);
+  }
+
+  return (
+    <div className="flex min-h-full flex-1 flex-col">
+      <Helmet><title>Checkout</title></Helmet>
+      <SiteHeader session={session ?? null} />
+      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-xl px-lg py-xxl sm:px-xl">
+        <header className="flex flex-col gap-xs">
+          <p className="text-caption uppercase text-muted-foreground">Secure checkout</p>
+          <h1 className="font-display text-display-md text-ink text-balance">Complete your payment</h1>
+          <p className="text-body-md text-muted-foreground">{mun.name} · {registration.productName}</p>
+        </header>
+        {expired ? (
+          <RegistrationNotice tone="warning" title="Your seat hold expired" message="Start again to reserve a fresh seat.">
+            <Button render={<Link to={`/register/${slug}`} />}>Start over</Button>
+          </RegistrationNotice>
+        ) : (
+          <>
+            {error === "webhook" && (
+              <RegistrationNotice tone="error" title="Payment processor unreachable" message="Your seat is still held." />
+            )}
+            {registration.expiresAt && <ReservationCountdown expiresAt={registration.expiresAt} />}
+            <section className="flex flex-col gap-lg rounded-md border border-border p-lg sm:p-xl">
+              <div className="flex items-baseline justify-between gap-md border-b border-border pb-md">
+                <span className="text-label-md text-ink">Amount due</span>
+                <span className="font-mono text-title-lg tabular-nums text-ink">{formatPrice(registration.productPrice)}</span>
+              </div>
+              <div className="flex items-start gap-xs rounded-sm bg-surface-soft px-md py-sm text-body-md text-muted-foreground">
+                <ShieldCheckIcon className="mt-px size-4 shrink-0" aria-hidden />
+                <p><span className="font-medium text-ink">Mock provider.</span> No real card is charged.</p>
+              </div>
+              <div className="flex flex-col gap-sm sm:flex-row">
+                <Button size="lg" className="sm:flex-1" disabled={paying} onClick={() => handlePay("success")}>
+                  <CreditCardIcon aria-hidden />
+                  Pay {formatPrice(registration.productPrice)}
+                </Button>
+                <Button size="lg" variant="outline" disabled={paying} onClick={() => handlePay("failure")}>
+                  Simulate failure
+                </Button>
+              </div>
+              <p className="flex items-center gap-xs text-body-md text-muted-foreground">
+                <LockIcon className="size-3.5" aria-hidden />
+                Reference <code className="font-mono text-[13px] text-ink">{registration.id}</code>
+              </p>
+            </section>
+          </>
+        )}
+      </main>
+      <SiteFooter />
+    </div>
+  );
 }
