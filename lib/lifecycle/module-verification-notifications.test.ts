@@ -35,8 +35,12 @@ async function makeMun(organizerId: string) {
   return mun
 }
 
-async function flushMicrotasks() {
-  await new Promise((resolve) => setTimeout(resolve, 20))
+/** Fire-and-forget notifications resolve after the review transaction commits. */
+async function waitForNotifications() {
+  for (let i = 0; i < 50; i++) {
+    if (notifyPipelineEventMock.mock.calls.length > 0) return
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
 }
 
 describe('module-verification.ts pipeline notification wiring', () => {
@@ -58,7 +62,7 @@ describe('module-verification.ts pipeline notification wiring', () => {
       { userId: admin.id, role: 'ADMIN' },
     )
 
-    await flushMicrotasks()
+    await waitForNotifications()
 
     expect(notifyPipelineEventMock).toHaveBeenCalledTimes(1)
     expect(notifyPipelineEventMock.mock.calls[0][0]).toMatchObject({
@@ -77,7 +81,7 @@ describe('module-verification.ts pipeline notification wiring', () => {
 
     await reviewModule(mun.id, 'COMMITTEES', 'VERIFIED', [], { userId: admin.id, role: 'ADMIN' })
 
-    await flushMicrotasks()
+    await waitForNotifications()
 
     expect(notifyPipelineEventMock).not.toHaveBeenCalled()
   })
