@@ -1,15 +1,22 @@
--- Hand-written migration (see docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
--- Section 2.1). Must run AFTER 0009 (which adds the new mun_module enum values) and MUST be its own
--- transaction — Postgres cannot use a newly-added enum value in the same transaction that added it.
+-- Intentionally a no-op. Kept as a file (not deleted) because databases that
+-- were migrated before the 0009 fix already recorded this migration's entry in
+-- drizzle.__drizzle_migrations; removing the file would desynchronise the
+-- journal against those databases.
 --
--- Remaps legacy mun_module keys to their PRD Section 38 equivalents in both tables that reference
--- the enum. The legacy enum values themselves are NOT removed (Postgres enums are append-only here);
--- only the data rows are remapped.
-UPDATE "mun_module_verifications" SET "module_name" = 'BASIC_INFO' WHERE "module_name" = 'mun_details';--> statement-breakpoint
-UPDATE "mun_module_verifications" SET "module_name" = 'COMMITTEES' WHERE "module_name" = 'committees';--> statement-breakpoint
-UPDATE "mun_module_verifications" SET "module_name" = 'PORTFOLIOS' WHERE "module_name" = 'portfolios';--> statement-breakpoint
-UPDATE "mun_module_verifications" SET "module_name" = 'REGISTRATION_TYPES' WHERE "module_name" = 'registration_products';--> statement-breakpoint
-UPDATE "verification_issues" SET "module_name" = 'BASIC_INFO' WHERE "module_name" = 'mun_details';--> statement-breakpoint
-UPDATE "verification_issues" SET "module_name" = 'COMMITTEES' WHERE "module_name" = 'committees';--> statement-breakpoint
-UPDATE "verification_issues" SET "module_name" = 'PORTFOLIOS' WHERE "module_name" = 'portfolios';--> statement-breakpoint
-UPDATE "verification_issues" SET "module_name" = 'REGISTRATION_TYPES' WHERE "module_name" = 'registration_products';
+-- HISTORY: this migration used to remap the legacy mun_module keys
+-- (mun_details/committees/portfolios/registration_products) onto their PRD
+-- Section 38 equivalents with plain UPDATE statements. That was unsafe on a
+-- FRESH database: Drizzle runs all pending migrations in a single transaction,
+-- so these UPDATEs referenced enum labels that 0009 had added via
+-- `ALTER TYPE ... ADD VALUE` in that same transaction, which Postgres rejects
+-- ("unsafe use of new value of enum type"). The whole batch rolled back and a
+-- fresh database ended up with zero tables.
+--
+-- The remap now happens inside 0009's `ALTER COLUMN ... TYPE ... USING (CASE
+-- ...)` clauses, which is transaction-safe. Already-migrated databases are
+-- unaffected: they ran the old 0010 UPDATEs successfully back when 0009 was a
+-- separate committed transaction, so their rows already carry the PRD keys,
+-- and 0009's CASE is a no-op for any row that is already remapped.
+--
+-- Do not add statements here. New migrations get new files.
+SELECT 1;

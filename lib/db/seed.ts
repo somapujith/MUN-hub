@@ -8,6 +8,16 @@ import { config } from 'dotenv'
 // would otherwise run before DATABASE_URL is populated and silently fall back
 // to OS-default connection params (verified: falls back to connecting as OS
 // user with no password, rather than throwing an error).
+// !! WARNING -- THIS CONNECTS TO LIVE NEON BY DEFAULT !!
+// `.env` in this repo holds the team's shared live Neon DATABASE_URL. Running
+// this script with no override therefore writes to the real database that the
+// dev server and anyone browsing it read from. A test run against Neon once
+// wrote 472 junk MUNs + 941 junk users before this was caught.
+// For ANY non-production run, override the connection explicitly, e.g.:
+//   DATABASE_URL=postgresql://mun_hub:mun_hub_dev@localhost:5432/mun_hub npx tsx lib/db/seed.ts
+// (Tests are already safe: vitest.setup.ts pins them to .env.test regardless.)
+// The hardcoded `.env` path below is repo-wide tooling convention -- do not
+// change it unilaterally; override DATABASE_URL instead.
 config({ path: '.env' })
 
 import { eq } from 'drizzle-orm'
