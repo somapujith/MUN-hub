@@ -244,6 +244,10 @@ describe('pipeline schema (Task 4: 7 net-new module tables)', () => {
         name: 'Jane Doe',
         role: 'CUSTOM',
         customRole: 'Secretary-General',
+        institution: 'VIT Vellore',
+        organization: 'VIT MUN Society',
+        socialLinks: { instagram: 'https://instagram.com/vitmun' },
+        isPublic: false,
         displayOrder: 0,
       })
       .returning()
@@ -251,6 +255,10 @@ describe('pipeline schema (Task 4: 7 net-new module tables)', () => {
     expect(secGen.committeeId).toBeNull()
     expect(secGen.role).toBe('CUSTOM')
     expect(secGen.customRole).toBe('Secretary-General')
+    expect(secGen.institution).toBe('VIT Vellore')
+    expect(secGen.organization).toBe('VIT MUN Society')
+    expect(secGen.socialLinks).toEqual({ instagram: 'https://instagram.com/vitmun' })
+    expect(secGen.isPublic).toBe(false)
 
     const [chair] = await db
       .insert(munExecutiveBoard)

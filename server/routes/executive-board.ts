@@ -4,6 +4,7 @@ import {
   createEbMember,
   deleteEbMember,
   listEbMembers,
+  listEbMembersForOrganizer,
   updateEbMember,
 } from '@/lib/actions/executive-board'
 import { ebRoleEnum } from '@/lib/db/schema-enums'
@@ -19,6 +20,10 @@ const createEbBodySchema = z
     customRole: z.string().nullable().optional(),
     photoUrl: z.string().nullable().optional(),
     bio: z.string().nullable().optional(),
+    institution: z.string().nullable().optional(),
+    organization: z.string().nullable().optional(),
+    socialLinks: z.unknown().optional(),
+    isPublic: z.boolean().optional(),
     displayOrder: z.number().int().nonnegative().optional(),
   })
   .strict()
@@ -36,6 +41,10 @@ const updateEbBodySchema = z
     customRole: z.string().nullable().optional(),
     photoUrl: z.string().nullable().optional(),
     bio: z.string().nullable().optional(),
+    institution: z.string().nullable().optional(),
+    organization: z.string().nullable().optional(),
+    socialLinks: z.unknown().optional(),
+    isPublic: z.boolean().optional(),
     displayOrder: z.number().int().nonnegative().optional(),
   })
   .strict()
@@ -44,6 +53,11 @@ export const executiveBoardRoutes = new Hono<{ Variables: AppVariables }>()
 
 executiveBoardRoutes.get('/muns/:munId/executive-board', async (c) => {
   const members = await listEbMembers(c.req.param('munId'))
+  return c.json(members)
+})
+
+executiveBoardRoutes.get('/muns/:munId/executive-board/manage', requireAuth, async (c) => {
+  const members = await listEbMembersForOrganizer(c.req.param('munId'), c.get('session'))
   return c.json(members)
 })
 

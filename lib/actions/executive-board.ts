@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { committees, munExecutiveBoard } from '@/lib/db/schema'
 import type { EbRole } from '@/lib/db/schema-enums'
@@ -30,6 +30,10 @@ export interface ExecutiveBoardMember {
   customRole: string | null
   photoUrl: string | null
   bio: string | null
+  institution: string | null
+  organization: string | null
+  socialLinks: unknown
+  isPublic: boolean
   displayOrder: number
   createdAt: Date
 }
@@ -65,6 +69,10 @@ export interface CreateEbMemberInput {
   customRole?: string | null
   photoUrl?: string | null
   bio?: string | null
+  institution?: string | null
+  organization?: string | null
+  socialLinks?: unknown
+  isPublic?: boolean
   displayOrder?: number
 }
 
@@ -84,6 +92,10 @@ export async function createEbMember(input: CreateEbMemberInput, session: Sessio
       customRole: input.role === 'CUSTOM' ? (input.customRole ?? null) : null,
       photoUrl: input.photoUrl ?? null,
       bio: input.bio ?? null,
+      institution: input.institution ?? null,
+      organization: input.organization ?? null,
+      socialLinks: input.socialLinks ?? null,
+      isPublic: input.isPublic ?? true,
       displayOrder: input.displayOrder ?? 0,
     })
     .returning()
@@ -100,6 +112,10 @@ export interface UpdateEbMemberInput {
   customRole?: string | null
   photoUrl?: string | null
   bio?: string | null
+  institution?: string | null
+  organization?: string | null
+  socialLinks?: unknown
+  isPublic?: boolean
   displayOrder?: number
 }
 
@@ -160,6 +176,12 @@ export async function listEbMembers(munId: string): Promise<ExecutiveBoardMember
   return db
     .select()
     .from(munExecutiveBoard)
-    .where(eq(munExecutiveBoard.munId, munId))
+    .where(and(eq(munExecutiveBoard.munId, munId), eq(munExecutiveBoard.isPublic, true)))
     .orderBy(asc(munExecutiveBoard.displayOrder))
+}
+
+/** Organizer read, includes hidden members so they can be edited or published. */
+export async function listEbMembersForOrganizer(munId: string, session: Session | null): Promise<ExecutiveBoardMember[]> {
+  await assertOwnsOrAdmin(munId, session)
+  return db.select().from(munExecutiveBoard).where(eq(munExecutiveBoard.munId, munId)).orderBy(asc(munExecutiveBoard.displayOrder))
 }

@@ -51,6 +51,31 @@ describe('executive-board actions', () => {
       expect(member.munId).toBe(mun.id)
       expect(member.name).toBe('Secretary General')
       expect(member.committeeId).toBeNull()
+      expect(member.isPublic).toBe(true)
+    })
+
+    it('persists institution, organization, social links, and public visibility', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+
+      const member = await createEbMember(
+        {
+          munId: mun.id,
+          name: 'Secretary General',
+          role: 'CHAIR',
+          institution: 'VIT Vellore',
+          organization: 'VIT MUN Society',
+          socialLinks: { instagram: 'https://instagram.com/vitmun' },
+          isPublic: false,
+        },
+        sessionFor(organizer),
+      )
+
+      expect(member.institution).toBe('VIT Vellore')
+      expect(member.organization).toBe('VIT MUN Society')
+      expect(member.socialLinks).toEqual({ instagram: 'https://instagram.com/vitmun' })
+      expect(member.isPublic).toBe(false)
+      expect(await listEbMembers(mun.id)).toHaveLength(0)
     })
 
     it('rejects a non-owning organizer with Forbidden', async () => {
@@ -127,6 +152,30 @@ describe('executive-board actions', () => {
 
       const updated = await updateEbMember(member.id, { name: 'New Chair' }, session)
       expect(updated.name).toBe('New Chair')
+    })
+
+    it('updates the new profile and visibility fields without clearing existing fields', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+      const member = await createEbMember(
+        {
+          munId: mun.id,
+          name: 'Chair',
+          role: 'CHAIR',
+          institution: 'Original Institution',
+          organization: 'Original Organization',
+          socialLinks: { website: 'https://example.com' },
+        },
+        session,
+      )
+
+      const updated = await updateEbMember(member.id, { institution: 'Updated Institution', isPublic: false }, session)
+
+      expect(updated.institution).toBe('Updated Institution')
+      expect(updated.organization).toBe('Original Organization')
+      expect(updated.socialLinks).toEqual({ website: 'https://example.com' })
+      expect(updated.isPublic).toBe(false)
     })
 
     it('rejects a non-owning organizer with Forbidden', async () => {

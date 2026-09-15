@@ -9,4 +9,6 @@ export const queryKeys = {
   registration: (id: string) => ["registration", id] as const,
   productAvailability: (productIds: string[]) =>
     ["registration", "availability", productIds] as const,
+  executiveBoard: (munId: string) => ["organizer", "executive-board", munId] as const,
+  committees: (munId: string) => ["organizer", "committees", munId] as const,
 };
