@@ -3,7 +3,10 @@ import { Navigate, useLocation } from "react-router";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/hooks/use-session";
 
-/** UX-only auth gate. Server is authoritative — API derives identity from cookie. */
+/**
+ * UX-only auth gate. Server is authoritative — every protected API route
+ * derives identity from the session cookie; never trust client-supplied userId.
+ */
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { data: session, isPending } = useSession();
   const location = useLocation();

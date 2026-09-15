@@ -40,6 +40,7 @@ import { OrganizerSettingsPage } from "@/pages/organizer/dashboard/sections/sett
 import { OrganizerSetupPage } from "@/pages/organizer/dashboard/sections/setup-page";
 import { OrganizerTeamPage } from "@/pages/organizer/dashboard/sections/team-page";
 import { MunsPage } from "@/pages/muns-page";
+import { RequireAuth } from "@/guards/require-auth";
 import { RegisterConfirmationPage } from "@/pages/register/register-confirmation-page";
 import { RegisterPage } from "@/pages/register/register-page";
 import { RegisterPayPage } from "@/pages/register/register-pay-page";
@@ -54,8 +55,22 @@ export const router = createBrowserRouter([
       { path: "muns", element: <MunsPage /> },
       { path: "mun/:slug", element: <MunDetailPage /> },
       { path: "login", element: <LoginPage /> },
-      { path: "dashboard", element: <StudentDashboardPage /> },
-      { path: "support/new", element: <SupportNewPage /> },
+      {
+        path: "dashboard",
+        element: (
+          <RequireAuth>
+            <StudentDashboardPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: "support/new",
+        element: (
+          <RequireAuth>
+            <SupportNewPage />
+          </RequireAuth>
+        ),
+      },
       {
         path: "register/:slug",
         element: <RegisterLayout />,

@@ -14,7 +14,7 @@ const daysFromNow = (n: number) => {
 export const MOCK_WORKSPACE_MUNS: WorkspaceMun[] = [
   {
     id: "mun-bitsmun",
-    name: "BITSMUN Hyderabad \'25",
+    name: "BITSMUN Hyderabad '25",
     slug: "bitsmun-hyderabad-25",
     edition: "2025",
     status: "REGISTRATION_OPEN",
