@@ -4,6 +4,11 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { muns } from "@/lib/db/schema";
 import type { MunStatus } from "@/lib/db/schema-enums";
+import { listMunMedia } from "@/lib/actions/mun-branding";
+import { listMunDocuments } from "@/lib/actions/mun-documents";
+import { listScheduleItems } from "@/lib/actions/mun-schedule";
+import { getMunContact } from "@/lib/actions/mun-contact";
+import { listMunFaqs } from "@/lib/actions/mun-faq";
 
 /**
  * The editable field set for the MUN Setup module.
@@ -58,4 +63,15 @@ export async function getMunSetup(munId: string): Promise<MunSetupRecord | null>
     .limit(1);
 
   return mun ?? null;
+}
+
+export async function getMunSetupModules(munId: string) {
+  const [media, documents, scheduleItems, contact, faqs] = await Promise.all([
+    listMunMedia(munId),
+    listMunDocuments(munId),
+    listScheduleItems(munId),
+    getMunContact(munId),
+    listMunFaqs(munId),
+  ]);
+  return { media, documents, scheduleItems, contact, faqs };
 }

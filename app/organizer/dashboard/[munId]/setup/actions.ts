@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 import { getSession } from "@/app/lib/session";
 import { updateMunDetails } from "@/lib/actions/mun-config";
 import type { UpdateMunDetailsInput } from "@/lib/actions/mun-config";
+import { uploadMunMedia } from "@/lib/actions/mun-branding";
+import { uploadMunDocument } from "@/lib/actions/mun-documents";
+import { createScheduleItem } from "@/lib/actions/mun-schedule";
+import { upsertMunContact } from "@/lib/actions/mun-contact";
+import { createMunFaq } from "@/lib/actions/mun-faq";
 import { submitFinalConfirmation } from "@/lib/lifecycle/organizer-confirmation";
 
 /**
@@ -46,6 +51,99 @@ export interface SetupFormState {
    * `app/organizer/apply/apply-form.tsx`.
    */
   savedAt?: number;
+}
+
+export async function saveContactAction(
+  munId: string,
+  _prev: SetupFormState,
+  formData: FormData,
+): Promise<SetupFormState> {
+  const session = await getSession();
+  const values = collect(formData, [
+    "officialEmail",
+    "phone",
+    "website",
+    "contactPersonName",
+    "contactPersonRole",
+    "contactPersonEmail",
+    "contactPersonPhone",
+  ]);
+  const fieldErrors: Record<string, string> = {};
+  if (!values.officialEmail.includes("@")) fieldErrors.officialEmail = "Enter a valid email address.";
+  if (!values.contactPersonName) fieldErrors.contactPersonName = "Enter a contact name.";
+  if (!values.contactPersonEmail.includes("@")) fieldErrors.contactPersonEmail = "Enter a valid email address.";
+  if (Object.keys(fieldErrors).length) return { status: "error", message: "Check the highlighted fields and try again.", fieldErrors, values };
+
+  try {
+    await upsertMunContact(munId, {
+      officialEmail: values.officialEmail,
+      phone: values.phone || null,
+      website: values.website || null,
+      contactPersonName: values.contactPersonName,
+      contactPersonRole: values.contactPersonRole || null,
+      contactPersonEmail: values.contactPersonEmail,
+      contactPersonPhone: values.contactPersonPhone || null,
+    }, session);
+  } catch (error) { return toErrorState(error, values); }
+  revalidatePath(`/organizer/dashboard/${munId}/setup`);
+  return { status: "success", message: "Contact details saved.", savedAt: Date.now() };
+}
+
+export async function uploadBrandingAction(
+  munId: string,
+  _prev: SetupFormState,
+  formData: FormData,
+): Promise<SetupFormState> {
+  const file = formData.get("file");
+  const kind = String(formData.get("kind") ?? "");
+  if (!(file instanceof File) || file.size === 0) return { status: "error", message: "Choose an image to upload." };
+  if (kind !== "LOGO" && kind !== "COVER") return { status: "error", message: "Choose a valid branding asset." };
+  try {
+    await uploadMunMedia({ munId, kind, file: Buffer.from(await file.arrayBuffer()), contentType: file.type }, await getSession());
+  } catch (error) { return toErrorState(error); }
+  revalidatePath(`/organizer/dashboard/${munId}/setup`);
+  return { status: "success", message: `${kind === "LOGO" ? "Logo" : "Cover image"} saved.`, savedAt: Date.now() };
+}
+
+export async function uploadRulesAction(
+  munId: string,
+  _prev: SetupFormState,
+  formData: FormData,
+): Promise<SetupFormState> {
+  const file = formData.get("file");
+  const title = String(formData.get("title") ?? "Rules of procedure").trim();
+  if (!(file instanceof File) || file.size === 0) return { status: "error", message: "Choose a PDF to upload." };
+  try {
+    await uploadMunDocument({ munId, kind: "RULES", title: title || "Rules of procedure", file: Buffer.from(await file.arrayBuffer()), contentType: file.type }, await getSession());
+  } catch (error) { return toErrorState(error); }
+  revalidatePath(`/organizer/dashboard/${munId}/setup`);
+  return { status: "success", message: "Rules document uploaded.", savedAt: Date.now() };
+}
+
+export async function addScheduleItemAction(
+  munId: string,
+  _prev: SetupFormState,
+  formData: FormData,
+): Promise<SetupFormState> {
+  const values = collect(formData, ["title", "kind", "startsAt", "endsAt", "location"]);
+  if (!values.title || !values.startsAt || !values.endsAt) return { status: "error", message: "Enter a title, start time, and end time.", values };
+  const startsAt = new Date(values.startsAt);
+  const endsAt = new Date(values.endsAt);
+  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime()) || endsAt <= startsAt) return { status: "error", message: "End time must be after start time.", values };
+  try {
+    await createScheduleItem({ munId, title: values.title, kind: values.kind as "COMMITTEE_SESSION", startsAt, endsAt, location: values.location || null }, await getSession());
+  } catch (error) { return toErrorState(error, values); }
+  revalidatePath(`/organizer/dashboard/${munId}/setup`);
+  return { status: "success", message: "Schedule item added.", savedAt: Date.now() };
+}
+
+export async function addFaqAction(munId: string, _prev: SetupFormState, formData: FormData): Promise<SetupFormState> {
+  const values = collect(formData, ["question", "answer"]);
+  if (!values.question || !values.answer) return { status: "error", message: "Enter both a question and an answer.", values };
+  try { await createMunFaq(munId, values.question, values.answer, await getSession()); }
+  catch (error) { return toErrorState(error, values); }
+  revalidatePath(`/organizer/dashboard/${munId}/setup`);
+  return { status: "success", message: "FAQ added.", savedAt: Date.now() };
 }
 
 // ---------------------------------------------------------------------------

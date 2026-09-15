@@ -21,6 +21,7 @@ import {
   validateFieldValues,
 } from "@/components/registration/accommodation-fields";
 import { simulatePaymentOutcome } from "@/lib/payments/mock-adapter";
+import { listFormFields } from "@/lib/actions/registration-form";
 
 /**
  * Result shape for the registration form's `useActionState`.
@@ -132,6 +133,14 @@ export async function submitRegistrationAction(
   const experience = String(formData.get("experience") ?? "").trim();
   const dietary = String(formData.get("dietary") ?? "").trim();
   const accommodations = String(formData.get("accommodations") ?? "").trim();
+  let customFieldValues: Record<string, unknown> = {};
+  try {
+    const rawCustomFields = String(formData.get("customFieldValues") ?? "{}");
+    const parsed = JSON.parse(rawCustomFields);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) customFieldValues = parsed;
+  } catch {
+    return { status: "error", reason: "validation", message: "Check the form fields and try again." };
+  }
   // `""` means "No accommodation" — the skip path.
   const accommodationOptionId = String(formData.get("accommodationOptionId") ?? "").trim();
   const accommodationFieldValuesRaw = String(
@@ -184,6 +193,13 @@ export async function submitRegistrationAction(
       reason: "validation",
       message: "That registration option is no longer available.",
     };
+  }
+
+  const formFields = await listFormFields(mun.id);
+  for (const field of formFields) {
+    if (field.required && !String(customFieldValues[field.fieldKey] ?? "").trim()) {
+      return { status: "error", reason: "validation", message: `${field.label} is required.` };
+    }
   }
 
   // Same for committee/portfolio: both are optional, but if supplied they must
@@ -273,6 +289,7 @@ export async function submitRegistrationAction(
           experience: experience || null,
           dietary: dietary || null,
           accommodations: accommodations || null,
+          ...customFieldValues,
         },
         // Skip path: both stay `undefined`, so the column stays NULL and
         // `initiateRegistration` never enters its accommodation branch at all.

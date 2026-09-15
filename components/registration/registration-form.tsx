@@ -29,7 +29,7 @@ import type {
   AccommodationOption,
   AccommodationOptionField,
 } from "@/lib/actions/accommodation";
-import type { CommitteeWithPortfolios, RegistrationProduct } from "@/lib/types";
+import type { CommitteeWithPortfolios, RegistrationFormField, RegistrationProduct } from "@/lib/types";
 
 /** A product joined to its live seat count, computed server-side. */
 export interface ProductWithAvailability {
@@ -56,6 +56,7 @@ interface RegistrationFormProps {
    * whose only choice is "no".
    */
   accommodationOptions: AccommodationOption[];
+  formFields: RegistrationFormField[];
   /** Prefill from the signed-in user's profile — editable, never authoritative. */
   defaults: {
     fullName: string;
@@ -97,6 +98,7 @@ export function RegistrationForm({
   products,
   committees,
   accommodationOptions,
+  formFields,
   defaults,
   preselectedProductId,
 }: RegistrationFormProps) {
@@ -133,6 +135,10 @@ export function RegistrationForm({
     dietary: "",
     accommodations: "",
   });
+  const configurableFields = formFields.filter(
+    (field) => !["institution_name", "mun_experience"].includes(field.fieldKey),
+  );
+  const [customFieldValues, setCustomFieldValues] = React.useState<Record<string, string>>({});
 
   // ---- Accommodation state ------------------------------------------------
   // `""` is the "No accommodation" sentinel and the default: a student who
@@ -244,7 +250,8 @@ export function RegistrationForm({
   const detailsComplete =
     details.fullName.trim() !== "" &&
     details.email.trim() !== "" &&
-    details.institution.trim() !== "";
+    details.institution.trim() !== "" &&
+    configurableFields.every((field) => !field.required || customFieldValues[field.fieldKey]?.trim());
 
   // A server-reported failure has to move the user back to the step that owns
   // the problem: a sold-out seat belongs to the option picker, a rejected field
@@ -318,6 +325,7 @@ export function RegistrationForm({
           <input type="hidden" name="experience" value={details.experience} />
           <input type="hidden" name="dietary" value={details.dietary} />
           <input type="hidden" name="accommodations" value={details.accommodations} />
+              <input type="hidden" name="customFieldValues" value={JSON.stringify(customFieldValues)} />
         </>
       )}
 
@@ -485,6 +493,19 @@ export function RegistrationForm({
                   value={details.accommodations}
                   onChange={(value) => setDetails((d) => ({ ...d, accommodations: value }))}
                 />
+                {configurableFields.map((field) => {
+                  const choices = Array.isArray(field.choices)
+                    ? field.choices as string[]
+                    : typeof field.choices === "string"
+                      ? JSON.parse(field.choices) as string[]
+                      : [];
+                  const value = customFieldValues[field.fieldKey] ?? "";
+                  const update = (next: string) => setCustomFieldValues((current) => ({ ...current, [field.fieldKey]: next }));
+                  if (["DROPDOWN", "MULTIPLE_CHOICE"].includes(field.fieldType)) {
+                    return <div key={field.id} className="flex flex-col gap-xs sm:col-span-2"><Label htmlFor={field.fieldKey}>{field.label}{field.required && " *"}</Label><select id={field.fieldKey} value={value} onChange={(event) => update(event.target.value)} required={field.required} className={selectClassName}><option value="">Select an option</option>{choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}</select>{field.helpText && <p className="text-body-sm text-muted-foreground">{field.helpText}</p>}</div>;
+                  }
+                  return <Field key={field.id} id={field.fieldKey} label={field.label} type={field.fieldType === "EMAIL" ? "email" : field.fieldType === "PHONE" ? "tel" : field.fieldType === "DATE" ? "date" : "text"} required={field.required} value={value} onChange={update} className={field.fieldType === "LONG_TEXT" ? "sm:col-span-2" : undefined} placeholder={field.helpText ?? undefined} />;
+                })}
               </div>
 
               <StepNav

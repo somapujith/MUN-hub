@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import { committees, muns, portfolios, registrationProducts, users } from '@/lib/db/schema'
 import type { MunStatus } from '@/lib/db/schema-enums'
 import type { MunDetail, MunSummary } from '@/lib/types'
+import { listFormFields } from './registration-form'
 
 /**
  * Statuses visible to the public marketplace by default. Every other status
@@ -162,13 +163,14 @@ export async function getMunBySlug(slug: string): Promise<MunDetail | null> {
     return null
   }
 
-  const [organizer, committeeRows, activeProducts] = await Promise.all([
+  const [organizer, committeeRows, activeProducts, formFields] = await Promise.all([
     db.select({ name: users.name }).from(users).where(eq(users.id, mun.organizerId)).limit(1),
     db.select().from(committees).where(eq(committees.munId, mun.id)),
     db
       .select()
       .from(registrationProducts)
       .where(and(eq(registrationProducts.munId, mun.id), eq(registrationProducts.status, 'active'))),
+    listFormFields(mun.id),
   ])
 
   const committeeIds = committeeRows.map((c) => c.id)
@@ -190,6 +192,7 @@ export async function getMunBySlug(slug: string): Promise<MunDetail | null> {
     })),
     registrationProducts: activeProducts,
     organizerName: organizer[0]?.name ?? null,
+    formFields,
   }
 }
 

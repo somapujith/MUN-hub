@@ -5,6 +5,7 @@ import type {
   organizerApplications,
   portfolios,
   registrationProducts,
+  munFormFields,
   verificationLogs,
 } from '@/lib/db/schema'
 import type { MunStatus } from '@/lib/db/schema-enums'
@@ -13,6 +14,7 @@ export type Mun = InferSelectModel<typeof muns>
 export type Committee = InferSelectModel<typeof committees>
 export type Portfolio = InferSelectModel<typeof portfolios>
 export type RegistrationProduct = InferSelectModel<typeof registrationProducts>
+export type RegistrationFormField = InferSelectModel<typeof munFormFields>
 export type OrganizerApplication = InferSelectModel<typeof organizerApplications>
 export type VerificationLog = InferSelectModel<typeof verificationLogs>
 
@@ -51,6 +53,7 @@ export interface MunDetail extends Mun {
   committees: CommitteeWithPortfolios[]
   registrationProducts: RegistrationProduct[]
   organizerName: string | null
+  formFields: RegistrationFormField[]
 }
 
 /**

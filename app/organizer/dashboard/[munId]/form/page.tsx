@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { ListChecksIcon } from "lucide-react";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
-import { ModulePlaceholder } from "@/components/organizer/module-placeholder";
+import { listFormFields } from "@/lib/actions/registration-form";
+import { FormBuilder } from "./form-builder";
 
 /**
  * PLACEHOLDER — Registration Form (PRD § 5).
@@ -15,13 +15,12 @@ import { ModulePlaceholder } from "@/components/organizer/module-placeholder";
 
 export const metadata: Metadata = { title: "Registration Form" };
 
-export default function FormPage() {
+export default async function FormPage({ params }: PageProps<"/organizer/dashboard/[munId]/form">) {
+  const { munId } = await params;
+  const fields = await listFormFields(munId);
   return (
     <WorkspacePage title="Registration form">
-      <ModulePlaceholder
-        icon={ListChecksIcon}
-        description="The form builder that replaces Google Forms: field types, validation and conditional logic."
-      />
+      <FormBuilder munId={munId} fields={fields} />
     </WorkspacePage>
   );
 }

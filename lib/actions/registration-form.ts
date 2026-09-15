@@ -6,6 +6,7 @@ import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 import { forceReverification } from '@/lib/lifecycle/reverification'
+import { DEFAULT_REGISTRATION_FIELDS } from './registration-form-defaults'
 
 // -----------------------------------------------------------------------------
 // registration-form — REGISTRATION_FORM module (PRD Section 17)
@@ -335,6 +336,10 @@ export async function reorderFormFields(input: ReorderFormFieldsInput, session: 
 
 /** Public read, no auth — the registration funnel renders these to build the form. */
 export async function listFormFields(munId: string): Promise<FormField[]> {
+  await db
+    .insert(munFormFields)
+    .values(DEFAULT_REGISTRATION_FIELDS.map((field) => ({ ...field, munId, conditionalOn: null, conditionalOperator: null, conditionalValue: null })))
+    .onConflictDoNothing({ target: [munFormFields.munId, munFormFields.fieldKey] })
   return db
     .select()
     .from(munFormFields)

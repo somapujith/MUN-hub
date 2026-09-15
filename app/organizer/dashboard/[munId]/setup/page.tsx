@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
-import { getMunSetup } from "./queries";
+import { getMunSetup, getMunSetupModules } from "./queries";
 import { getConfirmationSummary } from "./confirmation-summary";
 import { SetupTabs } from "./setup-tabs";
 import { DatesVenueForm, GeneralForm } from "./setup-forms";
 import { FinalConfirmationPanel } from "./final-confirmation-panel";
+import { BrandingForm, ContactForm, FaqForm, RulesForm, ScheduleForm } from "./module-forms";
 
 /**
  * MUN Setup (PRD § 9).
@@ -33,7 +34,7 @@ export default async function SetupPage({
 
   if (!mun) notFound();
 
-  const summary = await getConfirmationSummary(munId);
+  const [summary, modules] = await Promise.all([getConfirmationSummary(munId), getMunSetupModules(munId)]);
   if (!summary) notFound();
 
   return (
@@ -63,6 +64,11 @@ export default async function SetupPage({
             country={mun.country}
           />
         }
+        brandingPanel={<BrandingForm munId={mun.id} media={modules.media} />}
+        schedulePanel={<ScheduleForm munId={mun.id} items={modules.scheduleItems} />}
+        rulesPanel={<RulesForm munId={mun.id} documents={modules.documents.filter((document) => document.kind === "RULES")} />}
+        contactPanel={<ContactForm munId={mun.id} contact={modules.contact} />}
+        faqsPanel={<FaqForm munId={mun.id} faqs={modules.faqs} />}
       />
     </WorkspacePage>
   );

@@ -149,6 +149,7 @@ export const munsRelations = relations(muns, ({ one, many }) => ({
   documents: many(munDocuments),
   scheduleItems: many(munScheduleItems),
   contact: one(munContacts, { fields: [muns.id], references: [munContacts.munId] }),
+  faqs: many(munFaqs),
 }))
 
 // ---------------------------------------------------------------------------
@@ -1004,4 +1005,23 @@ export const munContacts = pgTable(
 
 export const munContactsRelations = relations(munContacts, ({ one }) => ({
   mun: one(muns, { fields: [munContacts.munId], references: [muns.id] }),
+}))
+
+// mun_faqs (FAQS, PRD Section 24)
+export const munFaqs = pgTable(
+  'mun_faqs',
+  {
+    id: id(),
+    munId: text('mun_id').notNull().references(() => muns.id, { onDelete: 'cascade' }),
+    question: text('question').notNull(),
+    answer: text('answer').notNull(),
+    displayOrder: integer('display_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mun_faqs_mun_id_idx').on(table.munId)],
+)
+
+export const munFaqsRelations = relations(munFaqs, ({ one }) => ({
+  mun: one(muns, { fields: [munFaqs.munId], references: [muns.id] }),
 }))

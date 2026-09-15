@@ -153,6 +153,7 @@ export default async function RegisterPage({ params, searchParams }: RegisterPag
         products={availability}
         committees={mun.committees}
         accommodationOptions={accommodationOptions}
+        formFields={mun.formFields}
         // Deep link from the MUN page's pricing cards
         // (`/register/[slug]?product=<id>`). Validated against this MUN's own
         // products so a stray id can't preselect foreign inventory.

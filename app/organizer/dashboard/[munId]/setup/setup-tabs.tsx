@@ -11,7 +11,6 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ModulePlaceholder } from "@/components/organizer/module-placeholder";
 
 /**
  * The PRD § 9–11 sub-sections as a tab strip.
@@ -93,9 +92,19 @@ const STUB_COPY: Record<string, { icon: typeof SettingsIcon; description: string
 export function SetupTabs({
   generalPanel,
   datesVenuePanel,
+  brandingPanel,
+  schedulePanel,
+  rulesPanel,
+  contactPanel,
+  faqsPanel,
 }: {
   generalPanel: React.ReactNode;
   datesVenuePanel: React.ReactNode;
+  brandingPanel: React.ReactNode;
+  schedulePanel: React.ReactNode;
+  rulesPanel: React.ReactNode;
+  contactPanel: React.ReactNode;
+  faqsPanel: React.ReactNode;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -122,6 +131,11 @@ export function SetupTabs({
   const panels: Record<string, React.ReactNode> = {
     general: generalPanel,
     "dates-venue": datesVenuePanel,
+    branding: brandingPanel,
+    schedule: schedulePanel,
+    rules: rulesPanel,
+    contact: contactPanel,
+    faqs: faqsPanel,
   };
 
   return (
@@ -141,14 +155,9 @@ export function SetupTabs({
       </div>
 
       {TABS.map(({ value }) => {
-        const stub = STUB_COPY[value];
         return (
           <TabsContent key={value} value={value}>
-            {stub ? (
-              <ModulePlaceholder icon={stub.icon} description={stub.description} />
-            ) : (
-              panels[value]
-            )}
+            {panels[value]}
           </TabsContent>
         );
       })}
