@@ -11,29 +11,33 @@ Curated MUN (Model United Nations) marketplace + registration + organizer manage
 Design/plan docs:
 - `docs/superpowers/specs/2026-09-13-mun-hub-mvp-backend-design.md` — architecture decisions
 - `docs/superpowers/plans/2026-09-13-mun-hub-mvp-backend.md` — task-by-task implementation plan (backend/data)
+- `docs/superpowers/specs/2026-09-15-nextjs-to-react-spa-migration-design.md` — Next.js → Vite/Hono migration design
+- `docs/superpowers/plans/2026-09-15-nextjs-to-react-spa-migration.md` — migration task-by-task plan
 
 ## Stack (locked decisions, don't re-litigate without asking user)
 
-- Next.js App Router, TypeScript, Tailwind, shadcn/ui
-- Server Actions + Route Handlers only — no separate backend service
+- **REVERSED 2026-09-15:** Next.js App Router + Server Actions is no longer the target architecture. Migrating to **Vite + React Router v7 (data-router mode) + TanStack Query** frontend in `/web`, and a **standalone Hono API on Node** in `/server`. `/lib` stays shared and framework-agnostic (imported by both). Full design + plan: `docs/superpowers/specs/2026-09-15-nextjs-to-react-spa-migration-design.md`, `docs/superpowers/plans/2026-09-15-nextjs-to-react-spa-migration.md`. The Next app under `/app` remains primary until Phase 7 retires it — do not "correct" new work back toward Server Actions / Route Handlers as the long-term shape.
+- TypeScript, Tailwind, shadcn/ui (design tokens / components port to `/web`; Next keeps them until cutover)
 - **Drizzle ORM** (not Prisma — user corrected this mid-build) + `postgres` driver
 - **Neon** is the target cloud Postgres provider (not Supabase Postgres). **Live as of 2026-09-13** — `.env`'s `DATABASE_URL` now points at the user's real Neon instance (not local Docker), migrated + seeded. Local `docker-compose.yml` Postgres still works as a fallback if `.env` gets pointed back at it, but the default dev DB is now Neon. Tests pass against it (95/95) but run noticeably slower (~15s vs <1s local) since every query is now a real network round-trip — worth knowing if a test run feels slow, it's not broken.
 - Auth/Payments/Storage: mock adapters behind interfaces (`lib/auth/adapter.ts`, `lib/payments/adapter.ts`, `lib/storage/adapter.ts`) — real providers (Razorpay confirmed for payments; auth/storage provider undecided) drop in later without touching call sites
-- Routing: path-based `/mun/[slug]` — wildcard subdomains deferred
+- Routing: path-based `/mun/[slug]` — wildcard subdomains deferred; SPA will use React Router equivalents after Phase 3
 
-## Session split (two parallel Claude Code sessions on this repo)
+## Session split (migration — Phases 0–7, 2026-09-15)
 
-This session (**mun-hub-b2**) owns backend/data:
-- `prisma/` — n/a, removed. Schema lives in `lib/db/schema.ts` (Drizzle)
-- `lib/db/`, `lib/auth/`, `lib/payments/`, `lib/storage/`, `lib/lifecycle/`, `lib/actions/`, `lib/types/`, `lib/notifications/`
+**Migration ownership is by phase, not by directory** (supersedes the old `lib/*` vs `app/**` split for this work):
 
-UI/pages/components ownership:
-- `app/**/page.tsx`, `app/**/*.tsx` (except route handlers under `app/api/`), `components/` (beyond base shadcn primitives)
-- **mun-hub-93** built the first UI pass ("Diplomatic Modernism" design). **2026-09-13**: user asked for a full frontend rebuild against a new Airtable-style editorial design system (`DESIGN-airtable.md` — coral/forest/dark-navy signature cards, Haas Grotesk, replaces Diplomatic Modernism entirely). **mun-hub-02** took over and owns UI going forward; mun-hub-93 stood down cleanly. If a third UI session ever spins up, it inherits from mun-hub-02's state, not mun-hub-93's.
+- **This session (backend / Phases 0–2):** decouple `lib/` from Next (`getSessionByToken`, explicit `session` params), stand up `/server` Hono API, typed client contract. Then Phase 2 hardening + Phase 6 coordination while the frontend session owns UI ports.
+- **mun-hub-b5 / vite-frontend-migration (frontend / Phases 3–6):** Vite SPA skeleton, public routes, authenticated reads, organizer workspace, admin console.
+- **Both sessions together:** Phase 7 (retire Next) only after Phase 6 is stable in production.
 
-**Contract surface** (backend session lands these, UI session imports them, never edits them): `lib/types/*.ts`, `lib/actions/*.ts`, `lib/db/schema.ts`.
+During the migration, freeze new files under `app/` (existing-page fixes OK). Contract surface remains: `lib/types/*.ts`, `lib/actions/*.ts`, `lib/db/schema.ts` — HTTP handlers must not import `db`.
 
-Coordinate via SendMessage before touching the other side's files. Both sessions run full-autonomous, caveman-terse commit/PR text stays normal (not caveman) per user's global caveman rules.
+<details><summary>Superseded: pre-migration session split (mun-hub-b2 / mun-hub-02)</summary>
+
+This session (**mun-hub-b2**) owned backend/data: `lib/db/`, `lib/auth/`, `lib/payments/`, `lib/storage/`, `lib/lifecycle/`, `lib/actions/`, `lib/types/`, `lib/notifications/`. UI owned `app/**/page.tsx`, `components/`. **mun-hub-93** built Diplomatic Modernism; **mun-hub-02** rebuilt against `DESIGN-airtable.md`. Coordinate via SendMessage before touching the other side's files.
+
+</details>
 
 ## Known corrections mid-build (so future agents don't repeat the mistake)
 
