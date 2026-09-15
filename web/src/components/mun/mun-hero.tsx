@@ -1,0 +1,137 @@
+import { Link } from "react-router";
+import { CalendarDaysIcon, LockIcon, MapPinIcon, UsersIcon } from "lucide-react";
+import { MunStatusBadge } from "@/components/mun/mun-status-badge";
+import { formatDateRange } from "@/components/shared/date-range";
+import { formatPrice } from "@/components/shared/currency";
+import { Button } from "@/components/ui/button";
+import type { MunDetail } from "@/types";
+
+/**
+ * MUN detail hero — `hero-band` (DESIGN-airtable.md § Cards & Containers).
+ *
+ * White canvas, no gradient, no mesh, no atmospheric backdrop: the doc is
+ * explicit that the hero's strength is type + buttons sitting in whitespace
+ * ("Don't add a gradient backdrop to the hero. Airtable's hero is white, full
+ * stop."). Display type stays at weight 400 — emphasis comes from size, not
+ * weight (doc Don't #3). One primary CTA per viewport (doc Do #2), paired with
+ * the white outlined secondary.
+ */
+
+interface MunHeroProps {
+  mun: MunDetail;
+  /** Cheapest active registration product price, or null when none are active. */
+  fromPrice: number | null;
+}
+
+export function MunHero({ mun, fromPrice }: MunHeroProps) {
+  const canRegister = mun.status === "REGISTRATION_OPEN";
+  const location = [mun.venue, mun.city, mun.country].filter(Boolean).join(", ");
+  const committeeCount = mun.committees.length;
+
+  return (
+    <section className="border-b border-border bg-background">
+      <div className="content-container pt-xxl pb-xl md:pt-section md:pb-xxl">
+        <div className="grid gap-xl lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end lg:gap-xxl">
+          <div className="max-w-3xl">
+            <div className="flex flex-wrap items-center gap-sm">
+              <MunStatusBadge status={mun.status} />
+              {mun.edition && (
+                <span className="text-caption text-muted-foreground">
+                  Edition {mun.edition}
+                </span>
+              )}
+            </div>
+
+            {/* display-lg at 40px / weight 400 — never bold (doc Don't #3) */}
+            <h1 className="mt-md font-display text-display-md font-normal tracking-[-0.011em] text-balance text-ink md:text-display-lg">
+              {mun.name}
+            </h1>
+
+            {mun.theme && (
+              <p className="mt-sm text-title-md font-normal text-body">{mun.theme}</p>
+            )}
+
+            {/* Supporting meta line: dates, location, scale. */}
+            <dl className="mt-lg flex flex-wrap items-center gap-x-lg gap-y-xs text-body-md text-muted-foreground">
+              <div className="flex items-center gap-xs">
+                <dt className="sr-only">Dates</dt>
+                <CalendarDaysIcon className="size-4 shrink-0" strokeWidth={1.75} />
+                <dd>{formatDateRange(mun.startDate, mun.endDate)}</dd>
+              </div>
+
+              <div className="flex items-center gap-xs">
+                <dt className="sr-only">Location</dt>
+                <MapPinIcon className="size-4 shrink-0" strokeWidth={1.75} />
+                <dd>{location || "Location to be announced"}</dd>
+              </div>
+
+              {committeeCount > 0 && (
+                <div className="flex items-center gap-xs">
+                  <dt className="sr-only">Committees</dt>
+                  <UsersIcon className="size-4 shrink-0" strokeWidth={1.75} />
+                  <dd>
+                    {committeeCount} {committeeCount === 1 ? "committee" : "committees"}
+                  </dd>
+                </div>
+              )}
+            </dl>
+
+            <p className="mt-xs text-body-md text-muted-foreground">
+              Hosted by{" "}
+              <span className="text-body">{mun.organizerName ?? "Independent organizer"}</span>
+            </p>
+          </div>
+
+          {/* Action cluster: one primary CTA, one secondary — the doc's
+              signature button pair. Price sits above it as plain meta, not as a
+              pricing-dialect block (that lives in the registration section). */}
+          <div className="flex flex-col gap-sm lg:items-end">
+            {fromPrice !== null && (
+              <p className="text-body-md text-muted-foreground lg:text-right">
+                Registration from{" "}
+                <span className="text-label-md text-ink tabular-nums">
+                  {formatPrice(fromPrice)}
+                </span>
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-sm">
+              {canRegister ? (
+                // `text-primary-foreground` is repeated here deliberately: the
+                // variant's own color class is stripped by cn()/tailwind-merge,
+                // which reads the custom `text-button` font-size token in the
+                // size classes as a conflicting `text-*` color utility. Passing
+                // it via className puts it last, so it survives the merge.
+                // Without this the CTA renders #333840 on #181d26 (~1.3:1).
+                <Button
+                  className="text-primary-foreground"
+                  render={<Link to={`/register/${mun.slug}`} />}
+                >
+                  Register now
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  disabled
+                  // Informational (non-interactive) disabled state: opacity-50
+                  // fails contrast badly, so hold full opacity and let the
+                  // hairline + icon carry the "unavailable" signal instead.
+                  className="disabled:opacity-100 disabled:border-border-strong disabled:text-muted-foreground"
+                >
+                  <LockIcon className="size-4" strokeWidth={1.75} />
+                  {mun.status === "REGISTRATION_CLOSED"
+                    ? "Registration closed"
+                    : "Registration not open yet"}
+                </Button>
+              )}
+
+              <Button variant="outline" render={<a href="#registration" />}>
+                View passes
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}

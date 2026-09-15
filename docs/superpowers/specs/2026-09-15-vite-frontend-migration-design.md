@@ -23,19 +23,29 @@ frontend decision depends on it.
 
 ## 2. Locked decisions (do not depend on backend contract)
 
-- **Stack:** Vite + React 19 + TypeScript + React Router v7 (data router —
-  `createBrowserRouter`/`createStaticRouter` with loaders/actions, the
-  closest RR concept to Next's Server Component data fetching + Server
-  Actions split) + React Query (`@tanstack/react-query`) for all server
-  state/caching/mutations.
-- **SEO strategy:** Vite SSR mode for exactly 3 route trees —
-  `/` (homepage), `/muns` (marketplace listing), `/mun/:slug` (MUN detail)
-  — the same 3 pages this session already gave `generateMetadata`/
-  sitemap/robots to under Next. Every other route tree (dashboard,
-  organizer, admin, login, register, support) is CSR-only — matches the
-  existing MUNHub_Client_Server_Rendering_PRD.md's own hybrid-rendering
-  principle (public/SEO-critical → server, authenticated/interactive →
-  client), just reimplemented on Vite's SSR primitives instead of Next's.
+**2026-09-15 correction (post mun-hub-ef review, aligned to mun-hub-bf's now-finished
+backend design at `.claude/worktrees/nextjs-to-react-migration/docs/superpowers/specs/2026-09-15-nextjs-to-react-spa-migration-design.md` Sections 5.1 and 7):**
+the two items below were locked before the backend design existed and directly
+contradicted it. Corrected here, before any router/build code is written.
+
+- **Stack:** Vite + React 19 + TypeScript + React Router v7 **data-router mode
+  only** (`createBrowserRouter`, NOT framework mode) + React Query
+  (`@tanstack/react-query`) for all server state/caching/mutations.
+  **Loaders are NOT used for data fetching** — data fetching goes through
+  React Query exclusively (backend design Section 5.1: "two fetching systems
+  is an anti-pattern"). Loaders, if used at all, are limited to pre-auth route
+  guards. `createStaticRouter` is dropped entirely — there is no
+  router-level SSR anywhere in this app.
+- **SEO strategy: CSR-only for every route, including the 3 public ones**
+  (`/`, `/muns`, `/mun/:slug`). No Vite SSR entry, no `createStaticRouter`.
+  SEO/social-preview parity for those 3 routes is a **backend concern**:
+  mun-hub-bf's design Section 7 (Decision 6) puts a crawler-User-Agent-targeted
+  prerender service (D1: a Hono route serving templated HTML+meta, no React
+  involved) in front of the SPA. The frontend's only obligations here are (a)
+  make sure the SPA itself still sets `document.title`/meta via
+  `react-helmet-async` for real browser users' tab titles/back-forward, and
+  (b) not build anything that assumes it owns crawler-facing HTML — that's
+  Section 7's job, in `/server` or a sibling service, not `/web`.
 - **Route tree — 1:1 URL mapping**, zero URL shape changes (preserves
   bookmarks, the sitemap just added, and any external links):
 
@@ -63,9 +73,14 @@ frontend decision depends on it.
   (it does — it's not actually Next-specific despite the name, just needs
   its own hydration-safe mounting in a Vite SSR context).
 - **Build tooling:** Vite's own dev server + `vite build`, no Next config
-  surface at all once cutover completes. Two build targets: a client
-  bundle (all routes) and an SSR entry (the 3 SEO routes only) per Vite's
-  standard SSR setup.
+  surface at all once cutover completes. **Single build target: the client
+  bundle, all routes.** No SSR entry (corrected above — SSR is not this
+  app's concern at all now).
+- **Directory:** new SPA lives at repo-root `/web` (matches backend design
+  Section 8.2's Phase-0 layout: `/lib` shared, `/server` new API, `/web` new
+  SPA, `/app` existing Next app deleted at the end — and Section 3.5's own
+  `web/src/api/client.ts` reference). Not a `frontend/` folder, not nested
+  under `app/`.
 - **Server-driven auth check, not client-trusted:** whatever the auth
   mechanism turns out to be (pending backend contract), the frontend never
   treats a client-visible flag as authoritative for gating protected
@@ -84,12 +99,24 @@ moment the real contract arrives.
   fetches. If the new backend instead issues a bearer token, this becomes
   an Authorization-header interceptor in the React Query fetch wrapper —
   a contained, single-file change (`lib/api-client.ts`), not a rearchitect.
-- **API base URL / endpoint shapes** — placeholder: assume REST-ish
-  endpoints roughly mirroring the current `lib/actions/*.ts` function
-  names (e.g. `getMunBySlug` → `GET /api/muns/:slug`). React Query keys
-  will be structured to match once real shapes land; this doesn't block
-  scaffolding the route tree or component structure, only the actual
-  `useQuery`/`useMutation` call bodies.
+- **API base URL / endpoint shapes — no longer a placeholder.** Backend
+  design has landed: base is `/api/v1`, routes are resource/action-oriented
+  per its Section 3.2/3.3 (e.g. `getMunBySlug` → `GET /api/v1/muns/:slug`).
+  Full route map: Section 5.2 of the backend design doc. Query key
+  convention: its Section 6.1 (hierarchical arrays, prefix-invalidatable).
+  Still doesn't block steps 1-3 (no real calls yet), but step 4's client
+  should be built directly against this contract, not re-derived.
+- **Idempotency-Key + date revival — new pending items, not yet built.**
+  Backend Section 3.5/6.6: the typed client must inject a stable
+  `Idempotency-Key` header generated once per user intent (not per retry —
+  a `useRef`'d UUID, reset only when the triggering dialog/flow closes and
+  reopens) for mutations that need it (`initiateRegistration`,
+  `publishFromQueue`, others per Section 3.2), and must revive ISO date
+  strings on an allowlisted key suffix (`At`/`Date`/`deadline`) back into
+  `Date` objects so ported components need no date-handling changes. Both
+  are step-4 work (real client), noted now so step-3 mock data uses real
+  `Date` objects (matching what the client will eventually hand components),
+  not strings.
 - **The bimodal auth pattern in lib/actions** (some functions take
   `session: Session | null` as a param, others call `getSession()`
   internally) — per mun-hub-52's research, this matters for how the new
