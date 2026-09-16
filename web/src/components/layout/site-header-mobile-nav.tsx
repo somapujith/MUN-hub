@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MenuIcon } from "lucide-react";
 import {
   Sheet,
@@ -11,9 +12,9 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { CitySelector } from "@/components/marketplace/city-selector";
-function signOutAction() {
-  // Placeholder until auth API lands (Task 3.7+).
-}
+import { signOut } from "@/api/auth";
+import { homeUrlForRole, isCrossOrigin } from "@/lib/host-routing";
+import type { Role } from "@/types/enums";
 
 
 /**
@@ -31,7 +32,8 @@ interface MobileNavLink {
 interface SiteHeaderMobileNavProps {
   links: MobileNavLink[];
   isSignedIn: boolean;
-  dashboardHref: string | null;
+  /** Null when signed out; drives the dashboard destination and which footer actions show. */
+  role: Role | null;
   /**
    * Marketplace cities, when the page supplies them. The nav bar's compact
    * city picker is hidden below `md`, so it reappears here — same
@@ -45,12 +47,24 @@ interface SiteHeaderMobileNavProps {
 export function SiteHeaderMobileNav({
   links,
   isSignedIn,
-  dashboardHref,
+  role,
   cities,
   selectedCity = "",
 }: SiteHeaderMobileNavProps) {
   const [open, setOpen] = React.useState(false);
   const { pathname } = useLocation();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  const signOutMutation = useMutation({
+    mutationFn: signOut,
+    onSettled: () => {
+      queryClient.clear();
+      navigate("/");
+    },
+  });
+
+  const dashboardUrl = role ? homeUrlForRole(role) : null;
 
   // Close the sheet on navigation — Base UI keeps it open across a client
   // transition otherwise, which strands the user behind an overlay.
@@ -101,35 +115,46 @@ export function SiteHeaderMobileNav({
               {link.label}
             </Link>
           ))}
-          {isSignedIn && dashboardHref && (
-            <Link
-              to={dashboardHref}
-              className="rounded-sm px-sm py-sm text-title-sm text-ink outline-none transition-colors duration-150 hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:bg-surface-strong"
-            >
-              Dashboard
-            </Link>
+          {isSignedIn && dashboardUrl && (
+            // Cross-origin when the dashboard lives on another zone's subdomain
+            // — React Router can't navigate there, so it has to be a real link.
+            isCrossOrigin(dashboardUrl) ? (
+              <a
+                href={dashboardUrl}
+                className="rounded-sm px-sm py-sm text-title-sm text-ink outline-none transition-colors duration-150 hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:bg-surface-strong"
+              >
+                Dashboard
+              </a>
+            ) : (
+              <Link
+                to={dashboardUrl}
+                className="rounded-sm px-sm py-sm text-title-sm text-ink outline-none transition-colors duration-150 hover:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:bg-surface-strong"
+              >
+                Dashboard
+              </Link>
+            )
           )}
         </nav>
 
         <SheetFooter>
-          <Button render={<Link to="/organizer/apply" />}>
-            List your MUN
-          </Button>
           {isSignedIn ? (
-            <form onSubmit={(e) => { e.preventDefault(); signOutAction(); }}>
-              <Button
-                type="submit"
-                variant="outline"
-                className="w-full"
-                nativeButton
-              >
-                Sign out
-              </Button>
-            </form>
-          ) : (
-            <Button variant="outline" render={<Link to="/login" />}>
-              Sign in
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              nativeButton
+              disabled={signOutMutation.isPending}
+              onClick={() => signOutMutation.mutate()}
+            >
+              {signOutMutation.isPending ? "Signing out…" : "Sign out"}
             </Button>
+          ) : (
+            <>
+              <Button render={<Link to="/signup" />}>Create account</Button>
+              <Button variant="outline" render={<Link to="/login" />}>
+                Sign in
+              </Button>
+            </>
           )}
         </SheetFooter>
       </SheetContent>

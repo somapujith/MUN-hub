@@ -11,7 +11,6 @@ import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
 import { fetchRegistrationById } from "@/api/registration";
 import { getMockMunBySlug } from "@/mocks/data";
-import { useSession } from "@/hooks/use-session";
 import { NotFoundPage } from "@/pages/not-found-page";
 import type { RegistrationStatus } from "@/types/enums";
 
@@ -30,7 +29,6 @@ export function RegisterConfirmationPage() {
   const [searchParams] = useSearchParams();
   const registrationId = searchParams.get("registrationId");
   const navigate = useNavigate();
-  const { data: session } = useSession();
   const mun = getMockMunBySlug(slug);
   if (!mun) return <NotFoundPage />;
   if (!registrationId) {
@@ -47,7 +45,7 @@ export function RegisterConfirmationPage() {
   if (regQuery.isPending) {
     return (
       <div className="flex min-h-full flex-1 flex-col">
-        <SiteHeader session={session ?? null} />
+        <SiteHeader />
         <main className="mx-auto w-full max-w-2xl flex-1 px-lg py-xxl" aria-busy="true" />
         <SiteFooter />
       </div>
@@ -71,7 +69,7 @@ export function RegisterConfirmationPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Helmet><title>Registration status</title></Helmet>
-      <SiteHeader session={session ?? null} />
+      <SiteHeader />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-xl px-lg py-xxl sm:px-xl">
         {renderStatus(registration.status, slug, receipt, registrationId)}
       </main>

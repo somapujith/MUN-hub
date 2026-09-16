@@ -16,7 +16,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useSession } from "@/hooks/use-session";
 import { cn } from "cn";
 import type { StudentProfileInput } from "@/types/student-profile";
 
@@ -51,7 +50,6 @@ const textareaClassName = cn(
 );
 
 export function ProfilePage() {
-  const { data: session } = useSession();
   const queryClient = useQueryClient();
   const profileQuery = useQuery({
     queryKey: STUDENT_PROFILE_QUERY_KEY,
@@ -144,7 +142,7 @@ export function ProfilePage() {
       <Helmet>
         <title>Your profile</title>
       </Helmet>
-      <SiteHeader session={session ?? null} />
+      <SiteHeader />
       <main className="content-container flex flex-1 flex-col gap-xl py-xxl">
         <header className="flex flex-col gap-xxs">
           <h1 className="font-display text-display-md text-ink">

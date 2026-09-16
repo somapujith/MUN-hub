@@ -2,10 +2,8 @@ import { Helmet } from "react-helmet-async";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SupportForm } from "@/components/support/support-form";
-import { useSession } from "@/hooks/use-session";
 
 export function SupportNewPage() {
-  const { data: session } = useSession();
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
@@ -13,7 +11,7 @@ export function SupportNewPage() {
         <title>Contact Support</title>
         <meta name="description" content="File a support ticket — our team will follow up." />
       </Helmet>
-      <SiteHeader session={session ?? null} />
+      <SiteHeader />
       <main className="flex-1 bg-surface-soft/60">
         <div className="mx-auto flex w-full max-w-lg flex-col gap-lg px-md py-xxl">
           <header className="flex flex-col gap-xxs">

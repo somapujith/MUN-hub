@@ -13,7 +13,6 @@ import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
 import { completeMockPayment, fetchRegistrationById } from "@/api/registration";
 import { getMockMunBySlug } from "@/mocks/data";
-import { useSession } from "@/hooks/use-session";
 import { NotFoundPage } from "@/pages/not-found-page";
 
 export function RegisterPayPage() {
@@ -23,7 +22,6 @@ export function RegisterPayPage() {
   const error = searchParams.get("error");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data: session } = useSession();
   const [paying, setPaying] = React.useState(false);
 
   const mun = getMockMunBySlug(slug);
@@ -42,7 +40,7 @@ export function RegisterPayPage() {
   if (regQuery.isPending) {
     return (
       <div className="flex min-h-full flex-1 flex-col">
-        <SiteHeader session={session ?? null} />
+        <SiteHeader />
         <main className="mx-auto w-full max-w-2xl flex-1 px-lg py-xxl" aria-busy="true" />
         <SiteFooter />
       </div>
@@ -76,7 +74,7 @@ export function RegisterPayPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Helmet><title>Checkout</title></Helmet>
-      <SiteHeader session={session ?? null} />
+      <SiteHeader />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-xl px-lg py-xxl sm:px-xl">
         <header className="flex flex-col gap-xs">
           <p className="text-caption uppercase text-muted-foreground">Secure checkout</p>

@@ -3,10 +3,8 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SupportPanel } from "@/components/support/support-panel";
 import { RequireRole } from "@/guards/require-role";
-import { useSession } from "@/hooks/use-session";
 
 export function OrganizerSupportPage() {
-  const { data: session } = useSession();
 
   return (
     <RequireRole roles={["ORGANIZER"]}>
@@ -15,7 +13,7 @@ export function OrganizerSupportPage() {
           <title>Support</title>
           <meta name="description" content="Chat with the MUN Hub support team." />
         </Helmet>
-        <SiteHeader session={session ?? null} />
+        <SiteHeader />
         <main className="flex-1 bg-surface-soft/60">
           <div className="content-container flex flex-col gap-lg py-xl">
             <header className="flex flex-col gap-xxs border-b border-border pb-lg">

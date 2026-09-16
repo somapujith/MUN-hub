@@ -32,11 +32,10 @@ function RegistrationShell({
   narrow?: boolean;
   children: ReactNode;
 }) {
-  const { data: session } = useSession();
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <SiteHeader session={session ?? null} />
+      <SiteHeader />
       <main
         className={cn(
           "mx-auto flex w-full flex-1 flex-col gap-xl px-lg py-xl sm:px-xl",
@@ -67,10 +66,10 @@ function RegistrationShell({
 }
 
 export function RegisterPage() {
+  const { data: session } = useSession();
   const { slug = "" } = useParams();
   const [searchParams] = useSearchParams();
   const preselectedProductId = searchParams.get("product") ?? undefined;
-  const { data: session } = useSession();
 
   const mun = getMockMunBySlug(slug);
   if (!mun) return <NotFoundPage />;

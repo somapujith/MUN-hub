@@ -2,10 +2,8 @@ import { Helmet } from "react-helmet-async";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SupportPanel } from "@/components/support/support-panel";
-import { useSession } from "@/hooks/use-session";
 
 export function StudentSupportPage() {
-  const { data: session } = useSession();
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
@@ -13,7 +11,7 @@ export function StudentSupportPage() {
         <title>Support</title>
         <meta name="description" content="Chat with the MUN Hub support team." />
       </Helmet>
-      <SiteHeader session={session ?? null} />
+      <SiteHeader />
       <main className="content-container flex flex-1 flex-col gap-lg py-xxl">
         <header className="flex flex-col gap-xxs">
           <h1 className="font-display text-display-md text-ink">Support</h1>

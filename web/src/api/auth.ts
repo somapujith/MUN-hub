@@ -16,6 +16,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/**
+ * GET /api/v1/auth/session — who the session cookie belongs to, or `null` when
+ * signed out. The cookie travels via `credentials: "include"`; there is no
+ * client-side token to read, so this endpoint is the only way the SPA learns
+ * its own identity.
+ */
+export function getSession() {
+  return request<Session | null>("/auth/session");
+}
+
 export interface SignInInput {
   email: string;
   password: string;

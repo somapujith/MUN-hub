@@ -6,7 +6,7 @@ import { SiteHeaderSearch } from "@/components/layout/site-header-search";
 import { SiteHeaderUserMenu } from "@/components/layout/site-header-user-menu";
 import { CitySelector } from "@/components/marketplace/city-selector";
 import { SupportWidget } from "@/components/support/support-widget";
-import type { Role } from "@/types";
+import { useSession } from "@/hooks/use-session";
 
 /**
  * `top-nav` — docs/prd/DESIGN-airtable.md § Components.
@@ -52,20 +52,25 @@ import type { Role } from "@/types";
  * specifies a fixed 64px bar, so content drops out of it instead of growing it.
  */
 
-const NAV_LINKS = [
+const BROWSE_LINKS = [
   { href: "/muns", label: "Marketplace" },
   { href: "/muns?sortBy=date", label: "Upcoming" },
   { href: "/organizer/apply", label: "For organizers" },
 ] as const;
 
-/** Role → the dashboard that role actually lands on. */
-const DASHBOARD_HREF = {
-  STUDENT: "/dashboard",
-  ORGANIZER: "/organizer/dashboard",
-  OPERATIONS: "/admin/review",
-  ADMIN: "/admin/review",
-  SUPER_ADMIN: "/admin/review",
-} as const;
+/**
+ * Organizers get their own labelled door rather than sharing the delegate
+ * "Sign in" button — it's the same `POST /auth/session` underneath, but the
+ * separate entry point means an organizer never has to wonder whether the
+ * student-facing sign-in is "the right one", and it lands them straight in the
+ * organizer workspace instead of a delegate dashboard.
+ *
+ * Admins deliberately get NO public link: `/admin/login` exists and works, but
+ * advertising a staff console entry point on a public marketplace nav invites
+ * credential-stuffing at the highest-privilege door for zero user benefit.
+ * Staff reach it directly (or via admin.munhub.in, which lands there).
+ */
+const ORGANIZER_LOGIN_LINK = { href: "/organizer/login", label: "Organizer login" } as const;
 
 interface SiteHeaderProps {
   /**
@@ -75,16 +80,18 @@ interface SiteHeaderProps {
   cities?: string[];
   /** Active city from the page's own `?city=` parsing. */
   selectedCity?: string;
-  /** Optional session — pages pass mock/null until API client lands. */
-  session?: { userId: string; role: Role } | null;
 }
 
-export function SiteHeader({
-  cities,
-  selectedCity = "",
-  session = null,
-}: SiteHeaderProps = {}) {
+export function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) {
+  // Read straight from the session query rather than taking a prop: the prop
+  // version silently rendered a signed-OUT header on the 15 of 27 pages that
+  // forgot to pass it, so being signed in looked different depending on which
+  // page you were on. One source of truth, every page.
+  const { data: session } = useSession();
   const showCityPicker = Boolean(cities && cities.length > 0);
+  // Signed-in users already have their door; the organizer link is wayfinding
+  // for people who haven't authenticated yet.
+  const navLinks = session ? BROWSE_LINKS.map((l) => ({ ...l })) : [...BROWSE_LINKS, ORGANIZER_LOGIN_LINK].map((l) => ({ ...l }));
 
   return (
     <>
@@ -132,7 +139,7 @@ export function SiteHeader({
                 : "hidden items-center gap-md md:flex lg:gap-lg"
             }
           >
-            {NAV_LINKS.map((link) => (
+            {navLinks.map((link) => (
               <Link
                 key={link.href}
                 to={link.href}
@@ -147,33 +154,32 @@ export function SiteHeader({
             <ThemeToggle />
   
             {session ? (
-              <SiteHeaderUserMenu
-                role={session.role}
-                dashboardHref={DASHBOARD_HREF[session.role]}
-              />
+              <SiteHeaderUserMenu role={session.role} />
             ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="hidden lg:inline-flex"
-                render={<Link to="/login" />}
-              >
-                Sign in
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="hidden lg:inline-flex"
+                  render={<Link to="/login" />}
+                >
+                  Sign in
+                </Button>
+                <Button
+                  size="sm"
+                  className="hidden h-9 lg:inline-flex"
+                  render={<Link to="/signup" />}
+                >
+                  Create account
+                </Button>
+              </>
             )}
   
-            <Button
-              size="sm"
-              className="hidden h-9 lg:inline-flex"
-              render={<Link to="/organizer/apply" />}
-            >
-              List your MUN
-            </Button>
   
             <SiteHeaderMobileNav
-              links={NAV_LINKS.map((l) => ({ ...l }))}
+              links={navLinks}
               isSignedIn={Boolean(session)}
-              dashboardHref={session ? DASHBOARD_HREF[session.role] : null}
+              role={session?.role ?? null}
               cities={showCityPicker ? cities : undefined}
               selectedCity={selectedCity}
             />

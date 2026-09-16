@@ -24,7 +24,7 @@ export function WorkspaceTopbar({ muns, currentMun, role }: WorkspaceTopbarProps
       </div>
       <div className="flex shrink-0 items-center gap-xs">
         <ThemeToggle />
-        <SiteHeaderUserMenu role={role} dashboardHref="/organizer/dashboard" />
+        <SiteHeaderUserMenu role={role} />
       </div>
     </header>
   );

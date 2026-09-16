@@ -12,10 +12,8 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAccountSettings, setEmailNotificationsEnabled } from "@/api/account";
 import { queryKeys } from "@/api/query-keys";
-import { useSession } from "@/hooks/use-session";
 
 export function AccountPage() {
-  const { data: session } = useSession();
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({
     queryKey: queryKeys.account(),
@@ -44,7 +42,7 @@ export function AccountPage() {
       <Helmet>
         <title>Account settings</title>
       </Helmet>
-      <SiteHeader session={session ?? null} />
+      <SiteHeader />
       <main className="content-container flex flex-1 flex-col gap-xl py-xxl">
         <header className="flex flex-col gap-xxs">
           <h1 className="font-display text-display-md text-ink">Account settings</h1>

@@ -92,7 +92,10 @@ authRoutes.delete('/session', async (c) => {
   return c.body(null, 204)
 })
 
+// Explicit `?? null`: an unauthenticated request has no `session` var set, and
+// `c.json(undefined)` serializes to an empty body the client can't distinguish
+// from a network failure. `null` is an unambiguous "signed out".
 authRoutes.get('/session', (c) => {
   const session = c.get('session')
-  return c.json(session)
+  return c.json(session ?? null)
 })

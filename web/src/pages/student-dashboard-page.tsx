@@ -53,7 +53,7 @@ export function StudentDashboardPage() {
       <Helmet>
         <title>Your dashboard</title>
       </Helmet>
-      <SiteHeader session={session ?? null} />
+      <SiteHeader />
       {loading ? (
         <DashboardSkeleton />
       ) : (

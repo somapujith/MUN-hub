@@ -25,7 +25,7 @@ export function RequireRole({
         <Helmet>
           <title>Access denied</title>
         </Helmet>
-        <SiteHeader session={session} />
+        <SiteHeader />
         <main className="content-container flex flex-1 flex-col justify-center gap-md py-xxl">
           <p className="text-caption uppercase text-muted-foreground">403</p>
           <h1 className="font-display text-display-md text-ink">Access denied</h1>

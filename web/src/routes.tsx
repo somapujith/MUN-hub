@@ -16,7 +16,9 @@ import { AdminSupportPage } from "@/pages/admin/support-page";
 import { AdminVerificationPage } from "@/pages/admin/verification-page";
 import { ForgotPasswordPage } from "@/pages/forgot-password-page";
 import { HostAwareIndexPage } from "@/pages/host-aware-index-page";
+import { AdminLoginPage } from "@/pages/admin/admin-login-page";
 import { LoginPage } from "@/pages/login-page";
+import { OrganizerLoginPage } from "@/pages/organizer/organizer-login-page";
 import { MunDetailPage } from "@/pages/mun-detail-page";
 import { NotFoundPage } from "@/pages/not-found-page";
 import { OrganizerApplyPage } from "@/pages/organizer/apply-page";
@@ -61,6 +63,11 @@ export const router = createBrowserRouter([
       { path: "muns", element: <MunsPage /> },
       { path: "mun/:slug", element: <MunDetailPage /> },
       { path: "login", element: <LoginPage /> },
+      // Labelled per-role doors. Same POST /auth/session underneath — these
+      // differ only in signposting and post-login destination. /admin/login is
+      // intentionally unlinked from the public nav.
+      { path: "organizer/login", element: <OrganizerLoginPage /> },
+      { path: "admin/login", element: <AdminLoginPage /> },
       { path: "signup", element: <SignupPage /> },
       { path: "forgot-password", element: <ForgotPasswordPage /> },
       { path: "reset-password", element: <ResetPasswordPage /> },
