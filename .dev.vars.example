@@ -1,9 +1,0 @@
-DATABASE_URL="postgresql://mun_hub:mun_hub_dev@localhost:5432/mun_hub"
-MOCK_PAYMENT_WEBHOOK_SECRET="dev-webhook-secret-change-me"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
-AUTH_ADAPTER="mock"
-PAYMENTS_ADAPTER="mock"
-STORAGE_ADAPTER="mock"
-# AES-256-GCM key for lib/crypto/field-encryption.ts — base64-encoded 32
-# bytes. No default/fallback exists — the app throws at startup without it.
-PAYMENT_FIELD_KEY="REPLACE_WITH_BASE64_32_BYTE_KEY"

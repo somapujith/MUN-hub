@@ -138,6 +138,9 @@ export function errorHandler(error: unknown, c: Context<{ Variables: AppVariable
 
   if (mapped.status === 500) {
     console.error(`[${requestId}] unhandled error`, error)
+    if (error instanceof Error && error.cause) {
+      console.error(`[${requestId}] cause:`, error.cause)
+    }
   }
 
   const body: ApiErrorBody = {

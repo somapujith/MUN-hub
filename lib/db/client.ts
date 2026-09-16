@@ -18,7 +18,14 @@ function resolveConnectionString(): string {
 }
 
 function createDb() {
-  const queryClient = globalForDb.queryClient ?? postgres(resolveConnectionString())
+  // prepare: false — required for Cloudflare Hyperdrive: it pools/multiplexes
+  // connections across multiple downstream Postgres connections, which
+  // breaks postgres.js's default server-side prepared statements (a query
+  // prepared on one pooled connection doesn't exist on another). Without
+  // this, queries intermittently fail in production depending on which
+  // pooled connection Hyperdrive happens to hand back — harmless to also
+  // disable for the direct local/Node connection path.
+  const queryClient = globalForDb.queryClient ?? postgres(resolveConnectionString(), { prepare: false })
 
   if (process.env.NODE_ENV !== 'production') {
     globalForDb.queryClient = queryClient

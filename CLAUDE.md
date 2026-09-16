@@ -1,5 +1,3 @@
-@AGENTS.md
-
 # MUN Hub — Project Context
 
 Living context doc. Update this file whenever architecture, scope, or session-split decisions change — future sessions/agents read this first.
