@@ -1,18 +1,15 @@
 import { Helmet } from "react-helmet-async";
 import type { FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { signIn } from "@/api/auth";
+import { queryKeys } from "@/api/query-keys";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { safeRedirectTo } from "@/lib/redirect";
-
-const ERROR_MESSAGES: Record<string, string> = {
-  "missing-email": "Enter an email address to continue.",
-  "not-found":
-    "No account matches that email. This demo only recognises the seeded accounts listed below.",
-};
 
 const DESTINATION_LABELS: { prefix: string; label: string }[] = [
   { prefix: "/organizer/apply", label: "your organizer application" },
@@ -26,37 +23,40 @@ function destinationLabel(redirectTo: string): string | undefined {
   return DESTINATION_LABELS.find((d) => redirectTo.startsWith(d.prefix))?.label;
 }
 
-const DEMO_ACCOUNTS = [
-  { email: "student@munhub.test", role: "Student" },
-  { email: "organizer@munhub.test", role: "Organizer" },
-  { email: "admin@munhub.test", role: "Admin" },
-];
-
 export function LoginPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const redirectTo = safeRedirectTo(searchParams.get("redirectTo") ?? searchParams.get("redirect"));
-  const errorMessage = searchParams.get("error")
-    ? ERROR_MESSAGES[searchParams.get("error")!]
-    : undefined;
   const returningTo = destinationLabel(redirectTo);
+  const signupHref = redirectTo !== "/" ? `/signup?redirectTo=${encodeURIComponent(redirectTo)}` : "/signup";
+
+  const signInMutation = useMutation({
+    mutationFn: signIn,
+    onSuccess: (session) => {
+      // Drop everything cached under whatever (anonymous, or a previous
+      // account's) identity was active before, then seed the session query
+      // directly with the real result so `useSession`/`RequireAuth` see the
+      // signed-in account right away instead of waiting on a refetch.
+      queryClient.clear();
+      queryClient.setQueryData(queryKeys.session(), session);
+      navigate(redirectTo, { replace: true });
+    },
+  });
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const email = String(form.get("email") ?? "").trim().toLowerCase();
-    if (!email) {
-      navigate(`/login?error=missing-email&redirect=${encodeURIComponent(redirectTo)}`);
-      return;
-    }
-    const known = DEMO_ACCOUNTS.some((a) => a.email === email);
-    if (!known) {
-      navigate(`/login?error=not-found&redirect=${encodeURIComponent(redirectTo)}`);
-      return;
-    }
-    // Mock auth — real session lands with API client (step 4)
-    navigate(redirectTo);
+    const password = String(form.get("password") ?? "");
+    signInMutation.mutate({ email, password });
   }
+
+  const errorMessage = signInMutation.isError
+    ? signInMutation.error instanceof Error
+      ? signInMutation.error.message
+      : "Unable to sign in."
+    : undefined;
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
@@ -77,14 +77,12 @@ export function LoginPage() {
               Welcome back
             </h1>
             <p className="text-body-md text-muted-foreground">
-              Enter your email to continue
+              Sign in to continue
               {returningTo ? ` to ${returningTo}` : ""}.
             </p>
           </header>
 
-          <form onSubmit={handleSubmit} className="mt-xl flex flex-col gap-md">
-            <input type="hidden" name="redirectTo" value={redirectTo} />
-
+          <form onSubmit={handleSubmit} className="mt-xl flex flex-col gap-md" noValidate>
             <div className="flex flex-col gap-xs">
               <Label htmlFor="email">Email address</Label>
               <Input
@@ -95,6 +93,28 @@ export function LoginPage() {
                 autoFocus
                 required
                 placeholder="you@school.edu"
+                aria-invalid={errorMessage ? true : undefined}
+                aria-describedby={errorMessage ? "login-error" : undefined}
+              />
+            </div>
+
+            <div className="flex flex-col gap-xs">
+              <div className="flex items-center justify-between gap-sm">
+                <Label htmlFor="password">Password</Label>
+                <Link
+                  to="/forgot-password"
+                  className="text-body-md text-link underline-offset-2 hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                placeholder="Your password"
                 aria-invalid={errorMessage ? true : undefined}
                 aria-describedby={errorMessage ? "login-error" : undefined}
               />
@@ -117,30 +137,17 @@ export function LoginPage() {
               </p>
             ) : null}
 
-            <Button type="submit" className="w-full">
-              Continue
+            <Button type="submit" className="w-full" disabled={signInMutation.isPending}>
+              {signInMutation.isPending ? "Signing in…" : "Sign in"}
             </Button>
           </form>
 
-          <div className="mt-xl border-t border-border pt-lg">
-            <p className="text-caption text-ink">Demo sign-in — no password</p>
-            <p className="mt-xxs text-body-md text-muted-foreground">
-              MUN Hub is running on mock authentication for this preview. Any seeded
-              email signs you straight in; real credentials land before launch.
-            </p>
-
-            <ul className="mt-md flex flex-col gap-xxs">
-              {DEMO_ACCOUNTS.map((account) => (
-                <li
-                  key={account.email}
-                  className="flex items-center justify-between gap-md rounded-sm bg-surface-soft px-sm py-xs"
-                >
-                  <code className="font-mono text-body-md text-ink">{account.email}</code>
-                  <span className="text-body-md text-muted-foreground">{account.role}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <p className="mt-xl border-t border-border pt-lg text-body-md text-muted-foreground">
+            Don&apos;t have an account?{" "}
+            <Link to={signupHref} className="text-link underline underline-offset-2">
+              Create an account
+            </Link>
+          </p>
         </div>
       </main>
 

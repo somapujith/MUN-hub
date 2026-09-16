@@ -16,13 +16,21 @@
 
 Tests: existing Vitest suite must stay green (`.env.test`-isolated per CLAUDE.md's test/dev DB isolation note — do not touch that file). Add unit coverage for: the CORS origin-matcher function, the reserved-slug-word rejection, and `host-routing.ts`'s zone/slug resolution (pure function, easy to unit test with mocked `hostname` strings).
 
-## Phase B — user-executed (outside this session's reach)
+## Phase B — done for `munhub-web`, pending for `munhub-api`
 
-0. **Before deploying `munhub-api`:** set up Cloudflare Hyperdrive (or switch `lib/db/client.ts` to `@neondatabase/serverless`) for Postgres access from a Worker — see spec §8. The Node-only `postgres` package's raw TCP connection is expected not to work as-is inside a Worker.
-1. In the Cloudflare dashboard for the `munhub.in` zone: add the wildcard DNS record (`*` → proxied) if not already present from the Custom Domains flow, since Workers Routes need the record to exist even though the Worker (not the record's target) serves the traffic.
-2. Run `wrangler deploy` for `munhub-web` and `munhub-api` (commands added in Phase A step 7) — needs a Cloudflare API token pasted directly into whichever session runs the deploy (per CLAUDE.md: never relay secrets between sessions).
-3. Set `COOKIE_DOMAIN=.munhub.in` and production `CORS_ORIGINS`/`DATABASE_URL`/etc. as Workers secrets for `munhub-api` (`wrangler secret put ...`), and confirm `NODE_ENV=production` is set so `secure` cookies and the boot guard (`server/lib/boot-guard.ts`'s `assertProductionAuthConfigured`) both engage correctly in prod.
-4. Smoke-test each host post-deploy (see Verification below).
+Completed 2026-09-17, with a Cloudflare API token pasted directly into this session (per CLAUDE.md: never relay secrets between sessions):
+
+1. ~~Add `munhub.in` as a Cloudflare zone~~ — **done.** Was on BigRock nameservers; switched to `marty.ns.cloudflare.com`/`sima.ns.cloudflare.com`, zone active, all SSL certs (per-Custom-Domain + Universal `*.munhub.in`) issued.
+2. ~~Deploy `munhub-web`~~ — **done.** `app.`/`organize.`/`admin.munhub.in` live as Custom Domains, `*.munhub.in/*` live as a Workers Route.
+3. ~~Wildcard DNS record~~ — **done, and this was the one surprise:** a Workers Route does NOT auto-create its DNS record the way a Custom Domain does. Had to manually add a proxied `AAAA * 100::` record before `<slug>.munhub.in` would resolve at all — recorded in the spec (§3) so the next person doesn't hit the same dead end.
+4. Verified live: `app.munhub.in`, `organize.munhub.in`, `admin.munhub.in`, and a wildcard slug (`oxford.munhub.in`) all return HTTP 200 serving the SPA shell over HTTPS. `munhub.in`/`www.munhub.in` DNS untouched, still on Vercel.
+
+**`munhub-api`: also done, 2026-09-17.**
+
+1. ~~Hyperdrive~~ — **done**, a peer session already ran `wrangler hyperdrive create munhub-db` against the real Neon instance and filled the id into `server/wrangler.jsonc` before this session got to it.
+2. ~~Secrets~~ — **done.** `PAYMENT_FIELD_KEY` and `MOCK_PAYMENT_WEBHOOK_SECRET` set via `wrangler secret put` (values sourced from `server/.dev.vars`, gitignored). `COOKIE_DOMAIN`/`CORS_ORIGINS` are plain `vars` in `server/wrangler.jsonc` (not secret). `DATABASE_URL` is NOT set as a Workers secret — Hyperdrive's binding supplies the connection string per-request; `DATABASE_URL` only matters for local Node dev.
+3. **One real bug found and fixed during this deploy:** `lib/crypto/field-encryption.ts` loaded its encryption key eagerly at module top-level (`const encryptionKey = loadKey()`, by original deliberate design — "fail immediately on boot"). On Cloudflare Workers, module-scope code runs at cold start before any request/`env`/secret exists, so this always saw the key as unset and failed Wrangler's deploy-time validation (error 10021) even with the secret correctly uploaded. Fixed by making it a lazy, memoized singleton (`getEncryptionKey()`) — same fail-loud-once behavior, just deferred to first actual use instead of import time, mirroring the exact pattern `lib/db/client.ts`'s Hyperdrive bridge already used for the same class of problem. Tests + `tsc --noEmit` still clean after the change. **If any other `lib/` module reads `process.env.X` at pure module-top-level with no lazy wrapper, it will hit this same failure the moment it's imported into `/server`'s dependency graph** — this file was the only real offender found by grepping for the pattern, but worth remembering if a future deploy throws the same error 10021 shape.
+4. Deployed and verified: `api.munhub.in` returns real seeded MUN data from Neon via Hyperdrive (`GET /api/v1/muns` → 200 with live rows). **Correction (found by a peer session, not just propagation lag as first assumed):** `api.munhub.in`'s Custom Domain was genuinely being shadowed by `munhub-web`'s `*.munhub.in/*` wildcard Workers Route — Custom Domains do not unconditionally win over a zone-level wildcard Route for the same hostname. Fixed by adding an explicit `api.munhub.in/*` → `munhub-api` Workers Route (more specific than the wildcard, so it wins) alongside the Custom Domain. Both now show correctly in the zone's Workers Routes list. If a future subdomain needs its own Custom Domain, add the matching explicit Route too, or it may intermittently or permanently get served by the wildcard's Worker instead.
 
 ## Verification
 

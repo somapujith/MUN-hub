@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { RegistrationCard } from "@/components/dashboard/registration-card";
 import { DashboardEmptyState } from "@/components/dashboard/dashboard-empty-state";
 import { queryKeys } from "@/api/query-keys";
-import { fetchPastRegistrations, fetchUpcomingRegistrations } from "@/mocks/registrations";
+import { fetchPastRegistrations, fetchUpcomingRegistrations } from "@/api/student-dashboard";
 import { fetchMockUserProfile } from "@/mocks/session";
 import { useSession } from "@/hooks/use-session";
 

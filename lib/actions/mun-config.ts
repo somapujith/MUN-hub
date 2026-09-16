@@ -352,6 +352,22 @@ export interface UpdateMunDetailsInput {
   country?: string | null
 }
 
+/**
+ * Full mun row for the organizer's own setup/edit form (or admin). Unlike
+ * `getMunBySlug` (lib/actions/marketplace.ts), this is deliberately NOT
+ * filtered by publication status — an organizer must be able to see/edit
+ * their own mun's details while it's still in any pre-publication lifecycle
+ * state (DRAFT, ONBOARDING, CONTENT_SUBMITTED, etc), which is exactly when
+ * this form is used most. Owning organizer or admin only, same gate as
+ * `updateMunDetails` below.
+ */
+export async function getMunDetails(munId: string, session: Session | null): Promise<Mun> {
+  await assertOwnsOrAdmin(munId, session)
+  const [mun] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
+  if (!mun) throw new Error('Mun not found')
+  return mun
+}
+
 /** Updates the mun's own editable fields. Organizer-only (or admin) — never touches status. */
 export async function updateMunDetails(
   munId: string,

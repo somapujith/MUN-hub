@@ -11,8 +11,8 @@ import { ReservationCountdown } from "@/components/registration/reservation-coun
 import { hasPassed } from "@/components/registration/deadline";
 import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
+import { completeMockPayment, fetchRegistrationById } from "@/api/registration";
 import { getMockMunBySlug } from "@/mocks/data";
-import { fetchRegistrationById, mockCompletePayment } from "@/mocks/registrations";
 import { useSession } from "@/hooks/use-session";
 import { NotFoundPage } from "@/pages/not-found-page";
 
@@ -59,10 +59,18 @@ export function RegisterPayPage() {
 
   async function handlePay(outcome: "success" | "failure") {
     setPaying(true);
-    await mockCompletePayment(registrationId!, outcome);
-    await queryClient.invalidateQueries({ queryKey: queryKeys.registration(registrationId!) });
-    await queryClient.invalidateQueries({ queryKey: queryKeys.dashboardUpcoming() });
-    navigate(`/register/${slug}/confirmation?registrationId=${encodeURIComponent(registrationId!)}`);
+    try {
+      await completeMockPayment(registrationId!, outcome);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.registration(registrationId!) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboardUpcoming() });
+      navigate(`/register/${slug}/confirmation?registrationId=${encodeURIComponent(registrationId!)}`);
+    } catch {
+      setPaying(false);
+      navigate(
+        `/register/${slug}/pay?registrationId=${encodeURIComponent(registrationId!)}&error=webhook`,
+        { replace: true },
+      );
+    }
   }
 
   return (

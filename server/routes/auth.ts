@@ -1,8 +1,9 @@
 import { Hono, type Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
-import { signIn, signOut, signUp } from '@/lib/actions/auth'
+import { changePassword, signIn, signOut, signUp } from '@/lib/actions/auth'
 import { SESSION_COOKIE_NAME } from '@/lib/auth/session'
+import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
@@ -24,6 +25,13 @@ const signUpBodySchema = z
     name: z.string().trim().min(1),
     email: z.string().trim().min(1).email(),
     password: z.string().min(8),
+  })
+  .strict()
+
+const changePasswordBodySchema = z
+  .object({
+    currentPassword: z.string().min(1),
+    newPassword: z.string().min(8),
   })
   .strict()
 
@@ -57,6 +65,17 @@ authRoutes.post('/users', async (c) => {
   setSessionCookie(c, token, expiresAt)
 
   return c.json({ userId, role }, 201)
+})
+
+// Session-gated "change password while logged in" — see lib/actions/auth.ts's
+// changePassword for how this differs from the signed-out reset flow in
+// server/routes/password-reset.ts (which invalidates other sessions; this
+// does not).
+authRoutes.post('/session/password', requireAuth, async (c) => {
+  const body = changePasswordBodySchema.parse(await c.req.json())
+  await changePassword(body.currentPassword, body.newPassword, c.get('session')!)
+
+  return c.body(null, 204)
 })
 
 authRoutes.delete('/session', async (c) => {

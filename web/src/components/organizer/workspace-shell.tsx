@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { WorkspaceSidebar } from "@/components/organizer/workspace-sidebar";
 import { WorkspaceTopbar } from "@/components/organizer/workspace-topbar";
+import { SupportWidget } from "@/components/support/support-widget";
 import type { WorkspaceMun } from "@/types/organizer";
 import type { Role } from "@/types/enums";
 
@@ -21,6 +22,7 @@ export function WorkspaceShell({ muns, currentMun, role, children }: WorkspaceSh
         <WorkspaceTopbar muns={muns} currentMun={currentMun} role={role} />
         <main className="flex flex-1 flex-col">{children}</main>
       </div>
+      <SupportWidget />
     </div>
   );
 }

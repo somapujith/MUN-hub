@@ -13,7 +13,8 @@ import { hasPassed } from "@/components/registration/deadline";
 import type { ProductWithAvailability } from "@/components/registration/types";
 import { formatDateRange } from "@/components/shared/date-range";
 import { queryKeys } from "@/api/query-keys";
-import { getMockMunBySlug, getMockProductsAvailability } from "@/mocks/data";
+import { getProductsAvailability } from "@/api/registration";
+import { getMockMunBySlug } from "@/mocks/data";
 import { fetchMockUserProfile } from "@/mocks/session";
 import { useSession } from "@/hooks/use-session";
 import { NotFoundPage } from "@/pages/not-found-page";
@@ -80,6 +81,13 @@ export function RegisterPage() {
     enabled: Boolean(session?.userId),
   });
 
+  const productIds = mun.registrationProducts.map((product) => product.id);
+  const availabilityQuery = useQuery({
+    queryKey: queryKeys.productAvailability(productIds),
+    queryFn: () => getProductsAvailability(productIds),
+    enabled: mun.status === "REGISTRATION_OPEN" && productIds.length > 0,
+  });
+
   const dateRange = formatDateRange(mun.startDate, mun.endDate);
   const location = [mun.city, mun.country].filter(Boolean).join(", ");
 
@@ -109,20 +117,7 @@ export function RegisterPage() {
     );
   }
 
-  const availabilityByProduct = getMockProductsAvailability(
-    mun.registrationProducts.map((product) => product.id),
-  );
-  const availability: ProductWithAvailability[] = mun.registrationProducts.map((product) => ({
-    product,
-    ...(availabilityByProduct.get(product.id) ?? {
-      capacity: product.capacity,
-      taken: 0,
-      available: product.capacity,
-    }),
-    deadlinePassed: product.deadline ? hasPassed(product.deadline) : false,
-  }));
-
-  if (availability.length === 0) {
+  if (productIds.length === 0) {
     return (
       <>
         <Helmet>
@@ -140,6 +135,49 @@ export function RegisterPage() {
       </>
     );
   }
+
+  if (availabilityQuery.isPending) {
+    return (
+      <>
+        <Helmet>
+          <title>Register — {mun.name}</title>
+        </Helmet>
+        <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
+          <div aria-busy="true" className="py-xxl" />
+        </RegistrationShell>
+      </>
+    );
+  }
+
+  if (availabilityQuery.isError) {
+    return (
+      <>
+        <Helmet>
+          <title>Register — {mun.name}</title>
+        </Helmet>
+        <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
+          <RegistrationNotice
+            tone="error"
+            title="Couldn't load seat availability"
+            message="Something went wrong loading registration options. Try again."
+          >
+            <Button render={<Link to={`/mun/${slug}`} />}>View conference</Button>
+          </RegistrationNotice>
+        </RegistrationShell>
+      </>
+    );
+  }
+
+  const availabilityByProduct = availabilityQuery.data ?? new Map();
+  const availability: ProductWithAvailability[] = mun.registrationProducts.map((product) => ({
+    product,
+    ...(availabilityByProduct.get(product.id) ?? {
+      capacity: product.capacity,
+      taken: 0,
+      available: product.capacity,
+    }),
+    deadlinePassed: product.deadline ? hasPassed(product.deadline) : false,
+  }));
 
   const anySeatsLeft = availability.some((entry) => entry.available > 0);
   if (!anySeatsLeft) {
@@ -183,6 +221,7 @@ export function RegisterPage() {
       <RegistrationShell munName={mun.name} dateRange={dateRange} location={location}>
         <RegistrationFormMock
           slug={slug}
+          munId={mun.id}
           munName={mun.name}
           products={availability}
           committees={mun.committees}

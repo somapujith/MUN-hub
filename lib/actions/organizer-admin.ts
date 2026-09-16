@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, ilike, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { users } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
@@ -10,12 +10,18 @@ const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
 
 export type OrganizerRow = Pick<
   User,
-  'id' | 'name' | 'email' | 'suspended' | 'suspendedReason' | 'suspendedAt'
+  'id' | 'name' | 'email' | 'institution' | 'suspended' | 'suspendedReason' | 'suspendedAt' | 'createdAt'
 >
 
 export interface ListOrganizersParams {
   limit?: number
   offset?: number
+  // Case-insensitive substring match against name OR email. Added
+  // 2026-09-17 — this was previously a documented gap (see
+  // organizer-admin.test.ts's `listOrganizers` describe block); the admin
+  // organizer directory page needs it to be usable once seed/real data
+  // volume grows past a single page.
+  search?: string
 }
 
 export interface ListOrganizersResult {
@@ -41,16 +47,24 @@ export async function listOrganizers(
 
   const limit = params.limit ?? 20
   const offset = params.offset ?? 0
-  const whereClause = eq(users.role, 'ORGANIZER')
+  const trimmedSearch = params.search?.trim()
+  const whereClause = trimmedSearch
+    ? and(
+        eq(users.role, 'ORGANIZER'),
+        or(ilike(users.name, `%${trimmedSearch}%`), ilike(users.email, `%${trimmedSearch}%`)),
+      )
+    : eq(users.role, 'ORGANIZER')
 
   const results = await db
     .select({
       id: users.id,
       name: users.name,
       email: users.email,
+      institution: users.institution,
       suspended: users.suspended,
       suspendedReason: users.suspendedReason,
       suspendedAt: users.suspendedAt,
+      createdAt: users.createdAt,
     })
     .from(users)
     .where(whereClause)

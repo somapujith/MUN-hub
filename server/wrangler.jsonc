@@ -14,6 +14,17 @@
     "COOKIE_DOMAIN": ".munhub.in",
     "CORS_ORIGINS": "http://localhost:5173,http://localhost:5174,http://localhost:3000"
   },
+  // Hyperdrive config "munhub-db", created 2026-09-17 against the production
+  // Neon instance. Pools/terminates Postgres connections at Cloudflare's edge
+  // so Worker isolates don't each hold their own Neon connection.
+  // Local Node dev (server/src/index.ts, `npm run dev`) does not use this at
+  // all and is unaffected — see lib/db/client.ts's connection-string resolver.
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "d3d1e91bf3474e2988f7524362979a8e"
+    }
+  ],
   "observability": {
     "enabled": true
   }

@@ -1,13 +1,15 @@
 import { Helmet } from "react-helmet-async";
 import { Link, useSearchParams } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
-import { MunCardGrid } from "@/components/mun/mun-card-grid";
+import { MunCardGrid, MunCardGridSkeleton } from "@/components/mun/mun-card-grid";
 import { SearchBar } from "@/components/marketplace/search-bar";
 import { FilterSidebar } from "@/components/marketplace/filter-sidebar";
 import { Button } from "@/components/ui/button";
-import { getMarketplaceFacets, searchMockMuns } from "@/mocks/data";
+import { getMarketplaceFacets, searchMuns, type MunSearchParams } from "@/api/marketplace";
+import { queryKeys } from "@/api/query-keys";
 
 const PAGE_SIZE = 24;
 
@@ -33,16 +35,27 @@ export function MunsPage() {
       ? params.sortBy
       : undefined;
 
-  const { results, total } = searchMockMuns({
+  const searchQueryParams: MunSearchParams = {
     query: params.q || undefined,
     city: params.city || undefined,
     country: params.country || undefined,
     sortBy,
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
+  };
+
+  const munsQuery = useQuery({
+    queryKey: queryKeys.muns(searchQueryParams),
+    queryFn: () => searchMuns(searchQueryParams),
+  });
+  const facetsQuery = useQuery({
+    queryKey: queryKeys.marketplaceFacets(),
+    queryFn: getMarketplaceFacets,
   });
 
-  const facets = getMarketplaceFacets();
+  const results = munsQuery.data?.results ?? [];
+  const total = munsQuery.data?.total ?? 0;
+  const facets = facetsQuery.data ?? { cities: [], countries: [] };
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(page * PAGE_SIZE, total);
@@ -116,14 +129,24 @@ export function MunsPage() {
             </div>
 
             <div className="pt-lg">
-              <MunCardGrid
-                muns={results}
-                emptyMessage={
-                  params.q
-                    ? `Nothing matched "${params.q}". Try a shorter phrase, or clear your location filters.`
-                    : undefined
-                }
-              />
+              {munsQuery.isLoading ? (
+                <MunCardGridSkeleton />
+              ) : munsQuery.isError ? (
+                <p className="text-body-md text-destructive">
+                  {munsQuery.error instanceof Error
+                    ? munsQuery.error.message
+                    : "Unable to load conferences right now."}
+                </p>
+              ) : (
+                <MunCardGrid
+                  muns={results}
+                  emptyMessage={
+                    params.q
+                      ? `Nothing matched "${params.q}". Try a shorter phrase, or clear your location filters.`
+                      : undefined
+                  }
+                />
+              )}
             </div>
 
             {totalPages > 1 && (

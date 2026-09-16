@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
 import { muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
-import { getMunOverview, getDelegateList } from './organizer-dashboard'
+import { getMunOverview, getDelegateList, getOrganizerWorkspaceOverview } from './organizer-dashboard'
 
 function sess(user: { id: string; role: Session['role'] }): Session {
   return { userId: user.id, role: user.role }
@@ -202,6 +202,85 @@ describe('organizer dashboard queries', () => {
     await expect(
       getDelegateList('00000000-0000-0000-0000-000000000000', undefined, sess(organizer)),
     ).rejects.toThrow('Mun not found')
+  })
+
+  it('aggregates workspace totals and per-mun summaries across every owned mun', async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'WorkspaceOrg', email: `wsorg-${suffix}@test.com`, role: 'ORGANIZER' })
+      .returning()
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'WorkspaceStudent', email: `wsstu-${suffix}@test.com`, role: 'STUDENT' })
+      .returning()
+
+    const [munA] = await db
+      .insert(muns)
+      .values({ organizerId: organizer.id, name: 'Workspace Mun A', slug: `ws-mun-a-${suffix}` })
+      .returning()
+    const [munB] = await db
+      .insert(muns)
+      .values({ organizerId: organizer.id, name: 'Workspace Mun B', slug: `ws-mun-b-${suffix}` })
+      .returning()
+
+    const [productA] = await db
+      .insert(registrationProducts)
+      .values({ munId: munA.id, name: 'Delegate', price: 1000, capacity: 5, status: 'active' })
+      .returning()
+    // Inactive product's capacity must not count toward the mun's total.
+    await db
+      .insert(registrationProducts)
+      .values({ munId: munA.id, name: 'Retired pass', price: 1000, capacity: 100, status: 'inactive' })
+    const [productB] = await db
+      .insert(registrationProducts)
+      .values({ munId: munB.id, name: 'Delegate', price: 1000, capacity: 3, status: 'active' })
+      .returning()
+
+    await db
+      .insert(registrations)
+      .values({ userId: student.id, munId: munA.id, registrationProductId: productA.id, status: 'CONFIRMED' })
+    await db
+      .insert(registrations)
+      .values({ userId: student.id, munId: munA.id, registrationProductId: productA.id, status: 'PAYMENT_PENDING' })
+    await db
+      .insert(registrations)
+      .values({ userId: student.id, munId: munB.id, registrationProductId: productB.id, status: 'CANCELLED' })
+
+    const overview = await getOrganizerWorkspaceOverview(sess(organizer))
+
+    expect(overview.muns.map((mun) => mun.id).sort()).toEqual([munA.id, munB.id].sort())
+    const summaryA = overview.muns.find((mun) => mun.id === munA.id)!
+    expect(summaryA.confirmedCount).toBe(1)
+    expect(summaryA.registrationCount).toBe(2) // CONFIRMED + PAYMENT_PENDING
+    expect(summaryA.capacity).toBe(5) // inactive product excluded
+    const summaryB = overview.muns.find((mun) => mun.id === munB.id)!
+    expect(summaryB.confirmedCount).toBe(0) // CANCELLED doesn't count
+    expect(summaryB.registrationCount).toBe(0)
+    expect(summaryB.capacity).toBe(3)
+
+    expect(overview.totals).toEqual({
+      registrations: 2,
+      confirmed: 1,
+      pending: 1,
+      capacity: 8,
+      availableSeats: 7,
+    })
+  })
+
+  it('returns an empty overview for an organizer who owns no muns', async () => {
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'NoMunsOrg', email: `no-muns-${Date.now()}@test.com`, role: 'ORGANIZER' })
+      .returning()
+
+    const overview = await getOrganizerWorkspaceOverview(sess(organizer))
+    expect(overview.muns).toEqual([])
+    expect(overview.totals).toEqual({ registrations: 0, confirmed: 0, pending: 0, capacity: 0, availableSeats: 0 })
+  })
+
+  it('rejects an unauthenticated caller for the workspace overview', async () => {
+    await expect(getOrganizerWorkspaceOverview(null)).rejects.toThrow('Forbidden')
   })
 
   afterAll(async () => {

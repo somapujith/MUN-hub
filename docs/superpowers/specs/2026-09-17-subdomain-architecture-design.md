@@ -1,7 +1,7 @@
 # Subdomain Architecture — Design
 
 **Date:** 2026-09-17
-**Status:** Approved for implementation (Phase A below), pending user DNS/Cloudflare actions for Phase B
+**Status:** Fully live. `munhub.in` onboarded to Cloudflare (was BigRock nameservers, now `marty`/`sima.ns.cloudflare.com`). `munhub-web` deployed with `app.`/`organize.`/`admin.munhub.in` as Custom Domains and `*.munhub.in/*` as a Workers Route (backed by a manually-added wildcard DNS record — see §3) — all verified serving the SPA over HTTPS. `munhub-api` deployed with `api.munhub.in` as a Custom Domain, backed by Cloudflare Hyperdrive for Neon access — verified returning real seeded data (`GET /api/v1/muns`). `munhub.in`/`www.munhub.in` DNS untouched, still on Vercel. See the plan doc for the one real bug this deploy surfaced (an eager module-load pattern in `lib/crypto/field-encryption.ts` incompatible with Workers, now fixed).
 **Supersedes:** CLAUDE.md's prior "Routing: path-based `/mun/[slug]` — wildcard subdomains deferred" note, and PRD Section 15 / `MUNHub_Ultra_Fast_Performance_PRD.md` Section 16 ("deferred") status.
 
 ## 1. Context
@@ -41,7 +41,7 @@ Two Workers, matching the existing `/web` vs `/server` split:
 
 - **`munhub-web`** (from `/web`, static assets via Workers Static Assets, `not_found_handling: "single-page-application"` for client-side-router fallback):
   - Custom Domains (now): `app.munhub.in`, `organize.munhub.in`, `admin.munhub.in`. **Not** `munhub.in`/`www.munhub.in` yet — those stay pointed at the existing Vercel deployment until the Phase 7 cutover (see §2).
-  - Wildcard Route: `*.munhub.in/*` — catches every other subdomain (per-MUN slugs). Only matches `label.munhub.in` patterns, never bare `munhub.in`, so it cannot intercept the still-live Vercel apex/www.
+  - Wildcard Route: `*.munhub.in/*` — catches every other subdomain (per-MUN slugs). Only matches `label.munhub.in` patterns, never bare `munhub.in`, so it cannot intercept the still-live Vercel apex/www. **Important, learned during deploy:** unlike Custom Domains, a Workers Route does NOT create its own DNS record — a `*.munhub.in` DNS record (any proxied placeholder, e.g. `AAAA * 100::`) must exist in the zone first, or the wildcard hostnames simply won't resolve at all.
   - The `www` → apex redirect (and the apex Custom Domain itself) is deferred to the Phase 7 cutover along with the rest of the Vercel→Cloudflare move — not part of this rollout.
 - **`munhub-api`** (from `/server`, new Workers fetch handler — see §4):
   - Custom Domain: `api.munhub.in`.
@@ -81,6 +81,10 @@ deleteCookie(c, SESSION_COOKIE_NAME, { path: '/', domain: COOKIE_DOMAIN })
 ```
 
 `.munhub.in` (leading dot, or the modern no-dot form — both work the same in current browsers) makes the cookie valid for `munhub.in` and every subdomain. `SameSite=Lax` is unaffected — all these hosts share the same registrable domain (`munhub.in`), so cross-subdomain requests are still same-site, not cross-site; no CSRF posture change.
+
+## 5b. CSRF origin allowlist fix (found post-deploy by a peer session)
+
+`server/middleware/csrf.ts`'s `ALLOWED_ORIGINS` was a hardcoded localhost-only set, independent of `app.ts`'s CORS matcher — meaning every mutating request (`POST`/`PUT`/`PATCH`/`DELETE`, including login itself) from the real deployed SPA got a 403 CSRF rejection, since `Origin: https://munhub.in` was never in that set. Fixed with the same `MUNHUB_ORIGIN_PATTERN` regex `app.ts`'s CORS matcher uses (duplicated rather than imported, to avoid an `app.ts` ↔ `csrf.ts` import cycle). Verified in production: `POST /api/v1/auth/session` with `Origin: https://munhub.in` returns 200 + session cookie.
 
 ## 6. CORS fix
 

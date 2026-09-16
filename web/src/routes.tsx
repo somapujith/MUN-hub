@@ -14,12 +14,14 @@ import { AdminRegistrationsPage } from "@/pages/admin/registrations-page";
 import { AdminReviewPage } from "@/pages/admin/review-page";
 import { AdminSupportPage } from "@/pages/admin/support-page";
 import { AdminVerificationPage } from "@/pages/admin/verification-page";
+import { ForgotPasswordPage } from "@/pages/forgot-password-page";
 import { HostAwareIndexPage } from "@/pages/host-aware-index-page";
 import { LoginPage } from "@/pages/login-page";
 import { MunDetailPage } from "@/pages/mun-detail-page";
 import { NotFoundPage } from "@/pages/not-found-page";
 import { OrganizerApplyPage } from "@/pages/organizer/apply-page";
 import { OrganizerApplySubmittedPage } from "@/pages/organizer/apply-submitted-page";
+import { OrganizerSupportPage } from "@/pages/organizer/support-page";
 import { MunIndexRedirect } from "@/pages/organizer/dashboard/mun-index-redirect";
 import { OrganizerMunsPage } from "@/pages/organizer/dashboard/muns-page";
 import { OrganizerOverviewPage } from "@/pages/organizer/dashboard/overview-page";
@@ -40,11 +42,15 @@ import { OrganizerSettingsPage } from "@/pages/organizer/dashboard/sections/sett
 import { OrganizerSetupPage } from "@/pages/organizer/dashboard/sections/setup-page";
 import { OrganizerTeamPage } from "@/pages/organizer/dashboard/sections/team-page";
 import { MunsPage } from "@/pages/muns-page";
+import { ProfilePage } from "@/pages/profile-page";
 import { RequireAuth } from "@/guards/require-auth";
 import { RegisterConfirmationPage } from "@/pages/register/register-confirmation-page";
 import { RegisterPage } from "@/pages/register/register-page";
 import { RegisterPayPage } from "@/pages/register/register-pay-page";
+import { ResetPasswordPage } from "@/pages/reset-password-page";
+import { SignupPage } from "@/pages/signup-page";
 import { StudentDashboardPage } from "@/pages/student-dashboard-page";
+import { StudentSupportPage } from "@/pages/student-support-page";
 import { SupportNewPage } from "@/pages/support-new-page";
 
 export const router = createBrowserRouter([
@@ -55,11 +61,30 @@ export const router = createBrowserRouter([
       { path: "muns", element: <MunsPage /> },
       { path: "mun/:slug", element: <MunDetailPage /> },
       { path: "login", element: <LoginPage /> },
+      { path: "signup", element: <SignupPage /> },
+      { path: "forgot-password", element: <ForgotPasswordPage /> },
+      { path: "reset-password", element: <ResetPasswordPage /> },
+      {
+        path: "profile",
+        element: (
+          <RequireAuth>
+            <ProfilePage />
+          </RequireAuth>
+        ),
+      },
       {
         path: "dashboard",
         element: (
           <RequireAuth>
             <StudentDashboardPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: "dashboard/support",
+        element: (
+          <RequireAuth>
+            <StudentSupportPage />
           </RequireAuth>
         ),
       },
@@ -85,6 +110,7 @@ export const router = createBrowserRouter([
         path: "organizer/apply/submitted",
         element: <OrganizerApplySubmittedPage />,
       },
+      { path: "organizer/support", element: <OrganizerSupportPage /> },
       {
         path: "organizer/dashboard",
         children: [

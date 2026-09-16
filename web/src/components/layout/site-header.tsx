@@ -5,6 +5,7 @@ import { SiteHeaderMobileNav } from "@/components/layout/site-header-mobile-nav"
 import { SiteHeaderSearch } from "@/components/layout/site-header-search";
 import { SiteHeaderUserMenu } from "@/components/layout/site-header-user-menu";
 import { CitySelector } from "@/components/marketplace/city-selector";
+import { SupportWidget } from "@/components/support/support-widget";
 import type { Role } from "@/types";
 
 /**
@@ -86,97 +87,100 @@ export function SiteHeader({
   const showCityPicker = Boolean(cities && cities.length > 0);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background">
-      <div className="content-container flex h-16 items-center gap-sm lg:gap-md">
-        <Link
-          to="/"
-          className="-mx-2 flex shrink-0 items-center gap-2 rounded-sm px-2 py-1 text-label-md font-medium tracking-[-0.01em] text-ink transition-colors duration-150 hover:text-body focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
-        >
-          {/* Wordmark: the only place the coral signature color is allowed at
-              small scale — as a 8px dot, not a surface. */}
-          <span
-            aria-hidden
-            className="size-2 rounded-full bg-signature-coral"
-          />
-          <span className="font-display">MUN Hub</span>
-        </Link>
-
-        {showCityPicker && (
-          <CitySelector
-            cities={cities!}
-            selected={selectedCity}
-            variant="compact"
-            className="hidden md:inline-flex"
-          />
-        )}
-
-        {/* Search takes the slack in the middle. `min-w-0` on the flex child is
-            what stops the input's intrinsic width from shoving the right
-            cluster off the bar at 768px. */}
-        <SiteHeaderSearch
-          city={selectedCity || undefined}
-          className="min-w-0 flex-1 sm:max-w-[220px] lg:max-w-[260px]"
-        />
-
-        {/* `whitespace-nowrap` matters: at exactly 768px the nav is tight and
-            "For organizers" otherwise wraps to two lines inside the 64px bar.
-            The link row is the first thing to go when the city picker is
-            present — two browse controls plus three links don't fit until xl. */}
-        <nav
-          aria-label="Primary"
-          className={
-            showCityPicker
-              ? "hidden items-center gap-md xl:flex"
-              : "hidden items-center gap-md md:flex lg:gap-lg"
-          }
-        >
-          {NAV_LINKS.map((link) => (
-            <Link
-              key={link.href}
-              to={link.href}
-              className="rounded-sm whitespace-nowrap text-body-md text-body transition-colors duration-150 hover:text-ink focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background focus-visible:outline-none"
-            >
-              {link.label}
-            </Link>
-          ))}
-        </nav>
-
-        <div className="ml-auto flex shrink-0 items-center gap-xs">
-          <ThemeToggle />
-
-          {session ? (
-            <SiteHeaderUserMenu
-              role={session.role}
-              dashboardHref={DASHBOARD_HREF[session.role]}
-            />
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="hidden lg:inline-flex"
-              render={<Link to="/login" />}
-            >
-              Sign in
-            </Button>
-          )}
-
-          <Button
-            size="sm"
-            className="hidden h-9 lg:inline-flex"
-            render={<Link to="/organizer/apply" />}
+    <>
+      <header className="sticky top-0 z-40 border-b border-border bg-background">
+        <div className="content-container flex h-16 items-center gap-sm lg:gap-md">
+          <Link
+            to="/"
+            className="-mx-2 flex shrink-0 items-center gap-2 rounded-sm px-2 py-1 text-label-md font-medium tracking-[-0.01em] text-ink transition-colors duration-150 hover:text-body focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
           >
-            List your MUN
-          </Button>
-
-          <SiteHeaderMobileNav
-            links={NAV_LINKS.map((l) => ({ ...l }))}
-            isSignedIn={Boolean(session)}
-            dashboardHref={session ? DASHBOARD_HREF[session.role] : null}
-            cities={showCityPicker ? cities : undefined}
-            selectedCity={selectedCity}
+            {/* Wordmark: the only place the coral signature color is allowed at
+                small scale — as a 8px dot, not a surface. */}
+            <span
+              aria-hidden
+              className="size-2 rounded-full bg-signature-coral"
+            />
+            <span className="font-display">MUN Hub</span>
+          </Link>
+  
+          {showCityPicker && (
+            <CitySelector
+              cities={cities!}
+              selected={selectedCity}
+              variant="compact"
+              className="hidden md:inline-flex"
+            />
+          )}
+  
+          {/* Search takes the slack in the middle. `min-w-0` on the flex child is
+              what stops the input's intrinsic width from shoving the right
+              cluster off the bar at 768px. */}
+          <SiteHeaderSearch
+            city={selectedCity || undefined}
+            className="min-w-0 flex-1 sm:max-w-[220px] lg:max-w-[260px]"
           />
+  
+          {/* `whitespace-nowrap` matters: at exactly 768px the nav is tight and
+              "For organizers" otherwise wraps to two lines inside the 64px bar.
+              The link row is the first thing to go when the city picker is
+              present — two browse controls plus three links don't fit until xl. */}
+          <nav
+            aria-label="Primary"
+            className={
+              showCityPicker
+                ? "hidden items-center gap-md xl:flex"
+                : "hidden items-center gap-md md:flex lg:gap-lg"
+            }
+          >
+            {NAV_LINKS.map((link) => (
+              <Link
+                key={link.href}
+                to={link.href}
+                className="rounded-sm whitespace-nowrap text-body-md text-body transition-colors duration-150 hover:text-ink focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background focus-visible:outline-none"
+              >
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+  
+          <div className="ml-auto flex shrink-0 items-center gap-xs">
+            <ThemeToggle />
+  
+            {session ? (
+              <SiteHeaderUserMenu
+                role={session.role}
+                dashboardHref={DASHBOARD_HREF[session.role]}
+              />
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="hidden lg:inline-flex"
+                render={<Link to="/login" />}
+              >
+                Sign in
+              </Button>
+            )}
+  
+            <Button
+              size="sm"
+              className="hidden h-9 lg:inline-flex"
+              render={<Link to="/organizer/apply" />}
+            >
+              List your MUN
+            </Button>
+  
+            <SiteHeaderMobileNav
+              links={NAV_LINKS.map((l) => ({ ...l }))}
+              isSignedIn={Boolean(session)}
+              dashboardHref={session ? DASHBOARD_HREF[session.role] : null}
+              cities={showCityPicker ? cities : undefined}
+              selectedCity={selectedCity}
+            />
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
+      <SupportWidget />
+    </>
   );
 }

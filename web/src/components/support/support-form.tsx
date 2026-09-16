@@ -1,8 +1,10 @@
 import * as React from "react";
 import { useNavigate } from "react-router";
+import { useMutation } from "@tanstack/react-query";
 import { cn } from "cn";
 import { toast } from "sonner";
 import { CheckCircle2Icon, Loader2Icon, SendIcon } from "lucide-react";
+import { createSupportTicket } from "@/api/support";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,25 +32,29 @@ const textareaClassName = cn(
   "placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25",
 );
 
-/** Mock support intake — Phase 4. Task 3.7 wires useMutation → POST /api/v1/support. */
 export function SupportForm() {
   const [category, setCategory] = React.useState<SupportCategory>("TECHNICAL");
   const [subject, setSubject] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [submitted, setSubmitted] = React.useState(false);
-  const [pending, setPending] = React.useState(false);
   const navigate = useNavigate();
 
+  const submitMutation = useMutation({
+    mutationFn: () => createSupportTicket({ category, subject: subject.trim(), description: description.trim() }),
+    onSuccess: () => {
+      setSubmitted(true);
+      toast.success("Ticket submitted");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to submit ticket"),
+  });
+
+  const pending = submitMutation.isPending;
   const canSubmit = subject.trim().length > 0 && description.trim().length > 0;
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canSubmit) return;
-    setPending(true);
-    await new Promise((r) => setTimeout(r, 400));
-    setPending(false);
-    setSubmitted(true);
-    toast.success("Ticket submitted (mock)");
+    if (!canSubmit || pending) return;
+    submitMutation.mutate();
   }
 
   if (submitted) {

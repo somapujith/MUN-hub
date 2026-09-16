@@ -1,5 +1,6 @@
 import { Link, useSearchParams } from "react-router";
 import { Helmet } from "react-helmet-async";
+import { useQuery } from "@tanstack/react-query";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { MunAdCarousel } from "@/components/mun/mun-ad-carousel";
@@ -14,7 +15,8 @@ import {
   SignatureCardTitle,
 } from "@/components/ui/signature-card";
 import { resolvePriceBand, resolveStatusFilter } from "@/lib/home-filters";
-import { getMarketplaceFacets, searchMockMuns } from "@/mocks/data";
+import { getMarketplaceFacets, searchMuns, type MunSearchParams } from "@/api/marketplace";
+import { queryKeys } from "@/api/query-keys";
 import type { MunSearchResult, MunSummary } from "@/types";
 
 const CLOSING_SOON_DAYS = 42;
@@ -28,7 +30,11 @@ function seeAllHref(city: string): string {
 
 export function HomePage() {
   const [searchParams] = useSearchParams();
-  const facets = getMarketplaceFacets();
+  const facetsQuery = useQuery({
+    queryKey: queryKeys.marketplaceFacets(),
+    queryFn: getMarketplaceFacets,
+  });
+  const facets = facetsQuery.data ?? { cities: [], countries: [] };
   const rawCity = searchParams.get("city") ?? undefined;
   const city = rawCity && facets.cities.includes(rawCity) ? rawCity : "";
   const statusFilter = resolveStatusFilter(
@@ -47,27 +53,45 @@ export function HomePage() {
   const wantsPublished = !statusFilter || statusFilter === "PUBLISHED";
   const wantsClosed = statusFilter === "REGISTRATION_CLOSED";
 
-  const openNow = wantsOpen
-    ? searchMockMuns({
-        ...sharedFilters,
-        status: ["REGISTRATION_OPEN"],
-        limit: ROW_LIMIT,
-      })
-    : EMPTY_RESULT;
-  const publishedOnly = wantsPublished
-    ? searchMockMuns({
-        ...sharedFilters,
-        status: ["PUBLISHED"],
-        limit: ROW_LIMIT,
-      })
-    : EMPTY_RESULT;
-  const closed = wantsClosed
-    ? searchMockMuns({
-        ...sharedFilters,
-        status: ["REGISTRATION_CLOSED"],
-        limit: ROW_LIMIT,
-      })
-    : EMPTY_RESULT;
+  const openParams: MunSearchParams = {
+    ...sharedFilters,
+    status: ["REGISTRATION_OPEN"],
+    limit: ROW_LIMIT,
+  };
+  const publishedParams: MunSearchParams = {
+    ...sharedFilters,
+    status: ["PUBLISHED"],
+    limit: ROW_LIMIT,
+  };
+  const closedParams: MunSearchParams = {
+    ...sharedFilters,
+    status: ["REGISTRATION_CLOSED"],
+    limit: ROW_LIMIT,
+  };
+
+  const openQuery = useQuery({
+    queryKey: queryKeys.muns(openParams),
+    queryFn: () => searchMuns(openParams),
+    enabled: wantsOpen,
+  });
+  const publishedQuery = useQuery({
+    queryKey: queryKeys.muns(publishedParams),
+    queryFn: () => searchMuns(publishedParams),
+    enabled: wantsPublished,
+  });
+  const closedQuery = useQuery({
+    queryKey: queryKeys.muns(closedParams),
+    queryFn: () => searchMuns(closedParams),
+    enabled: wantsClosed,
+  });
+
+  const openNow = openQuery.data ?? EMPTY_RESULT;
+  const publishedOnly = publishedQuery.data ?? EMPTY_RESULT;
+  const closed = closedQuery.data ?? EMPTY_RESULT;
+  const isLoadingRows =
+    (wantsOpen && openQuery.isLoading) ||
+    (wantsPublished && publishedQuery.isLoading) ||
+    (wantsClosed && closedQuery.isLoading);
 
   const now = Date.now();
   const closingSoonCutoff = now + CLOSING_SOON_DAYS * 24 * 60 * 60 * 1000;
@@ -130,7 +154,11 @@ export function HomePage() {
 
             <div className="flex flex-col gap-lg pt-lg lg:flex-row lg:gap-xxl lg:pt-xl">
               <div className="order-1 min-w-0 flex-1 lg:order-none">
-                {hasAnyRow ? (
+                {isLoadingRows ? (
+                  <p className="py-xxl text-center text-body-md text-muted-foreground">
+                    Loading conferences…
+                  </p>
+                ) : hasAnyRow ? (
                   <div className="flex flex-col gap-xxl">
                     <MunRow
                       title="Registration open now"

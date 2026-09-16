@@ -1,6 +1,15 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, munModuleVerifications, munSubmissions, organizerApplications, verificationLogs } from '@/lib/db/schema'
+import {
+  muns,
+  munModuleVerifications,
+  munSubmissions,
+  organizerApplications,
+  payments,
+  registrations,
+  users,
+  verificationLogs,
+} from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
@@ -293,6 +302,81 @@ export async function getModuleReviewQueue(
   const [{ count } = { count: 0 }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(munModuleVerifications)
+    .where(whereClause)
+
+  return { results, total: count }
+}
+
+export interface RegistrationsQueueParams {
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+export interface RegistrationsQueueRow {
+  id: string
+  delegateName: string
+  delegateEmail: string
+  munName: string
+  status: string
+  paymentStatus: string | null
+  createdAt: Date
+}
+
+export interface RegistrationsQueueResult {
+  results: RegistrationsQueueRow[]
+  total: number
+}
+
+/**
+ * Platform-wide, paginated registrations list for the admin console's
+ * Registrations page — distinct from `admin-search.ts`'s
+ * `searchRegistrations`, which requires a non-empty query and returns an
+ * unpaginated 50-row cap (that one's for the ops "look up one registration"
+ * search box). This is the browse view the admin console mock's page
+ * comment flagged as "?q= search wiring deferred": works with no `q` at all
+ * (paginated, default 20/page, newest first — same reasoning as
+ * `getReviewQueue`), and an optional `q` narrows across delegate name / mun
+ * name / registration id using the same ILIKE-or-exact-id predicate shape as
+ * `searchRegistrations`. Requires OPERATIONS/ADMIN/SUPER_ADMIN.
+ */
+export async function getRegistrationsQueue(
+  params: RegistrationsQueueParams = {},
+  session: Session | null,
+): Promise<RegistrationsQueueResult> {
+  requireRole(session, [...REVIEW_ROLES])
+
+  const limit = params.limit ?? 20
+  const offset = params.offset ?? 0
+  const q = params.q?.trim()
+  const whereClause = q
+    ? or(ilike(users.name, `%${q}%`), ilike(muns.name, `%${q}%`), eq(registrations.id, q))
+    : undefined
+
+  const results = await db
+    .select({
+      id: registrations.id,
+      delegateName: users.name,
+      delegateEmail: users.email,
+      munName: muns.name,
+      status: registrations.status,
+      paymentStatus: payments.status,
+      createdAt: registrations.createdAt,
+    })
+    .from(registrations)
+    .innerJoin(users, eq(registrations.userId, users.id))
+    .innerJoin(muns, eq(registrations.munId, muns.id))
+    .leftJoin(payments, eq(payments.registrationId, registrations.id))
+    .where(whereClause)
+    .orderBy(desc(registrations.createdAt))
+    .limit(limit)
+    .offset(offset)
+
+  const [{ count } = { count: 0 }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(registrations)
+    .innerJoin(users, eq(registrations.userId, users.id))
+    .innerJoin(muns, eq(registrations.munId, muns.id))
     .where(whereClause)
 
   return { results, total: count }

@@ -11,9 +11,18 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 //
 // Key handling: PAYMENT_FIELD_KEY must be a base64-encoded 32-byte value.
 // There is deliberately NO default key and NO fallback — a silently-weak key
-// is worse than a crash. This is validated and decoded ONCE at module load
-// time (not lazily inside encryptField/decryptField) so a misconfigured
-// deployment fails immediately on boot, not on the first payment write.
+// is worse than a crash. This is validated and decoded ONCE, cached, and
+// reused (see getEncryptionKey below) so a misconfigured deployment fails
+// loudly on first real use rather than silently encrypting with a bad key.
+//
+// Loaded lazily rather than at module top-level: under Cloudflare Workers
+// this module is evaluated once at cold start, before any request (and
+// therefore before `env`/secrets) exists, so eagerly reading
+// `process.env.PAYMENT_FIELD_KEY` at import time always saw it as unset and
+// failed Wrangler's deploy-time validation — same class of problem
+// `lib/db/client.ts`'s `resolveConnectionString`/Hyperdrive-bridge solves.
+// Local Node dev/tests are unaffected: this still runs the exact same
+// synchronous, cached logic, just on first use rather than on import.
 
 const KEY_BYTE_LENGTH = 32
 const IV_BYTE_LENGTH = 12
@@ -35,7 +44,12 @@ function loadKey(): Buffer {
   return key
 }
 
-const encryptionKey = loadKey()
+let cachedKey: Buffer | undefined
+
+function getEncryptionKey(): Buffer {
+  if (!cachedKey) cachedKey = loadKey()
+  return cachedKey
+}
 
 /**
  * Encrypts `plaintext` with AES-256-GCM using a fresh random 12-byte IV.
@@ -43,7 +57,7 @@ const encryptionKey = loadKey()
  */
 export function encryptField(plaintext: string): string {
   const iv = randomBytes(IV_BYTE_LENGTH)
-  const cipher = createCipheriv('aes-256-gcm', encryptionKey, iv)
+  const cipher = createCipheriv('aes-256-gcm', getEncryptionKey(), iv)
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
   const authTag = cipher.getAuthTag()
 
@@ -73,7 +87,7 @@ export function decryptField(ciphertext: string): string {
   const authTag = Buffer.from(authTagB64, 'base64')
   const data = Buffer.from(dataB64, 'base64')
 
-  const decipher = createDecipheriv('aes-256-gcm', encryptionKey, iv)
+  const decipher = createDecipheriv('aes-256-gcm', getEncryptionKey(), iv)
   decipher.setAuthTag(authTag)
 
   const plaintext = Buffer.concat([decipher.update(data), decipher.final()])

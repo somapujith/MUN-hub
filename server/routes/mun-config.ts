@@ -8,6 +8,7 @@ import {
   deleteCommittee,
   deletePortfolio,
   deleteRegistrationProduct,
+  getMunDetails,
   listCommittees,
   listPortfolios,
   listRegistrationProducts,
@@ -20,8 +21,24 @@ import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
 
-const optionalDate = z.coerce.date().optional()
-const nullableDate = z.union([z.coerce.date(), z.null()]).optional()
+// NOTE on ordering: `z.coerce.date()` coerces `null` via `new Date(null)`,
+// which JS resolves to the epoch (1970-01-01) instead of failing — so a
+// union that tries the date branch first silently turns an explicit JSON
+// `null` into a bogus real date rather than surfacing it as a validation
+// error or preserving it as "no value". Putting `z.null()` first makes the
+// union short-circuit on an explicit null before `z.coerce.date()` ever
+// sees it. Verified against both branches: `z.coerce.date().safeParse(null)`
+// returns `{ success: true, data: 1970-01-01T00:00:00.000Z }` on its own.
+const nullableDate = z.union([z.null(), z.coerce.date()]).optional()
+// Create endpoints have no "explicit null" input in their lib types (e.g.
+// `CreateRegistrationProductInput.deadline?: Date`, no `| null` branch) —
+// only "omit" or "set". A client that sends an empty date field as JSON
+// `null` (as the registration-products create form does) should be treated
+// the same as omitting it, not coerced into the epoch bug described above.
+const optionalDate = z
+  .union([z.null(), z.coerce.date()])
+  .optional()
+  .transform((value) => value ?? undefined)
 
 const createCommitteeBodySchema = z
   .object({
@@ -57,6 +74,14 @@ const updatePortfolioBodySchema = z
   })
   .strict()
 
+// NOTE: description/eligibility are `?: string` / `?: Record<...>` (NOT
+// nullable) on lib/actions/mun-config.ts's Create/UpdateRegistrationProductInput
+// — there's no lib-layer way to explicitly clear either back to null via
+// these actions, only to omit them (leave unchanged) or set a new value. The
+// schemas below match that exactly rather than accepting `null`, since a
+// nullable value here would fail to type-check against the lib input type.
+const eligibilitySchema = z.record(z.string(), z.unknown()).optional()
+
 const createRegistrationProductBodySchema = z
   .object({
     name: z.string().min(1),
@@ -64,6 +89,14 @@ const createRegistrationProductBodySchema = z
     capacity: z.number().int().positive(),
     currency: z.string().optional(),
     deadline: optionalDate,
+    // Registration Types PRD (Slice 1, 2026-09-15) fields — already accepted
+    // by lib/actions/mun-config.ts's CreateRegistrationProductInput, just not
+    // previously exposed on this route. See commit b77d787.
+    description: z.string().optional(),
+    allowsIndividual: z.boolean().optional(),
+    allowsDelegation: z.boolean().optional(),
+    displayOrder: z.number().int().nonnegative().optional(),
+    eligibility: eligibilitySchema,
   })
   .strict()
 
@@ -75,6 +108,11 @@ const updateRegistrationProductBodySchema = z
     currency: z.string().optional(),
     deadline: nullableDate,
     status: z.string().optional(),
+    description: z.string().optional(),
+    allowsIndividual: z.boolean().optional(),
+    allowsDelegation: z.boolean().optional(),
+    displayOrder: z.number().int().nonnegative().optional(),
+    eligibility: eligibilitySchema,
   })
   .strict()
 
@@ -110,6 +148,17 @@ async function resolveIncludeInactive(
 }
 
 export const munConfigRoutes = new Hono<{ Variables: AppVariables }>()
+
+// Organizer's own setup/edit read — NOT the public `/muns/:slug` route
+// (marketplace.ts's getMunBySlug filters by publication status; this must
+// not). Namespaced under /organizer/muns/... (same convention as
+// organizer-dashboard.ts's /organizer/muns/:munId/overview) so it never
+// collides with munsRoutes' public `GET /muns/:slug`, which is mounted
+// ahead of this bundle in apiV1 and would otherwise win the match first.
+munConfigRoutes.get('/organizer/muns/:munId/details', requireAuth, async (c) => {
+  const mun = await getMunDetails(c.req.param('munId'), c.get('session'))
+  return c.json(mun)
+})
 
 munConfigRoutes.get('/muns/:munId/committees', async (c) => {
   const committees = await listCommittees(c.req.param('munId'))

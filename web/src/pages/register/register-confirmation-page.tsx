@@ -9,8 +9,8 @@ import { RegistrationNotice } from "@/components/registration/registration-notic
 import { formatDateRange } from "@/components/shared/date-range";
 import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
+import { fetchRegistrationById } from "@/api/registration";
 import { getMockMunBySlug } from "@/mocks/data";
-import { fetchRegistrationById } from "@/mocks/registrations";
 import { useSession } from "@/hooks/use-session";
 import { NotFoundPage } from "@/pages/not-found-page";
 import type { RegistrationStatus } from "@/types/enums";

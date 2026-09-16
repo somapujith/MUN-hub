@@ -10,7 +10,7 @@ import { ProductOption } from "@/components/registration/product-option";
 import { StepIndicator } from "@/components/registration/step-indicator";
 import type { ProductWithAvailability } from "@/components/registration/types";
 import type { CommitteeWithPortfolios } from "@/types";
-import { mockInitiateRegistration } from "@/mocks/registrations";
+import { initiateRegistration } from "@/api/registration";
 
 const STEPS = ["Option", "Details", "Review"] as const;
 const selectClassName = cn(
@@ -20,6 +20,7 @@ const selectClassName = cn(
 
 interface RegistrationFormMockProps {
   slug: string;
+  munId: string;
   munName: string;
   products: ProductWithAvailability[];
   committees: CommitteeWithPortfolios[];
@@ -29,6 +30,7 @@ interface RegistrationFormMockProps {
 
 export function RegistrationFormMock({
   slug,
+  munId,
   munName,
   products,
   committees,
@@ -40,10 +42,12 @@ export function RegistrationFormMock({
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Phase 4 API wiring (§6.4): generate once per confirm-dialog intent.
-  // const idempotencyKeyRef = React.useRef<string | null>(null);
-  // if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
-  // inject Idempotency-Key header on initiateRegistration mutation.
+  // Generated once per confirm-dialog intent (spec §6.4) so a duplicate
+  // submit (double click, retried network request after a slow response)
+  // can't reserve two seats — the server rejects a replayed key as the same
+  // logical request rather than starting a second one.
+  const idempotencyKeyRef = React.useRef<string | null>(null);
+  if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
 
   const isSelectable = (entry: ProductWithAvailability) =>
     entry.available > 0 && !entry.deadlinePassed;
@@ -77,15 +81,24 @@ export function RegistrationFormMock({
     setPending(true);
     setError(null);
     try {
-      const { registrationId } = await mockInitiateRegistration({
-        slug,
-        registrationProductId: productId,
-        committeeId: committeeId || undefined,
-        portfolioId: portfolioId || undefined,
-      });
+      const { registrationId } = await initiateRegistration(
+        {
+          munId,
+          registrationProductId: productId,
+          committeeId: committeeId || undefined,
+          portfolioId: portfolioId || undefined,
+          formResponses: {
+            fullName: details.fullName,
+            email: details.email,
+            phone: details.phone || null,
+            institution: details.institution,
+          },
+        },
+        idempotencyKeyRef.current!,
+      );
       navigate(`/register/${slug}/pay?registrationId=${encodeURIComponent(registrationId)}`);
-    } catch {
-      setError("Could not reserve your seat. Try again.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reserve your seat. Try again.");
       setPending(false);
     }
   }

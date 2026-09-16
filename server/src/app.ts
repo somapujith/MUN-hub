@@ -4,6 +4,7 @@ import { logger } from 'hono/logger'
 import { requestId } from 'hono/request-id'
 import { csrfMiddleware } from '../middleware/csrf'
 import { errorHandler } from '../middleware/error'
+import { hyperdriveMiddleware } from '../middleware/hyperdrive'
 import { rateLimitMiddleware } from '../middleware/rate-limit'
 import { sessionMiddleware } from '../middleware/session'
 import { apiV1 } from '../routes/index'
@@ -34,12 +35,16 @@ export function makeCorsOriginMatcher() {
 
 /**
  * Base Hono app with the full middleware stack (spec Section 8.2):
- * request-id → logger → CORS → session → [webhooks outside CSRF] →
- * CSRF → rate-limit → /api/v1 routes → error handler
+ * hyperdrive-bridge (Workers-only, see below) → request-id → logger → CORS →
+ * session → [webhooks outside CSRF] → CSRF → rate-limit → /api/v1 routes →
+ * error handler
  */
 export function createApp() {
   const app = new Hono<{ Variables: AppVariables }>()
 
+  // Must run before anything that might touch `db` (lib/db/client.ts) — see
+  // hyperdriveMiddleware's own comment and lib/db/hyperdrive-bridge.ts.
+  app.use('*', hyperdriveMiddleware)
   app.use('*', requestId())
   app.use('*', logger())
   app.use(

@@ -113,12 +113,10 @@ describe('listOrganizers', () => {
     // CLAUDE.md), so a fresh row is no longer guaranteed to land on a small
     // bounded page even with a "!" prefix meant to sort first (the "!"
     // prefix itself has accumulated enough prior rows to push newer ones
-    // off a `limit: 5` page). `listOrganizers` has no name/query filter to
-    // fetch this row directly, so the simplest fix that doesn't depend on
-    // pagination position is a limit generous enough to outrun the
-    // accumulated junk. This increasingly needs a real filter/query
-    // capability as local test data keeps growing — out of scope for this
-    // fix, noted here for whoever picks it up next.
+    // off a `limit: 5` page). A limit generous enough to outrun the
+    // accumulated junk keeps this assertion independent of pagination
+    // position (the `search` param added below is the real fix for new
+    // callers; this test intentionally exercises the unfiltered path too).
     const [organizer] = await db
       .insert(users)
       .values({ name: `!list-test-org-${Date.now()}`, email: `org-${Date.now()}-${Math.random()}@test.dev`, role: 'ORGANIZER' })
@@ -160,6 +158,30 @@ describe('listOrganizers', () => {
     const __actor = sess(organizer)
 
     await expect(listOrganizers({}, __actor)).rejects.toThrow('Forbidden')
+  })
+
+  it('filters by search against name or email (case-insensitive substring)', async () => {
+    const admin = await makeUser('ADMIN')
+    const unique = `Zellandia-${Date.now()}`
+    const [organizer] = await db
+      .insert(users)
+      .values({
+        name: `${unique} MUN Society`,
+        email: `contact-${Date.now()}-${Math.random()}@test.dev`,
+        role: 'ORGANIZER',
+      })
+      .returning()
+    const __actor = sess(admin)
+
+    const byName = await listOrganizers({ search: unique.toLowerCase() }, __actor)
+    expect(byName.results.map((r) => r.id)).toContain(organizer.id)
+
+    const byEmail = await listOrganizers({ search: organizer.email.toUpperCase() }, __actor)
+    expect(byEmail.results.map((r) => r.id)).toEqual([organizer.id])
+
+    const noMatch = await listOrganizers({ search: `no-such-organizer-${Date.now()}` }, __actor)
+    expect(noMatch.results).toEqual([])
+    expect(noMatch.total).toBe(0)
   })
 })
 

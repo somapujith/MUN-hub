@@ -3,6 +3,7 @@ import type { AppVariables } from '../src/types'
 import { authRoutes } from './auth'
 import { goLiveRoutes } from './go-live'
 import { munsRoutes } from './muns'
+import { passwordResetRoutes } from './password-reset'
 import { protectedRoutes } from './protected'
 import { sitemapRoutes } from './sitemap'
 
@@ -11,6 +12,7 @@ export const publicRoutes = new Hono<{ Variables: AppVariables }>()
 
 publicRoutes.route('/auth', authRoutes)
 publicRoutes.route('/muns', munsRoutes)
+publicRoutes.route('/', passwordResetRoutes)
 publicRoutes.route('/', sitemapRoutes)
 
 /**

@@ -1,5 +1,6 @@
 import { Helmet } from "react-helmet-async";
 import { Link, useParams } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { MunHero } from "@/components/mun/mun-hero";
@@ -12,14 +13,60 @@ import {
   SignatureCardEyebrow,
   SignatureCardTitle,
 } from "@/components/ui/signature-card";
-import { getMockMunBySlug, getMockProductsAvailability } from "@/mocks/data";
+import { getMunBySlug, getProductsAvailability } from "@/api/marketplace";
+import { queryKeys } from "@/api/query-keys";
 import { cn } from "cn";
 import { NotFoundPage } from "@/pages/not-found-page";
 
 export function MunDetailPage({ slugOverride }: { slugOverride?: string } = {}) {
   const { slug: slugParam } = useParams<{ slug: string }>();
   const slug = slugOverride ?? slugParam;
-  const mun = slug ? getMockMunBySlug(slug) : null;
+
+  const munQuery = useQuery({
+    queryKey: queryKeys.mun(slug ?? ""),
+    queryFn: () => getMunBySlug(slug!),
+    enabled: Boolean(slug),
+  });
+
+  const mun = munQuery.data;
+  const productIds = mun ? mun.registrationProducts.map((p) => p.id) : [];
+  const availabilityQuery = useQuery({
+    queryKey: queryKeys.productAvailability(productIds),
+    queryFn: () => getProductsAvailability(productIds),
+    enabled: productIds.length > 0,
+  });
+
+  if (!slug) {
+    return <NotFoundPage />;
+  }
+
+  if (munQuery.isLoading) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col bg-background">
+        <SiteHeader />
+        <main className="flex flex-1 items-center justify-center">
+          <p className="text-body-md text-muted-foreground">Loading conference…</p>
+        </main>
+        <SiteFooter />
+      </div>
+    );
+  }
+
+  if (munQuery.isError) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col bg-background">
+        <SiteHeader />
+        <main className="flex flex-1 items-center justify-center px-lg text-center">
+          <p className="text-body-md text-destructive">
+            {munQuery.error instanceof Error
+              ? munQuery.error.message
+              : "Unable to load this conference right now."}
+          </p>
+        </main>
+        <SiteFooter />
+      </div>
+    );
+  }
 
   if (!mun) {
     return <NotFoundPage />;
@@ -27,7 +74,7 @@ export function MunDetailPage({ slugOverride }: { slugOverride?: string } = {}) 
 
   const canRegister = mun.status === "REGISTRATION_OPEN";
   const products = mun.registrationProducts;
-  const availability = getMockProductsAvailability(products.map((p) => p.id));
+  const availability = new Map(Object.entries(availabilityQuery.data ?? {}));
 
   const prices = products.map((product) => product.price);
   const fromPrice = prices.length > 0 ? Math.min(...prices) : null;
