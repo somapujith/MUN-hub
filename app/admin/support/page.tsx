@@ -4,7 +4,7 @@ import { LifeBuoyIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { getSession } from "@/app/lib/session";
-import { listTickets } from "@/lib/actions/support";
+import { listTicketsWithRequester } from "@/lib/actions/support";
 import { TicketRow } from "./ticket-row";
 
 export const metadata: Metadata = {
@@ -33,7 +33,7 @@ export default async function SupportPage() {
     redirect("/");
   }
 
-  const tickets = await listTickets({}, session);
+  const tickets = await listTicketsWithRequester({}, session);
 
   return (
     <div className="flex min-h-full flex-1 flex-col">

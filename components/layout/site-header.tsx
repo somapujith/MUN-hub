@@ -6,6 +6,7 @@ import { SiteHeaderMobileNav } from "@/components/layout/site-header-mobile-nav"
 import { SiteHeaderSearch } from "@/components/layout/site-header-search";
 import { SiteHeaderUserMenu } from "@/components/layout/site-header-user-menu";
 import { CitySelector } from "@/components/marketplace/city-selector";
+import { SupportWidget } from "@/components/support/support-widget";
 
 /**
  * `top-nav` — docs/prd/DESIGN-airtable.md § Components.
@@ -79,8 +80,11 @@ interface SiteHeaderProps {
 export async function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) {
   const session = await getSession();
   const showCityPicker = Boolean(cities && cities.length > 0);
+  const supportRole =
+    session?.role === "STUDENT" || session?.role === "ORGANIZER" ? session.role : null;
 
   return (
+    <>
     <header className="sticky top-0 z-40 border-b border-border bg-background">
       <div className="content-container flex h-16 items-center gap-sm lg:gap-md">
         <Link
@@ -173,5 +177,12 @@ export async function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps 
         </div>
       </div>
     </header>
+    {supportRole && (
+      <SupportWidget
+        role={supportRole}
+        inboxHref={supportRole === "STUDENT" ? "/dashboard/support" : "/organizer/support"}
+      />
+    )}
+    </>
   );
 }

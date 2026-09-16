@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { WorkspaceSidebar } from "@/components/organizer/workspace-sidebar";
 import { WorkspaceTopbar } from "@/components/organizer/workspace-topbar";
+import { SupportWidget } from "@/components/support/support-widget";
 import type { WorkspaceMun } from "@/app/organizer/dashboard/workspace-queries";
 import type { Role } from "@/lib/db/schema-enums";
 
@@ -55,6 +56,13 @@ export function WorkspaceShell({
         <WorkspaceTopbar muns={muns} currentMun={currentMun} role={role} />
         <main className="flex flex-1 flex-col">{children}</main>
       </div>
+
+      {/* Top-level sibling, not nested in either scroll container above —
+          `fixed` positioning is relative to the viewport as long as no
+          ancestor sets `transform`/`filter`/`perspective`, which neither
+          does. Organizer-only: ADMIN/OPERATIONS/SUPER_ADMIN can view this
+          workspace too but get their own `/admin/support` queue instead. */}
+      {role === "ORGANIZER" && <SupportWidget role="ORGANIZER" inboxHref="/organizer/support" />}
     </div>
   );
 }

@@ -3,7 +3,13 @@
 import * as React from "react";
 import { cn } from "cn";
 import { toast } from "sonner";
-import { CheckIcon, Loader2Icon, UserPlusIcon } from "lucide-react";
+import {
+  CheckIcon,
+  Loader2Icon,
+  MessageCircleIcon,
+  SendIcon,
+  UserPlusIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -15,12 +21,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import type { SupportTicketRow } from "@/lib/actions/support";
+import type { AdminTicketListItem, SupportMessageRow } from "@/lib/actions/support";
 import {
   assignTicketToSelfAction,
   markTicketInProgressAction,
   resolveTicketAction,
 } from "./actions";
+import {
+  getConversationAction,
+  markConversationReadAction,
+  sendMessageAction,
+} from "@/app/support/chat-actions";
 
 const fieldClassName = cn(
   "w-full min-w-0 resize-y rounded-sm border border-input bg-background px-md py-sm text-body-md text-ink transition-colors outline-none",
@@ -30,9 +41,9 @@ const fieldClassName = cn(
   "dark:bg-card"
 );
 
-const CLOSED_STATUSES: SupportTicketRow["status"][] = ["RESOLVED", "CLOSED"];
+const CLOSED_STATUSES: AdminTicketListItem["status"][] = ["RESOLVED", "CLOSED"];
 
-function statusVariant(status: SupportTicketRow["status"]): "secondary" | "info" | "warning" | "success" {
+function statusVariant(status: AdminTicketListItem["status"]): "secondary" | "info" | "warning" | "success" {
   switch (status) {
     case "NEW":
       return "warning";
@@ -56,14 +67,19 @@ function statusVariant(status: SupportTicketRow["status"]): "secondary" | "info"
  * caught an uncontrolled textarea breaking exactly this kind of gate in
  * `app/admin/organizers/suspend-dialog.tsx`; this component carries forward
  * the same fix.
+ *
+ * `ticket` is the requester-joined `AdminTicketListItem` (adds
+ * `requesterName`/`requesterRole`) so the row can show who filed it and give
+ * access to the self-contained chat thread below (`<ConversationThread>`).
  */
 export function TicketRow({
   ticket,
 }: {
-  ticket: SupportTicketRow;
+  ticket: AdminTicketListItem;
 }) {
   const [open, setOpen] = React.useState(false);
   const [notes, setNotes] = React.useState("");
+  const [chatOpen, setChatOpen] = React.useState(false);
   const [pendingAssign, startAssign] = React.useTransition();
   const [pendingProgress, startProgress] = React.useTransition();
   const [pendingResolve, startResolve] = React.useTransition();
@@ -136,6 +152,12 @@ export function TicketRow({
             </Badge>
             <Badge variant={statusVariant(ticket.status)}>{ticket.status}</Badge>
           </div>
+          <p className="text-body-sm text-muted-foreground">
+            Filed by <span className="font-medium text-ink">{ticket.requesterName}</span>{" "}
+            <Badge variant={ticket.requesterRole === "STUDENT" ? "secondary" : "outline"}>
+              {ticket.requesterRole}
+            </Badge>
+          </p>
           <p className="text-muted-foreground">{ticket.description}</p>
           {ticket.resolutionNotes && (
             <p className="text-body-sm text-muted-foreground">
@@ -180,6 +202,21 @@ export function TicketRow({
             )}
           </div>
         )}
+      </div>
+
+      <div className="flex flex-col gap-sm">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="w-fit"
+          onClick={() => setChatOpen((prev) => !prev)}
+        >
+          <MessageCircleIcon aria-hidden />
+          {chatOpen ? "Hide conversation" : "View conversation"}
+        </Button>
+
+        {chatOpen && <ConversationThread ticket={ticket} />}
       </div>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -228,6 +265,141 @@ export function TicketRow({
           </form>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+const POLL_INTERVAL_MS = 5000;
+
+/**
+ * Self-contained chat thread for one ticket, rendered inline when the row's
+ * "View conversation" toggle is open. Deliberately does not import from
+ * `components/support/**` (a separate widget for the student/organizer side
+ * is being built concurrently by another agent) — some duplication between
+ * the two chat UIs is expected here.
+ *
+ * Requester messages (`senderId === ticket.createdBy`) render left/muted;
+ * any other sender is staff and renders right/primary-tinted — read
+ * receipts are shared across all admins by design, so there's no
+ * per-reviewer distinction among staff senders.
+ */
+function ConversationThread({ ticket }: { ticket: AdminTicketListItem }) {
+  const [messages, setMessages] = React.useState<SupportMessageRow[] | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [draft, setDraft] = React.useState("");
+  const [pendingSend, startSend] = React.useTransition();
+  const markedReadRef = React.useRef(false);
+  const isClosed = ticket.status === "CLOSED";
+
+  const refresh = React.useCallback(async () => {
+    const result = await getConversationAction(ticket.id);
+    if (result.ok) {
+      setMessages(result.data.messages);
+      setLoadError(null);
+    } else {
+      setLoadError(result.error);
+    }
+  }, [ticket.id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    refresh();
+
+    // Clear the admin-side unread indicator once, the first time this
+    // thread is opened for this ticket — not on every poll tick.
+    if (!markedReadRef.current) {
+      markedReadRef.current = true;
+      markConversationReadAction(ticket.id);
+    }
+
+    const interval = setInterval(() => {
+      if (!cancelled) refresh();
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [ticket.id, refresh]);
+
+  function handleSend() {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+
+    startSend(async () => {
+      const result = await sendMessageAction(ticket.id, trimmed);
+      if (!result.ok) {
+        toast.error("Could not send message", { description: result.error });
+        return;
+      }
+      setDraft("");
+      await refresh();
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-sm rounded-md border border-border bg-surface-soft/40 p-sm">
+      {messages === null ? (
+        loadError ? (
+          <p className="text-body-sm text-destructive">{loadError}</p>
+        ) : (
+          <p className="flex items-center gap-xs text-body-sm text-muted-foreground">
+            <Loader2Icon className="size-3.5 animate-spin" aria-hidden />
+            Loading conversation…
+          </p>
+        )
+      ) : messages.length === 0 ? (
+        <p className="text-body-sm text-muted-foreground">No messages yet.</p>
+      ) : (
+        <div className="flex max-h-72 flex-col gap-xs overflow-y-auto">
+          {messages.map((message) => {
+            const fromRequester = message.senderId === ticket.createdBy;
+            return (
+              <div
+                key={message.id}
+                className={cn("flex flex-col gap-0.5", fromRequester ? "items-start" : "items-end")}
+              >
+                <div
+                  className={cn(
+                    "max-w-[80%] rounded-md px-sm py-xs text-body-sm",
+                    fromRequester ? "bg-surface-soft text-ink" : "bg-primary text-primary-foreground"
+                  )}
+                >
+                  {message.body}
+                </div>
+                <span className="text-[11px] text-muted-foreground">
+                  {fromRequester ? ticket.requesterName : "Staff"} ·{" "}
+                  {new Date(message.createdAt).toLocaleString()}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {isClosed ? (
+        <p className="text-body-sm text-muted-foreground">This conversation is closed.</p>
+      ) : (
+        <div className="flex items-end gap-xs">
+          <textarea
+            rows={2}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={pendingSend}
+            className={fieldClassName}
+            placeholder="Reply to the requester…"
+          />
+          <Button size="sm" disabled={pendingSend || !draft.trim()} onClick={handleSend}>
+            {pendingSend ? (
+              <Loader2Icon className="animate-spin" aria-hidden />
+            ) : (
+              <SendIcon aria-hidden />
+            )}
+            Send
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
