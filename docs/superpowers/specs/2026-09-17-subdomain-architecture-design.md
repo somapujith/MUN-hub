@@ -1,7 +1,9 @@
 # Subdomain Architecture — Design
 
 **Date:** 2026-09-17
-**Status:** Fully live. `munhub.in` onboarded to Cloudflare (was BigRock nameservers, now `marty`/`sima.ns.cloudflare.com`). `munhub-web` deployed with `app.`/`organize.`/`admin.munhub.in` as Custom Domains and `*.munhub.in/*` as a Workers Route (backed by a manually-added wildcard DNS record — see §3) — all verified serving the SPA over HTTPS. `munhub-api` deployed with `api.munhub.in` as a Custom Domain, backed by Cloudflare Hyperdrive for Neon access — verified returning real seeded data (`GET /api/v1/muns`). `munhub.in`/`www.munhub.in` DNS untouched, still on Vercel. See the plan doc for the one real bug this deploy surfaced (an eager module-load pattern in `lib/crypto/field-encryption.ts` incompatible with Workers, now fixed).
+**Status:** Fully live, and one critical bug found + fixed during post-deploy review (2026-09-17, second pass): the cross-subdomain cookie sharing this whole design exists for was **not actually working** — see §5c.
+
+**Status (original deploy pass):** `munhub.in` onboarded to Cloudflare (was BigRock nameservers, now `marty`/`sima.ns.cloudflare.com`). `munhub-web` deployed with `app.`/`organize.`/`admin.munhub.in` as Custom Domains and `*.munhub.in/*` as a Workers Route (backed by a manually-added wildcard DNS record — see §3) — all verified serving the SPA over HTTPS. `munhub-api` deployed with `api.munhub.in` as a Custom Domain, backed by Cloudflare Hyperdrive for Neon access — verified returning real seeded data (`GET /api/v1/muns`). `munhub.in`/`www.munhub.in` DNS untouched, still on Vercel. See the plan doc for the one real bug this deploy surfaced (an eager module-load pattern in `lib/crypto/field-encryption.ts` incompatible with Workers, now fixed).
 **Supersedes:** CLAUDE.md's prior "Routing: path-based `/mun/[slug]` — wildcard subdomains deferred" note, and PRD Section 15 / `MUNHub_Ultra_Fast_Performance_PRD.md` Section 16 ("deferred") status.
 
 ## 1. Context
@@ -85,6 +87,18 @@ deleteCookie(c, SESSION_COOKIE_NAME, { path: '/', domain: COOKIE_DOMAIN })
 ## 5b. CSRF origin allowlist fix (found post-deploy by a peer session)
 
 `server/middleware/csrf.ts`'s `ALLOWED_ORIGINS` was a hardcoded localhost-only set, independent of `app.ts`'s CORS matcher — meaning every mutating request (`POST`/`PUT`/`PATCH`/`DELETE`, including login itself) from the real deployed SPA got a 403 CSRF rejection, since `Origin: https://munhub.in` was never in that set. Fixed with the same `MUNHUB_ORIGIN_PATTERN` regex `app.ts`'s CORS matcher uses (duplicated rather than imported, to avoid an `app.ts` ↔ `csrf.ts` import cycle). Verified in production: `POST /api/v1/auth/session` with `Origin: https://munhub.in` returns 200 + session cookie.
+
+## 5c. The cross-subdomain cookie was never actually working (found in post-deploy review, 2026-09-17)
+
+After the full stack was live, a real login against production (`POST /api/v1/auth/session` with `Origin: https://app.munhub.in`) came back with **no `Domain=` attribute on the `Set-Cookie` header at all** — meaning every subdomain still got its own host-only session, the exact problem §5 was supposed to fix.
+
+Root cause, and it's bigger than just this one cookie: **Cloudflare Workers never populate arbitrary custom `vars`/secrets into `process.env`.** Only `NODE_ENV` is special-cased (statically replaced by Wrangler's bundler at build time — which is why `secure: process.env.NODE_ENV === 'production'` worked fine and masked the problem). `server/routes/auth.ts` read `process.env.COOKIE_DOMAIN` at module scope — on Workers that's always `undefined`, config or no config. The same bug independently affected two other reads: `lib/crypto/field-encryption.ts`'s `PAYMENT_FIELD_KEY` (the earlier "fix" in §8/the plan doc only solved the *deploy-time crash* from reading it eagerly — making it lazy didn't fix the *source*, so it would still have thrown "not set" on the first real payment-settlement write in production) and `lib/payments/mock-adapter.ts`'s `MOCK_PAYMENT_WEBHOOK_SECRET` (would have thrown on the first real webhook).
+
+Fixed generically rather than per-variable: new `lib/runtime-env.ts` (`setRuntimeEnv`/`getRuntimeEnv`, mirroring `lib/db/hyperdrive-bridge.ts`'s existing pattern for the identical platform constraint) plus `server/middleware/runtime-env.ts`, registered first in `server/src/app.ts`'s middleware stack, which bridges `c.env` into it on every request. All three affected reads (`auth.ts`'s cookie domain, `field-encryption.ts`'s key, `mock-adapter.ts`'s webhook secret) now go through `getRuntimeEnv()` instead of `process.env` directly, as does `parseCorsOrigins()`'s explicit-list support in `app.ts`/`csrf.ts` (not currently blocking anything live, since the `MUNHUB_ORIGIN_PATTERN` regex match doesn't depend on any env var, but it was the same latent bug). Local Node dev/tests are unaffected — `getRuntimeEnv()` falls back to real `process.env` there, since nothing calls `setRuntimeEnv()` outside a Workers request.
+
+Verified after redeploying `munhub-api`: `Set-Cookie` now includes `Domain=.munhub.in`, and a cookie captured from a login against `app.munhub.in` was successfully reused for a session check made with `Origin: https://organize.munhub.in`.
+
+**Lesson for future work in `/server`:** never read a custom (non-`NODE_ENV`) environment variable via `process.env.X` anywhere in `/server` or a `lib/` module it depends on — always use `getRuntimeEnv('X')`. A plain `process.env.X` read will work perfectly in local Node dev and in Vitest, pass every test, and then silently return `undefined` the moment it's actually deployed to a Worker. This is exactly the kind of bug that's invisible until you test the real deployed URL, not just `tsc`/tests/build.
 
 ## 6. CORS fix
 

@@ -1,4 +1,5 @@
 import { createMiddleware } from 'hono/factory'
+import { getRuntimeEnv } from '@/lib/runtime-env'
 import type { AppVariables } from '../src/types'
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -23,7 +24,7 @@ const MUNHUB_ORIGIN_PATTERN = /^https:\/\/([a-z0-9-]+\.)?munhub\.in$/
 function isAllowedOrigin(origin: string): boolean {
   if (ALLOWED_ORIGINS.has(origin)) return true
   if (MUNHUB_ORIGIN_PATTERN.test(origin)) return true
-  const extra = process.env.CORS_ORIGINS ?? process.env.ALLOWED_ORIGINS ?? ''
+  const extra = getRuntimeEnv('CORS_ORIGINS') ?? getRuntimeEnv('ALLOWED_ORIGINS') ?? ''
   return extra
     .split(',')
     .map((o) => o.trim())

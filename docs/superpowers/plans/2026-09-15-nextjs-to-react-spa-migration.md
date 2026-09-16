@@ -1,5 +1,7 @@
 # Next.js -> Vite/React SPA + Standalone Node API - Implementation Plan
 
+> **Status update 2026-09-17: effectively complete.** All phases through 7 have happened in practice — `/web` + `/server` have full feature parity (auth, profile, marketplace, registration, dashboards, all organizer/admin sections), both are deployed to Cloudflare Workers, and production DNS (`munhub.in`/`www.munhub.in` on Vercel, plus `app.`/`organize.`/`admin.`/`api.munhub.in` on Cloudflare) now serves the new stack exclusively. The Next.js app under `/app` is dead code, not reachable in production. See CLAUDE.md's "Deploy config" section and `docs/superpowers/specs/2026-09-17-subdomain-architecture-design.md` for the actual end state — this plan's checkboxes below were not kept up to date against that real progress, so treat the doc above as authoritative over the checklist.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Remove Next.js entirely. New frontend: Vite + React Router v7 (data-router mode) + TanStack Query. New backend: standalone Hono API on Node, decoupled from any frontend framework. `lib/` (actions, lifecycle, db, auth core, payments, storage, notifications, crypto) survives with minimal, mechanical changes.

@@ -3,6 +3,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { changePassword, signIn, signOut, signUp } from '@/lib/actions/auth'
 import { SESSION_COOKIE_NAME } from '@/lib/auth/session'
+import { getRuntimeEnv } from '@/lib/runtime-env'
 import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
 
@@ -10,8 +11,12 @@ const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 // Unset locally (host-only cookie, today's behavior). In production, set to
 // ".munhub.in" so the session cookie is sent to app./organize./admin. too.
+// getRuntimeEnv (not a module-level `process.env` read) because Workers never
+// populate custom vars into `process.env` at all — see lib/runtime-env.ts.
 // docs/superpowers/specs/2026-09-17-subdomain-architecture-design.md §5
-const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || undefined
+function cookieDomain(): string | undefined {
+  return getRuntimeEnv('COOKIE_DOMAIN') || undefined
+}
 
 const signInBodySchema = z
   .object({
@@ -43,7 +48,7 @@ function setSessionCookie(c: Context<{ Variables: AppVariables }>, token: string
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'Lax',
     path: '/',
-    domain: COOKIE_DOMAIN,
+    domain: cookieDomain(),
     maxAge: COOKIE_MAX_AGE_SECONDS,
     expires: expiresAt,
   })
@@ -82,7 +87,7 @@ authRoutes.delete('/session', async (c) => {
   const token = getCookie(c, SESSION_COOKIE_NAME) ?? ''
   await signOut(token)
 
-  deleteCookie(c, SESSION_COOKIE_NAME, { path: '/', domain: COOKIE_DOMAIN })
+  deleteCookie(c, SESSION_COOKIE_NAME, { path: '/', domain: cookieDomain() })
 
   return c.body(null, 204)
 })

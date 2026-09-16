@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { getRuntimeEnv } from '@/lib/runtime-env'
 
 // -----------------------------------------------------------------------------
 // field-encryption — AES-256-GCM helpers for at-rest field encryption
@@ -17,19 +18,24 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 //
 // Loaded lazily rather than at module top-level: under Cloudflare Workers
 // this module is evaluated once at cold start, before any request (and
-// therefore before `env`/secrets) exists, so eagerly reading
-// `process.env.PAYMENT_FIELD_KEY` at import time always saw it as unset and
-// failed Wrangler's deploy-time validation — same class of problem
-// `lib/db/client.ts`'s `resolveConnectionString`/Hyperdrive-bridge solves.
-// Local Node dev/tests are unaffected: this still runs the exact same
-// synchronous, cached logic, just on first use rather than on import.
+// therefore before `env`/secrets) exists, so eagerly reading the key at
+// import time always saw it as unset and failed Wrangler's deploy-time
+// validation. And even lazily, Workers never populate custom vars/secrets
+// into `process.env` at all (only `NODE_ENV` is special-cased) — so this
+// reads via `getRuntimeEnv` (lib/runtime-env.ts), not `process.env` directly,
+// or the key would still silently be missing on every real request in
+// production despite being correctly configured as a Workers secret. Same
+// class of problem `lib/db/client.ts`'s `resolveConnectionString`/
+// Hyperdrive-bridge solves. Local Node dev/tests are unaffected: this still
+// runs the exact same synchronous, cached logic, just on first use rather
+// than on import, reading real `process.env.PAYMENT_FIELD_KEY` there.
 
 const KEY_BYTE_LENGTH = 32
 const IV_BYTE_LENGTH = 12
 const SEPARATOR = ':'
 
 function loadKey(): Buffer {
-  const raw = process.env.PAYMENT_FIELD_KEY
+  const raw = getRuntimeEnv('PAYMENT_FIELD_KEY')
   if (!raw) {
     throw new Error('PAYMENT_FIELD_KEY environment variable is not set — refusing to start without a field-encryption key')
   }

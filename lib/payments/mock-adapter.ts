@@ -1,8 +1,13 @@
 import crypto from 'node:crypto'
+import { getRuntimeEnv } from '@/lib/runtime-env'
 import type { PaymentOrder, PaymentsAdapter } from './adapter'
 
+// getRuntimeEnv (not `process.env` directly) — Cloudflare Workers never
+// populate custom vars/secrets into `process.env`, so a direct read here
+// would silently see this as unset on every real webhook in production even
+// though it's correctly configured as a Workers secret. See lib/runtime-env.ts.
 function getWebhookSecret(): string {
-  const secret = process.env.MOCK_PAYMENT_WEBHOOK_SECRET
+  const secret = getRuntimeEnv('MOCK_PAYMENT_WEBHOOK_SECRET')
   if (!secret) {
     throw new Error('MOCK_PAYMENT_WEBHOOK_SECRET not configured')
   }

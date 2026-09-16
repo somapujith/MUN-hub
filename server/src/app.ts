@@ -6,13 +6,19 @@ import { csrfMiddleware } from '../middleware/csrf'
 import { errorHandler } from '../middleware/error'
 import { hyperdriveMiddleware } from '../middleware/hyperdrive'
 import { rateLimitMiddleware } from '../middleware/rate-limit'
+import { runtimeEnvMiddleware } from '../middleware/runtime-env'
 import { sessionMiddleware } from '../middleware/session'
 import { apiV1 } from '../routes/index'
 import { webhooks } from '../routes/webhooks'
+import { getRuntimeEnv } from '@/lib/runtime-env'
 import type { AppVariables } from './types'
 
 function parseCorsOrigins(): string[] {
-  const raw = process.env.CORS_ORIGINS ?? process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173,http://localhost:3000'
+  // getRuntimeEnv (not process.env directly) so this reflects the current
+  // request's Workers `c.env` — see lib/runtime-env.ts. Must be read fresh
+  // per call, not cached at createApp()-time, since createApp() runs once at
+  // Workers cold start, before runtimeEnvMiddleware has bridged anything.
+  const raw = getRuntimeEnv('CORS_ORIGINS') ?? getRuntimeEnv('ALLOWED_ORIGINS') ?? 'http://localhost:5173,http://localhost:3000'
   return raw
     .split(',')
     .map((o) => o.trim())
@@ -25,25 +31,25 @@ function parseCorsOrigins(): string[] {
 const MUNHUB_ORIGIN_PATTERN = /^https:\/\/([a-z0-9-]+\.)?munhub\.in$/
 
 export function makeCorsOriginMatcher() {
-  const explicitOrigins = new Set(parseCorsOrigins())
-
   return (origin: string): string | undefined => {
-    if (explicitOrigins.has(origin) || MUNHUB_ORIGIN_PATTERN.test(origin)) return origin
+    if (new Set(parseCorsOrigins()).has(origin) || MUNHUB_ORIGIN_PATTERN.test(origin)) return origin
     return undefined
   }
 }
 
 /**
  * Base Hono app with the full middleware stack (spec Section 8.2):
- * hyperdrive-bridge (Workers-only, see below) → request-id → logger → CORS →
- * session → [webhooks outside CSRF] → CSRF → rate-limit → /api/v1 routes →
- * error handler
+ * runtime-env bridge → hyperdrive-bridge (both Workers-only, see below) →
+ * request-id → logger → CORS → session → [webhooks outside CSRF] → CSRF →
+ * rate-limit → /api/v1 routes → error handler
  */
 export function createApp() {
   const app = new Hono<{ Variables: AppVariables }>()
 
-  // Must run before anything that might touch `db` (lib/db/client.ts) — see
-  // hyperdriveMiddleware's own comment and lib/db/hyperdrive-bridge.ts.
+  // Must run before anything that might read a bridged var/secret (CORS's
+  // origin matcher below, session cookie domain, payment key/webhook secret)
+  // or touch `db` — see lib/runtime-env.ts / lib/db/hyperdrive-bridge.ts.
+  app.use('*', runtimeEnvMiddleware)
   app.use('*', hyperdriveMiddleware)
   app.use('*', requestId())
   app.use('*', logger())
