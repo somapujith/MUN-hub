@@ -1,46 +1,54 @@
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
-import { getHyperdriveConnectionString } from './hyperdrive-bridge'
+import { getCachedHyperdriveDb, getHyperdriveConnectionString, setCachedHyperdriveDb } from './hyperdrive-bridge'
 import * as schema from './schema'
 
 const globalForDb = globalThis as unknown as {
   queryClient?: ReturnType<typeof postgres>
 }
 
-/**
- * Prefers a Workers-injected Hyperdrive connection string (see
- * `./hyperdrive-bridge`) and falls back to `DATABASE_URL` for local Node
- * dev/tests, which never set it — same value/behavior as before this
- * function existed.
- */
-function resolveConnectionString(): string {
-  return getHyperdriveConnectionString() ?? process.env.DATABASE_URL!
-}
-
-function createDb() {
+function buildDb(connectionString: string) {
   // prepare: false — required for Cloudflare Hyperdrive: it pools/multiplexes
   // connections across multiple downstream Postgres connections, which
   // breaks postgres.js's default server-side prepared statements (a query
-  // prepared on one pooled connection doesn't exist on another). Without
-  // this, queries intermittently fail in production depending on which
-  // pooled connection Hyperdrive happens to hand back — harmless to also
-  // disable for the direct local/Node connection path.
-  const queryClient = globalForDb.queryClient ?? postgres(resolveConnectionString(), { prepare: false })
-
-  if (process.env.NODE_ENV !== 'production') {
-    globalForDb.queryClient = queryClient
-  }
-
-  return drizzle(queryClient, { schema })
+  // prepared on one pooled connection doesn't exist on another). Harmless
+  // to also disable for the direct local/Node connection path.
+  return drizzle(postgres(connectionString, { prepare: false }), { schema })
 }
 
-type Db = ReturnType<typeof createDb>
+type Db = ReturnType<typeof buildDb>
 
-let cachedDb: Db | undefined
+let cachedNodeDb: Db | undefined
 
 function getDb(): Db {
-  if (!cachedDb) cachedDb = createDb()
-  return cachedDb
+  const hyperdriveConnectionString = getHyperdriveConnectionString()
+
+  // Cloudflare Workers path: never reuse a client across requests. Workers
+  // ties I/O objects (a postgres.js/Hyperdrive socket included) to the
+  // specific request that created them — reusing a module-level-cached
+  // client from a previous request throws "Cannot perform I/O on behalf of
+  // a different request", intermittently, depending on isolate reuse. Build
+  // (or reuse, within THIS request only) via the AsyncLocalStorage-scoped
+  // cache in hyperdrive-bridge.ts — see that file's header comment.
+  if (hyperdriveConnectionString) {
+    const cached = getCachedHyperdriveDb<Db>()
+    if (cached) return cached
+    const fresh = buildDb(hyperdriveConnectionString)
+    setCachedHyperdriveDb(fresh)
+    return fresh
+  }
+
+  // Local Node dev/tests: a real long-lived process, so a single client
+  // cached for the process lifetime is correct and desired — same
+  // behavior as before Hyperdrive existed.
+  if (!cachedNodeDb) {
+    const queryClient = globalForDb.queryClient ?? postgres(process.env.DATABASE_URL!, { prepare: false })
+    if (process.env.NODE_ENV !== 'production') {
+      globalForDb.queryClient = queryClient
+    }
+    cachedNodeDb = drizzle(queryClient, { schema })
+  }
+  return cachedNodeDb
 }
 
 // `db` defers actually resolving a connection string / creating the

@@ -1,5 +1,5 @@
 import { createMiddleware } from 'hono/factory'
-import { setHyperdriveConnectionString } from '@/lib/db/hyperdrive-bridge'
+import { runWithHyperdriveConnectionString } from '@/lib/db/hyperdrive-bridge'
 import type { AppVariables } from '../src/types'
 
 type HyperdriveBindings = {
@@ -17,6 +17,13 @@ type HyperdriveBindings = {
  * `lib/db/hyperdrive-bridge.ts`, since that module has no direct access to
  * Hono's `c.env`. Must run before any route handler that touches `db` —
  * registered first in `server/src/app.ts`.
+ *
+ * Runs the rest of the request (`next()`) *inside*
+ * `runWithHyperdriveConnectionString`'s AsyncLocalStorage scope, not just
+ * before it, so every downstream `lib/db/client.ts` call in this request's
+ * async call graph resolves to a client scoped to THIS request — see
+ * `lib/db/hyperdrive-bridge.ts`'s header comment for why that matters
+ * (Workers ties I/O objects to the request that created them).
  */
 export const hyperdriveMiddleware = createMiddleware<{
   Variables: AppVariables
@@ -24,7 +31,8 @@ export const hyperdriveMiddleware = createMiddleware<{
 }>(async (c, next) => {
   const connectionString = c.env?.HYPERDRIVE?.connectionString
   if (connectionString) {
-    setHyperdriveConnectionString(connectionString)
+    await runWithHyperdriveConnectionString(connectionString, () => next())
+  } else {
+    await next()
   }
-  await next()
 })
