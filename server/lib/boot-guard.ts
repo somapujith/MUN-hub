@@ -13,7 +13,8 @@ export function assertProductionAuthConfigured(): void {
     throw new Error(
       'Refusing to start: NODE_ENV=production requires a real auth adapter. ' +
         'Set AUTH_ADAPTER to a non-mock provider before deploying. ' +
-        'The passwordless mock signIn(email) must not be publicly routable in production.',
+        'The mock adapter (lib/auth/mock-adapter.ts) is dev/demo-only and must not ' +
+        'be publicly routable in production.',
     )
   }
 }

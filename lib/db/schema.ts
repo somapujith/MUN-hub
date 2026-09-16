@@ -47,13 +47,24 @@ export const users = pgTable('users', {
   username: text('username').unique(),
   institution: text('institution'),
   profileImage: text('profile_image'),
+  // Nullable: seeded/legacy rows may predate real signup. Every account
+  // created via signUp (lib/actions/auth.ts) always sets this — a null value
+  // on a post-signup row means "cannot sign in", not "passwordless is ok".
+  // See lib/auth/password.ts for the scrypt hash/verify pair.
+  passwordHash: text('password_hash'),
+  // Single account-level preference (2026-09-17): whether the user wants
+  // email notifications about their own registrations/MUN updates. Kept as
+  // one column, not a jsonb bag — add a column per preference if/when a
+  // second one is needed, rather than pre-building a generic preferences
+  // system nobody's asked for yet.
+  emailNotificationsEnabled: boolean('email_notifications_enabled').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   suspended: boolean('suspended').notNull().default(false),
   suspendedReason: text('suspended_reason'),
   suspendedAt: timestamp('suspended_at', { withTimezone: true }),
 })
 
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ one, many }) => ({
   organizedMuns: many(muns),
   registrations: many(registrations),
   organizerApplications: many(organizerApplications),
@@ -61,6 +72,82 @@ export const usersRelations = relations(users, ({ many }) => ({
   achievements: many(achievements),
   verificationLogs: many(verificationLogs),
   sessions: many(sessions),
+  studentProfile: one(studentProfiles, {
+    fields: [users.id],
+    references: [studentProfiles.userId],
+  }),
+}))
+
+// ---------------------------------------------------------------------------
+// student_profiles — one-time-fill delegate onboarding data (emergency
+// contact, DOB, past MUN experience, etc.) so a student never re-types it on
+// every registration. 1:1 with `users` via a unique FK, STUDENT-role only by
+// convention (not DB-enforced — an ORGANIZER/ADMIN account simply never gets
+// a row). Existence of a row (with all its NOT NULL columns populated) IS the
+// "profile complete" signal — see lib/actions/student-profile.ts's
+// `isProfileComplete`, deliberately not a separate boolean flag.
+//
+// Field keys are chosen to line up with `DEFAULT_REGISTRATION_FIELDS`
+// (lib/actions/registration-form-defaults.ts) — grade/address/transportation/
+// DOB/emergency-contact/experience are already asked per-registration via
+// `mun_form_fields`; `getProfileFormDefaults` maps this table's columns back
+// onto those same `fieldKey`s so the per-mun form can pre-fill instead of
+// re-asking, without the two systems needing to merge.
+// ---------------------------------------------------------------------------
+
+export const studentProfiles = pgTable(
+  'student_profiles',
+  {
+    id: id(),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    dateOfBirth: timestamp('date_of_birth', { withTimezone: true }).notNull(),
+    gradeOrYear: text('grade_or_year').notNull(),
+    residentialAddress: text('residential_address').notNull(),
+    requiresTransportation: boolean('requires_transportation').notNull().default(false),
+    emergencyContactName: text('emergency_contact_name').notNull(),
+    emergencyContactPhone: text('emergency_contact_phone').notNull(),
+    emergencyContactRelation: text('emergency_contact_relation').notNull(),
+    munExperience: text('mun_experience'),
+    referralCode: text('referral_code'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('student_profiles_user_id_idx').on(table.userId)],
+)
+
+export const studentProfilesRelations = relations(studentProfiles, ({ one }) => ({
+  user: one(users, { fields: [studentProfiles.userId], references: [users.id] }),
+}))
+
+// ---------------------------------------------------------------------------
+// password_reset_tokens — "forgot password" recovery flow. Single-use
+// (`usedAt` set on consumption), 1-hour expiry (enforced in
+// lib/actions/password-reset.ts, not the DB). Tokens are stored in plaintext,
+// same convention `sessions.token` already uses — both are high-entropy
+// random values from `crypto.randomBytes`, and this app has no other
+// precedent for hashing at-rest tokens.
+// ---------------------------------------------------------------------------
+
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    id: id(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('password_reset_tokens_user_id_idx').on(table.userId)],
+)
+
+export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
+  user: one(users, { fields: [passwordResetTokens.userId], references: [users.id] }),
 }))
 
 // ---------------------------------------------------------------------------
@@ -752,16 +839,32 @@ export const supportTickets = pgTable(
     relatedRegistrationId: text('related_registration_id').references(() => registrations.id),
     relatedMunId: text('related_mun_id').references(() => muns.id),
     resolutionNotes: text('resolution_notes'),
+    // Chat-thread additions (support widget). `lastMessageAt` is denormalized
+    // purely for sorting a user's/admin's conversation list by recent
+    // activity without joining support_messages; the two `*ReadAt` columns
+    // back the unread-badge count on each side of the conversation — a
+    // message strictly after the reader's own `*ReadAt` is unread to them.
+    lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
+    // Denormalized alongside lastMessageAt so unread state is a plain id/time
+    // comparison against `createdBy` (no join to support_messages, no role
+    // check needed — anyone who can send at all besides the requester is
+    // necessarily staff): requester-unread if this isn't `createdBy` and is
+    // newer than requesterReadAt; admin-unread if it IS `createdBy` and is
+    // newer than adminReadAt.
+    lastMessageSenderId: text('last_message_sender_id').references(() => users.id),
+    requesterReadAt: timestamp('requester_read_at', { withTimezone: true }),
+    adminReadAt: timestamp('admin_read_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index('support_tickets_status_idx').on(table.status),
     index('support_tickets_assigned_to_idx').on(table.assignedTo),
+    index('support_tickets_created_by_idx').on(table.createdBy),
   ],
 )
 
-export const supportTicketsRelations = relations(supportTickets, ({ one }) => ({
+export const supportTicketsRelations = relations(supportTickets, ({ one, many }) => ({
   creator: one(users, { fields: [supportTickets.createdBy], references: [users.id] }),
   assignee: one(users, { fields: [supportTickets.assignedTo], references: [users.id] }),
   registration: one(registrations, {
@@ -769,6 +872,37 @@ export const supportTicketsRelations = relations(supportTickets, ({ one }) => ({
     references: [registrations.id],
   }),
   mun: one(muns, { fields: [supportTickets.relatedMunId], references: [muns.id] }),
+  messages: many(supportMessages),
+}))
+
+// ---------------------------------------------------------------------------
+// support_messages — the chat thread behind a support_tickets row. One row
+// per message; `senderRole` snapshots the sender's role at send time (not a
+// join to `users.role`) so a later role change never rewrites who "spoke as"
+// what in ticket history the same way `mun_versions` snapshots content
+// instead of re-deriving it live.
+// ---------------------------------------------------------------------------
+
+export const supportMessages = pgTable(
+  'support_messages',
+  {
+    id: id(),
+    ticketId: text('ticket_id')
+      .notNull()
+      .references(() => supportTickets.id, { onDelete: 'cascade' }),
+    senderId: text('sender_id')
+      .notNull()
+      .references(() => users.id),
+    senderRole: roleEnum('sender_role').notNull(),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('support_messages_ticket_id_idx').on(table.ticketId, table.createdAt)],
+)
+
+export const supportMessagesRelations = relations(supportMessages, ({ one }) => ({
+  ticket: one(supportTickets, { fields: [supportMessages.ticketId], references: [supportTickets.id] }),
+  sender: one(users, { fields: [supportMessages.senderId], references: [users.id] }),
 }))
 
 // ---------------------------------------------------------------------------

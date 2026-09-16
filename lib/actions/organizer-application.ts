@@ -36,15 +36,24 @@ function slugify(name: string): string {
     .replace(/(^-|-$)/g, '')
 }
 
+// Subdomain labels reserved for role-based hosts (app.munhub.in, etc.) and the
+// api/www hosts — a MUN can never be allocated one of these as its slug, or
+// its wildcard-subdomain page would collide with a role console.
+// docs/superpowers/specs/2026-09-17-subdomain-architecture-design.md §2
+const RESERVED_SLUGS = new Set(['www', 'app', 'organize', 'admin', 'api'])
+
 async function generateUniqueSlug(name: string): Promise<string> {
   const base = slugify(name) || 'mun'
 
-  const [existing] = await db.select({ id: muns.id }).from(muns).where(eq(muns.slug, base)).limit(1)
-  if (!existing) return base
+  if (!RESERVED_SLUGS.has(base)) {
+    const [existing] = await db.select({ id: muns.id }).from(muns).where(eq(muns.slug, base)).limit(1)
+    if (!existing) return base
+  }
 
-  // Base slug taken — append a short uniqueness suffix and retry until free.
+  // Base slug taken (or reserved) — append a short uniqueness suffix and retry until free.
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const candidate = `${base}-${Math.random().toString(36).slice(2, 8)}`
+    if (RESERVED_SLUGS.has(candidate)) continue
     const [clash] = await db.select({ id: muns.id }).from(muns).where(eq(muns.slug, candidate)).limit(1)
     if (!clash) return candidate
   }

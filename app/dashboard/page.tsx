@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
+import { LifeBuoyIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { RegistrationCard } from "@/components/dashboard/registration-card";
 import { DashboardEmptyState } from "@/components/dashboard/dashboard-empty-state";
 import { getSession } from "@/app/lib/session";
 import { getPastRegistrations, getUpcomingRegistrations } from "@/lib/actions/student-dashboard";
+import { isProfileComplete } from "@/lib/actions/student-profile";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import type { Metadata } from "next";
@@ -39,9 +41,10 @@ export default async function DashboardPage() {
     .where(eq(users.id, session.userId))
     .limit(1);
 
-  const [upcoming, past] = await Promise.all([
+  const [upcoming, past, profileComplete] = await Promise.all([
     getUpcomingRegistrations(session),
     getPastRegistrations(session),
+    isProfileComplete(session.userId),
   ]);
 
   const hasAnyRegistration = upcoming.length > 0 || past.length > 0;
@@ -51,6 +54,18 @@ export default async function DashboardPage() {
       <SiteHeader />
 
       <main className="content-container flex flex-1 flex-col gap-xl py-xxl">
+        {!profileComplete && (
+          <div className="flex flex-col gap-sm rounded-md border border-border bg-surface-soft px-md py-sm sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-body-md text-ink">
+              Complete your profile to register for a MUN — emergency contact, school, and a
+              few other details, just once.
+            </p>
+            <Button size="sm" render={<Link href="/profile?redirectTo=/dashboard" />}>
+              Complete profile
+            </Button>
+          </div>
+        )}
+
         {/* Page header — utility surface, no marketing band. */}
         <header className="flex flex-col gap-md sm:flex-row sm:items-end sm:justify-between">
           <div className="flex flex-col gap-xxs">
@@ -64,9 +79,15 @@ export default async function DashboardPage() {
             </p>
           </div>
 
-          <Button variant="outline" render={<Link href="/muns" />}>
-            Browse MUNs
-          </Button>
+          <div className="flex items-center gap-sm">
+            <Button variant="ghost" size="sm" render={<Link href="/dashboard/support" />}>
+              <LifeBuoyIcon className="size-4" strokeWidth={1.75} aria-hidden />
+              Support
+            </Button>
+            <Button variant="outline" render={<Link href="/muns" />}>
+              Browse MUNs
+            </Button>
+          </div>
         </header>
 
         <Separator />

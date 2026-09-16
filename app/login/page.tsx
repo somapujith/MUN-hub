@@ -13,13 +13,13 @@ export const metadata: Metadata = {
 };
 
 interface LoginPageProps {
-  searchParams: Promise<{ error?: string; redirectTo?: string }>;
+  searchParams: Promise<{ error?: string; redirectTo?: string; reset?: string }>;
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
   "missing-email": "Enter an email address to continue.",
-  "not-found":
-    "No account matches that email. This demo only recognises the seeded accounts listed below.",
+  "invalid-credentials": "That email or password isn't right. Double-check and try again.",
+  suspended: "This account has been suspended. Contact support if you think that's a mistake.",
 };
 
 /**
@@ -50,6 +50,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const redirectTo = safeRedirectTo(params.redirectTo);
   const errorMessage = params.error ? ERROR_MESSAGES[params.error] : undefined;
   const returningTo = destinationLabel(redirectTo);
+  const resetSuccess = params.reset === "success";
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
@@ -69,7 +70,23 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             </p>
           </header>
 
-          <form action={loginAction} className="mt-xl flex flex-col gap-md">
+          {resetSuccess ? (
+            <p
+              role="status"
+              className="mt-xl flex items-start gap-xs rounded-sm border border-border bg-surface-soft px-sm py-sm text-body-md text-ink"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="mt-px size-4 shrink-0 fill-current"
+              >
+                <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm3.28 4.72a.75.75 0 0 1 0 1.06l-4 4a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 1 1 1.06-1.06l1.47 1.47 3.47-3.47a.75.75 0 0 1 1.06 0Z" />
+              </svg>
+              <span>Password updated. Sign in with your new password.</span>
+            </p>
+          ) : null}
+
+          <form action={loginAction} className={resetSuccess ? "mt-md flex flex-col gap-md" : "mt-xl flex flex-col gap-md"}>
             <input type="hidden" name="redirectTo" value={redirectTo} />
 
             <div className="flex flex-col gap-xs">
@@ -82,6 +99,27 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 autoFocus
                 required
                 placeholder="you@school.edu"
+                aria-invalid={errorMessage ? true : undefined}
+                aria-describedby={errorMessage ? "login-error" : undefined}
+              />
+            </div>
+
+            <div className="flex flex-col gap-xs">
+              <div className="flex items-center justify-between gap-sm">
+                <Label htmlFor="password">Password</Label>
+                <a
+                  href="/forgot-password"
+                  className="text-body-sm font-medium text-ink underline underline-offset-2"
+                >
+                  Forgot password?
+                </a>
+              </div>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
                 aria-invalid={errorMessage ? true : undefined}
                 aria-describedby={errorMessage ? "login-error" : undefined}
               />
@@ -109,13 +147,20 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             </Button>
           </form>
 
-          {/* Honest disclosure: this is passwordless mock auth. Saying so beats
-              shipping a password field that checks nothing. */}
+          <p className="mt-md text-body-md text-muted-foreground">
+            New here?{" "}
+            <a
+              href={`/signup?redirectTo=${encodeURIComponent(redirectTo)}`}
+              className="font-medium text-ink underline underline-offset-2"
+            >
+              Create an account
+            </a>
+          </p>
+
           <div className="mt-xl border-t border-border pt-lg">
-            <p className="text-caption text-ink">Demo sign-in — no password</p>
+            <p className="text-caption text-ink">Demo accounts</p>
             <p className="mt-xxs text-body-md text-muted-foreground">
-              MUN Hub is running on mock authentication for this preview. Any seeded
-              email signs you straight in; real credentials land before launch.
+              Password for every demo account: <code className="font-mono">munhub-demo</code>
             </p>
 
             <ul className="mt-md flex flex-col gap-xxs">

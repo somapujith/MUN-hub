@@ -10,6 +10,7 @@ const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days, matches lib/auth/s
 
 export async function loginAction(formData: FormData): Promise<void> {
   const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
   const redirectTo = safeRedirectTo(formData.get("redirectTo"));
 
   if (!email) {
@@ -19,9 +20,13 @@ export async function loginAction(formData: FormData): Promise<void> {
   let token: string;
   let expiresAt: Date;
   try {
-    ({ token, expiresAt } = await signIn(email));
-  } catch {
-    redirect(`/login?error=not-found&redirectTo=${encodeURIComponent(redirectTo)}`);
+    ({ token, expiresAt } = await signIn(email, password));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === "Account suspended") {
+      redirect(`/login?error=suspended&redirectTo=${encodeURIComponent(redirectTo)}`);
+    }
+    redirect(`/login?error=invalid-credentials&redirectTo=${encodeURIComponent(redirectTo)}`);
   }
 
   const cookieStore = await cookies();

@@ -63,7 +63,23 @@ interface RegistrationFormProps {
     email: string;
     phone: string;
     institution: string;
+    /**
+     * Sourced from the student's saved profile (`mun_experience`). Pre-fills
+     * the hardcoded "Prior MUN experience" field so a returning student isn't
+     * asked twice.
+     */
+    experience?: string;
   };
+  /**
+   * The student's saved onboarding profile, keyed by the same `fieldKey`s as
+   * `DEFAULT_REGISTRATION_FIELDS` (grade_class, residential_address,
+   * transportation, date_of_birth, referral_code, emergency_contact_name,
+   * emergency_contact_phone, mun_experience). Used to pre-fill this mun's own
+   * `formFields` when a field's `fieldKey` matches a known profile key — the
+   * per-mun form stays fully editable and authoritative; this is pre-fill
+   * only, never a bypass of the organizer's required/optional configuration.
+   */
+  profileDefaults: Record<string, string>;
   /** Product deep-linked from the MUN page, already validated server-side. */
   preselectedProductId?: string;
 }
@@ -100,6 +116,7 @@ export function RegistrationForm({
   accommodationOptions,
   formFields,
   defaults,
+  profileDefaults,
   preselectedProductId,
 }: RegistrationFormProps) {
   const [state, formAction] = useActionState(submitRegistrationAction, initialState);
@@ -131,14 +148,16 @@ export function RegistrationForm({
     email: defaults.email,
     phone: defaults.phone,
     institution: defaults.institution,
-    experience: "",
+    experience: defaults.experience ?? "",
     dietary: "",
     accommodations: "",
   });
   const configurableFields = formFields.filter(
     (field) => !["institution_name", "mun_experience"].includes(field.fieldKey),
   );
-  const [customFieldValues, setCustomFieldValues] = React.useState<Record<string, string>>({});
+  const [customFieldValues, setCustomFieldValues] = React.useState<Record<string, string>>(
+    () => ({ ...profileDefaults }),
+  );
 
   // ---- Accommodation state ------------------------------------------------
   // `""` is the "No accommodation" sentinel and the default: a student who
@@ -347,6 +366,17 @@ export function RegistrationForm({
                 return to {munName}
               </Link>
               .
+            </span>
+          )}
+          {state.reason === "profile" && (
+            <span className="mt-xxs block">
+              <Link
+                href={`/profile?redirectTo=${encodeURIComponent(`/register/${slug}`)}`}
+                className="text-link underline underline-offset-4"
+              >
+                Complete your profile
+              </Link>
+              , then come back to finish registering.
             </span>
           )}
         </div>

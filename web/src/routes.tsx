@@ -14,7 +14,7 @@ import { AdminRegistrationsPage } from "@/pages/admin/registrations-page";
 import { AdminReviewPage } from "@/pages/admin/review-page";
 import { AdminSupportPage } from "@/pages/admin/support-page";
 import { AdminVerificationPage } from "@/pages/admin/verification-page";
-import { HomePage } from "@/pages/home-page";
+import { HostAwareIndexPage } from "@/pages/host-aware-index-page";
 import { LoginPage } from "@/pages/login-page";
 import { MunDetailPage } from "@/pages/mun-detail-page";
 import { NotFoundPage } from "@/pages/not-found-page";
@@ -51,7 +51,7 @@ export const router = createBrowserRouter([
   {
     element: <RootLayout />,
     children: [
-      { index: true, element: <HomePage /> },
+      { index: true, element: <HostAwareIndexPage /> },
       { path: "muns", element: <MunsPage /> },
       { path: "mun/:slug", element: <MunDetailPage /> },
       { path: "login", element: <LoginPage /> },

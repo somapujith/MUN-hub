@@ -22,6 +22,7 @@ import {
 } from "@/components/registration/accommodation-fields";
 import { simulatePaymentOutcome } from "@/lib/payments/mock-adapter";
 import { listFormFields } from "@/lib/actions/registration-form";
+import { isProfileComplete } from "@/lib/actions/student-profile";
 
 /**
  * Result shape for the registration form's `useActionState`.
@@ -45,6 +46,7 @@ export interface RegisterFormState {
     | "forbidden"
     | "closed"
     | "accommodation"
+    | "profile"
     | "unknown";
 }
 
@@ -150,6 +152,17 @@ export async function submitRegistrationAction(
   const session = await getSession();
   if (!session) {
     redirect(`/login?redirectTo=${encodeURIComponent(`/register/${slug}`)}`);
+  }
+
+  // Defense-in-depth backstop for a direct POST that bypasses the page-level
+  // redirect in app/register/[slug]/page.tsx — in normal use the page-level
+  // gate always catches this first, so this should rarely if ever trigger.
+  if (!(await isProfileComplete(session.userId))) {
+    return {
+      status: "error",
+      reason: "profile",
+      message: "Complete your profile before registering.",
+    };
   }
 
   if (!registrationProductId) {

@@ -173,6 +173,10 @@ export const supportCategoryEnum = pgEnum('support_category', [
   'ORGANIZER',
   'TECHNICAL',
   'SAFETY_POLICY',
+  // Quick-start chats from the floating support widget skip the category
+  // picker entirely (matches Intercom/Zendesk-style launchers) — this is
+  // their default category rather than forcing a choice up front.
+  'GENERAL',
 ])
 
 export const supportPriorityEnum = pgEnum('support_priority', [

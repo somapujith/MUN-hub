@@ -1,0 +1,2 @@
+ALTER TABLE "support_tickets" ADD COLUMN "last_message_sender_id" text;--> statement-breakpoint
+ALTER TABLE "support_tickets" ADD CONSTRAINT "support_tickets_last_message_sender_id_users_id_fk" FOREIGN KEY ("last_message_sender_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;

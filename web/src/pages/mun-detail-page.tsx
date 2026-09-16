@@ -16,8 +16,9 @@ import { getMockMunBySlug, getMockProductsAvailability } from "@/mocks/data";
 import { cn } from "cn";
 import { NotFoundPage } from "@/pages/not-found-page";
 
-export function MunDetailPage() {
-  const { slug } = useParams<{ slug: string }>();
+export function MunDetailPage({ slugOverride }: { slugOverride?: string } = {}) {
+  const { slug: slugParam } = useParams<{ slug: string }>();
+  const slug = slugOverride ?? slugParam;
   const mun = slug ? getMockMunBySlug(slug) : null;
 
   if (!mun) {

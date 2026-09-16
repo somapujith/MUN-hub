@@ -2,7 +2,20 @@ import { describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
 import { users, supportTickets, adminActions } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
-import { createTicket, listTickets, assignTicket, updateTicketStatus } from './support'
+import {
+  createTicket,
+  listTickets,
+  assignTicket,
+  updateTicketStatus,
+  startConversation,
+  sendMessage,
+  getConversation,
+  markConversationRead,
+  listMyConversations,
+  getUnreadConversationCount,
+  getAdminUnreadConversationCount,
+  listTicketsWithRequester,
+} from './support'
 
 describe('createTicket', () => {
   it('creates a NEW ticket with default NORMAL priority', async () => {
@@ -200,6 +213,168 @@ describe('updateTicketStatus', () => {
     await updateTicketStatus(ticket.id, 'CLOSED', undefined, { userId: admin.id, role: 'ADMIN' })
 
     await expect(updateTicketStatus(ticket.id, 'NEW', undefined, { userId: admin.id, role: 'ADMIN' })).rejects.toThrow('Invalid ticket transition')
+  })
+})
+
+describe('startConversation', () => {
+  it('creates a GENERAL ticket with a derived subject and the opening message, read by the requester', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'C1', email: `c1-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+
+    const { ticket, message } = await startConversation({ body: 'Hi, my payment failed' }, { userId: student.id, role: 'STUDENT' })
+    expect(ticket.category).toBe('GENERAL')
+    expect(ticket.subject).toBe('Hi, my payment failed')
+    expect(ticket.lastMessageSenderId).toBe(student.id)
+    expect(ticket.requesterReadAt).not.toBeNull()
+    expect(message.body).toBe('Hi, my payment failed')
+    expect(message.senderRole).toBe('STUDENT')
+  })
+
+  it('throws on an empty message', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'C1b', email: `c1b-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+    await expect(startConversation({ body: '   ' }, { userId: student.id, role: 'STUDENT' })).rejects.toThrow('Message cannot be empty')
+  })
+
+  it('throws Forbidden with no session', async () => {
+    await expect(startConversation({ body: 'hi' }, null)).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('sendMessage / getConversation / markConversationRead', () => {
+  it('lets the requester and an admin exchange messages, ordered oldest first', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'C2', email: `c2-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+    const [admin] = await db
+      .insert(users)
+      .values({ name: 'C2a', email: `c2a-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
+      .returning()
+
+    const { ticket } = await startConversation({ body: 'first message' }, { userId: student.id, role: 'STUDENT' })
+    await sendMessage(ticket.id, 'we are looking into it', { userId: admin.id, role: 'ADMIN' })
+    await sendMessage(ticket.id, 'thanks!', { userId: student.id, role: 'STUDENT' })
+
+    const { messages } = await getConversation(ticket.id, { userId: student.id, role: 'STUDENT' })
+    expect(messages.map((m) => m.body)).toEqual(['first message', 'we are looking into it', 'thanks!'])
+  })
+
+  it('rejects a third party who is neither the requester nor an admin', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'C3', email: `c3-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+    const [other] = await db
+      .insert(users)
+      .values({ name: 'C3b', email: `c3b-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+
+    const { ticket } = await startConversation({ body: 'hi' }, { userId: student.id, role: 'STUDENT' })
+    await expect(sendMessage(ticket.id, 'butting in', { userId: other.id, role: 'STUDENT' })).rejects.toThrow('Forbidden')
+    await expect(getConversation(ticket.id, { userId: other.id, role: 'STUDENT' })).rejects.toThrow('Forbidden')
+  })
+
+  it('rejects new messages on a CLOSED ticket', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'C4', email: `c4-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+    const [admin] = await db
+      .insert(users)
+      .values({ name: 'C4a', email: `c4a-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
+      .returning()
+
+    const { ticket } = await startConversation({ body: 'hi' }, { userId: student.id, role: 'STUDENT' })
+    await assignTicket(ticket.id, { userId: admin.id, role: 'ADMIN' })
+    await updateTicketStatus(ticket.id, 'IN_PROGRESS', undefined, { userId: admin.id, role: 'ADMIN' })
+    await updateTicketStatus(ticket.id, 'RESOLVED', 'done', { userId: admin.id, role: 'ADMIN' })
+    await updateTicketStatus(ticket.id, 'CLOSED', undefined, { userId: admin.id, role: 'ADMIN' })
+
+    await expect(sendMessage(ticket.id, 'still broken', { userId: student.id, role: 'STUDENT' })).rejects.toThrow(
+      'This conversation is closed.',
+    )
+  })
+
+  it('markConversationRead clears unread for whichever side calls it', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'C5', email: `c5-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+    const [admin] = await db
+      .insert(users)
+      .values({ name: 'C5a', email: `c5a-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
+      .returning()
+
+    const { ticket } = await startConversation({ body: 'hi' }, { userId: student.id, role: 'STUDENT' })
+    await sendMessage(ticket.id, 'reply', { userId: admin.id, role: 'ADMIN' })
+
+    expect(await getUnreadConversationCount({ userId: student.id, role: 'STUDENT' })).toBe(1)
+    await markConversationRead(ticket.id, { userId: student.id, role: 'STUDENT' })
+    expect(await getUnreadConversationCount({ userId: student.id, role: 'STUDENT' })).toBe(0)
+  })
+})
+
+describe('listMyConversations / getUnreadConversationCount / getAdminUnreadConversationCount', () => {
+  it('lists only the caller\'s own tickets, most recent activity first', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'C6', email: `c6-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+    const [otherStudent] = await db
+      .insert(users)
+      .values({ name: 'C6b', email: `c6b-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+
+    const { ticket: older } = await startConversation({ body: 'older' }, { userId: student.id, role: 'STUDENT' })
+    const { ticket: newer } = await startConversation({ body: 'newer' }, { userId: student.id, role: 'STUDENT' })
+    await startConversation({ body: 'not mine' }, { userId: otherStudent.id, role: 'STUDENT' })
+
+    const mine = await listMyConversations({ userId: student.id, role: 'STUDENT' })
+    expect(mine.map((t) => t.id)).toEqual([newer.id, older.id])
+  })
+
+  it('getAdminUnreadConversationCount counts conversations awaiting an admin reply, and rejects non-admins', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'C7', email: `c7-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+    const [admin] = await db
+      .insert(users)
+      .values({ name: 'C7a', email: `c7a-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
+      .returning()
+
+    const { ticket } = await startConversation({ body: 'needs a reply' }, { userId: student.id, role: 'STUDENT' })
+    const before = await getAdminUnreadConversationCount({ userId: admin.id, role: 'ADMIN' })
+    expect(before).toBeGreaterThanOrEqual(1)
+
+    await markConversationRead(ticket.id, { userId: admin.id, role: 'ADMIN' })
+    await sendMessage(ticket.id, 'here to help', { userId: admin.id, role: 'ADMIN' })
+
+    await expect(getAdminUnreadConversationCount({ userId: student.id, role: 'STUDENT' })).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('listTicketsWithRequester', () => {
+  it('joins requester name/role onto each ticket', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'Req One', email: `req1-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+    const { ticket } = await startConversation({ body: 'need help' }, { userId: student.id, role: 'STUDENT' })
+
+    const rows = await listTicketsWithRequester({}, { userId: 'admin-x', role: 'ADMIN' })
+    const found = rows.find((r) => r.id === ticket.id)
+    expect(found?.requesterName).toBe('Req One')
+    expect(found?.requesterRole).toBe('STUDENT')
+  })
+
+  it('throws Forbidden for a non-admin', async () => {
+    await expect(listTicketsWithRequester({}, { userId: 'student-x', role: 'STUDENT' })).rejects.toThrow('Forbidden')
   })
 })
 

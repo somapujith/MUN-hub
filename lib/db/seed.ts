@@ -21,7 +21,12 @@ import { config } from 'dotenv'
 config({ path: '.env' })
 
 import { eq } from 'drizzle-orm'
+import { hashPassword } from '@/lib/auth/password'
 import { seedFullGoLiveModules, type GoLiveModuleTables } from './seed-go-live-modules'
+
+// Shown verbatim on the login page's demo-accounts panel
+// (app/login/page.tsx) — must match exactly.
+const DEMO_PASSWORD = 'munhub-demo'
 
 type SchemaModule = typeof import('./schema')
 type ClientModule = typeof import('./client')
@@ -44,7 +49,23 @@ interface Tables extends GoLiveModuleTables {
 
 async function upsertUserByEmail(db: Db, users: Users, data: NewUser) {
   const [existing] = await db.select().from(users).where(eq(users.email, data.email)).limit(1)
-  if (existing) return existing
+  if (existing) {
+    // Backfill fields that have drifted from the current seed definition —
+    // same "re-seeding must backfill rather than silently skip" reasoning as
+    // seedMun's organizerDrifted/datesDrifted handling below, applied here to
+    // passwordHash: rows created before real password auth landed would
+    // otherwise stay permanently un-signinable across re-seeds.
+    if (!existing.passwordHash && data.passwordHash) {
+      const [updated] = await db
+        .update(users)
+        .set({ passwordHash: data.passwordHash })
+        .where(eq(users.id, existing.id))
+        .returning()
+      console.log(`    (backfilled passwordHash for ${existing.email})`)
+      return updated
+    }
+    return existing
+  }
   const [created] = await db.insert(users).values(data).returning()
   return created
 }
@@ -419,10 +440,13 @@ async function main() {
   }
 
   console.log('Seeding users...')
+  const demoPasswordHash = await hashPassword(DEMO_PASSWORD)
+
   const admin = await upsertUserByEmail(db, users, {
     name: 'Platform Admin',
     email: 'admin@munhub.test',
     role: 'ADMIN',
+    passwordHash: demoPasswordHash,
   })
   console.log(`  - Admin: ${admin.email}`)
 
@@ -431,6 +455,7 @@ async function main() {
     email: 'student@munhub.test',
     role: 'STUDENT',
     institution: 'VIT Vellore',
+    passwordHash: demoPasswordHash,
   })
   console.log(`  - Student: ${student.email} (institution: ${student.institution})`)
 
@@ -444,6 +469,7 @@ async function main() {
       name: seed.organizer.name,
       email: seed.organizer.email,
       role: 'ORGANIZER',
+      passwordHash: demoPasswordHash,
     })
     organizersByEmail.set(organizer.email, organizer)
     console.log(`  - Organizer: ${organizer.email}`)

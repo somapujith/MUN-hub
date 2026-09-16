@@ -31,7 +31,8 @@ Default port: **3001** (`PORT` env overrides).
 | Variable | Default | Purpose |
 |---|---|---|
 | `PORT` | `3001` | HTTP listen port |
-| `CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed origins (CORS + CSRF) |
+| `CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed origins, exact match. In addition, any `https://*.munhub.in` origin is always allowed (role + per-MUN wildcard subdomains — see `docs/superpowers/specs/2026-09-17-subdomain-architecture-design.md`) |
+| `COOKIE_DOMAIN` | *(unset = host-only cookie)* | Set to `.munhub.in` in production so the session cookie is shared across `app.`/`organize.`/`admin.munhub.in` |
 | `AUTH_ADAPTER` | *(unset = mock)* | Must be non-`mock` when `NODE_ENV=production` |
 | `NODE_ENV` | `development` | Production triggers auth boot-guard |
 

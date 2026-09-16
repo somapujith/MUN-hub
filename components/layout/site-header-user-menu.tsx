@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboardIcon, LogOutIcon, TicketIcon } from "lucide-react";
+import { LayoutDashboardIcon, LogOutIcon, TicketIcon, UserRoundIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,6 +68,12 @@ export function SiteHeaderUserMenu({
             <DropdownMenuItem render={<Link href="/dashboard" />}>
               <TicketIcon />
               My registrations
+            </DropdownMenuItem>
+          )}
+          {role === "STUDENT" && (
+            <DropdownMenuItem render={<Link href="/profile" />}>
+              <UserRoundIcon />
+              My profile
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />

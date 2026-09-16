@@ -18,6 +18,20 @@ function parseCorsOrigins(): string[] {
     .filter(Boolean)
 }
 
+// Any subdomain of munhub.in (apex, www, app, organize, admin, or a per-MUN
+// slug on the wildcard host) — covers the role-subdomain + wildcard-subdomain
+// architecture. docs/superpowers/specs/2026-09-17-subdomain-architecture-design.md §6
+const MUNHUB_ORIGIN_PATTERN = /^https:\/\/([a-z0-9-]+\.)?munhub\.in$/
+
+export function makeCorsOriginMatcher() {
+  const explicitOrigins = new Set(parseCorsOrigins())
+
+  return (origin: string): string | undefined => {
+    if (explicitOrigins.has(origin) || MUNHUB_ORIGIN_PATTERN.test(origin)) return origin
+    return undefined
+  }
+}
+
 /**
  * Base Hono app with the full middleware stack (spec Section 8.2):
  * request-id → logger → CORS → session → [webhooks outside CSRF] →
@@ -31,7 +45,7 @@ export function createApp() {
   app.use(
     '*',
     cors({
-      origin: parseCorsOrigins(),
+      origin: makeCorsOriginMatcher(),
       credentials: true,
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Request-Id'],

@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "munhub-web",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "dist",
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [
+    { "pattern": "app.munhub.in", "custom_domain": true },
+    { "pattern": "organize.munhub.in", "custom_domain": true },
+    { "pattern": "admin.munhub.in", "custom_domain": true },
+    // Wildcard: any other *.munhub.in label is a per-MUN slug page.
+    // Requires a proxied wildcard DNS record (*.munhub.in) in the zone.
+    // Does NOT match bare munhub.in/www.munhub.in — those stay on Vercel
+    // until the Phase 7 cutover (docs/superpowers/specs/2026-09-17-subdomain-architecture-design.md §2).
+    { "pattern": "*.munhub.in/*", "zone_name": "munhub.in" }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

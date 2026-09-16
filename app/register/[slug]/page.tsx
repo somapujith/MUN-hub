@@ -18,6 +18,7 @@ import { getSession } from "@/app/lib/session";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { isProfileComplete, getProfileFormDefaults } from "@/lib/actions/student-profile";
 
 interface RegisterPageProps {
   params: Promise<{ slug: string }>;
@@ -50,6 +51,12 @@ export default async function RegisterPage({ params, searchParams }: RegisterPag
   const session = await getSession();
   if (!session) {
     redirect(`/login?redirectTo=${encodeURIComponent(`/register/${slug}`)}`);
+  }
+
+  // Profile-completeness gate. Catches an incomplete profile before the user
+  // sees a form they can't submit — same reasoning as the auth gate above.
+  if (!(await isProfileComplete(session.userId))) {
+    redirect(`/profile?redirectTo=${encodeURIComponent(`/register/${slug}`)}`);
   }
 
   const dateRange = formatDateRange(mun.startDate, mun.endDate);
@@ -145,6 +152,11 @@ export default async function RegisterPage({ params, searchParams }: RegisterPag
     .where(eq(users.id, session.userId))
     .limit(1);
 
+  // Saved onboarding profile (emergency contact, DOB, school, etc.) — pre-fills
+  // both the hardcoded "experience" field and any of this mun's own
+  // `formFields` whose `fieldKey` matches a known profile key.
+  const profileDefaults = await getProfileFormDefaults(session);
+
   return (
     <RegistrationShell munName={mun.name} dateRange={dateRange} location={location}>
       <RegistrationForm
@@ -162,11 +174,13 @@ export default async function RegisterPage({ params, searchParams }: RegisterPag
             ? preselectedProductId
             : undefined
         }
+        profileDefaults={profileDefaults}
         defaults={{
           fullName: profile?.name ?? "",
           email: profile?.email ?? "",
           phone: profile?.phone ?? "",
           institution: profile?.institution ?? "",
+          experience: profileDefaults.mun_experience ?? "",
         }}
       />
     </RegistrationShell>

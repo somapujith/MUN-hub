@@ -148,6 +148,34 @@
       "when": 1789486318162,
       "tag": "0020_harsh_major_mapleleaf",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789590516645,
+      "tag": "0021_jittery_anita_blake",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1789593813153,
+      "tag": "0022_happy_marten_broadcloak",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789595999361,
+      "tag": "0023_bent_zzzax",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789596095429,
+      "tag": "0024_wooden_freak",
+      "breakpoints": true
     }
   ]
 }
