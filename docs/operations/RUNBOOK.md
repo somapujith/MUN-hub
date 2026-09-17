@@ -146,7 +146,7 @@ npx wrangler secret list --env=""
 | `COOKIE_SECURE` | var | yes (prod) | `true` in `wrangler.jsonc`. Unset: Secure except on plain-http localhost. |
 | `TURNSTILE_SECRET_KEY` | secret | no | Cloudflare Turnstile check on delegate signup and organizer sign-in code requests. Set it only together with the web build's `VITE_TURNSTILE_SITE_KEY`, or every such request is rejected. |
 | `RATE_LIMIT_IP_MULTIPLIER` | var | no | Scales per-IP limits in the in-memory fallback only (local/E2E); never affects the Workers bindings |
-| `RL_*` (14) | binding | yes | Workers Rate Limiting bindings (`ratelimits` in `wrangler.jsonc`, namespace ids 1001-1014). A missing binding falls back to an in-memory counter per isolate. |
+| `RL_*` (18) | binding | yes | Workers Rate Limiting bindings (`ratelimits` in `wrangler.jsonc`, namespace ids 1001-1018; `env.staging` declares its own copy with ids 2001-2018, since `ratelimits` isn't inherited). A missing binding falls back to an in-memory counter per isolate. |
 | `SYSTEM_ACTOR_USER_ID` | var | for the lifecycle job | `users.id` of a dedicated staff account, recorded as the actor of scheduled open/close/start moves. Unset: that job logs `scheduled_job.skipped` and does nothing. |
 | `CHECKIN_CODE_SECRET` | secret | recommended | Signs conference check-in codes (at least 32 characters). Unset: derived from `PAYMENT_FIELD_KEY`. Don't change it once passes are issued. |
 | `REQUIRE_EMAIL_VERIFICATION` | var | no | `true` blocks registration (403) until the account email is verified |

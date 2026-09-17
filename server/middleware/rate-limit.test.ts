@@ -154,6 +154,63 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
     expect(otherUser.status).toBe(200)
   })
 
+  describe('self-service MFA disable / recovery-code regeneration', () => {
+    it('limits code guesses per signed-in user, whichever addresses they come from', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const result = await statuses(LIMITERS.mfaManageUser.limit + 1, () =>
+        send('/auth/mfa/disable', { ip: freshIp(), user, body: { code: '000000' } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.mfaManageUser.limit))
+
+      const otherUser = await send('/auth/mfa/disable', { ip: freshIp(), user: `user-${crypto.randomUUID()}`, body: { code: '000000' } })
+      expect(otherUser.status).toBe(200)
+    })
+
+    it('shares one budget between disable and regenerate', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const routes = ['/auth/mfa/disable', '/auth/mfa/recovery-codes']
+      const result = await statuses(LIMITERS.mfaManageUser.limit + 1, (i) =>
+        send(routes[i % routes.length], { ip: freshIp(), user, body: { code: '000000' } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.mfaManageUser.limit))
+    })
+  })
+
+  describe('uploaded-file reads', () => {
+    const fileRoute = (i: number) => `/files/muns/m-1/cover/${i}.png`
+
+    it('do not use up the global per-IP budget', async () => {
+      process.env.RATE_LIMIT_GLOBAL_PER_MINUTE = '3'
+      const ip = freshIp()
+
+      // A /muns page's worth of cover images, well past the global cap...
+      const images = await statuses(24, (i) => send(fileRoute(i), { ip, method: 'GET' }))
+      expect(images.every((status) => status === 200)).toBe(true)
+      // ...and the page's API calls still go through.
+      expect(await statuses(3, () => send('/muns', { ip, method: 'GET' }))).toEqual([200, 200, 200])
+      expect((await send('/muns', { ip, method: 'GET' })).status).toBe(429)
+    })
+
+    it('have their own per-IP limit, for GET and HEAD alike', async () => {
+      const ip = freshIp()
+      const result = await statuses(LIMITERS.filesIp.limit + 1, (i) =>
+        send(fileRoute(i), { ip, method: i % 2 === 0 ? 'GET' : 'HEAD' }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.filesIp.limit))
+    })
+
+    it('only exempts reads below /files/', async () => {
+      process.env.RATE_LIMIT_GLOBAL_PER_MINUTE = '1'
+      const ip = freshIp()
+      expect((await send('/files', { ip, method: 'GET' })).status).toBe(200)
+      expect((await send('/files', { ip, method: 'GET' })).status).toBe(429)
+
+      const writer = freshIp()
+      expect((await send(fileRoute(1), { ip: writer, body: {} })).status).toBe(200)
+      expect((await send(fileRoute(2), { ip: writer, body: {} })).status).toBe(429)
+    })
+  })
+
   it('keeps the organizer code limits: per IP+email and per IP', async () => {
     const ip = freshIp()
     const email = freshEmail('org-code')
@@ -263,6 +320,29 @@ describe('rateLimitMiddleware (Workers bindings)', () => {
     consoleError.mockRestore()
   })
 
+  it('counts a file read against the files binding only, not the global one', async () => {
+    const env = allBindings()
+    const ip = freshIp()
+
+    const res = await send('/files/muns/m-1/logo/a.png', { ip, env, method: 'GET' })
+
+    expect(res.status).toBe(200)
+    expect((env.RL_FILES_IP as ReturnType<typeof fakeBinding>).limit).toHaveBeenCalledWith({ key: `ip:${ip}` })
+    expect((env.RL_GLOBAL_IP as ReturnType<typeof fakeBinding>).limit).not.toHaveBeenCalled()
+  })
+
+  it('counts MFA disable against the per-user binding as well as the global one', async () => {
+    const env = allBindings()
+    const ip = freshIp()
+    const user = `user-${crypto.randomUUID()}`
+
+    const res = await send('/auth/mfa/disable', { ip, env, user, body: { code: '000000' } })
+
+    expect(res.status).toBe(200)
+    expect((env.RL_MFA_MANAGE_USER as ReturnType<typeof fakeBinding>).limit).toHaveBeenCalledWith({ key: `user:${user}` })
+    expect((env.RL_GLOBAL_IP as ReturnType<typeof fakeBinding>).limit).toHaveBeenCalledWith({ key: `ip:${ip}` })
+  })
+
   it('ignores the in-memory overrides when bindings are present', async () => {
     process.env.RATE_LIMIT_GLOBAL_PER_MINUTE = '1'
     const env = allBindings()
@@ -297,27 +377,46 @@ describe('server/wrangler.jsonc ratelimits', () => {
     return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1'))
   }
 
+  type RateLimitEntry = { name: string; namespace_id: string; simple: { limit: number; period: number } }
   const config = parseJsonc(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8')) as {
-    ratelimits?: Array<{ name: string; namespace_id: string; simple: { limit: number; period: number } }>
+    ratelimits?: RateLimitEntry[]
+    env?: Record<string, { ratelimits?: RateLimitEntry[] }>
   }
-  const declared = config.ratelimits ?? []
+  // Wrangler never inherits `ratelimits` into a named environment, so each
+  // environment has to declare the full set itself; without them it silently
+  // runs on per-isolate in-memory counters.
+  const environments: Array<[string, RateLimitEntry[]]> = [
+    ['top level', config.ratelimits ?? []],
+    ...Object.entries(config.env ?? {}).map(([name, env]): [string, RateLimitEntry[]] => [`env.${name}`, env.ratelimits ?? []]),
+  ]
 
-  it('declares a binding with the same limit and period for every limiter', () => {
-    for (const spec of Object.values(LIMITERS)) {
-      const binding = declared.find((entry) => entry.name === spec.binding)
-      expect(binding, spec.binding).toBeDefined()
-      expect(binding!.simple, spec.binding).toEqual({ limit: spec.limit, period: spec.periodSeconds })
-    }
-    expect(declared).toHaveLength(Object.keys(LIMITERS).length)
+  it('has at least one named environment to check', () => {
+    expect(environments.length).toBeGreaterThan(1)
   })
 
-  it('uses unique, positive-integer namespace ids', () => {
-    const ids = declared.map((entry) => entry.namespace_id)
+  describe.each(environments)('%s', (_label, declared) => {
+    it('declares a binding with the same limit and period for every limiter', () => {
+      for (const spec of Object.values(LIMITERS)) {
+        const binding = declared.find((entry) => entry.name === spec.binding)
+        expect(binding, spec.binding).toBeDefined()
+        expect(binding!.simple, spec.binding).toEqual({ limit: spec.limit, period: spec.periodSeconds })
+      }
+      expect(declared).toHaveLength(Object.keys(LIMITERS).length)
+    })
+
+    it('uses unique, positive-integer namespace ids', () => {
+      const ids = declared.map((entry) => entry.namespace_id)
+      expect(new Set(ids).size).toBe(ids.length)
+      for (const id of ids) expect(id).toMatch(/^[1-9]\d*$/)
+    })
+
+    it('only uses periods Workers supports', () => {
+      for (const entry of declared) expect([10, 60]).toContain(entry.simple.period)
+    })
+  })
+
+  it('never shares a namespace id between environments (counters would be shared)', () => {
+    const ids = environments.flatMap(([, declared]) => declared.map((entry) => entry.namespace_id))
     expect(new Set(ids).size).toBe(ids.length)
-    for (const id of ids) expect(id).toMatch(/^[1-9]\d*$/)
-  })
-
-  it('only uses periods Workers supports', () => {
-    for (const entry of declared) expect([10, 60]).toContain(entry.simple.period)
   })
 })

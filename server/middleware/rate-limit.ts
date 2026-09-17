@@ -12,7 +12,8 @@ import type { AppVariables } from '../src/types'
 export const LIMITERS = {
   /**
    * Per-IP cap on every /api/v1 request, including those that also match a
-   * route rule below. The in-memory fallback can be replaced with
+   * route rule below — except uploaded-file reads (`filesIp`). The in-memory
+   * fallback can be replaced with
    * RATE_LIMIT_GLOBAL_PER_MINUTE (e.g. the E2E suite, where every request
    * comes from one address).
    */
@@ -43,6 +44,12 @@ export const LIMITERS = {
   // different tokens from one IP, and hammering one token's endpoint fast.
   mfaVerifyIp: { binding: 'RL_MFA_VERIFY_IP', limit: 20, periodSeconds: 60, perIp: true },
   mfaVerifyToken: { binding: 'RL_MFA_VERIFY_TOKEN', limit: 10, periodSeconds: 60, perIp: false },
+  // Self-service MFA disable / recovery-code regeneration. Each takes a fresh
+  // TOTP (or recovery) code to prove the caller is the account holder and not
+  // just someone holding the session cookie, and nothing else counts wrong
+  // guesses there, so this per-account cap is what makes guessing the code
+  // impractical. Both routes share one budget per user.
+  mfaManageUser: { binding: 'RL_MFA_MANAGE_USER', limit: 5, periodSeconds: 60, perIp: false },
   // Organizer email-code sign-in. lib/actions/organizer-otp.ts also enforces a
   // per-address resend cooldown and hourly cap, and a per-code attempt limit.
   // The per-IP cap bounds how many different addresses one IP can send codes to.
@@ -52,6 +59,12 @@ export const LIMITERS = {
   registrationsUser: { binding: 'RL_REGISTRATIONS_USER', limit: 10, periodSeconds: 60, perIp: false },
   availabilityIp: { binding: 'RL_AVAILABILITY_IP', limit: 60, periodSeconds: 60, perIp: true },
   munsListIp: { binding: 'RL_MUNS_LIST_IP', limit: 120, periodSeconds: 60, perIp: true },
+  // Uploaded-file reads (GET /api/v1/files/*): counted here INSTEAD of the
+  // global cap. One /muns page loads up to 24 cover images, so a school lab
+  // behind one address would otherwise use up the global budget on images
+  // alone and break its API calls too. The files are immutable and cached for
+  // a year, so this only bounds hot-linking/scraping.
+  filesIp: { binding: 'RL_FILES_IP', limit: 1200, periodSeconds: 60, perIp: true },
 } satisfies Record<string, LimiterSpec>
 
 type RequestFacts = {
@@ -66,16 +79,32 @@ type RequestFacts = {
 type Check = { limiter: LimiterSpec; key: string }
 
 type LimitRule = {
-  method: string
+  methods: readonly string[]
+  /** Exact path under /api/v1, or — ending in '/' — every path below it. */
   path: string
   readsEmail?: boolean
   readsPendingToken?: boolean
+  /**
+   * The rule's checks replace the global per-IP cap instead of adding to it.
+   * Only for cheap, static reads that a single page loads many of.
+   */
+  replacesGlobal?: boolean
   checks: (facts: RequestFacts) => Check[]
+}
+
+function ruleMatches(rule: LimitRule, method: string, path: string): boolean {
+  if (!rule.methods.includes(method)) return false
+  return rule.path.endsWith('/') ? path.startsWith(rule.path) && path.length > rule.path.length : path === rule.path
+}
+
+/** Keys a signed-in user's own budget; a signed-out caller (rejected later by requireAuth) is keyed by IP. */
+function userKey({ ip, sessionUserId }: RequestFacts): string {
+  return sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}`
 }
 
 const RULES: LimitRule[] = [
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/auth/session',
     readsEmail: true,
     checks: ({ ip, email }) => [
@@ -84,19 +113,17 @@ const RULES: LimitRule[] = [
     ],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/auth/users',
     checks: ({ ip }) => [{ limiter: LIMITERS.signupIp, key: `ip:${ip}` }],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/auth/session/password',
-    checks: ({ ip, sessionUserId }) => [
-      { limiter: LIMITERS.changePasswordUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
-    ],
+    checks: (facts) => [{ limiter: LIMITERS.changePasswordUser, key: userKey(facts) }],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/password-reset/request',
     readsEmail: true,
     checks: ({ ip, email }) => [
@@ -105,12 +132,12 @@ const RULES: LimitRule[] = [
     ],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/password-reset/confirm',
     checks: ({ ip }) => [{ limiter: LIMITERS.resetConfirmIp, key: `ip:${ip}` }],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/auth/session/mfa',
     readsPendingToken: true,
     checks: ({ ip, pendingToken }) => [
@@ -118,8 +145,19 @@ const RULES: LimitRule[] = [
       ...(pendingToken ? [{ limiter: LIMITERS.mfaVerifyToken, key: `token:${pendingToken}` }] : []),
     ],
   },
+  // Same key for both routes, so alternating between them doesn't double the budget.
   {
-    method: 'POST',
+    methods: ['POST'],
+    path: '/auth/mfa/disable',
+    checks: (facts) => [{ limiter: LIMITERS.mfaManageUser, key: userKey(facts) }],
+  },
+  {
+    methods: ['POST'],
+    path: '/auth/mfa/recovery-codes',
+    checks: (facts) => [{ limiter: LIMITERS.mfaManageUser, key: userKey(facts) }],
+  },
+  {
+    methods: ['POST'],
     path: '/auth/organizers/code',
     readsEmail: true,
     checks: ({ ip, email }) => [
@@ -128,7 +166,7 @@ const RULES: LimitRule[] = [
     ],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/auth/organizers/session',
     readsEmail: true,
     checks: ({ ip, email }) => [
@@ -136,21 +174,29 @@ const RULES: LimitRule[] = [
     ],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/registrations',
     checks: ({ sessionUserId }) => [
       { limiter: LIMITERS.registrationsUser, key: `session:${sessionUserId ?? 'anon'}` },
     ],
   },
   {
-    method: 'GET',
+    methods: ['GET'],
     path: '/products/availability',
     checks: ({ ip }) => [{ limiter: LIMITERS.availabilityIp, key: `ip:${ip}` }],
   },
   {
-    method: 'GET',
+    methods: ['GET'],
     path: '/muns',
     checks: ({ ip }) => [{ limiter: LIMITERS.munsListIp, key: `ip:${ip}` }],
+  },
+  {
+    // server/routes/files.ts is the only handler under /files/. Hono answers
+    // HEAD with the GET handler but keeps HEAD as the request method.
+    methods: ['GET', 'HEAD'],
+    path: '/files/',
+    replacesGlobal: true,
+    checks: ({ ip }) => [{ limiter: LIMITERS.filesIp, key: `ip:${ip}` }],
   },
 ]
 
@@ -177,13 +223,14 @@ async function readBodyPendingToken(c: Context): Promise<string | undefined> {
  * Rate limits per spec Section 4.6, mounted on /api/v1 (webhook routes are
  * mounted outside it). Every request counts against the global per-IP cap;
  * a request matching a route rule additionally counts against each of that
- * rule's limits — a route rule never exempts a request from the global cap.
- * The first exhausted limit answers 429 with Retry-After.
+ * rule's limits. The one exception is a rule marked `replacesGlobal`
+ * (uploaded-file reads), whose own limit is counted instead of the global
+ * cap. The first exhausted limit answers 429 with Retry-After.
  */
 export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   const path = c.req.path.replace(/^\/api\/v1/, '') || '/'
   const method = c.req.method
-  const matched = RULES.filter((rule) => rule.method === method && rule.path === path)
+  const matched = RULES.filter((rule) => ruleMatches(rule, method, path))
 
   const facts: RequestFacts = {
     ip: getClientIp(c),
@@ -197,7 +244,7 @@ export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }>
   }
 
   const checks: Check[] = [
-    { limiter: LIMITERS.globalIp, key: `ip:${facts.ip}` },
+    ...(matched.some((rule) => rule.replacesGlobal) ? [] : [{ limiter: LIMITERS.globalIp, key: `ip:${facts.ip}` }]),
     ...matched.flatMap((rule) => rule.checks(facts)),
   ]
 

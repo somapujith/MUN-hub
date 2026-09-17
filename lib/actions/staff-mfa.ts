@@ -237,15 +237,27 @@ export async function completeMfaChallenge(
   return { userId: outcome.userId, role: outcome.role, token, expiresAt }
 }
 
-/** The id of the first unused recovery code that verifies against `code`, or null. */
+/** The shape generateRecoveryCode produces (case-insensitive, since the sign-in field only displays uppercase). */
+const RECOVERY_CODE_PATTERN = /^[0-9A-F]{5}-[0-9A-F]{5}$/i
+
+/**
+ * The id of the first unused recovery code that verifies against `code`, or
+ * null. Anything not shaped like a recovery code (e.g. a wrong 6-digit TOTP)
+ * is rejected before any hashing: each candidate costs a full scrypt
+ * verification (~65 ms, ~32 MiB), so checking every wrong guess against all
+ * ten codes would make each failed attempt expensive to serve.
+ */
 async function matchRecoveryCode(executor: Executor, userId: string, code: string): Promise<string | null> {
+  if (!RECOVERY_CODE_PATTERN.test(code)) return null
+  const normalized = code.toUpperCase()
+
   const candidates = await executor
     .select({ id: mfaRecoveryCodes.id, codeHash: mfaRecoveryCodes.codeHash })
     .from(mfaRecoveryCodes)
     .where(and(eq(mfaRecoveryCodes.userId, userId), isNull(mfaRecoveryCodes.usedAt)))
 
   for (const candidate of candidates) {
-    if (await verifyPassword(code, candidate.codeHash)) return candidate.id
+    if (await verifyPassword(normalized, candidate.codeHash)) return candidate.id
   }
   return null
 }
@@ -284,6 +296,10 @@ export async function regenerateMfaRecoveryCodes(code: string, session: Session)
  * recovery code proves it's really them (not just whoever currently holds
  * the session cookie) before the safety net comes down. Throws
  * `notConfirmed` if there's nothing confirmed to disable.
+ *
+ * Unlike completeMfaChallenge, nothing here counts wrong codes: guessing is
+ * bounded by the per-user RL_MFA_MANAGE_USER limit on this route and on
+ * regenerate (server/middleware/rate-limit.ts).
  */
 export async function disableMfa(code: string, session: Session): Promise<void> {
   assertStaff(session)

@@ -274,6 +274,35 @@ describe('disableMfa', () => {
 
     expect(await hasConfirmedMfa(admin.id)).toBe(false)
   })
+
+  it('accepts a recovery code typed in lowercase', async () => {
+    const admin = await makeUser('ADMIN')
+    const { recoveryCodes } = await enrollAndConfirm(admin)
+
+    await disableMfa(recoveryCodes[0].toLowerCase(), sess(admin))
+
+    expect(await hasConfirmedMfa(admin.id)).toBe(false)
+  })
+
+  it('does not hash a wrong 6-digit code against the recovery codes', async () => {
+    const admin = await makeUser('ADMIN')
+    await enrollAndConfirm(admin)
+    const password = await import('@/lib/auth/password')
+    const verifySpy = vi.spyOn(password, 'verifyPassword')
+
+    try {
+      await expect(disableMfa('000000', sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
+      await expect(disableMfa('not a code', sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
+      expect(verifySpy).not.toHaveBeenCalled()
+
+      // A recovery-code-shaped guess is still checked (and still rejected).
+      await expect(disableMfa('ABCDE-12345', sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
+      expect(verifySpy).toHaveBeenCalled()
+    } finally {
+      verifySpy.mockRestore()
+    }
+    expect(await hasConfirmedMfa(admin.id)).toBe(true)
+  })
 })
 
 describe('beginMfaEnrollment — TOTP_FIELD_KEY unavailable', () => {
