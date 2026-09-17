@@ -18,6 +18,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** Provider key of the dev/test mock checkout (lib/payments/mock-adapter.ts). */
+export const MOCK_PAYMENT_PROVIDER = "mock_razorpay";
+
 export interface InitiateRegistrationInput {
   munId: string;
   registrationProductId: string;
@@ -30,14 +33,20 @@ export interface InitiateRegistrationInput {
 
 export interface InitiateRegistrationResult {
   registrationId: string;
-  orderId: string;
+  /** Null for a free pass — it is CONFIRMED straight away, nothing to pay. */
+  orderId: string | null;
+  status: RegistrationStatus;
+  /** True when the server returned the registration an earlier submit (same key) created. */
+  replayed: boolean;
 }
 
 /**
  * Wraps `POST /registrations` (lib/actions/registration.ts#initiateRegistration).
  * Session-derived actor — never send a `userId`. Requires an
  * `Idempotency-Key` (spec Section 6.4) so a duplicate submit (double click,
- * retried network request) can't reserve two seats.
+ * retried network request) returns the same registration instead of
+ * reserving a second seat. Fails with the server's friendly message when
+ * online payments are unavailable (503 PAYMENTS_UNAVAILABLE).
  */
 export function initiateRegistration(
   input: InitiateRegistrationInput,
@@ -76,7 +85,8 @@ interface RawRegistrationDetail {
   };
   committee: { name: string } | null;
   portfolio: { name: string } | null;
-  payment: Array<{ amount: number; status: PaymentStatus }>;
+  payment: Array<{ amount: number; currency: string; status: PaymentStatus }>;
+  paymentProvider: string | null;
 }
 
 function toRegistrationDetail(raw: RawRegistrationDetail): MockRegistrationDetail {
@@ -101,7 +111,8 @@ function toRegistrationDetail(raw: RawRegistrationDetail): MockRegistrationDetai
     },
     committee: raw.committee ? { name: raw.committee.name } : null,
     portfolio: raw.portfolio ? { name: raw.portfolio.name } : null,
-    payment: raw.payment.map((p) => ({ amount: p.amount, status: p.status })),
+    payment: raw.payment.map((p) => ({ amount: p.amount, currency: p.currency, status: p.status })),
+    paymentProvider: raw.paymentProvider,
   };
 }
 
@@ -114,18 +125,25 @@ export async function fetchRegistrationById(id: string): Promise<MockRegistratio
   return toRegistrationDetail(raw);
 }
 
+/** Response of the payment webhook processor, relayed by the mock checkout. */
 export interface MockPaymentResult {
   ok: boolean;
-  alreadyConfirmed?: boolean;
-  refundOwed?: boolean;
+  /** The registration is now confirmed. */
+  confirmed?: boolean;
+  /** This payment had already been applied. */
+  duplicate?: boolean;
+  /** Authentic, but nothing changed (e.g. a failure after a capture). */
+  ignored?: boolean;
+  /** Money was taken without a valid registration; support resolves it. */
+  exception?: boolean;
 }
 
 /**
- * Wraps `POST /registrations/:id/mock-payment` — the mock checkout submit.
- * Signs a provider-shaped payload server-side and posts it to the real
- * `/webhooks/payments` route, so confirmation still only ever happens there
- * (never client-driven). See server/routes/registrations.ts for the full
- * rationale, ported from `app/register/[slug]/actions.ts#completeMockPaymentAction`.
+ * Wraps `POST /registrations/:id/mock-payment` — the dev/test mock checkout,
+ * only present when the server runs with the mock payments adapter. The
+ * server signs a provider-shaped webhook and runs it through the same
+ * verification + settlement path as a real delivery, so confirmation never
+ * happens client-side.
  */
 export function completeMockPayment(
   registrationId: string,
@@ -135,4 +153,52 @@ export function completeMockPayment(
     method: "POST",
     body: JSON.stringify({ outcome }),
   });
+}
+
+export interface RegistrationReceipt {
+  registrationId: string;
+  status: RegistrationStatus;
+  registeredAt: Date;
+  mun: {
+    name: string;
+    slug: string;
+    city: string | null;
+    country: string | null;
+    startDate: Date | null;
+    endDate: Date | null;
+  };
+  passName: string;
+  committeeName: string | null;
+  portfolioName: string | null;
+  /** Null for a free pass. */
+  payment: {
+    amount: number;
+    currency: string;
+    status: PaymentStatus;
+    reference: string | null;
+    orderId: string;
+    paidAt: Date | null;
+  } | null;
+}
+
+type RawReceipt = Omit<RegistrationReceipt, "registeredAt" | "mun" | "payment"> & {
+  registeredAt: string;
+  mun: Omit<RegistrationReceipt["mun"], "startDate" | "endDate"> & {
+    startDate: string | null;
+    endDate: string | null;
+  };
+  payment: (Omit<NonNullable<RegistrationReceipt["payment"]>, "paidAt"> & { paidAt: string | null }) | null;
+};
+
+const toDate = (value: string | null) => (value ? new Date(value) : null);
+
+/** Wraps `GET /registrations/:id/receipt` — owner-only; anyone else gets a 404. */
+export async function fetchRegistrationReceipt(id: string): Promise<RegistrationReceipt> {
+  const raw = await request<RawReceipt>(`/registrations/${encodeURIComponent(id)}/receipt`);
+  return {
+    ...raw,
+    registeredAt: new Date(raw.registeredAt),
+    mun: { ...raw.mun, startDate: toDate(raw.mun.startDate), endDate: toDate(raw.mun.endDate) },
+    payment: raw.payment ? { ...raw.payment, paidAt: toDate(raw.payment.paidAt) } : null,
+  };
 }

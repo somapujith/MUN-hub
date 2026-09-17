@@ -4,13 +4,17 @@ import {
   accommodationOptions,
   committees,
   muns,
+  paymentWebhookEvents,
   payments,
   portfolios,
   registrationProducts,
   registrations,
 } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
-import { mockPaymentsAdapter } from '@/lib/payments/mock-adapter'
+import { onRegistrationConfirmed, runPaymentHook } from '@/lib/payments/events'
+import { computeFeeBreakdown, getPlatformFeeRates, type FeeBreakdown } from '@/lib/payments/fees'
+import { effectivePassPrice } from '@/lib/payments/pricing'
+import { getPaymentsAdapter } from '@/lib/payments/registry'
 import type { RegistrationInput, RegistrationStatus } from '@/lib/types'
 
 const RESERVATION_TTL_MS = 15 * 60 * 1000
@@ -72,10 +76,14 @@ export const REGISTRATION_ERRORS = {
   portfolioNeedsCommittee: 'Choose a committee before choosing a portfolio',
   portfoliosDisabled: 'This committee does not offer portfolio selection',
   profileIncomplete: 'Complete your profile before registering for a MUN',
+  paymentsUnavailable:
+    "Online payments aren't available yet, so paid passes can't be booked right now. Please try again later.",
+  paymentStartFailed: "We couldn't start your payment, so no seat was held. Please try again.",
+  idempotencyKeyReused: 'This request key was already used for a different registration',
 } as const
 
 /** HTTP status for each `REGISTRATION_ERRORS` message. */
-export const REGISTRATION_ERROR_STATUS: Record<string, 400 | 409> = {
+export const REGISTRATION_ERROR_STATUS: Record<string, 400 | 409 | 503> = {
   [REGISTRATION_ERRORS.notOpen]: 409,
   [REGISTRATION_ERRORS.notOpenYet]: 409,
   [REGISTRATION_ERRORS.deadlinePassed]: 409,
@@ -87,6 +95,72 @@ export const REGISTRATION_ERROR_STATUS: Record<string, 400 | 409> = {
   [REGISTRATION_ERRORS.portfolioNeedsCommittee]: 400,
   [REGISTRATION_ERRORS.portfoliosDisabled]: 400,
   [REGISTRATION_ERRORS.profileIncomplete]: 409,
+  [REGISTRATION_ERRORS.paymentsUnavailable]: 503,
+  [REGISTRATION_ERRORS.paymentStartFailed]: 503,
+  [REGISTRATION_ERRORS.idempotencyKeyReused]: 409,
+}
+
+export interface InitiateRegistrationOptions {
+  /**
+   * Client-supplied Idempotency-Key. A repeat call by the same user with the
+   * same key returns the original registration (`replayed: true`) instead
+   * of reserving — or rejecting — a second seat.
+   */
+  idempotencyKey?: string
+}
+
+export interface InitiateRegistrationResult {
+  registrationId: string
+  /** Provider order to pay; null for a free pass (confirmed immediately). */
+  orderId: string | null
+  status: RegistrationStatus
+  /** True when this call returned an earlier registration for the same key. */
+  replayed: boolean
+}
+
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0]
+
+async function findByIdempotencyKey(executor: DbOrTx, userId: string, idempotencyKey: string) {
+  const [row] = await executor
+    .select({
+      id: registrations.id,
+      munId: registrations.munId,
+      registrationProductId: registrations.registrationProductId,
+      status: registrations.status,
+      orderId: payments.providerOrderId,
+    })
+    .from(registrations)
+    .leftJoin(payments, eq(payments.registrationId, registrations.id))
+    .where(and(eq(registrations.userId, userId), eq(registrations.idempotencyKey, idempotencyKey)))
+    .limit(1)
+  return row ?? null
+}
+
+type IdempotentMatch = NonNullable<Awaited<ReturnType<typeof findByIdempotencyKey>>>
+
+function toReplay(
+  existing: IdempotentMatch,
+  input: { munId: string; registrationProductId: string },
+): InitiateRegistrationResult {
+  // Same key, different request: refuse rather than hand back a
+  // registration for something the caller didn't ask for.
+  if (existing.munId !== input.munId || existing.registrationProductId !== input.registrationProductId) {
+    throw new Error(REGISTRATION_ERRORS.idempotencyKeyReused)
+  }
+  return { registrationId: existing.id, orderId: existing.orderId, status: existing.status, replayed: true }
+}
+
+const IDEMPOTENCY_KEY_CONSTRAINT = 'registrations_user_idempotency_key_uq'
+
+/** postgres-js unique violation on `constraint`, looking through DrizzleQueryError's `cause`. */
+function isUniqueViolation(error: unknown, constraint: string): boolean {
+  let current: unknown = error
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    const pgError = current as { code?: string; constraint_name?: string; cause?: unknown }
+    if (pgError.code === '23505' && pgError.constraint_name === constraint) return true
+    current = pgError.cause
+  }
+  return false
 }
 
 /**
@@ -103,7 +177,12 @@ export const REGISTRATION_ERROR_STATUS: Record<string, 400 | 409> = {
  * Throws `Error('Forbidden')` if there is no active session.
  * Throws `Error('Registration product is at capacity')` if full.
  *
+ * Throws `REGISTRATION_ERRORS.paymentsUnavailable` for a paid pass when no
+ * payments adapter is usable (nothing is reserved).
+ *
  * Flow:
+ *   0. With an idempotency key: if this user already used it, return that
+ *      registration (`replayed: true`) and stop.
  *   1. Release expired reservations for this product (frees stale seats).
  *   2. In a transaction: share-lock the mun and require REGISTRATION_OPEN
  *      within its registration window; lock the pass and require it to be
@@ -112,22 +191,51 @@ export const REGISTRATION_ERROR_STATUS: Record<string, 400 | 409> = {
  *      committee, and count their active seats. Every failure throws one of
  *      `REGISTRATION_ERRORS` or an "... at capacity" error. Then
  *      count PENDING+PAYMENT_PENDING+CONFIRMED registrations
- *      against the product's capacity; if full, abort. Otherwise create a
- *      PENDING registration with a 15-minute expiresAt.
+ *      against the product's capacity; if full, abort. The price is decided
+ *      here too (early-bird if still running, plus accommodation) along
+ *      with its platform-fee split. A free total is CONFIRMED on the spot;
+ *      otherwise create a PENDING registration with a 15-minute expiresAt.
  *   3. After that transaction commits, call the payments adapter's
  *      createOrder() (external call — deliberately outside the DB
- *      transaction).
+ *      transaction). If it fails, the seat is released straight away.
  *   4. In a second transaction, flip the registration to PAYMENT_PENDING and
- *      create the corresponding payment row.
+ *      create the corresponding payment row (amount, currency, fee split).
  */
 export async function initiateRegistration(
   input: Omit<RegistrationInput, 'userId'>,
   session: Session | null,
-): Promise<{ registrationId: string; orderId: string }> {
+  options: InitiateRegistrationOptions = {},
+): Promise<InitiateRegistrationResult> {
   if (!session) {
     throw new Error('Forbidden')
   }
   const userId = session.userId
+  const idempotencyKey = options.idempotencyKey || undefined
+
+  if (idempotencyKey) {
+    const existing = await findByIdempotencyKey(db, userId, idempotencyKey)
+    if (existing) return toReplay(existing, input)
+  }
+
+  try {
+    return await reserveAndStartPayment(input, userId, idempotencyKey)
+  } catch (error) {
+    // Two concurrent calls with the same key that didn't serialize on the
+    // same pass lock: the loser trips the unique index and gets the winner.
+    if (idempotencyKey && isUniqueViolation(error, IDEMPOTENCY_KEY_CONSTRAINT)) {
+      const existing = await findByIdempotencyKey(db, userId, idempotencyKey)
+      if (existing) return toReplay(existing, input)
+    }
+    throw error
+  }
+}
+
+async function reserveAndStartPayment(
+  input: Omit<RegistrationInput, 'userId'>,
+  userId: string,
+  idempotencyKey: string | undefined,
+): Promise<InitiateRegistrationResult> {
+  const adapter = getPaymentsAdapter()
 
   if (input.portfolioId && !input.committeeId) {
     throw new Error(REGISTRATION_ERRORS.portfolioNeedsCommittee)
@@ -138,7 +246,7 @@ export async function initiateRegistration(
   // stale holds on the mun's other passes must be released too.
   await releaseExpiredReservationsForMun(input.munId)
 
-  const registration = await db.transaction(async (tx) => {
+  const reservation = await db.transaction(async (tx) => {
     // Share-lock the mun so an organizer/admin status change (transitionMun
     // takes FOR UPDATE) cannot close registration between this check and the
     // insert below. Shared locks don't block other registrations.
@@ -191,6 +299,14 @@ export async function initiateRegistration(
     }
     if (product.deadline && product.deadline < now) {
       throw new Error(REGISTRATION_ERRORS.passDeadlinePassed)
+    }
+
+    // A concurrent retry with the same key blocked on the pass lock above
+    // until the first call committed — it must get that registration back,
+    // not a "you already have an active registration" error.
+    if (idempotencyKey) {
+      const existing = await findByIdempotencyKey(tx, userId, idempotencyKey)
+      if (existing) return { kind: 'replay' as const, existing }
     }
 
     const activeRegistrations = await tx
@@ -332,6 +448,22 @@ export async function initiateRegistration(
       accommodationPrice = option.price
     }
 
+    // Price decided here, under the pass lock, from the server's clock —
+    // never from anything the client displayed.
+    const total = effectivePassPrice(product, now).price + accommodationPrice
+    const free = total === 0
+
+    // Checked before anything is inserted, so an unpayable request holds no
+    // seat. Fee rates are parsed here for the same reason: a malformed
+    // PLATFORM_FEE_BPS fails the request before a seat is reserved.
+    let fees: FeeBreakdown | null = null
+    if (!free) {
+      if (!adapter) {
+        throw new Error(REGISTRATION_ERRORS.paymentsUnavailable)
+      }
+      fees = computeFeeBreakdown(total, getPlatformFeeRates())
+    }
+
     const [created] = await tx
       .insert(registrations)
       .values({
@@ -343,35 +475,61 @@ export async function initiateRegistration(
         formResponses: input.formResponses,
         accommodationOptionId: input.accommodationOptionId,
         accommodationAnswers: input.accommodationAnswers,
-        status: 'PENDING',
-        expiresAt: new Date(Date.now() + RESERVATION_TTL_MS),
+        // A free pass has nothing to pay: confirmed now, no hold, no order.
+        status: free ? 'CONFIRMED' : 'PENDING',
+        expiresAt: free ? null : new Date(Date.now() + RESERVATION_TTL_MS),
+        idempotencyKey,
       })
-      .returning()
+      .returning({ id: registrations.id, status: registrations.status })
 
-    return { ...created, price: product.price + accommodationPrice, currency: product.currency }
+    return { kind: 'created' as const, registration: created, total, currency: product.currency, fees }
   })
 
-  const order = await mockPaymentsAdapter.createOrder(
-    registration.price,
-    registration.currency,
-    registration.id,
-  )
+  if (reservation.kind === 'replay') {
+    return toReplay(reservation.existing, input)
+  }
+
+  const { registration, total, currency, fees } = reservation
+
+  if (!fees || !adapter) {
+    void runPaymentHook(onRegistrationConfirmed, registration.id)
+    return { registrationId: registration.id, orderId: null, status: registration.status, replayed: false }
+  }
+
+  let order: { orderId: string }
+  try {
+    order = await adapter.createOrder({ amount: total, currency, registrationId: registration.id })
+  } catch (error) {
+    // Don't make the delegate wait out a 15-minute hold on a seat that can't
+    // be paid for. Clearing the key lets the client retry with the same one.
+    console.error(`[payments] createOrder failed for registration ${registration.id}`, error)
+    await db
+      .update(registrations)
+      .set({ status: 'CANCELLED', idempotencyKey: null, updatedAt: new Date() })
+      .where(and(eq(registrations.id, registration.id), eq(registrations.status, 'PENDING')))
+    throw new Error(REGISTRATION_ERRORS.paymentStartFailed)
+  }
 
   await db.transaction(async (tx) => {
     await tx
       .update(registrations)
       .set({ status: 'PAYMENT_PENDING', updatedAt: new Date() })
-      .where(eq(registrations.id, registration.id))
+      .where(and(eq(registrations.id, registration.id), eq(registrations.status, 'PENDING')))
 
     await tx.insert(payments).values({
       registrationId: registration.id,
+      provider: adapter.provider,
       providerOrderId: order.orderId,
-      amount: registration.price,
+      amount: total,
+      currency,
+      platformFeeAmount: fees.platformFee,
+      platformFeeTaxAmount: fees.platformFeeTax,
+      organizerNetAmount: fees.organizerNet,
       status: 'PENDING',
     })
   })
 
-  return { registrationId: registration.id, orderId: order.orderId }
+  return { registrationId: registration.id, orderId: order.orderId, status: 'PAYMENT_PENDING', replayed: false }
 }
 
 export interface RegistrationWithDetails {
@@ -445,6 +603,111 @@ async function isMunOrganizer(munId: string, userId: string): Promise<boolean> {
     .where(and(eq(muns.id, munId), eq(muns.organizerId, userId)))
     .limit(1)
   return Boolean(mun)
+}
+
+export interface RegistrationReceipt {
+  registrationId: string
+  status: RegistrationStatus
+  registeredAt: Date
+  mun: {
+    name: string
+    slug: string
+    city: string | null
+    country: string | null
+    startDate: Date | null
+    endDate: Date | null
+  }
+  passName: string
+  committeeName: string | null
+  portfolioName: string | null
+  /** Null for a free pass (nothing was paid). */
+  payment: {
+    amount: number
+    currency: string
+    status: (typeof payments.$inferSelect)['status']
+    /** Provider's payment id once captured, else null. */
+    reference: string | null
+    orderId: string
+    /** When the capture was applied; null until paid. */
+    paidAt: Date | null
+  } | null
+}
+
+/**
+ * The delegate's own receipt for one registration. Owner-only — unlike
+ * `getRegistrationById`, organizers and admins get null here (they have
+ * their own views), so the route can answer 404 without revealing whether
+ * the id exists. Never returns the fee split or any exception detail.
+ */
+export async function getRegistrationReceipt(
+  registrationId: string,
+  session: Session | null,
+): Promise<RegistrationReceipt | null> {
+  if (!session) {
+    throw new Error('Forbidden')
+  }
+
+  const row = await db.query.registrations.findFirst({
+    where: and(eq(registrations.id, registrationId), eq(registrations.userId, session.userId)),
+    columns: { id: true, status: true, createdAt: true },
+    with: {
+      mun: { columns: { name: true, slug: true, city: true, country: true, startDate: true, endDate: true } },
+      registrationProduct: { columns: { name: true } },
+      committee: { columns: { name: true } },
+      portfolio: { columns: { name: true } },
+      payment: {
+        columns: {
+          amount: true,
+          currency: true,
+          status: true,
+          providerPaymentId: true,
+          providerOrderId: true,
+          provider: true,
+          updatedAt: true,
+        },
+      },
+    },
+  })
+  if (!row) return null
+
+  const payment = row.payment.at(0) ?? null
+  let paidAt: Date | null = null
+  if (payment?.status === 'PAID') {
+    // The moment the capture was applied, from the webhook log; payments
+    // processed before that log existed fall back to the row's last update.
+    const [event] = await db
+      .select({ processedAt: paymentWebhookEvents.processedAt })
+      .from(paymentWebhookEvents)
+      .where(
+        and(
+          eq(paymentWebhookEvents.provider, payment.provider),
+          eq(paymentWebhookEvents.providerOrderId, payment.providerOrderId),
+          eq(paymentWebhookEvents.outcome, 'CONFIRMED'),
+        ),
+      )
+      .limit(1)
+    paidAt = event?.processedAt ?? payment.updatedAt
+  }
+
+  return {
+    registrationId: row.id,
+    status: row.status,
+    registeredAt: row.createdAt,
+    mun: row.mun,
+    passName: row.registrationProduct.name,
+    committeeName: row.committee?.name ?? null,
+    portfolioName: row.portfolio?.name ?? null,
+    payment: payment
+      ? {
+          amount: payment.amount,
+          currency: payment.currency,
+          status: payment.status,
+          reference: payment.providerPaymentId,
+          orderId: payment.providerOrderId,
+          paidAt,
+        }
+      : null,
+  }
 }
 
 /**

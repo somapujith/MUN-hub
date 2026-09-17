@@ -8,16 +8,21 @@ import {
   getProductAvailability,
   getProductsAvailability,
   getRegistrationById,
+  getRegistrationReceipt,
   initiateRegistration,
 } from '@/lib/actions/registration'
 import { isProfileComplete } from '@/lib/actions/student-profile'
 import { db } from '@/lib/db/client'
 import { payments, registrations } from '@/lib/db/schema'
-import { simulatePaymentOutcome } from '@/lib/payments/mock-adapter'
+import { MOCK_PROVIDER, simulatePaymentOutcome } from '@/lib/payments/mock-adapter'
+import { getPaymentsAdapter } from '@/lib/payments/registry'
+import { processPaymentWebhook } from '@/lib/payments/webhook'
 import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
+import { keepAlive } from './webhooks'
 
 const MAX_BATCH_AVAILABILITY_IDS = 50
+const MAX_IDEMPOTENCY_KEY_LENGTH = 255
 
 const initiateRegistrationBodySchema = z
   .object({
@@ -39,8 +44,13 @@ const mockPaymentBodySchema = z
 
 function registrationErrorResponse(c: Context<{ Variables: AppVariables }>, message: string) {
   const status = REGISTRATION_ERROR_STATUS[message] ?? 400
-  const code = status === 409 ? 'CONFLICT_STATE' : 'VALIDATION_FAILED'
+  const code =
+    status === 503 ? 'PAYMENTS_UNAVAILABLE' : status === 409 ? 'CONFLICT_STATE' : 'VALIDATION_FAILED'
   return c.json({ error: { code, message } }, status)
+}
+
+function notFound(c: Context<{ Variables: AppVariables }>) {
+  return c.json({ error: { code: 'NOT_FOUND', message: 'Registration not found' } }, 404)
 }
 
 export const registrationsRoutes = new Hono<{ Variables: AppVariables }>()
@@ -82,6 +92,13 @@ registrationsRoutes.get('/products/availability', async (c) => {
   return c.json({ availability })
 })
 
+/**
+ * Starts a registration. The `Idempotency-Key` header is required and is
+ * passed through: a retry with the same key by the same user answers 200
+ * with the original registration instead of 201 with a new one.
+ * A paid pass with no usable payments adapter answers 503
+ * PAYMENTS_UNAVAILABLE (no seat is held); a free pass is confirmed at once.
+ */
 registrationsRoutes.post(
   '/registrations',
   requireAuth,
@@ -98,12 +115,24 @@ registrationsRoutes.post(
         400,
       )
     }
+    if (idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+      return c.json(
+        {
+          error: {
+            code: 'VALIDATION_FAILED',
+            message: `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
+          },
+        },
+        400,
+      )
+    }
     await next()
   },
   zValidator('json', initiateRegistrationBodySchema),
   async (c) => {
     const body = c.req.valid('json')
     const session = c.get('session')!
+    const idempotencyKey = c.req.header('Idempotency-Key')!.trim()
 
     // The one-time participant profile (emergency contact, DOB, school…) is
     // required before any registration. Enforced here rather than inside
@@ -113,8 +142,8 @@ registrationsRoutes.post(
     }
 
     try {
-      const result = await initiateRegistration(body, session)
-      return c.json(result, 201)
+      const result = await initiateRegistration(body, session, { idempotencyKey })
+      return c.json(result, result.replayed ? 200 : 201)
     } catch (error) {
       const message = error instanceof Error ? error.message : ''
       if (Object.hasOwn(REGISTRATION_ERROR_STATUS, message)) {
@@ -129,11 +158,14 @@ registrationsRoutes.post(
  * Enriched read for the checkout/confirmation pages: `getRegistrationById`
  * (lib/actions/registration.ts) stays the single source of truth for the
  * owner/admin/organizer authorization decision — this only adds the
- * presentation-only joins (product name/price, mun, committee, portfolio)
- * that page needs to render, mirroring the shape
+ * presentation-only joins (product name/price, mun, committee, portfolio,
+ * payment) that page needs to render, mirroring the shape
  * `lib/actions/student-dashboard.ts#getUpcomingRegistrations` already
- * returns and the same two-step (authorize via lib, then join for display)
- * pattern `app/register/[slug]/pay/page.tsx` used server-side.
+ * returns.
+ *
+ * `paymentProvider` is the provider checkout should use right now, or null
+ * when online payments are unavailable (the pay page then says so instead
+ * of offering a checkout).
  */
 registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
   const registrationId = c.req.param('id')
@@ -141,10 +173,7 @@ registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
   const registration = await getRegistrationById(registrationId, session)
 
   if (!registration) {
-    return c.json(
-      { error: { code: 'NOT_FOUND', message: 'Registration not found' } },
-      404,
-    )
+    return notFound(c)
   }
 
   const detail = await db.query.registrations.findFirst({
@@ -159,10 +188,7 @@ registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
   })
 
   if (!detail) {
-    return c.json(
-      { error: { code: 'NOT_FOUND', message: 'Registration not found' } },
-      404,
-    )
+    return notFound(c)
   }
 
   return c.json({
@@ -186,69 +212,78 @@ registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
     },
     committee: detail.committee ? { name: detail.committee.name } : null,
     portfolio: detail.portfolio ? { name: detail.portfolio.name } : null,
-    payment: detail.payment.map((p) => ({ amount: p.amount, status: p.status })),
+    payment: detail.payment.map((p) => ({ amount: p.amount, currency: p.currency, status: p.status })),
+    paymentProvider: getPaymentsAdapter()?.provider ?? null,
   })
 })
 
 /**
- * Mock checkout submit — ported from
- * `app/register/[slug]/actions.ts#completeMockPaymentAction`. Signs a
- * provider-shaped payload server-side (the HMAC secret never reaches the
- * browser) and posts it to the same `/webhooks/payments` route a real
- * provider would call, so confirmation still only ever happens in
- * `server/routes/webhooks.ts` — never duplicated here.
+ * The delegate's receipt. Owner-only: anyone else (organizers and admins
+ * included) gets the same 404 as for an unknown id.
+ */
+registrationsRoutes.get('/registrations/:id/receipt', requireAuth, async (c) => {
+  const receipt = await getRegistrationReceipt(c.req.param('id'), c.get('session'))
+  if (!receipt) {
+    return notFound(c)
+  }
+  return c.json(receipt)
+})
+
+/**
+ * Mock checkout submit (dev/test only). Exists only while the mock adapter
+ * is the active one (`MOCK_PAYMENTS_ENABLED=true`) — otherwise 404, exactly
+ * as if the route didn't exist. Builds a mock-signed provider webhook
+ * server-side (the HMAC secret never reaches the browser) and runs it
+ * through `processPaymentWebhook`, the same verification + settlement path a
+ * real delivery to `/webhooks/payments` takes — confirmation never happens
+ * anywhere else.
  *
- * `getRegistrationById` throws Forbidden for a non-owner (caught by the app
- * error handler) and returns null for an unknown id, so one student can't
- * drive another student's payment.
+ * Only the registration's own delegate may drive its payment; everyone else
+ * gets 404.
  */
 registrationsRoutes.post(
   '/registrations/:id/mock-payment',
   requireAuth,
+  async (c, next) => {
+    if (getPaymentsAdapter()?.provider !== MOCK_PROVIDER) {
+      return c.json({ error: { code: 'NOT_FOUND', message: 'Not found' } }, 404)
+    }
+    await next()
+  },
   zValidator('json', mockPaymentBodySchema),
   async (c) => {
+    const adapter = getPaymentsAdapter()!
     const registrationId = c.req.param('id')
-    const session = c.get('session')
+    const session = c.get('session')!
     const { outcome } = c.req.valid('json')
 
-    const registration = await getRegistrationById(registrationId, session)
-    if (!registration) {
-      return c.json(
-        { error: { code: 'NOT_FOUND', message: 'Registration not found' } },
-        404,
-      )
+    const [registration] = await db
+      .select({ userId: registrations.userId })
+      .from(registrations)
+      .where(eq(registrations.id, registrationId))
+      .limit(1)
+    if (!registration || registration.userId !== session.userId) {
+      return notFound(c)
     }
 
     const [payment] = await db
-      .select({ orderId: payments.providerOrderId })
+      .select({ orderId: payments.providerOrderId, amount: payments.amount, currency: payments.currency })
       .from(payments)
       .where(eq(payments.registrationId, registrationId))
       .limit(1)
 
     if (!payment) {
-      throw new Error('Payment order not found')
+      return c.json(
+        { error: { code: 'CONFLICT_STATE', message: 'This registration has nothing to pay' } },
+        409,
+      )
     }
 
-    const { payload, signature } = await simulatePaymentOutcome(payment.orderId, outcome)
+    const webhook = simulatePaymentOutcome(payment, outcome)
+    const result = await processPaymentWebhook(adapter, webhook.rawBody, webhook.headers)
 
-    // Self-call, same-origin: derived from the incoming request rather than
-    // a hardcoded/env-configured origin, matching the Next.js reference's
-    // reasoning (a fixed "http://localhost:3000" fallback would silently
-    // break this under any deployment target where that env var isn't set).
-    const host = c.req.header('host') ?? 'localhost:3001'
-    const protocol = c.req.header('x-forwarded-proto') ?? 'http'
-
-    let response: Response
-    try {
-      response = await fetch(`${protocol}://${host}/webhooks/payments`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-webhook-signature': signature,
-        },
-        body: payload,
-      })
-    } catch {
+    if (!result.ok) {
+      console.error(`[payments] mock payment for ${registrationId} rejected: ${result.error}`)
       return c.json(
         {
           error: {
@@ -260,20 +295,7 @@ registrationsRoutes.post(
       )
     }
 
-    const body: unknown = await response.json().catch(() => null)
-
-    if (!response.ok) {
-      return c.json(
-        {
-          error: {
-            code: 'INTERNAL',
-            message: 'Payment processor unreachable. Your seat is still held.',
-          },
-        },
-        502,
-      )
-    }
-
-    return c.json(body ?? { ok: true })
+    keepAlive(c, result.afterCommit)
+    return c.json(result.body)
   },
 )

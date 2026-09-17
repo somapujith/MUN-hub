@@ -1,107 +1,51 @@
-import { Hono } from 'hono'
-import { and, eq } from 'drizzle-orm'
-import { db } from '@/lib/db/client'
-import { payments, registrations } from '@/lib/db/schema'
-import { mockPaymentsAdapter } from '@/lib/payments/mock-adapter'
+import { Hono, type Context } from 'hono'
+import { getPaymentsAdapter } from '@/lib/payments/registry'
+import { processPaymentWebhook, type ProcessWebhookResult, type WebhookErrorCode } from '@/lib/payments/webhook'
 import type { AppVariables } from '../src/types'
 
-interface WebhookPayload {
-  orderId: string
-  status: 'paid' | 'failed'
-  providerPaymentId?: string
+const WEBHOOK_ERROR_STATUS: Record<WebhookErrorCode, 400 | 404> = {
+  INVALID_SIGNATURE: 400,
+  INVALID_PAYLOAD: 400,
+  STALE_EVENT: 400,
+  PAYMENT_NOT_FOUND: 404,
 }
 
 /**
- * Payments provider webhook — ported from app/api/webhooks/payments/route.ts.
- * Raw body is read BEFORE JSON parse so signature verification uses exact bytes.
- * Mounted outside /api/v1 and outside CSRF middleware.
+ * Keeps post-commit payment hooks alive past the response on Workers.
+ * `c.executionCtx` throws outside Workers (Node dev, `app.request` tests),
+ * where the already-running promise simply finishes on its own.
+ */
+export function keepAlive(c: Context, work: Promise<void>): void {
+  try {
+    c.executionCtx.waitUntil(work)
+  } catch {
+    // Not on Workers.
+  }
+}
+
+/** Maps a processor result to the HTTP response a provider expects. */
+export function webhookResponse(c: Context<{ Variables: AppVariables }>, result: ProcessWebhookResult) {
+  if (!result.ok) {
+    return c.json({ error: result.message, code: result.error }, WEBHOOK_ERROR_STATUS[result.error])
+  }
+  keepAlive(c, result.afterCommit)
+  return c.json(result.body, 200)
+}
+
+/**
+ * Payments provider webhook. Raw body is read BEFORE any JSON parse so
+ * signature verification uses the exact bytes; everything else lives in
+ * lib/payments/webhook.ts. Mounted outside /api/v1 and outside CSRF
+ * middleware. With no usable payments adapter there is nothing that could
+ * have sent a genuine event, so the endpoint answers 404.
  */
 export const webhooks = new Hono<{ Variables: AppVariables }>().post('/payments', async (c) => {
+  const adapter = getPaymentsAdapter()
+  if (!adapter) {
+    return c.json({ error: 'Payments are not enabled' }, 404)
+  }
+
   const rawBody = await c.req.text()
-  const signature = c.req.header('x-webhook-signature') ?? ''
-
-  if (!mockPaymentsAdapter.verifyWebhookSignature(rawBody, signature)) {
-    return c.json({ error: 'Invalid signature' }, 400)
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(rawBody)
-  } catch {
-    return c.json({ error: 'Invalid payload' }, 400)
-  }
-
-  if (typeof parsed !== 'object' || parsed === null) {
-    return c.json({ error: 'Invalid payload' }, 400)
-  }
-
-  const payload = parsed as WebhookPayload
-
-  if (!payload.orderId || typeof payload.orderId !== 'string') {
-    return c.json({ error: 'Invalid payload' }, 400)
-  }
-
-  if (payload.status !== 'paid' && payload.status !== 'failed') {
-    return c.json({ error: 'Invalid payload' }, 400)
-  }
-
-  const [payment] = await db
-    .select()
-    .from(payments)
-    .where(eq(payments.providerOrderId, payload.orderId))
-    .limit(1)
-
-  if (!payment) {
-    return c.json({ error: 'Payment not found' }, 404)
-  }
-
-  if (payment.status === 'PAID') {
-    return c.json({ ok: true, alreadyConfirmed: true }, 200)
-  }
-
-  if (payload.status === 'failed') {
-    await db.transaction(async (tx) => {
-      await tx
-        .update(payments)
-        .set({ status: 'FAILED', updatedAt: new Date() })
-        .where(eq(payments.id, payment.id))
-
-      await tx
-        .update(registrations)
-        .set({ status: 'CANCELLED', updatedAt: new Date() })
-        .where(and(eq(registrations.id, payment.registrationId), eq(registrations.status, 'PAYMENT_PENDING')))
-    })
-    return c.json({ ok: true }, 200)
-  }
-
-  const outcome = await db.transaction(async (tx) => {
-    const [currentRegistration] = await tx
-      .select({ status: registrations.status })
-      .from(registrations)
-      .where(eq(registrations.id, payment.registrationId))
-      .for('update')
-      .limit(1)
-
-    const registrationIsConfirmable = currentRegistration?.status === 'PAYMENT_PENDING'
-
-    await tx
-      .update(payments)
-      .set({
-        status: registrationIsConfirmable ? 'PAID' : 'REFUNDED',
-        providerPaymentId: payload.providerPaymentId ?? null,
-        updatedAt: new Date(),
-      })
-      .where(eq(payments.id, payment.id))
-
-    if (registrationIsConfirmable) {
-      await tx
-        .update(registrations)
-        .set({ status: 'CONFIRMED', updatedAt: new Date() })
-        .where(eq(registrations.id, payment.registrationId))
-    }
-
-    return { registrationIsConfirmable }
-  })
-
-  return c.json({ ok: true, refundOwed: !outcome.registrationIsConfirmable }, 200)
+  const result = await processPaymentWebhook(adapter, rawBody, c.req.raw.headers)
+  return webhookResponse(c, result)
 })

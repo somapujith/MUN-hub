@@ -1,4 +1,4 @@
-import type { PaymentExceptionRow } from "@/types/admin-payments";
+import type { PaymentExceptionRow, ResolvedPaymentException } from "@/types/admin-payments";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -19,11 +19,18 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 /**
- * Payment exception queue for the admin console. Reuses the existing
- * `/admin/payment-exceptions` route (server/routes/admin-search.ts, backed
- * by `lib/actions/admin-search.ts#listPaymentExceptions`) — no new backend
- * endpoint needed for this page.
+ * Open payment exceptions (money taken with no valid registration behind
+ * it), newest first — `GET /admin/payment-exceptions`
+ * (server/routes/admin-search.ts → lib/payments/exceptions.ts).
  */
 export function listPaymentExceptions() {
   return request<PaymentExceptionRow[]>("/admin/payment-exceptions");
+}
+
+/** Marks one exception resolved. The note is required and goes into the audit log. */
+export function resolvePaymentException(paymentId: string, note: string) {
+  return request<ResolvedPaymentException>(
+    `/admin/payment-exceptions/${encodeURIComponent(paymentId)}/resolve`,
+    { method: "POST", body: JSON.stringify({ note }) },
+  );
 }

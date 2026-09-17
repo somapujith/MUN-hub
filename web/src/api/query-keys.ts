@@ -11,6 +11,7 @@ export const queryKeys = {
   dashboardPast: () => ["dashboard", "past"] as const,
   userProfile: (userId: string) => ["user", "profile", userId] as const,
   registration: (id: string) => ["registration", id] as const,
+  registrationReceipt: (id: string) => ["registration", id, "receipt"] as const,
   productAvailability: (productIds: string[]) =>
     ["registration", "availability", productIds] as const,
   executiveBoard: (munId: string) => ["organizer", "executive-board", munId] as const,
@@ -26,6 +27,8 @@ export const queryKeys = {
   munDocuments: (munId: string) => ["organizer", "documents", munId] as const,
   munMedia: (munId: string) => ["organizer", "media", munId] as const,
   paymentSettings: (munId: string) => ["organizer", "payment-settings", munId] as const,
+  paymentsSummary: (munId: string) => ["organizer", "payments-summary", munId] as const,
+  adminPaymentExceptions: () => ["admin", "payment-exceptions"] as const,
   schedule: (munId: string) => ["organizer", "schedule", munId] as const,
   delegates: (munId: string, filters: Record<string, unknown>) =>
     ["organizer", "delegates", munId, filters] as const,

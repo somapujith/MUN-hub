@@ -54,6 +54,9 @@ export function RegisterConfirmationPage() {
   if (!registration) return <NotFoundPage />;
 
   const mun = registration.mun;
+  // What was actually charged (early-bird and extras included). No payment
+  // row means a free pass.
+  const payment = registration.payment.at(0);
   const receipt = (
     <dl className="divide-y divide-border rounded-md border border-border bg-card">
       <ReceiptRow label="Reference" value={registration.id} mono />
@@ -62,7 +65,7 @@ export function RegisterConfirmationPage() {
       <ReceiptRow label="Pass" value={registration.productName} />
       {registration.committee && <ReceiptRow label="Committee" value={registration.committee.name} />}
       {registration.portfolio && <ReceiptRow label="Portfolio" value={registration.portfolio.name} />}
-      <ReceiptRow label="Amount" value={formatPrice(registration.productPrice)} mono />
+      <ReceiptRow label="Amount" value={payment ? formatPrice(payment.amount) : "Free"} mono />
       <ReceiptRow label="Status" value={STATUS_LABEL[registration.status]} />
     </dl>
   );
@@ -72,20 +75,36 @@ export function RegisterConfirmationPage() {
       <Helmet><title>Registration status</title></Helmet>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-xl px-lg py-xxl sm:px-xl">
-        {renderStatus(registration.status, slug, receipt, registrationId)}
+        {renderStatus(registration.status, slug, receipt, registrationId, Boolean(payment))}
       </main>
       <SiteFooter />
     </div>
   );
 }
 
-function renderStatus(status: RegistrationStatus, slug: string, receipt: ReactNode, registrationId: string) {
+function renderStatus(
+  status: RegistrationStatus,
+  slug: string,
+  receipt: ReactNode,
+  registrationId: string,
+  paid: boolean,
+) {
   switch (status) {
     case "CONFIRMED":
       return (
-        <RegistrationNotice tone="success" title="You're registered" message="Payment went through and your seat is confirmed." detail={receipt}>
+        <RegistrationNotice
+          tone="success"
+          title="You're registered"
+          message={paid ? "Payment went through and your seat is confirmed." : "Your seat is confirmed."}
+          detail={receipt}
+        >
           <Button render={<Link to={`/mun/${slug}`} />}>Back to conference</Button>
-          <Button variant="outline" render={<Link to="/muns" />}>Browse more MUNs</Button>
+          <Button
+            variant="outline"
+            render={<Link to={`/dashboard/registrations/${encodeURIComponent(registrationId)}/receipt`} />}
+          >
+            View receipt
+          </Button>
         </RegistrationNotice>
       );
     case "CANCELLED":

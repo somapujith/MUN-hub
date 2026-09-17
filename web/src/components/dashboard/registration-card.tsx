@@ -1,12 +1,18 @@
 import { Link } from "react-router";
-import { ArrowRightIcon, CalendarIcon, MapPinIcon } from "lucide-react";
+import { ArrowRightIcon, CalendarIcon, CreditCardIcon, MapPinIcon, ReceiptTextIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { RegistrationStatusChip } from "@/components/dashboard/registration-status-chip";
 import { getPaymentStatusMeta, getToneClassName } from "@/components/dashboard/registration-status";
+import { hasPassed } from "@/components/registration/deadline";
 import { formatPrice } from "@/components/shared/currency";
 import { formatDateRange } from "@/components/shared/date-range";
 import { cn } from "cn";
+import type { RegistrationStatus } from "@/types/enums";
 import type { RegistrationWithMun } from "@/types";
+
+/** Registrations that stand, and so have a receipt worth showing. */
+const RECEIPT_STATUSES: ReadonlySet<RegistrationStatus> = new Set(["CONFIRMED", "ATTENDED", "NO_SHOW"]);
 
 interface RegistrationCardProps {
   registration: RegistrationWithMun;
@@ -26,6 +32,14 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
     : null;
 
   const location = [mun.city, mun.country].filter(Boolean).join(", ");
+
+  // A held seat that still has time left can be paid for from here; the pay
+  // page reads the registration by id from the query string.
+  const canCompletePayment =
+    registration.status === "PAYMENT_PENDING" &&
+    registration.expiresAt !== null &&
+    !hasPassed(registration.expiresAt);
+  const hasReceipt = RECEIPT_STATUSES.has(registration.status);
 
   return (
     <Card
@@ -81,7 +95,7 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-between gap-sm sm:flex-col sm:items-end sm:justify-start sm:gap-xs">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-sm sm:flex-col sm:flex-nowrap sm:items-end sm:justify-start sm:gap-xs">
           {/* Mobile: fee and payment chip share one baseline row. Desktop: they
               stack right-aligned above the "View MUN" affordance. */}
           <div className="flex flex-row items-center gap-xs sm:flex-col sm:items-end sm:gap-xxs">
@@ -99,12 +113,15 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
                   {payment.label}
                 </span>
               </>
+            ) : hasReceipt ? (
+              <span className="text-label-md text-ink">Free</span>
             ) : (
               <span className="text-body-md text-muted-foreground">No payment yet</span>
             )}
           </div>
 
-          {/* Above the stretched MUN link (z-10) so it stays its own target. */}
+          {/* `relative z-10` lifts these above the card's stretched link so
+              they stay independently clickable. */}
           {["CONFIRMED", "ATTENDED", "NO_SHOW"].includes(registration.status) && (
             <Link
               to={`/dashboard/registrations/${registration.id}/pass`}
@@ -114,13 +131,37 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
             </Link>
           )}
 
-          <span
-            aria-hidden
-            className="hidden items-center gap-xxs text-body-md text-link sm:inline-flex"
-          >
-            View MUN
-            <ArrowRightIcon className="size-3.5" strokeWidth={1.75} />
-          </span>
+          {canCompletePayment ? (
+            <Button
+              size="sm"
+              className="relative z-10"
+              render={
+                <Link
+                  to={`/register/${mun.slug}/pay?registrationId=${encodeURIComponent(registration.id)}`}
+                />
+              }
+            >
+              <CreditCardIcon aria-hidden />
+              Complete payment
+            </Button>
+          ) : hasReceipt ? (
+            <Link
+              to={`/dashboard/registrations/${encodeURIComponent(registration.id)}/receipt`}
+              className="relative z-10 inline-flex items-center gap-xxs rounded-sm text-body-md text-link underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              <ReceiptTextIcon className="size-3.5" strokeWidth={1.75} aria-hidden />
+              Receipt
+              <span className="sr-only"> for {mun.name}</span>
+            </Link>
+          ) : (
+            <span
+              aria-hidden
+              className="hidden items-center gap-xxs text-body-md text-link sm:inline-flex"
+            >
+              View MUN
+              <ArrowRightIcon className="size-3.5" strokeWidth={1.75} />
+            </span>
+          )}
         </div>
       </CardContent>
     </Card>

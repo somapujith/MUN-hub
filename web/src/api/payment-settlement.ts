@@ -1,5 +1,6 @@
 import type {
   MaskedPaymentSettings,
+  MunPaymentsSummary,
   PaymentVerificationState,
   UpsertPaymentSettingsInput,
 } from "@/types/payment-settlement";
@@ -25,6 +26,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 /** Returns the masked settlement configuration, or `null` if none has been submitted yet. */
 export function getPaymentSettings(munId: string) {
   return request<MaskedPaymentSettings | null>(`/muns/${munId}/payment-settings`);
+}
+
+/** Paid-registration totals for the MUN, one entry per currency (empty until something is paid). */
+export async function getPaymentsSummary(munId: string): Promise<MunPaymentsSummary[]> {
+  const { totals } = await request<{ totals: MunPaymentsSummary[] }>(`/muns/${munId}/payments-summary`);
+  return totals;
 }
 
 /**

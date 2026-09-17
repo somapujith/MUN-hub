@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import {
+  getMunPaymentsSummary,
   getPaymentSettings,
   setPaymentVerificationState,
   upsertPaymentSettings,
@@ -33,7 +34,8 @@ const upsertPaymentBodySchema = z
     accountType: z.string().min(1),
     gateway: z.string().min(1),
     currency: z.string().optional(),
-    refundPolicy: z.string().nullable().optional(),
+    // No `refundPolicy`: MUN Hub has one platform-wide no-refunds policy.
+    // `.strict()` rejects the field if an old client still sends it.
     settlementNotes: z.string().nullable().optional(),
   })
   .strict()
@@ -49,6 +51,12 @@ export const paymentSettlementRoutes = new Hono<{ Variables: AppVariables }>()
 paymentSettlementRoutes.get('/muns/:munId/payment-settings', requireAuth, async (c) => {
   const settings = await getPaymentSettings(c.req.param('munId'), c.get('session'))
   return c.json(settings)
+})
+
+/** Paid-registration money for the finance page: gross, fee, fee tax, net. */
+paymentSettlementRoutes.get('/muns/:munId/payments-summary', requireAuth, async (c) => {
+  const totals = await getMunPaymentsSummary(c.req.param('munId'), c.get('session'))
+  return c.json({ totals })
 })
 
 paymentSettlementRoutes.put(

@@ -125,8 +125,9 @@ export function getMarketplaceFacets(): Promise<{ cities: string[]; countries: s
  * ever returns active products anyway, but the mapping is kept honest rather
  * than hardcoding `true`.
  */
-interface RawRegistrationProduct extends Omit<RegistrationProduct, "deadline"> {
+interface RawRegistrationProduct extends Omit<RegistrationProduct, "deadline" | "earlyBirdDeadline"> {
   deadline: string | null;
+  earlyBirdDeadline?: string | null;
   status?: string;
 }
 
@@ -152,6 +153,7 @@ function normalizeMunDetail(raw: RawMunDetail): MunDetail {
     registrationProducts: raw.registrationProducts.map((product) => ({
       ...product,
       deadline: toDate(product.deadline),
+      earlyBirdDeadline: toDate(product.earlyBirdDeadline),
       isActive: product.status ? product.status === "active" : true,
     })),
   };

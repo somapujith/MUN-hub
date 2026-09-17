@@ -2,6 +2,7 @@
 
 import { cn } from "cn";
 import { formatPrice } from "@/components/shared/currency";
+import { currentPassPrice, formatPriceDeadline } from "@/components/registration/pricing";
 import type { ProductWithAvailability } from "@/components/registration/types";
 
 interface ProductOptionProps {
@@ -24,6 +25,7 @@ export function ProductOption({ entry, checked, onSelect }: ProductOptionProps) 
   const soldOut = available === 0;
   const disabled = soldOut || deadlinePassed;
   const scarce = !disabled && available <= Math.max(3, Math.ceil(capacity * 0.1));
+  const pricing = currentPassPrice(product);
 
   return (
     <label
@@ -65,10 +67,24 @@ export function ProductOption({ entry, checked, onSelect }: ProductOptionProps) 
       <span className="flex min-w-0 flex-1 flex-col gap-xxs">
         <span className="flex flex-wrap items-baseline justify-between gap-xs">
           <span className="text-label-md text-ink">{product.name}</span>
-          <span className="font-mono text-label-md tabular-nums text-ink">
-            {formatPrice(product.price)}
+          <span className="flex items-baseline gap-xs">
+            {pricing.earlyBird && (
+              <del className="font-mono text-body-md tabular-nums text-muted-foreground">
+                <span className="sr-only">Regular price </span>
+                {formatPrice(pricing.regularPrice)}
+              </del>
+            )}
+            <span className="font-mono text-label-md tabular-nums text-ink">
+              {formatPrice(pricing.price)}
+            </span>
           </span>
         </span>
+
+        {pricing.earlyBird && pricing.earlyBirdEndsAt && (
+          <span className="text-body-md font-medium text-success-text">
+            Early-bird price until {formatPriceDeadline(pricing.earlyBirdEndsAt)}
+          </span>
+        )}
 
         <span className="text-body-md text-muted-foreground">
           {soldOut
