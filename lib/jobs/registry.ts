@@ -4,6 +4,7 @@ import { runConferenceReminders } from '@/lib/notifications/reminder-job'
 import { runSlaNotifications } from '@/lib/notifications/sla-job'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import { purgeExpiredAuthArtifacts } from './purge-auth-artifacts'
+import { purgeDeletedUserAnswers } from './purge-deleted-user-answers'
 import { releaseExpiredHoldsJob } from './release-expired-holds'
 import type { JobResult, ScheduledJob } from './types'
 
@@ -56,6 +57,18 @@ export const purgeExpiredAuthArtifactsJob: ScheduledJob = {
   },
 }
 
+/**
+ * Clears the registration answers a deleted delegate's account kept for a
+ * conference that had not happened yet, once it is over — the rest of the
+ * erasure the deletion screen promises.
+ */
+export const purgeDeletedUserAnswersJob: ScheduledJob = {
+  name: 'purgeDeletedUserAnswers',
+  async run({ now }) {
+    return { ...(await purgeDeletedUserAnswers(now)) }
+  },
+}
+
 /** SLA_DELAY emails when a go-live submission's review becomes due soon or overdue. */
 export const slaNotificationsJob: ScheduledJob = {
   name: 'runSlaNotifications',
@@ -98,6 +111,7 @@ export const SCHEDULED_JOBS: readonly ScheduledJob[] = [
   conferenceRemindersJob,
   organizerDigestJob,
   purgeExpiredAuthArtifactsJob,
+  purgeDeletedUserAnswersJob,
 ]
 
 export interface JobRunReport {

@@ -39,7 +39,10 @@ import type { Session } from '@/lib/auth/adapter'
  *   already checked-in, ATTENDED) registration for a conference that hasn't
  *   ended. Those answers hold the emergency contact, dietary and travel
  *   details the organizer needs on the day, and the delegate may still turn
- *   up. See `retainsRegistrationAnswers` for the exact rule.
+ *   up. See `retainsRegistrationAnswers` for the exact rule. The kept answers
+ *   are not kept forever: lib/jobs/purge-deleted-user-answers.ts re-applies
+ *   the same predicate on a schedule and clears them once the conference is
+ *   over, which is what the deletion screen promises.
  * - Kept as-is: consent records (proof of what was agreed and when),
  *   support tickets and their messages (they can concern payment exceptions an
  *   admin still has to resolve).
@@ -74,6 +77,15 @@ const UNPAID_HOLD_STATUSES: RegistrationStatus[] = ['PENDING', 'PAYMENT_PENDING'
 export function deletedUserEmail(userId: string): string {
   return `deleted+${userId}@deleted.invalid`
 }
+
+/**
+ * SQL LIKE pattern matching every address `deletedUserEmail` produces, i.e.
+ * every anonymized account. There is no `users.deletedAt` column (adding one
+ * needs a migration), so the rewritten address is the marker.
+ * lib/jobs/purge-deleted-user-answers.ts uses it to find the answers this
+ * module deliberately kept, once the conference they were kept for is over.
+ */
+export const DELETED_USER_EMAIL_PATTERN = 'deleted+%@deleted.invalid'
 
 /**
  * Whether a registration's answers survive the delegate's account deletion:
