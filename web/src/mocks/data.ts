@@ -11,8 +11,10 @@ const daysFromNow = (n: number) => {
 export const MOCK_CITIES = ["Hyderabad", "Vellore", "Oxford"] as const;
 export const MOCK_COUNTRIES = ["India", "United Kingdom"] as const;
 
+type MockSummaryBase = Omit<MunSummary, "registrationOpensAt" | "registrationDeadline">;
+
 /** Hyderabad-focused seed-shaped summaries — dates are real Date objects. */
-export const MOCK_MUN_SUMMARIES: MunSummary[] = [
+const MOCK_SUMMARY_BASES: MockSummaryBase[] = [
   {
     id: "mun-bitsmun",
     name: "BITSMUN Hyderabad '25",
@@ -119,11 +121,16 @@ export const MOCK_MUN_SUMMARIES: MunSummary[] = [
   },
 ];
 
+export const MOCK_MUN_SUMMARIES: MunSummary[] = MOCK_SUMMARY_BASES.map((base) => ({
+  ...base,
+  registrationOpensAt: null,
+  registrationDeadline: null,
+}));
+
 function detailFromSummary(s: MunSummary, extra?: Partial<MunDetail>): MunDetail {
   const committeeId = `${s.id}-unsc`;
   return {
     id: s.id,
-    organizerId: `org-${s.id}`,
     name: s.name,
     slug: s.slug,
     edition: "2025",
@@ -134,10 +141,22 @@ function detailFromSummary(s: MunSummary, extra?: Partial<MunDetail>): MunDetail
     startDate: s.startDate,
     endDate: s.endDate,
     venue: "Main Campus Auditorium",
+    addressLine1: null,
     city: s.city,
+    addressState: null,
+    postalCode: null,
     country: s.country,
+    mapUrl: null,
+    conferenceType: null,
+    targetParticipantType: null,
+    registrationOpensAt: s.registrationOpensAt,
+    registrationDeadline: s.registrationDeadline,
+    accommodationProvided: null,
     status: s.status,
     organizerName: s.organizerName,
+    coverImage: s.coverImage,
+    logo: null,
+    contact: null,
     committees: [
       {
         id: committeeId,

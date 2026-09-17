@@ -4,6 +4,8 @@ import { MunStatusBadge } from "@/components/mun/mun-status-badge";
 import { formatDateRange } from "@/components/shared/date-range";
 import { formatPrice } from "@/components/shared/currency";
 import { Button } from "@/components/ui/button";
+import { safeLinkUrl } from "@/components/mun/mun-format";
+import { RemoteImage } from "@/components/mun/remote-image";
 import type { MunDetail } from "@/types";
 
 /**
@@ -15,6 +17,10 @@ import type { MunDetail } from "@/types";
  * stop."). Display type stays at weight 400 — emphasis comes from size, not
  * weight (doc Don't #3). One primary CTA per viewport (doc Do #2), paired with
  * the white outlined secondary.
+ *
+ * The organizer's cover photo, when there is one, sits above the type as a
+ * cropped media well ({rounded.lg}) — never behind it — and the logo rides
+ * next to the status badge.
  */
 
 interface MunHeroProps {
@@ -27,13 +33,39 @@ export function MunHero({ mun, fromPrice }: MunHeroProps) {
   const canRegister = mun.status === "REGISTRATION_OPEN";
   const location = [mun.venue, mun.city, mun.country].filter(Boolean).join(", ");
   const committeeCount = mun.committees.length;
+  const cover = safeLinkUrl(mun.coverImage);
+  const logo = safeLinkUrl(mun.logo);
 
   return (
     <section className="border-b border-border bg-background">
-      <div className="content-container pt-xxl pb-xl md:pt-section md:pb-xxl">
+      {cover && (
+        <div className="content-container pt-lg">
+          <RemoteImage
+            src={cover}
+            alt=""
+            loading="eager"
+            className="aspect-[2/1] w-full rounded-lg bg-surface-soft object-cover sm:aspect-[3/1] lg:aspect-[4/1]"
+          />
+        </div>
+      )}
+      <div
+        className={
+          cover
+            ? "content-container pt-xl pb-xl md:pt-xxl md:pb-xxl"
+            : "content-container pt-xxl pb-xl md:pt-section md:pb-xxl"
+        }
+      >
         <div className="grid gap-xl lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end lg:gap-xxl">
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-sm">
+              {logo && (
+                <RemoteImage
+                  src={logo}
+                  alt={`${mun.name} logo`}
+                  loading="eager"
+                  className="size-12 rounded-md border border-border bg-white object-contain p-xxs"
+                />
+              )}
               <MunStatusBadge status={mun.status} />
               {mun.edition && (
                 <span className="text-caption text-muted-foreground">

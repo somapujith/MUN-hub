@@ -18,8 +18,11 @@ export interface MunSummary {
   country: string | null;
   startDate: Date | null;
   endDate: Date | null;
+  registrationOpensAt: Date | null;
+  registrationDeadline: Date | null;
   status: MunStatus;
   minPrice: number | null;
+  /** URL of the MUN's cover image, or null when none has been uploaded. */
   coverImage: string | null;
   organizerName: string | null;
 }
@@ -32,6 +35,10 @@ export interface Portfolio {
   capacity: number;
   /** Remaining seats for this portfolio (schema: integer, default 1). */
   availability: number;
+  /** Free-text portfolio type (country, person, press...), when the organizer set one. */
+  type?: string | null;
+  description?: string | null;
+  restrictions?: string | null;
 }
 
 export interface Committee {
@@ -42,6 +49,7 @@ export interface Committee {
   description: string | null;
   capacity: number;
   agenda?: string | null;
+  committeeType?: string | null;
 }
 
 export interface CommitteeWithPortfolios extends Committee {
@@ -54,15 +62,27 @@ export interface RegistrationProduct {
   name: string;
   description: string | null;
   price: number;
+  /** ISO currency code (the server defaults to INR). */
+  currency?: string;
   capacity: number;
   deadline: Date | null;
   isActive: boolean;
 }
 
-/** Full public detail shape — mirrors fields used by ported UI. */
+/** Official, public contact channels of a MUN (never the organizer's contact person). */
+export interface PublicMunContact {
+  officialEmail: string;
+  phone: string | null;
+  website: string | null;
+}
+
+/**
+ * Public MUN detail — mirrors `PublicMunDetail` in lib/types/mun.ts (GET
+ * /muns/:slug). There is deliberately no organizer id: the endpoint never
+ * sends one.
+ */
 export interface MunDetail {
   id: string;
-  organizerId: string;
   name: string;
   slug: string;
   edition: string | null;
@@ -71,12 +91,28 @@ export interface MunDetail {
   startDate: Date | null;
   endDate: Date | null;
   venue: string | null;
+  addressLine1: string | null;
   city: string | null;
+  addressState: string | null;
+  postalCode: string | null;
   country: string | null;
+  /** Organizer-supplied map link, or null. */
+  mapUrl: string | null;
+  conferenceType: string | null;
+  targetParticipantType: string | null;
+  registrationOpensAt: Date | null;
+  registrationDeadline: Date | null;
+  /** PROVIDED | NOT_PROVIDED | null (not answered yet). */
+  accommodationProvided: string | null;
   status: MunStatus;
   committees: CommitteeWithPortfolios[];
   registrationProducts: RegistrationProduct[];
   organizerName: string | null;
+  /** URL of the cover image, or null. */
+  coverImage: string | null;
+  /** URL of the logo, or null. */
+  logo: string | null;
+  contact: PublicMunContact | null;
   /**
    * The organizer's configured registration questions. Already served by
    * GET /muns/:slug — it was just never declared here, so the registration

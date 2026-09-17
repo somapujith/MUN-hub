@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { humanizeToken } from "@/lib/mun-public-labels";
 import { cn } from "cn";
 import type { CommitteeWithPortfolios } from "@/types";
 
@@ -41,9 +42,16 @@ function CommitteeCard({ committee }: { committee: CommitteeWithPortfolios }) {
   return (
     <li className="flex flex-col items-start rounded-md border border-border bg-card p-lg transition-colors">
       <div className="flex w-full items-start justify-between gap-sm">
-        <h3 className="font-display text-title-sm font-medium tracking-[-0.006em] text-ink">
-          {committee.name}
-        </h3>
+        <div className="min-w-0">
+          <h3 className="font-display text-title-sm font-medium tracking-[-0.006em] text-ink">
+            {committee.name}
+          </h3>
+          {committee.committeeType && (
+            <p className="mt-xxs text-caption text-muted-foreground">
+              {humanizeToken(committee.committeeType)}
+            </p>
+          )}
+        </div>
         {committee.capacity > 0 && (
           <Badge variant="secondary" className="shrink-0 tabular-nums">
             {committee.capacity} seats
@@ -52,7 +60,10 @@ function CommitteeCard({ committee }: { committee: CommitteeWithPortfolios }) {
       </div>
 
       {committee.agenda && (
-        <p className="mt-sm text-body-md leading-relaxed text-body">{committee.agenda}</p>
+        <div className="mt-sm">
+          <p className="text-caption text-muted-foreground">Agenda</p>
+          <p className="mt-xxs text-body-md leading-relaxed text-body">{committee.agenda}</p>
+        </div>
       )}
 
       {committee.description && (

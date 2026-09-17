@@ -1,4 +1,12 @@
 import type { MunDetail, MunSearchResult, MunSummary, RegistrationProduct } from "@/types";
+import type {
+  PublicAccommodationOption,
+  PublicExecutiveBoardMember,
+  PublicMunDocument,
+  PublicMunFaq,
+  PublicMunMedia,
+  PublicScheduleItem,
+} from "@/types/public-mun";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -34,9 +42,12 @@ function toDate(value: string | null | undefined): Date | null {
 }
 
 /** Raw JSON shape of a marketplace summary row — dates travel as ISO strings over the wire. */
-interface RawMunSummary extends Omit<MunSummary, "startDate" | "endDate"> {
+interface RawMunSummary
+  extends Omit<MunSummary, "startDate" | "endDate" | "registrationOpensAt" | "registrationDeadline"> {
   startDate: string | null;
   endDate: string | null;
+  registrationOpensAt?: string | null;
+  registrationDeadline?: string | null;
 }
 
 interface RawMunSearchResult {
@@ -45,8 +56,16 @@ interface RawMunSearchResult {
 }
 
 function normalizeMunSummary(raw: RawMunSummary): MunSummary {
-  return { ...raw, startDate: toDate(raw.startDate), endDate: toDate(raw.endDate) };
+  return {
+    ...raw,
+    startDate: toDate(raw.startDate),
+    endDate: toDate(raw.endDate),
+    registrationOpensAt: toDate(raw.registrationOpensAt),
+    registrationDeadline: toDate(raw.registrationDeadline),
+  };
 }
+
+export type MunSortBy = "date" | "deadline" | "price" | "newest";
 
 export type MunSearchParams = {
   query?: string;
@@ -54,7 +73,10 @@ export type MunSearchParams = {
   country?: string;
   minPrice?: number;
   maxPrice?: number;
-  sortBy?: "date" | "price" | "newest";
+  /** Conference must overlap [dateFrom, dateTo]; either bound may be omitted. */
+  dateFrom?: Date;
+  dateTo?: Date;
+  sortBy?: MunSortBy;
   status?: string[];
   limit?: number;
   offset?: number;
@@ -67,6 +89,8 @@ function buildSearchQuery(params: MunSearchParams): string {
   if (params.country) qs.set("country", params.country);
   if (params.minPrice !== undefined) qs.set("minPrice", String(params.minPrice));
   if (params.maxPrice !== undefined) qs.set("maxPrice", String(params.maxPrice));
+  if (params.dateFrom) qs.set("dateFrom", params.dateFrom.toISOString());
+  if (params.dateTo) qs.set("dateTo", params.dateTo.toISOString());
   if (params.sortBy) qs.set("sortBy", params.sortBy);
   if (params.status && params.status.length > 0) qs.set("status", params.status.join(","));
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
@@ -80,7 +104,8 @@ function buildSearchQuery(params: MunSearchParams): string {
  * `lib/actions/marketplace#searchMuns`. Omitting `status` lets the server
  * apply its own public-status default (PUBLISHED/REGISTRATION_OPEN/
  * REGISTRATION_CLOSED); pass it explicitly to narrow to one lifecycle bucket
- * (e.g. the homepage's "open now" / "opening soon" / "closed" shelves).
+ * (e.g. the homepage's "open now" / "opening soon" / "closed" shelves). The
+ * server drops any non-public status it is sent.
  */
 export async function searchMuns(params: MunSearchParams = {}): Promise<MunSearchResult> {
   const raw = await request<RawMunSearchResult>(`/muns${buildSearchQuery(params)}`);
@@ -103,9 +128,15 @@ interface RawRegistrationProduct extends Omit<RegistrationProduct, "deadline"> {
   status?: string;
 }
 
-interface RawMunDetail extends Omit<MunDetail, "startDate" | "endDate" | "registrationProducts"> {
+interface RawMunDetail
+  extends Omit<
+    MunDetail,
+    "startDate" | "endDate" | "registrationOpensAt" | "registrationDeadline" | "registrationProducts"
+  > {
   startDate: string | null;
   endDate: string | null;
+  registrationOpensAt: string | null;
+  registrationDeadline: string | null;
   registrationProducts: RawRegistrationProduct[];
 }
 
@@ -114,6 +145,8 @@ function normalizeMunDetail(raw: RawMunDetail): MunDetail {
     ...raw,
     startDate: toDate(raw.startDate),
     endDate: toDate(raw.endDate),
+    registrationOpensAt: toDate(raw.registrationOpensAt),
+    registrationDeadline: toDate(raw.registrationDeadline),
     registrationProducts: raw.registrationProducts.map((product) => ({
       ...product,
       deadline: toDate(product.deadline),
@@ -161,4 +194,49 @@ export async function getProductsAvailability(
     `/products/availability?ids=${encodeURIComponent(productIds.join(","))}`,
   );
   return availability;
+}
+
+// ---------------------------------------------------------------------------
+// Public MUN page sections — by-id public reads. Each is served for publicly
+// visible MUNs; the page only calls them after `getMunBySlug` resolved one.
+// ---------------------------------------------------------------------------
+
+function munPath(munId: string, section: string): string {
+  return `/muns/${encodeURIComponent(munId)}/${section}`;
+}
+
+interface RawScheduleItem extends Omit<PublicScheduleItem, "startsAt" | "endsAt"> {
+  startsAt: string;
+  endsAt: string;
+}
+
+/** `GET /muns/:munId/schedule` — ordered by start time. */
+export async function listPublicSchedule(munId: string): Promise<PublicScheduleItem[]> {
+  const raw = await request<RawScheduleItem[]>(munPath(munId, "schedule"));
+  return raw.map((item) => ({ ...item, startsAt: new Date(item.startsAt), endsAt: new Date(item.endsAt) }));
+}
+
+/** `GET /muns/:munId/documents`. */
+export function listPublicDocuments(munId: string): Promise<PublicMunDocument[]> {
+  return request<PublicMunDocument[]>(munPath(munId, "documents"));
+}
+
+/** `GET /muns/:munId/executive-board` — public members only, in display order. */
+export function listPublicExecutiveBoard(munId: string): Promise<PublicExecutiveBoardMember[]> {
+  return request<PublicExecutiveBoardMember[]>(munPath(munId, "executive-board"));
+}
+
+/** `GET /muns/:munId/accommodation` — active options only (no includeInactive). */
+export function listPublicAccommodation(munId: string): Promise<PublicAccommodationOption[]> {
+  return request<PublicAccommodationOption[]>(munPath(munId, "accommodation"));
+}
+
+/** `GET /muns/:munId/media` — logo, cover, gallery and sponsor images. */
+export function listPublicMedia(munId: string): Promise<PublicMunMedia[]> {
+  return request<PublicMunMedia[]>(munPath(munId, "media"));
+}
+
+/** `GET /muns/:munId/faqs`. */
+export function listPublicFaqs(munId: string): Promise<PublicMunFaq[]> {
+  return request<PublicMunFaq[]>(munPath(munId, "faqs"));
 }
