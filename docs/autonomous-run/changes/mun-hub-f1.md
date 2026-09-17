@@ -87,6 +87,18 @@ Lane: organizer workspace pages (not settings, finance, communications, registra
   - MUN Setup shows a status card per stage, a "live" card and a "next up" link, and hides the checklist after approval.
   - Checklist: blocking checks vs notes, and the per-section send button only for sections a reviewer sent back.
   - Support-button padding; en-IN dates.
+- `cb5abc7`: Executive Board member photos are uploaded instead of pasted as URLs.
+  - POST/DELETE `/executive-board/:id/photo`; old files are removed on replace, remove or member delete.
+  - The redundant "Display order" field is removed from the form.
+  - My MUNs: the button now reads "Host a MUN", and each card shows "Open".
+- `fb9b3a6` (requested by the lead):
+  - The organizer preview shows the launch state (no internal status; "Opens <date>" instead of "Closed").
+  - Toasts moved to bottom-right, above the support button.
+  - The empty roster says "No delegates yet" once, not twice.
+- `58a7c5c` (requested by the lead): the organizing body appears as the host.
+  - The onboarding profile step asks for it.
+  - `PUT /organizer/organization` edits it, and the overview has a "hosted by" card.
+  - Stored in `users.institution` (no migration). Public pages and search use it, falling back to the organizer's name.
 
 ### Bugs found while mapping (status)
 
