@@ -56,3 +56,13 @@ payout execution.
 - 08:23 Run started. Legal/about pages committed (`39a6157`). Lanes assigned; f1 holds
   migration slot 0030. mun-hub-67 declined a lane (no direct user instruction) — payments
   moved to a lead agent.
+- 08:40 Payments schema landed (`3b122be`, migration 0031). Nine lead lanes launched as the
+  `munhub-launch-lanes` workflow (worktree per lane, serialized merge, then wire + verify).
+  A separate `storage` lane agent builds real uploads (KV interim store; R2 not enabled).
+- 08:58 Production check (read-only, Neon via server/.dev.vars; `.env` now points at local
+  Docker): 30/33 migrations applied (0030–0032 pending); demo accounts incl. the only admin
+  still have the public password. Rotation was blocked by the permission classifier →
+  `USER_ACTIONS.md` §1.
+- f1 committed migrations 0030 (`ba44e79`) and 0032 (`f523604`); 4b wired four pipeline events
+  (`21b6c9c`); 84 added MOCK_PAYMENTS_ENABLED/ALLOW_LOCALHOST_ORIGINS to the E2E API env
+  (`6699007`) and reports E2E 297+148 passed, 0 failed.
