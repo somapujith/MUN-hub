@@ -15,6 +15,9 @@ import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { publishFromQueue, type PublishFromQueueResult } from '@/lib/lifecycle/go-live'
+import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
+import { notifyOrganizerApplicationEvent } from '@/lib/notifications/organizer-application-events'
+import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import type { Mun, MunWithApplication } from '@/lib/types'
 
 const REVIEW_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
@@ -155,7 +158,7 @@ export async function reviewMunApplication(
   // SUBMITTED -> UNDER_REVIEW claim, the decision itself, the APPROVED ->
   // ONBOARDING Gate 1 exit, and the organizer_applications status mirror.
   // Each status hop is its own audit-logged transition (verificationLogs).
-  return db.transaction(async (tx) => {
+  const updated = await db.transaction(async (tx) => {
     const [mun] = await tx.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).limit(1)
     if (!mun) {
       throw new Error('Mun not found')
@@ -165,7 +168,7 @@ export async function reviewMunApplication(
       await transitionMun(munId, 'UNDER_REVIEW', session.userId, undefined, undefined, tx)
     }
 
-    let updated = await transitionMun(munId, decision, session.userId, trimmedNotes, internalNotes, tx)
+    let result = await transitionMun(munId, decision, session.userId, trimmedNotes, internalNotes, tx)
 
     await tx
       .update(organizerApplications)
@@ -175,10 +178,55 @@ export async function reviewMunApplication(
     if (decision === 'APPROVED') {
       // Gate 1 exit — an approved organizer lands straight in the
       // onboarding workspace. APPROVED itself is not a submittable state.
-      updated = await transitionMun(munId, 'ONBOARDING', session.userId, undefined, undefined, tx)
+      result = await transitionMun(munId, 'ONBOARDING', session.userId, undefined, undefined, tx)
     }
 
-    return updated
+    return result
+  })
+
+  // After commit, never inside the transaction above (Task 12 Step 5
+  // convention — see lib/lifecycle/go-live.ts's file header). The Gate-1
+  // decision itself is an OrganizerApplicationEvent, never PipelineEvent's
+  // Gate-2-scoped APPROVED/CHANGES_REQUESTED (see that file's header for
+  // why). ONBOARDING_STARTED is separately a real PipelineEvent — it's a
+  // mun-lifecycle event (entering ONBOARDING), not a review-decision event,
+  // and only fires on the APPROVED path since that's the only decision that
+  // reaches ONBOARDING at all.
+  notifyReviewDecisionAfterCommit(munId, decision, trimmedNotes)
+
+  return updated
+}
+
+function notifyReviewDecisionAfterCommit(
+  munId: string,
+  decision: 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED',
+  reason: string | undefined,
+): void {
+  ;(async () => {
+    const context = await resolveMunNotificationContext(munId)
+
+    if (decision === 'APPROVED') {
+      await notifyOrganizerApplicationEvent({
+        type: 'APPLICATION_APPROVED',
+        munId,
+        organizerEmail: context.organizerEmail,
+        munName: context.munName,
+      })
+      await notifyPipelineEvent({ type: 'ONBOARDING_STARTED', munId, organizerEmail: context.organizerEmail, munName: context.munName })
+      return
+    }
+
+    await notifyOrganizerApplicationEvent({
+      type: decision === 'REJECTED' ? 'APPLICATION_REJECTED' : 'APPLICATION_CHANGES_REQUESTED',
+      munId,
+      organizerEmail: context.organizerEmail,
+      munName: context.munName,
+      // Non-APPROVED decisions require a non-empty `notes` earlier in this
+      // function, so `reason` is guaranteed defined on this branch.
+      reason: reason ?? 'See review notes.',
+    })
+  })().catch((error) => {
+    console.error('[admin-review] pipeline notification failed', error)
   })
 }
 
