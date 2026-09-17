@@ -9,6 +9,7 @@ import { rateLimitMiddleware } from '../middleware/rate-limit'
 import { runtimeEnvMiddleware } from '../middleware/runtime-env'
 import { sessionMiddleware } from '../middleware/session'
 import { apiV1 } from '../routes/index'
+import { munLifecycleRoutes } from '../routes/mun-lifecycle'
 import { webhooks } from '../routes/webhooks'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import type { AppVariables } from './types'
@@ -71,6 +72,7 @@ export function createApp() {
   app.use('/api/v1/*', csrfMiddleware)
   app.use('/api/v1/*', rateLimitMiddleware)
   app.route('/api/v1', apiV1)
+  app.route('/api/v1', munLifecycleRoutes)
 
   app.onError(errorHandler)
 
