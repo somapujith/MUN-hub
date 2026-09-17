@@ -76,10 +76,6 @@ test.describe('go-live queue', () => {
   })
 
   test('publishing a MUN that never went through review is refused cleanly', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: publishFromQueue throws "No submission found for this mun", which server/middleware/error.ts does not map — the admin gets 500 INTERNAL instead of a 404/409',
-    )
     const app = await createApplication('E2E Admin GoLive')
     const admin = await adminApi()
     const response = await admin.post(`muns/${app.munId}/actions/publish`, {

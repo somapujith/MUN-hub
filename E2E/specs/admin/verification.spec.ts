@@ -129,10 +129,6 @@ test.describe('Gate 2 — verification console', () => {
   })
 
   test('a stale second review is reported as a conflict the reviewer can read', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: reviewModule\'s "was already reviewed … reload and try again" error is unmapped in server/middleware/error.ts, so the reviewer gets 500 "Internal server error" instead of a 409 with that message',
-    )
     const app = await moduleInReview('BASIC_INFO')
     const admin = await adminApi()
     const url = `muns/${app.munId}/modules/BASIC_INFO/actions/review`

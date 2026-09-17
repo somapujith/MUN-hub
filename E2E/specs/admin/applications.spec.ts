@@ -188,10 +188,6 @@ test.describe('Gate 1 — applications queue', () => {
   })
 
   test('a second decision is reported as a conflict, not a server error', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: "Invalid transition from X to Y" is not mapped in server/middleware/error.ts, so a repeat decision returns 500 INTERNAL instead of 409 CONFLICT_STATE',
-    )
     const app = await createApplication()
     const api = await adminApi()
     await api.post(`admin/muns/${app.munId}/review-application`, { data: { decision: 'APPROVED' } })

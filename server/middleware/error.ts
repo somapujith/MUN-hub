@@ -181,6 +181,35 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
 
+  // Lifecycle/state conflicts: the target exists but is in the wrong state
+  // for the requested action (lib/lifecycle/mun-state-machine.ts,
+  // module-verification.ts, go-live.ts; lib/actions/support.ts).
+  if (
+    /^Invalid transition from \w+ to \w+$/.test(message) ||
+    /^Invalid ticket transition: \w+ -> \w+$/.test(message) ||
+    /^Module "\w+" was already reviewed \(current state: \w+\) — reload and try again$/.test(message) ||
+    /^Module "\w+" cannot be confirmed from its current state \(\w+\)$/.test(message) ||
+    message === 'No submission found for this mun' ||
+    message === 'No active submission found for this mun'
+  ) {
+    return { status: 409, code: 'CONFLICT_STATE', message }
+  }
+
+  // Input validation thrown from lib/ (mun-schedule.ts, accommodation.ts,
+  // mun-branding.ts, module-verification.ts, go-live.ts).
+  if (
+    message === 'endsAt must be after startsAt' ||
+    /^Field type \w+ requires at least one choice$/.test(message) ||
+    message === 'One or more ids do not belong to this mun' ||
+    /^Unsupported content type ".*" — allowed types are /.test(message) ||
+    /^File too large \(\d+ bytes\) — maximum allowed size is /.test(message) ||
+    message === 'FINAL_REVIEW cannot be made optional' ||
+    message === 'A non-empty reason is required to reject a submission' ||
+    message === 'A reason is required to reject or request changes'
+  ) {
+    return { status: 400, code: 'VALIDATION_FAILED', message }
+  }
+
   if (message.includes('unique constraint') || message.includes('23505') || message.includes('duplicate key')) {
     return { status: 409, code: 'CONFLICT_UNIQUE', message: 'Resource already exists' }
   }
@@ -251,4 +280,18 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'conditionalOn on "a" would create a cycle via "b"', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Field type DROPDOWN requires a non-empty choices array', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Cannot delete field "school": referenced by conditionalOn on grade', status: 409, code: 'CONFLICT_STATE' },
+  { message: 'Invalid transition from APPROVED to APPROVED', status: 409, code: 'CONFLICT_STATE' },
+  { message: 'Invalid ticket transition: NEW -> CLOSED', status: 409, code: 'CONFLICT_STATE' },
+  { message: 'Module "BASIC_INFO" was already reviewed (current state: VERIFIED) — reload and try again', status: 409, code: 'CONFLICT_STATE' },
+  { message: 'Module "BASIC_INFO" cannot be confirmed from its current state (VERIFIED)', status: 409, code: 'CONFLICT_STATE' },
+  { message: 'No submission found for this mun', status: 409, code: 'CONFLICT_STATE' },
+  { message: 'No active submission found for this mun', status: 409, code: 'CONFLICT_STATE' },
+  { message: 'endsAt must be after startsAt', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'Field type DROPDOWN requires at least one choice', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'One or more ids do not belong to this mun', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'Unsupported content type "image/gif" — allowed types are image/png, image/jpeg, image/webp', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'File too large (6000000 bytes) — maximum allowed size is 5MB', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'FINAL_REVIEW cannot be made optional', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'A non-empty reason is required to reject a submission', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'A reason is required to reject or request changes', status: 400, code: 'VALIDATION_FAILED' },
 ]

@@ -79,13 +79,14 @@ Tests for features the PRDs require but the app doesn't have yet are marked `tes
 | `E2E_BROWSER_CHANNEL` | `chrome` | Set to `chromium` to use Playwright's bundled browser |
 | `E2E_VIDEO` | unset | Record videos of failures (needs `npx playwright install ffmpeg`) |
 | `E2E_SHOW_KNOWN_BUGS` | unset | Turn off `test.fail` markers |
-| `E2E_ORG_WORKSPACE_SHIM` | unset | Set to `1` to replace the organizer workspace's mock MUN list with the organizer's real MUNs, intercepted at the network layer (see `specs/organizer/_helpers.ts`). This way the per-section organizer flows actually run despite the mock-data bug |
 | `E2E_SKIP_DB_PREPARE` | unset | Skip migrate/seed/reset. Only for running several suites side by side on different ports against an already-prepared database |
 | `E2E_AUTH_DIR`, `E2E_OUTPUT_DIR`, `E2E_REPORT_DIR` | inside `E2E/` | Keep parallel runs from overwriting each other. Paths are relative to `E2E/`, so use a bare name such as `test-results-2` |
 
 ## Rate limits
 
-The API rate-limits by client IP, and a local test run makes every request from one address. The organizer helpers give each API context its own `X-Forwarded-For` test address so they don't use up the browser's quota. This works only because `server/lib/rate-limit-store.ts` currently trusts that header from any client, which is itself a security bug. Once the server stops trusting it, those helpers will share the browser's limit again. If a run then starts getting `429`s, raise the limit for local runs rather than weakening the fix.
+The API rate-limits by client IP, and a local test run makes every request from `127.0.0.1`. The server takes the IP from the socket (or `CF-Connecting-IP` on Workers) and ignores `X-Forwarded-For` unless `TRUST_PROXY_HEADERS=true`. A test therefore can't pose as another client by sending that header; `specs/security/api-security.spec.ts` checks this.
+
+To keep the suite from throttling itself, `playwright.config.ts` starts the API with `RATE_LIMIT_GLOBAL_PER_MINUTE=100000`. That raises only the generic per-IP cap (300/min by default). The dedicated limits stay at their production values: sign-in is 5/min per IP+email, organizer code requests are 3/min per IP+email plus 30/min per IP, and organizer code verification is 10/min per IP+email. Tests should use a fresh email per attempt rather than work around these limits. If a run starts getting `429`s from one of them, spread the requests over more emails; don't reintroduce header tricks.
 
 ## Writing tests
 

@@ -133,10 +133,6 @@ test.describe('admin support queue', () => {
   })
 
   test('an illegal ticket transition is reported as a client error', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: "Invalid ticket transition: X -> Y" (lib/actions/support.ts) is unmapped in server/middleware/error.ts, so the admin gets 500 INTERNAL instead of 409',
-    )
     const student = await signUpViaApi()
     const ticketId = await fileTicket(student, uniqueName('E2E Admin Skip Ticket'))
     const admin = await adminApi()
