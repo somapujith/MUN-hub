@@ -410,7 +410,7 @@ export async function getModuleReviewQueue(
     .from(munModuleVerifications)
     .innerJoin(muns, eq(munModuleVerifications.munId, muns.id))
     .where(whereClause)
-    .orderBy(desc(munModuleVerifications.organizerConfirmedAt))
+    .orderBy(sql`${munModuleVerifications.organizerConfirmedAt} DESC NULLS LAST`)
     .limit(limit)
     .offset(offset)
 
