@@ -511,6 +511,47 @@ describe('mun-config actions', () => {
       expect(updatedMun.status).toBe('VERIFICATION')
     })
 
+    // The public page shows the street address and links out to mapUrl, so
+    // changing either on a live MUN must go back through review — the same
+    // rule venue/city already had.
+    it.each([
+      ['addressLine1', { addressLine1: '9 Other Street' }],
+      ['addressState', { addressState: 'Karnataka' }],
+      ['postalCode', { postalCode: '560001' }],
+      ['mapUrl', { mapUrl: 'https://attacker.example/venue' }],
+    ])('updateMunDetails triggers re-verification when a PUBLISHED mun changes %s', async (_field, patch) => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id, {
+        status: 'PUBLISHED',
+        addressLine1: '12 Lake Road',
+        addressState: 'Telangana',
+        postalCode: '500001',
+        mapUrl: 'https://maps.example/venue',
+      })
+      const session = sessionFor(organizer)
+
+      await updateMunDetails(mun.id, patch, session)
+
+      const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(updatedMun.status).toBe('VERIFICATION')
+      const [datesVenue] = await db
+        .select()
+        .from(munModuleVerifications)
+        .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'DATES_VENUE')))
+      expect(datesVenue.state).toBe('PENDING_REVIEW')
+    })
+
+    it('updateMunDetails triggers re-verification when a VERIFIED mun clears its street address', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id, { status: 'VERIFIED', addressLine1: '12 Lake Road' })
+      const session = sessionFor(organizer)
+
+      await updateMunDetails(mun.id, { addressLine1: null }, session)
+
+      const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(updatedMun.status).toBe('VERIFICATION')
+    })
+
     it('updateRegistrationProduct does NOT trigger re-verification when mun is still DRAFT', async () => {
       const organizer = await makeUser('ORGANIZER')
       const mun = await makeMun(organizer.id)

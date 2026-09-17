@@ -23,6 +23,33 @@ describe('detectHighImpactChange', () => {
     expect(detectHighImpactChange('BASIC_INFO', { name: 'Old Name' }, { name: 'New Name' })).toBe(true)
   })
 
+  // The public MUN page renders the street address and links out to mapUrl,
+  // so swapping either one after verification would send paying delegates to
+  // an unreviewed location or link — the same class of switch DATES_VENUE
+  // already blocked for venue/city.
+  it.each([
+    ['addressLine1', '12 Lake Road', '9 Other Street'],
+    ['addressState', 'Telangana', 'Karnataka'],
+    ['postalCode', '500001', '560001'],
+    ['mapUrl', 'https://maps.example/venue', 'https://attacker.example/venue'],
+  ])('detects a %s change on DATES_VENUE as high-impact', (field, before, after) => {
+    expect(detectHighImpactChange('DATES_VENUE', { [field]: before }, { [field]: after })).toBe(true)
+    expect(detectHighImpactChange('DATES_VENUE', { [field]: before }, { [field]: before })).toBe(false)
+  })
+
+  it('detects clearing the street address on DATES_VENUE as high-impact', () => {
+    expect(detectHighImpactChange('DATES_VENUE', { addressLine1: '12 Lake Road' }, { addressLine1: null })).toBe(true)
+  })
+
+  // Deliberately NOT high-impact — registration-lifecycle.ts tells an
+  // organizer to move this date to open a live MUN sooner, so bouncing them
+  // back into review for it would break that remedy. See reverification.ts.
+  it('does not flag a registrationOpensAt change on DATES_VENUE', () => {
+    const before = { registrationOpensAt: new Date('2027-01-01') }
+    const after = { registrationOpensAt: new Date('2027-02-01') }
+    expect(detectHighImpactChange('DATES_VENUE', before, after)).toBe(false)
+  })
+
   it('detects a committee capacity change on COMMITTEES as high-impact', () => {
     expect(detectHighImpactChange('COMMITTEES', { capacity: 30 }, { capacity: 50 })).toBe(true)
   })
