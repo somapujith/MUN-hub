@@ -62,16 +62,33 @@ test.describe('admin audit log', () => {
   })
 
   test('an application decision shows up in the platform audit log', async ({ page }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: reviewMunApplication writes only verification_logs, never admin_actions, so Gate 1 decisions never appear in /admin/audit (Admin PRD §4: every decision → Audit Log)',
-    )
     const app = await createApplication('E2E Admin Audit')
     const admin = await adminApi()
-    expect((await admin.post(`admin/muns/${app.munId}/review-application`, { data: { decision: 'REJECTED', notes: 'fraud' } })).ok()).toBeTruthy()
+    const reason = `E2E audit rejection ${Date.now()}`
+    expect((await admin.post(`admin/muns/${app.munId}/review-application`, { data: { decision: 'REJECTED', notes: reason } })).ok()).toBeTruthy()
     await page.goto('/admin/audit')
     await expect(heading(page, 'Audit log')).toBeVisible()
-    await expect(auditEntry(page, 'mun', app.munId)).toHaveCount(1, { timeout: 5_000 })
+    const entry = auditEntry(page, 'mun', app.munId)
+    await expect(entry).toHaveCount(1, { timeout: 5_000 })
+    await expect(entry.getByRole('link', { name: 'APPLICATION_REJECTED' })).toBeVisible()
+    await expect(entry).toContainText(reason)
+  })
+
+  test('an approval is listed once, not once per lifecycle step', async ({ page }) => {
+    const app = await createApplication('E2E Admin Audit')
+    const admin = await adminApi()
+    expect((await admin.post(`admin/muns/${app.munId}/review-application`, { data: { decision: 'APPROVED' } })).ok()).toBeTruthy()
+    await page.goto('/admin/audit')
+    const entry = auditEntry(page, 'mun', app.munId)
+    await expect(entry).toHaveCount(1, { timeout: 5_000 })
+    await expect(entry.getByRole('link', { name: 'APPLICATION_APPROVED' })).toBeVisible()
+
+    await page.goto(`/admin/audit/mun/${app.munId}`)
+    const history = main(page).getByRole('list').getByRole('listitem')
+    await expect(history).toHaveCount(4)
+    for (const [index, action] of ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'ONBOARDING'].entries()) {
+      await expect(history.nth(index)).toContainText(action)
+    }
   })
 
   test('a target with no history shows the empty state', async ({ page }) => {

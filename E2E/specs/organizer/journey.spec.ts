@@ -114,7 +114,6 @@ test.describe.serial('new organizer: sign up, apply, get approved', () => {
   })
 
   test('admin approval moves the new MUN into onboarding', async () => {
-    test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: approving an application leaves the MUN in APPROVED — nothing performs the APPROVED -> ONBOARDING Gate-1 exit (lib/actions/admin-review.ts#reviewMunApplication), so the organizer can never submit it for review')
     expect(munId).not.toBe('')
     await decide(munId, 'APPROVED', 'Welcome aboard')
 

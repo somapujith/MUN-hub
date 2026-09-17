@@ -120,6 +120,14 @@ export async function getMunForReview(munId: string, session: Session | null): P
  * ops/admin can act on a queue row in one call instead of needing a separate
  * "claim" action.
  *
+ * An APPROVED decision also performs the Gate 1 exit (APPROVED -> ONBOARDING),
+ * so the returned mun is in ONBOARDING and the organizer can start building
+ * it. The decision is mirrored onto `organizer_applications.status` /
+ * `reviewNotes`. REJECTED and CHANGES_REQUESTED require non-empty `notes`
+ * (the reason shown to the organizer). All of it is one transaction; each
+ * status hop writes its own `verificationLogs` row, and those rows are what
+ * `listAdminActions` (admin-audit.ts) surfaces as APPLICATION_* entries.
+ *
  * **Gate 1 only.** This is organizer-APPLICATION review (SUBMITTED/
  * UNDER_REVIEW muns, `organizer_applications`), never mun-content review.
  * Gate 2's content-review decision is `reviewSubmission`
@@ -136,16 +144,42 @@ export async function reviewMunApplication(
 ): Promise<Mun> {
   requireRole(session, [...REVIEW_ROLES])
 
-  const [mun] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
-  if (!mun) {
-    throw new Error('Mun not found')
+  // A rejection or a change request must tell the organizer why (Admin PRD
+  // §8). Only an approval may be recorded without a note.
+  const trimmedNotes = notes?.trim() || undefined
+  if (decision !== 'APPROVED' && !trimmedNotes) {
+    throw new Error('A reason is required to reject or request changes')
   }
 
-  if (mun.status === 'SUBMITTED') {
-    await transitionMun(munId, 'UNDER_REVIEW', session.userId)
-  }
+  // Everything below commits (or rolls back) as one unit: the optional
+  // SUBMITTED -> UNDER_REVIEW claim, the decision itself, the APPROVED ->
+  // ONBOARDING Gate 1 exit, and the organizer_applications status mirror.
+  // Each status hop is its own audit-logged transition (verificationLogs).
+  return db.transaction(async (tx) => {
+    const [mun] = await tx.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).limit(1)
+    if (!mun) {
+      throw new Error('Mun not found')
+    }
 
-  return transitionMun(munId, decision, session.userId, notes, internalNotes)
+    if (mun.status === 'SUBMITTED') {
+      await transitionMun(munId, 'UNDER_REVIEW', session.userId, undefined, undefined, tx)
+    }
+
+    let updated = await transitionMun(munId, decision, session.userId, trimmedNotes, internalNotes, tx)
+
+    await tx
+      .update(organizerApplications)
+      .set({ status: decision, reviewNotes: trimmedNotes ?? null })
+      .where(eq(organizerApplications.munId, munId))
+
+    if (decision === 'APPROVED') {
+      // Gate 1 exit — an approved organizer lands straight in the
+      // onboarding workspace. APPROVED itself is not a submittable state.
+      updated = await transitionMun(munId, 'ONBOARDING', session.userId, undefined, undefined, tx)
+    }
+
+    return updated
+  })
 }
 
 /**
@@ -328,6 +362,11 @@ export interface RegistrationsQueueResult {
   total: number
 }
 
+/** Escapes ILIKE wildcards so a search for "a_b" or "100%" matches literally. */
+function pattern(q: string): string {
+  return q.replace(/[\\%_]/g, (ch) => `\\${ch}`)
+}
+
 /**
  * Platform-wide, paginated registrations list for the admin console's
  * Registrations page — distinct from `admin-search.ts`'s
@@ -336,8 +375,9 @@ export interface RegistrationsQueueResult {
  * search box). This is the browse view the admin console mock's page
  * comment flagged as "?q= search wiring deferred": works with no `q` at all
  * (paginated, default 20/page, newest first — same reasoning as
- * `getReviewQueue`), and an optional `q` narrows across delegate name / mun
- * name / registration id using the same ILIKE-or-exact-id predicate shape as
+ * `getReviewQueue`), and an optional `q` narrows across delegate name /
+ * delegate email / mun name / registration id using the same
+ * ILIKE-or-exact-id predicate shape as
  * `searchRegistrations`. Requires OPERATIONS/ADMIN/SUPER_ADMIN.
  */
 export async function getRegistrationsQueue(
@@ -350,7 +390,12 @@ export async function getRegistrationsQueue(
   const offset = params.offset ?? 0
   const q = params.q?.trim()
   const whereClause = q
-    ? or(ilike(users.name, `%${q}%`), ilike(muns.name, `%${q}%`), eq(registrations.id, q))
+    ? or(
+        ilike(users.name, `%${pattern(q)}%`),
+        ilike(users.email, `%${pattern(q)}%`),
+        ilike(muns.name, `%${pattern(q)}%`),
+        eq(registrations.id, q),
+      )
     : undefined
 
   const results = await db

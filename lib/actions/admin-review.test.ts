@@ -1,12 +1,24 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { adminActions, muns, munModuleVerifications, organizerApplications, users, verificationLogs } from '@/lib/db/schema'
+import {
+  adminActions,
+  muns,
+  munModuleVerifications,
+  organizerApplications,
+  registrationProducts,
+  registrations,
+  users,
+  verificationLogs,
+} from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
+import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
+import { listAdminActions } from './admin-audit'
 
 import {
   getModuleReviewQueue,
   getMunForReview,
+  getRegistrationsQueue,
   getReviewQueue,
   publishMun,
   reinstateMun,
@@ -120,18 +132,100 @@ describe('getMunForReview', () => {
   })
 })
 
+async function makeApplication(organizerId: string, munId: string) {
+  await db.insert(organizerApplications).values({ organizerId, munId, status: 'SUBMITTED' })
+}
+
+async function applicationStatus(munId: string) {
+  const [row] = await db
+    .select({ status: organizerApplications.status, reviewNotes: organizerApplications.reviewNotes })
+    .from(organizerApplications)
+    .where(eq(organizerApplications.munId, munId))
+  return row
+}
+
+async function logActions(munId: string) {
+  const logs = await db
+    .select()
+    .from(verificationLogs)
+    .where(eq(verificationLogs.munId, munId))
+    .orderBy(verificationLogs.createdAt)
+  return logs
+}
+
 describe('reviewMunApplication', () => {
-  it('approves a submitted mun when actor is OPERATIONS', async () => {
+  it('approves an UNDER_REVIEW mun (OPERATIONS) and exits Gate 1 into ONBOARDING', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'UNDER_REVIEW')
+    await makeApplication(organizer.id, mun.id)
     const ops = await makeUser('OPERATIONS')
     const __actor = sess(ops)
 
     const result = await reviewMunApplication(mun.id, 'APPROVED', 'looks good', undefined, __actor)
-    expect(result.status).toBe('APPROVED')
+    expect(result.status).toBe('ONBOARDING')
 
-    const logs = await db.select().from(verificationLogs).where(eq(verificationLogs.munId, mun.id))
-    expect(logs.some((l) => l.action === 'APPROVED' && l.reviewerId === ops.id)).toBe(true)
+    const logs = await logActions(mun.id)
+    expect(logs.map((l) => l.action)).toEqual(['APPROVED', 'ONBOARDING'])
+    expect(logs.every((l) => l.reviewerId === ops.id)).toBe(true)
+    expect(logs[0].notes).toBe('looks good')
+    expect(await applicationStatus(mun.id)).toEqual({ status: 'APPROVED', reviewNotes: 'looks good' })
+  })
+
+  it.each(['REJECTED', 'CHANGES_REQUESTED'] as const)(
+    'refuses %s without a reason and changes nothing',
+    async (decision) => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id, 'SUBMITTED')
+      await makeApplication(organizer.id, mun.id)
+      const __actor = sess(await makeUser('ADMIN'))
+
+      for (const notes of [undefined, '', '   ']) {
+        await expect(reviewMunApplication(mun.id, decision, notes, 'internal only', __actor)).rejects.toThrow(
+          'A reason is required to reject or request changes',
+        )
+      }
+      const [after] = await db.select().from(muns).where(eq(muns.id, mun.id))
+      expect(after.status).toBe('SUBMITTED')
+      expect(await logActions(mun.id)).toHaveLength(0)
+      expect((await applicationStatus(mun.id)).status).toBe('SUBMITTED')
+    },
+  )
+
+  it('mirrors REJECTED onto the organizer application with the reason', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'SUBMITTED')
+    await makeApplication(organizer.id, mun.id)
+    const __actor = sess(await makeUser('ADMIN'))
+
+    const result = await reviewMunApplication(mun.id, 'REJECTED', '  could not verify  ', undefined, __actor)
+    expect(result.status).toBe('REJECTED')
+    expect(await applicationStatus(mun.id)).toEqual({ status: 'REJECTED', reviewNotes: 'could not verify' })
+  })
+
+  it('rolls back the claim when the decision itself fails', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'SUBMITTED')
+    const __actor = sess(await makeUser('ADMIN'))
+
+    await expect(
+      reviewMunApplication(mun.id, 'PUBLISHED' as unknown as 'APPROVED', 'a note', undefined, __actor),
+    ).rejects.toThrow('Invalid transition from UNDER_REVIEW to PUBLISHED')
+    const [after] = await db.select().from(muns).where(eq(muns.id, mun.id))
+    expect(after.status).toBe('SUBMITTED')
+    expect(await logActions(mun.id)).toHaveLength(0)
+  })
+
+  it('a second decision on an already-decided application is refused', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'SUBMITTED')
+    await makeApplication(organizer.id, mun.id)
+    const __actor = sess(await makeUser('ADMIN'))
+
+    await reviewMunApplication(mun.id, 'APPROVED', undefined, undefined, __actor)
+    await expect(reviewMunApplication(mun.id, 'REJECTED', 'too late', undefined, __actor)).rejects.toThrow(
+      'Invalid transition from ONBOARDING to REJECTED',
+    )
+    expect((await applicationStatus(mun.id)).status).toBe('APPROVED')
   })
 
   it('rejects when actor is a STUDENT', async () => {
@@ -150,14 +244,12 @@ describe('reviewMunApplication', () => {
     const __actor = sess(admin)
 
     const result = await reviewMunApplication(mun.id, 'APPROVED', 'approved on first review', undefined, __actor)
-    expect(result.status).toBe('APPROVED')
+    expect(result.status).toBe('ONBOARDING')
 
-    const logs = await db
-      .select()
-      .from(verificationLogs)
-      .where(eq(verificationLogs.munId, mun.id))
-      .orderBy(verificationLogs.createdAt)
-    expect(logs.map((l) => l.action)).toEqual(['UNDER_REVIEW', 'APPROVED'])
+    // One transaction, but each hop is its own ordered audit row.
+    const logs = await logActions(mun.id)
+    expect(logs.map((l) => l.action)).toEqual(['UNDER_REVIEW', 'APPROVED', 'ONBOARDING'])
+    expect(new Set(logs.map((l) => l.createdAt.getTime())).size).toBe(3)
     expect(logs.every((l) => l.reviewerId === admin.id)).toBe(true)
   })
 
@@ -167,8 +259,10 @@ describe('reviewMunApplication', () => {
     const admin = await makeUser('ADMIN')
     const __actor = sess(admin)
 
+    await makeApplication(organizer.id, mun.id)
     const result = await reviewMunApplication(mun.id, 'CHANGES_REQUESTED', 'fix dates', 'organizer is slow to respond', __actor)
     expect(result.status).toBe('CHANGES_REQUESTED')
+    expect(await applicationStatus(mun.id)).toEqual({ status: 'CHANGES_REQUESTED', reviewNotes: 'fix dates' })
 
     const logs = await db
       .select()
@@ -313,6 +407,110 @@ describe('getModuleReviewQueue', () => {
     const __actor = sess(student)
 
     await expect(getModuleReviewQueue({}, __actor)).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('getRegistrationsQueue', () => {
+  async function registeredDelegate() {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'PUBLISHED')
+    const tag = `${Date.now()}${Math.random().toString(36).slice(2, 8)}`
+    const [delegate] = await db
+      .insert(users)
+      .values({ name: `Delegate ${tag}`, email: `Search_Me.${tag}@Example.test`, role: 'STUDENT' })
+      .returning()
+    const [product] = await db
+      .insert(registrationProducts)
+      .values({ munId: mun.id, name: 'Delegate pass', price: 100, capacity: 10 })
+      .returning()
+    const [registration] = await db
+      .insert(registrations)
+      .values({ userId: delegate.id, munId: mun.id, registrationProductId: product.id, status: 'PENDING' })
+      .returning()
+    return { delegate, registration }
+  }
+
+  it('matches the delegate email, case-insensitively and by fragment', async () => {
+    const { delegate, registration } = await registeredDelegate()
+    const __actor = sess(await makeUser('OPERATIONS'))
+
+    for (const q of [delegate.email, delegate.email.toLowerCase(), delegate.email.split('@')[0].toUpperCase()]) {
+      const { results, total } = await getRegistrationsQueue({ q }, __actor)
+      expect(results.map((r) => r.id), q).toEqual([registration.id])
+      expect(total).toBe(1)
+    }
+  })
+
+  it('treats LIKE wildcards in the query literally', async () => {
+    await registeredDelegate()
+    const __actor = sess(await makeUser('OPERATIONS'))
+    const { total } = await getRegistrationsQueue({ q: `Search_Me.%${'_'.repeat(3)}@` }, __actor)
+    expect(total).toBe(0)
+  })
+})
+
+describe('listAdminActions (platform audit feed)', () => {
+  async function feedFor(munId: string, __actor: Session) {
+    const { results } = await listAdminActions({ limit: 100 }, __actor)
+    return results.filter((row) => row.targetType === 'mun' && row.targetId === munId)
+  }
+
+  it('lists each Gate 1 decision once, labelled APPLICATION_<decision>, with its reason', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    const approved = await makeMun(organizer.id, 'SUBMITTED')
+    const rejected = await makeMun(organizer.id, 'SUBMITTED')
+    // Real UNDER_REVIEW muns always carry the logged SUBMITTED -> UNDER_REVIEW
+    // claim, which is what identifies the next row as a Gate 1 decision.
+    const changes = await makeMun(organizer.id, 'SUBMITTED')
+    await transitionMun(changes.id, 'UNDER_REVIEW', admin.id)
+    await reviewMunApplication(approved.id, 'APPROVED', undefined, undefined, __actor)
+    await reviewMunApplication(rejected.id, 'REJECTED', 'fraud', undefined, __actor)
+    await reviewMunApplication(changes.id, 'CHANGES_REQUESTED', 'add venue', undefined, __actor)
+
+    const approvedRows = await feedFor(approved.id, __actor)
+    expect(approvedRows.map((r) => r.action)).toEqual(['APPLICATION_APPROVED'])
+    expect(approvedRows[0]).toMatchObject({ actorId: admin.id, actorName: admin.name, reason: null })
+    expect(approvedRows[0].createdAt).toBeInstanceOf(Date)
+
+    expect((await feedFor(rejected.id, __actor)).map((r) => [r.action, r.reason])).toEqual([
+      ['APPLICATION_REJECTED', 'fraud'],
+    ])
+    expect((await feedFor(changes.id, __actor)).map((r) => [r.action, r.reason])).toEqual([
+      ['APPLICATION_CHANGES_REQUESTED', 'add venue'],
+    ])
+  })
+
+  it('does not pick up a Gate 2 REJECTED transition (it leaves VERIFICATION, not UNDER_REVIEW)', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const admin = await makeUser('ADMIN')
+    const mun = await makeMun(organizer.id, 'VERIFICATION')
+    await transitionMun(mun.id, 'REJECTED', admin.id, 'content is fake')
+
+    expect(await feedFor(mun.id, sess(admin))).toEqual([])
+  })
+
+  it('still lists admin_actions rows, and the total counts both sources', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+    const before = (await listAdminActions({ limit: 1 }, __actor)).total
+
+    const live = await makeMun(organizer.id, 'PUBLISHED')
+    await unpublishMun(live.id, __actor)
+    const applied = await makeMun(organizer.id, 'SUBMITTED')
+    await reviewMunApplication(applied.id, 'REJECTED', 'no', undefined, __actor)
+
+    expect((await feedFor(live.id, __actor)).map((r) => r.action)).toEqual(['MUN_UNPUBLISHED'])
+    const after = await listAdminActions({ limit: 1 }, __actor)
+    expect(after.total).toBeGreaterThanOrEqual(before + 2)
+    expect(after.results).toHaveLength(1)
+  })
+
+  it('rejects a STUDENT session', async () => {
+    await expect(listAdminActions({}, sess(await makeUser('STUDENT')))).rejects.toThrow('Forbidden')
   })
 })
 

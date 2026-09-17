@@ -87,10 +87,6 @@ test.describe('admin registrations', () => {
   })
 
   test('a registration is findable by the delegate\'s email', async ({ page }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: admin registration search (lib/actions/admin-review.ts getRegistrationsQueue) matches delegate name, MUN name or registration ID only — searching a delegate\'s email, the usual support lookup, finds nothing',
-    )
     const { delegate } = await registeredDelegate()
     await searchRegistrations(page, delegate.email)
     await expect(registrationRow(page, delegate)).toHaveCount(1, { timeout: 5_000 })

@@ -72,7 +72,7 @@ export function AdminRegistrationsPage() {
       <Helmet title="Registrations" />
       <AdminPageFrame
         title="Registrations"
-        description="Platform-wide registration search across every conference — by delegate, MUN, or registration ID."
+        description="Platform-wide registration search across every conference — by delegate name or email, MUN, or registration ID."
       >
         <div className="flex flex-wrap items-end justify-between gap-md">
           <div className="flex flex-col gap-xs">
@@ -87,7 +87,7 @@ export function AdminRegistrationsPage() {
               <Input
                 id="admin-registrations-search"
                 type="search"
-                placeholder="Delegate, MUN, or registration ID"
+                placeholder="Delegate name or email, MUN, or registration ID"
                 className="pl-xxl"
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}

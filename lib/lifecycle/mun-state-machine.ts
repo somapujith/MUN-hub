@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, verificationLogs } from '@/lib/db/schema'
 import type { MunStatus } from '@/lib/db/schema-enums'
@@ -194,6 +194,11 @@ async function runTransition(
     action: toStatus,
     notes,
     internalNotes,
+    // The column default (now()) is the *transaction* start time, so several
+    // transitions in one transaction (e.g. reviewMunApplication's
+    // SUBMITTED -> UNDER_REVIEW -> APPROVED -> ONBOARDING) would all share a
+    // timestamp and sort arbitrarily. clock_timestamp() keeps them in order.
+    createdAt: sql`clock_timestamp()`,
   })
 
   return updated

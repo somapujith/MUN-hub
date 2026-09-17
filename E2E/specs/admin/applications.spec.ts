@@ -84,7 +84,8 @@ test.describe('Gate 1 — applications queue', () => {
     await expect(tableRow(page, app.munName)).toHaveCount(0)
 
     const review = await munReview(app.munId)
-    expect(review.status).toBe('APPROVED')
+    // Approval is the Gate 1 exit: APPROVED is recorded, then the MUN moves on to ONBOARDING.
+    expect(review.status).toBe('ONBOARDING')
     const approvedLog = review.verificationLogs.find((log) => log.action === 'APPROVED')
     expect(approvedLog?.notes).toBe('Welcome aboard')
     expect(approvedLog?.internalNotes).toBe('E2E internal approve note')
@@ -93,10 +94,6 @@ test.describe('Gate 1 — applications queue', () => {
   })
 
   test('an approved organizer\'s MUN moves on to ONBOARDING', async ({ page }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: reviewMunApplication stops at APPROVED — nothing performs the APPROVED -> ONBOARDING Gate-1 exit, so the organizer can never submit content (setup page only allows ONBOARDING/ACTION_REQUIRED/READY_FOR_SUBMISSION/CONTENT_SUBMITTED)',
-    )
     const app = await createApplication()
     await decide(page, app, 'Approve')
     await expect(page.getByText('Application approved')).toBeVisible()
@@ -104,10 +101,6 @@ test.describe('Gate 1 — applications queue', () => {
   })
 
   test('approving marks the organizer application record itself as APPROVED', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: organizer_applications.status is never updated by reviewMunApplication (stays SUBMITTED), so the BASIC_INFO validator\'s "organizer approved" check can never pass',
-    )
     const app = await createApplication()
     const api = await adminApi()
     const response = await api.post(`admin/muns/${app.munId}/review-application`, { data: { decision: 'APPROVED' } })
@@ -149,14 +142,25 @@ test.describe('Gate 1 — applications queue', () => {
   })
 
   test('REJECT without a reason is refused', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: a Gate 1 rejection with no reason is accepted (notes optional in server/routes/admin-review.ts and the dialog); Admin PRD §8 says a rejection reason is mandatory',
-    )
     const app = await createApplication()
     const api = await adminApi()
-    const response = await api.post(`admin/muns/${app.munId}/review-application`, { data: { decision: 'REJECTED' } })
-    expect(response.status()).toBe(400)
+    for (const decision of ['REJECTED', 'CHANGES_REQUESTED']) {
+      for (const notes of [undefined, '   ']) {
+        const response = await api.post(`admin/muns/${app.munId}/review-application`, { data: { decision, notes } })
+        expect(response.status(), `${decision} with notes=${JSON.stringify(notes)}`).toBe(400)
+      }
+    }
+    expect((await munReview(app.munId)).status).toBe('SUBMITTED')
+  })
+
+  test('the Review dialog asks for a reason before rejecting', async ({ page }) => {
+    const app = await createApplication()
+    const dialog = await openReviewDialog(page, app)
+    await dialog.getByRole('combobox', { name: 'Decision' }).selectOption({ label: 'Reject' })
+    await dialog.getByRole('button', { name: 'Reject' }).click()
+    await expect(dialog.getByRole('alert')).toHaveText('Give the organizer a reason for the rejection.')
+    await expect(dialog.getByRole('textbox', { name: 'Notes to organizer' })).toBeFocused()
+    await expect(dialog).toBeVisible()
     expect((await munReview(app.munId)).status).toBe('SUBMITTED')
   })
 
@@ -178,7 +182,9 @@ test.describe('Gate 1 — applications queue', () => {
       data: { decision: 'REJECTED', notes: 'second decision' },
     })
     expect(second.ok()).toBe(false)
-    expect((await munReview(app.munId)).status).toBe('APPROVED')
+    const review = await munReview(app.munId)
+    expect(review.status).toBe('ONBOARDING')
+    expect(review.organizerApplication?.status).toBe('APPROVED')
   })
 
   test('a second decision is reported as a conflict, not a server error', async () => {

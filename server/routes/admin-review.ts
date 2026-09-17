@@ -32,6 +32,12 @@ const reviewApplicationBodySchema = z
     internalNotes: z.string().optional(),
   })
   .strict()
+  // Admin PRD §8: a rejection or change request must carry a reason for the
+  // organizer. lib/actions/admin-review.ts enforces the same rule.
+  .refine((body) => body.decision === 'APPROVED' || (body.notes?.trim().length ?? 0) > 0, {
+    message: 'A reason is required to reject or request changes',
+    path: ['notes'],
+  })
 
 const suspendMunBodySchema = z
   .object({

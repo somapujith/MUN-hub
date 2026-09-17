@@ -1,6 +1,6 @@
-import { desc, eq, sql } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { adminActions, users } from '@/lib/db/schema'
+import { users } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { getGoLiveQueue } from '@/lib/lifecycle/go-live'
@@ -86,15 +86,34 @@ export interface AdminAuditListResult {
   total: number
 }
 
+/** Gate 1 decisions as they appear in the platform feed (`APPLICATION_` + the mun status). */
+export const GATE1_AUDIT_ACTIONS = [
+  'APPLICATION_APPROVED',
+  'APPLICATION_REJECTED',
+  'APPLICATION_CHANGES_REQUESTED',
+] as const
+
 /**
- * Cross-target `admin_actions` feed, newest first — distinct from
- * `getAuditHistory` (lib/actions/audit-history.ts), which merges
- * admin_actions + verification_logs for ONE (targetType, targetId) pair.
- * This is the platform-wide list that a reviewer clicks through from to
- * reach that per-target detail view. Paginated for the same reason as
- * getReviewQueue/getModuleReviewQueue/getGoLiveQueue: this table is
- * append-only and grows without bound as the platform runs. Requires
- * OPERATIONS/ADMIN/SUPER_ADMIN, same bar as every other admin-facing read.
+ * Platform-wide audit feed, newest first — distinct from `getAuditHistory`
+ * (lib/actions/audit-history.ts), which merges admin_actions +
+ * verification_logs for ONE (targetType, targetId) pair. This is the list a
+ * reviewer clicks through from to reach that per-target detail view.
+ *
+ * Two sources:
+ * - every `admin_actions` row (suspensions, Gate 2 decisions, publishes, …);
+ * - Gate 1 organizer-application decisions (`reviewMunApplication`), which
+ *   are recorded only as `verification_logs` transitions. A row counts as a
+ *   Gate 1 decision when it is APPROVED/REJECTED/CHANGES_REQUESTED and the
+ *   mun's immediately preceding log row is UNDER_REVIEW — UNDER_REVIEW is a
+ *   Gate 1-only status and the only state those decisions can leave from, so
+ *   a Gate 2 REJECTED/CHANGES_REQUESTED (which leaves from VERIFICATION, and
+ *   already has its own MUN_* admin_actions row) is never picked up twice.
+ *   These are labelled `APPLICATION_<decision>` so they can't be mistaken for
+ *   Gate 2's MUN_APPROVED/MUN_REJECTED/MUN_CHANGES_REQUESTED.
+ *
+ * Paginated for the same reason as getReviewQueue/getModuleReviewQueue/
+ * getGoLiveQueue: both sources are append-only and grow without bound.
+ * Requires OPERATIONS/ADMIN/SUPER_ADMIN, same bar as every other admin read.
  */
 export async function listAdminActions(
   params: AdminAuditListParams = {},
@@ -105,26 +124,54 @@ export async function listAdminActions(
   const limit = params.limit ?? 20
   const offset = params.offset ?? 0
 
-  const results = await db
-    .select({
-      id: adminActions.id,
-      actorId: adminActions.actorId,
-      actorName: users.name,
-      action: adminActions.action,
-      targetType: adminActions.targetType,
-      targetId: adminActions.targetId,
-      reason: adminActions.reason,
-      createdAt: adminActions.createdAt,
-    })
-    .from(adminActions)
-    .innerJoin(users, eq(adminActions.actorId, users.id))
-    .orderBy(desc(adminActions.createdAt))
-    .limit(limit)
-    .offset(offset)
+  const feed = sql`
+    SELECT aa.id, aa.actor_id, aa.action::text AS action, aa.target_type, aa.target_id, aa.reason, aa.created_at
+    FROM admin_actions aa
+    UNION ALL
+    SELECT vl.id, vl.reviewer_id, 'APPLICATION_' || vl.action, 'mun', vl.mun_id, vl.notes, vl.created_at
+    FROM verification_logs vl
+    WHERE vl.action IN ('APPROVED', 'REJECTED', 'CHANGES_REQUESTED')
+      AND (
+        SELECT prev.action
+        FROM verification_logs prev
+        WHERE prev.mun_id = vl.mun_id
+          AND (prev.created_at, prev.id) < (vl.created_at, vl.id)
+        ORDER BY prev.created_at DESC, prev.id DESC
+        LIMIT 1
+      ) = 'UNDER_REVIEW'
+  `
 
-  const [{ count } = { count: 0 }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(adminActions)
+  const rows = await db.execute<{
+    id: string
+    actor_id: string
+    actor_name: string
+    action: string
+    target_type: string
+    target_id: string
+    reason: string | null
+    created_at: string | Date
+  }>(sql`
+    SELECT feed.*, u.name AS actor_name
+    FROM (${feed}) AS feed
+    INNER JOIN ${users} u ON u.id = feed.actor_id
+    ORDER BY feed.created_at DESC, feed.id DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `)
 
-  return { results, total: count }
+  const countRows = await db.execute<{ count: number }>(
+    sql`SELECT count(*)::int AS count FROM (${feed}) AS feed INNER JOIN ${users} u ON u.id = feed.actor_id`,
+  )
+
+  const results: AdminAuditListItem[] = Array.from(rows).map((row) => ({
+    id: row.id,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    action: row.action,
+    targetType: row.target_type,
+    targetId: row.target_id,
+    reason: row.reason,
+    createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
+  }))
+
+  return { results, total: Number(Array.from(countRows)[0]?.count ?? 0) }
 }

@@ -48,6 +48,7 @@ export function AdminReviewPage() {
   const [decision, setDecision] = useState<ReviewDecision>("APPROVED");
   const [notes, setNotes] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
+  const [showReasonError, setShowReasonError] = useState(false);
 
   const params = { limit: PAGE_SIZE, offset: page * PAGE_SIZE };
   const queueQuery = useQuery({
@@ -69,6 +70,7 @@ export function AdminReviewPage() {
     setNotes("");
     setInternalNotes("");
     setDecision("APPROVED");
+    setShowReasonError(false);
   };
 
   const decideMutation = useMutation({
@@ -92,8 +94,17 @@ export function AdminReviewPage() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to record decision"),
   });
 
+  // Admin PRD §8: rejecting or requesting changes must tell the organizer why.
+  const reasonRequired = decision !== "APPROVED";
+  const reasonMissing = reasonRequired && notes.trim().length === 0;
+
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
+    if (reasonMissing) {
+      setShowReasonError(true);
+      document.getElementById("review-notes")?.focus();
+      return;
+    }
     decideMutation.mutate();
   };
 
@@ -194,7 +205,7 @@ export function AdminReviewPage() {
         }}
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-          <form onSubmit={handleSubmit} className="flex flex-col gap-lg">
+          <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-lg">
             <DialogHeader>
               <DialogTitle>Review {reviewTarget?.name}</DialogTitle>
               <DialogDescription>
@@ -254,13 +265,28 @@ export function AdminReviewPage() {
               <Label htmlFor="review-notes">Notes to organizer</Label>
               <textarea
                 id="review-notes"
-                className="min-h-20 rounded-sm border border-input bg-background px-md py-sm text-body-md text-ink outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
+                className="min-h-20 rounded-sm border border-input bg-background px-md py-sm text-body-md text-ink outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 aria-invalid:border-destructive"
                 value={notes}
-                onChange={(event) => setNotes(event.target.value)}
+                onChange={(event) => {
+                  setNotes(event.target.value);
+                  if (event.target.value.trim()) setShowReasonError(false);
+                }}
+                required={reasonRequired}
+                aria-invalid={showReasonError && reasonMissing ? true : undefined}
+                aria-describedby={showReasonError && reasonMissing ? "review-notes-error" : undefined}
                 placeholder={
-                  decision === "APPROVED" ? "Optional — shown to the organizer" : "What needs to change or why this was rejected"
+                  decision === "APPROVED"
+                    ? "Optional — shown to the organizer"
+                    : "Required — what needs to change or why this was rejected"
                 }
               />
+              {showReasonError && reasonMissing && (
+                <p id="review-notes-error" role="alert" className="text-body-md text-destructive">
+                  {decision === "REJECTED"
+                    ? "Give the organizer a reason for the rejection."
+                    : "Tell the organizer what needs to change."}
+                </p>
+              )}
             </div>
 
             <div className="flex flex-col gap-xs">
