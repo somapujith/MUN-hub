@@ -57,3 +57,8 @@ next-env.d.ts
 
 # stray build/scratch dirs
 .dist/
+
+# Playwright E2E (E2E/) — saved sessions contain live session cookies
+/E2E/.auth*/
+/E2E/test-results*/
+/E2E/playwright-report*/
