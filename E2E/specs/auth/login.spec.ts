@@ -226,10 +226,6 @@ test.describe('redirect after sign-in', () => {
   })
 
   test('an unauthenticated admin page bounces to the staff door', async ({ page }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: AdminLayout only uses RequireRole, which renders children when signed out — /admin shows the console shell with "Authentication required." instead of redirecting',
-    )
     await page.goto('/admin')
     await expect(page).toHaveURL(/\/admin\/login\?redirectTo=%2Fadmin$/, { timeout: 5_000 })
   })

@@ -57,10 +57,6 @@ test.describe('signed out', () => {
   test.use({ storageState: { cookies: [], origins: [] } })
 
   test('every admin page sends you to the staff sign-in', async ({ page }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: AdminLayout (web/src/layouts/admin-layout.tsx) is wrapped only in RequireRole, which renders children when there is no session — signed-out visitors get the admin console chrome (Admin nav, page headings, "Authentication required.") instead of a redirect to /admin/login',
-    )
     for (const path of ADMIN_PAGES.concat('/admin/audit/user/some-id')) {
       await page.goto(path)
       await expect(page, path).toHaveURL(/\/admin\/login\?redirectTo=/, { timeout: 5_000 })
@@ -71,13 +67,11 @@ test.describe('signed out', () => {
   })
 
   test('no admin data renders for a signed-out visitor', async ({ page }) => {
-    // Some pages retry the refused request a few times before showing the error.
-    test.setTimeout(120_000)
     for (const path of ADMIN_PAGES) {
       await page.goto(path)
-      await expect(page.getByRole('banner').getByRole('button', { name: /^sign in$/i })).toBeVisible()
-      // Wait for the refused data request to settle before checking what rendered.
-      await expect(main(page).getByText(/^(Authentication required\.|Forbidden)$/), path).toBeVisible()
+      // Signed-out visitors only ever see the staff sign-in form.
+      await expect(page, path).toHaveURL(/\/admin\/login\?redirectTo=/, { timeout: 5_000 })
+      await expect(page.getByRole('heading', { level: 1, name: 'Staff sign in' })).toBeVisible()
       await expect(main(page).getByRole('table'), path).toHaveCount(0)
       await expect(main(page).getByRole('link', { name: /^Pending Applications/ })).toHaveCount(0)
       await expect(main(page).getByRole('button', { name: /^(review|review module|suspend|publish|assign to me)$/i })).toHaveCount(0)
