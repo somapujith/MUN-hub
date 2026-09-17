@@ -14,13 +14,17 @@
 # - style-src needs 'unsafe-inline' for index.html's <style> block, the <style>
 #   next-themes injects for disableTransitionOnChange, and style attributes.
 # - challenges.cloudflare.com is Cloudflare Turnstile.
+# - static.cloudflareinsights.com is Cloudflare's own analytics beacon,
+#   auto-injected into every HTML response on a proxied zone — not something
+#   this app requests. Blocking it doesn't stop the injection, just breaks it
+#   with a console error, so it's allowed rather than fought.
 # - Permissions-Policy allows the camera for this origin only: the organizer
 #   check-in panel scans delegate passes with it. camera=() would make every
 #   getUserMedia call fail with no prompt the user could answer.
 # - A real payment gateway (e.g. Razorpay Checkout) needs its script, frame and
 #   connect origins added here and in vercel.json.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.munhub.in https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.munhub.in https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
