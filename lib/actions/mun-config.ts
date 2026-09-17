@@ -350,6 +350,12 @@ export interface UpdateMunDetailsInput {
   venue?: string | null
   city?: string | null
   country?: string | null
+  addressLine1?: string | null
+  addressState?: string | null
+  postalCode?: string | null
+  mapUrl?: string | null
+  registrationOpensAt?: Date | null
+  registrationDeadline?: Date | null
 }
 
 /**

@@ -55,7 +55,7 @@ const HIGH_IMPACT_FIELDS: Record<MunModule, string[]> = {
   ],
   RULES_DOCUMENTS: ['url'],
   SCHEDULE: ['startsAt', 'endsAt'],
-  ACCOMMODATION: ['price', 'capacity', 'name', 'status'],
+  ACCOMMODATION: ['price', 'capacity', 'name', 'status', 'accommodationProvided'],
   CONTACT: ['officialEmail', 'phone'],
   FINAL_REVIEW: [],
   // Legacy pre-PRD keys (retained, remapped via drizzle/0010) — kept

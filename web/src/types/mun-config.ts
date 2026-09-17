@@ -20,6 +20,13 @@ export interface MunSetupDetails {
   venue: string | null;
   city: string | null;
   country: string | null;
+  addressLine1: string | null;
+  addressState: string | null;
+  postalCode: string | null;
+  mapUrl: string | null;
+  registrationOpensAt: string | null;
+  registrationDeadline: string | null;
+  accommodationProvided: "PROVIDED" | "NOT_PROVIDED" | null;
   status: MunStatus;
   publishedAt: string | null;
   createdAt: string;
@@ -40,4 +47,11 @@ export interface UpdateMunDetailsInput {
   venue?: string | null;
   city?: string | null;
   country?: string | null;
+  addressLine1?: string | null;
+  addressState?: string | null;
+  postalCode?: string | null;
+  mapUrl?: string | null;
+  /** ISO date or datetime; the API coerces it to a timestamp. */
+  registrationOpensAt?: string | null;
+  registrationDeadline?: string | null;
 }

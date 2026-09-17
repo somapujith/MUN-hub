@@ -1,10 +1,11 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { accommodationOptionFields, accommodationOptions } from '@/lib/db/schema'
+import { accommodationOptionFields, accommodationOptions, muns } from '@/lib/db/schema'
 import type { AccommodationFieldType } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 
 // -----------------------------------------------------------------------------
 // accommodation — ACCOMMODATION module (PRD Section 22)
@@ -99,6 +100,44 @@ export async function updateAccommodationOption(
   await onModuleDataChanged(munId, 'ACCOMMODATION', session!.userId)
 
   return updated
+}
+
+export type AccommodationProvided = 'PROVIDED' | 'NOT_PROVIDED'
+
+/**
+ * Records whether the conference offers accommodation at all (PRD §22). With
+ * NOT_PROVIDED the ACCOMMODATION module passes without any options; with
+ * PROVIDED it needs at least one active option. Switching the answer on an
+ * already-verified mun sends ACCOMMODATION back for re-verification, since
+ * delegates may have registered expecting the other answer.
+ */
+export async function setAccommodationProvided(
+  munId: string,
+  provided: AccommodationProvided,
+  session: Session | null,
+): Promise<{ accommodationProvided: AccommodationProvided }> {
+  await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'ACCOMMODATION', session)
+
+  const [existing] = await db
+    .select({ accommodationProvided: muns.accommodationProvided })
+    .from(muns)
+    .where(eq(muns.id, munId))
+    .limit(1)
+  if (!existing) throw new Error('Mun not found')
+
+  await db.update(muns).set({ accommodationProvided: provided, updatedAt: new Date() }).where(eq(muns.id, munId))
+
+  await triggerReverificationIfNeeded(
+    'ACCOMMODATION',
+    { accommodationProvided: existing.accommodationProvided },
+    { accommodationProvided: provided },
+    munId,
+    session!.userId,
+  )
+  await onModuleDataChanged(munId, 'ACCOMMODATION', session!.userId)
+
+  return { accommodationProvided: provided }
 }
 
 /**

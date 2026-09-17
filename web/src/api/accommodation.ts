@@ -25,6 +25,18 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/**
+ * PUT /muns/:munId/accommodation/provided — whether the conference offers
+ * accommodation at all. NOT_PROVIDED completes the Accommodation module
+ * without any options.
+ */
+export function setAccommodationProvided(munId: string, provided: "PROVIDED" | "NOT_PROVIDED") {
+  return request<{ accommodationProvided: "PROVIDED" | "NOT_PROVIDED" }>(`/muns/${munId}/accommodation/provided`, {
+    method: "PUT",
+    body: JSON.stringify({ provided }),
+  });
+}
+
 export function listAccommodationOptions(munId: string) {
   return request<AccommodationOption[]>(`/muns/${munId}/accommodation?includeInactive=true`);
 }

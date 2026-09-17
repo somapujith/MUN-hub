@@ -7,6 +7,7 @@ import {
   deleteAccommodationOptionField,
   listAccommodationOptionFields,
   listAccommodationOptions,
+  setAccommodationProvided,
   updateAccommodationOption,
   updateAccommodationOptionField,
 } from '@/lib/actions/accommodation'
@@ -69,7 +70,24 @@ const updateFieldBodySchema = z
   })
   .strict()
 
+const setProvidedBodySchema = z.object({ provided: z.enum(['PROVIDED', 'NOT_PROVIDED']) }).strict()
+
 export const accommodationRoutes = new Hono<{ Variables: AppVariables }>()
+
+// "Do you offer accommodation?" — NOT_PROVIDED lets the module pass with no options.
+accommodationRoutes.put(
+  '/muns/:munId/accommodation/provided',
+  requireAuth,
+  zValidator('json', setProvidedBodySchema),
+  async (c) => {
+    const result = await setAccommodationProvided(
+      c.req.param('munId'),
+      c.req.valid('json').provided,
+      c.get('session'),
+    )
+    return c.json(result)
+  },
+)
 
 accommodationRoutes.get('/muns/:munId/accommodation', async (c) => {
   const munId = c.req.param('munId')

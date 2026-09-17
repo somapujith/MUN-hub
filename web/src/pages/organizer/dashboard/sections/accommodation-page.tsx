@@ -11,9 +11,11 @@ import {
   deleteAccommodationOptionField,
   listAccommodationOptionFields,
   listAccommodationOptions,
+  setAccommodationProvided,
   updateAccommodationOption,
   updateAccommodationOptionField,
 } from "@/api/accommodation";
+import { getMunDetails } from "@/api/mun-config";
 import { queryKeys } from "@/api/query-keys";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -277,8 +279,30 @@ export function OrganizerAccommodationPage() {
     queryFn: () => listAccommodationOptions(munId),
     enabled: Boolean(munId),
   });
+  const detailsQuery = useQuery({
+    queryKey: queryKeys.munSetupDetails(munId),
+    queryFn: () => getMunDetails(munId),
+    enabled: Boolean(munId),
+  });
+  const provided = detailsQuery.data?.accommodationProvided ?? null;
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.accommodationOptions(munId) });
+
+  const providedMutation = useMutation({
+    mutationFn: (value: "PROVIDED" | "NOT_PROVIDED") => setAccommodationProvided(munId, value),
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.munSetupDetails(munId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.munProgress(munId) }),
+      ]);
+      toast.success(
+        result.accommodationProvided === "PROVIDED"
+          ? "Accommodation is on — add at least one option"
+          : "Saved — this conference doesn't offer accommodation",
+      );
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to save"),
+  });
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -326,12 +350,61 @@ export function OrganizerAccommodationPage() {
         title="Accommodation"
         description="Paid add-ons and lodging options sold alongside registration."
         actions={
-          <Button size="sm" onClick={openCreate}>
-            <Plus aria-hidden /> Add option
-          </Button>
+          provided === "PROVIDED" ? (
+            <Button size="sm" onClick={openCreate}>
+              <Plus aria-hidden /> Add option
+            </Button>
+          ) : undefined
         }
       >
-        <div className="grid gap-lg xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <Card size="sm" className="mb-lg">
+          <CardHeader>
+            <CardTitle>Does your conference offer accommodation?</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-sm">
+            <fieldset className="flex flex-wrap gap-sm" disabled={providedMutation.isPending || detailsQuery.isLoading}>
+              <legend className="sr-only">Accommodation offered</legend>
+              {(
+                [
+                  { value: "PROVIDED", label: "Yes, delegates can book accommodation" },
+                  { value: "NOT_PROVIDED", label: "No, accommodation isn't provided" },
+                ] as const
+              ).map((option) => (
+                <label
+                  key={option.value}
+                  className={
+                    "flex cursor-pointer items-center gap-xs rounded-sm border px-md py-sm text-body-md text-ink transition-colors " +
+                    (provided === option.value ? "border-primary bg-primary/5" : "border-border hover:border-border-strong")
+                  }
+                >
+                  <input
+                    type="radio"
+                    name="accommodation-provided"
+                    checked={provided === option.value}
+                    onChange={() => providedMutation.mutate(option.value)}
+                    className="size-4 accent-[var(--primary)]"
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </fieldset>
+            {provided === null && !detailsQuery.isLoading && (
+              <p className="text-caption text-muted-foreground">
+                Answer this to complete the Accommodation step of your go-live checklist.
+              </p>
+            )}
+            {provided === "NOT_PROVIDED" && (
+              <p className="text-caption text-muted-foreground">
+                Delegates won&apos;t be offered accommodation. Any options below stay saved but aren&apos;t shown.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        <div
+          className={
+            "grid gap-lg xl:grid-cols-[minmax(0,1fr)_22rem]" + (provided === "PROVIDED" ? "" : " hidden")
+          }
+        >
           <section aria-label="Accommodation options" className="flex flex-col gap-md">
             {optionsQuery.isLoading && (
               <p className="text-body-md text-muted-foreground">Loading accommodation options...</p>

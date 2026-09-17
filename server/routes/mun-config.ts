@@ -127,6 +127,12 @@ const updateMunDetailsBodySchema = z
     venue: z.string().nullable().optional(),
     city: z.string().nullable().optional(),
     country: z.string().nullable().optional(),
+    addressLine1: z.string().nullable().optional(),
+    addressState: z.string().nullable().optional(),
+    postalCode: z.string().nullable().optional(),
+    mapUrl: z.string().url().nullable().optional(),
+    registrationOpensAt: nullableDate,
+    registrationDeadline: nullableDate,
   })
   .strict()
 

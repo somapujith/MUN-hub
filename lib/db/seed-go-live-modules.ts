@@ -344,7 +344,8 @@ export async function seedFullGoLiveModules({
       status: 'APPROVED',
       reviewNotes: 'Seeded as pre-approved demo data.',
     })
-    .onConflictDoNothing({ target: organizerApplications.organizerId })
+    // mun_id is the unique key (an organizer can have several applications, migration 0030).
+    .onConflictDoNothing({ target: organizerApplications.munId })
     .returning({ id: organizerApplications.id })
   if (insertedApplication.length > 0) {
     console.log('    - Seeded organizer application (APPROVED)')

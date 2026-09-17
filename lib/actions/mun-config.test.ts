@@ -336,6 +336,39 @@ describe('mun-config actions', () => {
       expect(cleared.venue).toBeNull()
     })
 
+    it('saves the address and registration window, which completes the Dates & Venue module', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id, { status: 'ONBOARDING' })
+      const session = sessionFor(organizer)
+
+      const updated = await updateMunDetails(
+        mun.id,
+        {
+          startDate: new Date('2027-03-10'),
+          endDate: new Date('2027-03-12'),
+          venue: 'Convention Centre',
+          addressLine1: '12 Lake Road',
+          addressState: 'Telangana',
+          postalCode: '500001',
+          city: 'Hyderabad',
+          country: 'India',
+          mapUrl: 'https://maps.example/venue',
+          registrationOpensAt: new Date('2027-01-01'),
+          registrationDeadline: new Date('2027-03-01'),
+        },
+        session,
+      )
+      expect(updated).toMatchObject({ addressLine1: '12 Lake Road', addressState: 'Telangana', postalCode: '500001' })
+      expect(updated.registrationOpensAt?.toISOString().slice(0, 10)).toBe('2027-01-01')
+      expect(updated.registrationDeadline?.toISOString().slice(0, 10)).toBe('2027-03-01')
+
+      const [datesVenue] = await db
+        .select()
+        .from(munModuleVerifications)
+        .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'DATES_VENUE')))
+      expect(datesVenue.completionStatus).toBe('COMPLETE')
+    })
+
     it('rejects a non-owning organizer', async () => {
       const owner = await makeUser('ORGANIZER')
       const stranger = await makeUser('ORGANIZER')

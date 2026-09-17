@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest'
+import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, users } from '@/lib/db/schema'
+import { munModuleVerifications, muns, users } from '@/lib/db/schema'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import {
@@ -10,6 +11,7 @@ import {
   deleteAccommodationOptionField,
   listAccommodationOptionFields,
   listAccommodationOptions,
+  setAccommodationProvided,
   updateAccommodationOption,
   updateAccommodationOptionField,
 } from './accommodation'
@@ -27,6 +29,49 @@ async function makeMun(organizerId: string) {
 function sessionFor(user: { id: string; role: Role }): Session {
   return { userId: user.id, role: user.role }
 }
+
+describe('setAccommodationProvided', () => {
+  it('records "not provided", which completes the module without any options', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id)
+    const session = sessionFor(organizer)
+
+    await expect(setAccommodationProvided(mun.id, 'NOT_PROVIDED', session)).resolves.toEqual({
+      accommodationProvided: 'NOT_PROVIDED',
+    })
+    const [row] = await db.select().from(muns).where(eq(muns.id, mun.id))
+    expect(row.accommodationProvided).toBe('NOT_PROVIDED')
+    const [module] = await db
+      .select()
+      .from(munModuleVerifications)
+      .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'ACCOMMODATION')))
+    expect(module.completionStatus).toBe('COMPLETE')
+
+    await setAccommodationProvided(mun.id, 'PROVIDED', session)
+    const [provided] = await db
+      .select()
+      .from(munModuleVerifications)
+      .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'ACCOMMODATION')))
+    expect(provided.completionStatus).not.toBe('COMPLETE')
+  })
+
+  it('sends a verified mun back for re-verification when the answer changes', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id)
+    await db.update(muns).set({ status: 'VERIFIED', accommodationProvided: 'PROVIDED' }).where(eq(muns.id, mun.id))
+
+    await setAccommodationProvided(mun.id, 'NOT_PROVIDED', sessionFor(organizer))
+    const [row] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(row.status).toBe('VERIFICATION')
+  })
+
+  it("rejects an organizer who doesn't own the mun", async () => {
+    const owner = await makeUser('ORGANIZER')
+    const stranger = await makeUser('ORGANIZER')
+    const mun = await makeMun(owner.id)
+    await expect(setAccommodationProvided(mun.id, 'NOT_PROVIDED', sessionFor(stranger))).rejects.toThrow('Forbidden')
+  })
+})
 
 describe('accommodation options CRUD', () => {
   it('lets the owning organizer create, update, and soft-delete an option', async () => {
