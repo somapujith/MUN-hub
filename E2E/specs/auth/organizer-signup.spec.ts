@@ -78,11 +78,13 @@ test.describe('organizer signup (UI)', () => {
     await expect(page).toHaveURL(NEW_ORGANIZER_LANDING)
     expect((await sessionOf(page))?.role).toBe('ORGANIZER')
 
-    // The welcome page walks them into the host application.
+    // The welcome page walks them into the onboarding wizard, which the apply page also redirects to.
     await expect(pageHeading(page)).toHaveText('Reach the right delegates, grow as you host')
     await page.getByRole('link', { name: 'Start your journey' }).click()
-    await expect(page).toHaveURL(/\/organizer\/apply$/)
-    await expect(pageHeading(page)).toHaveText('Host your MUN on MUN Hub')
+    await expect(page).toHaveURL(/\/organizer\/onboarding$/)
+    await expect(pageHeading(page)).toHaveText('Create your organizer profile')
+    await page.goto('/organizer/apply')
+    await expect(page).toHaveURL(/\/organizer\/onboarding$/)
 
     await page.goto('/organizer/dashboard')
     await expect(pageHeading(page)).toHaveText('Overview')
@@ -124,11 +126,11 @@ test.describe('organizer signup (UI)', () => {
 
   test('?redirectTo= wins over the welcome page', async ({ page }) => {
     const email = uniqueEmail('org-redirect')
-    await page.goto('/organizer/signup?redirectTo=%2Forganizer%2Fapply')
+    await page.goto('/organizer/signup?redirectTo=%2Forganizer%2Fsupport')
     await fillDetails(page, { email })
     await sendCode(page)
     await enterPlantedCode(page, email)
-    await expect(page).toHaveURL(/\/organizer\/apply$/)
+    await expect(page).toHaveURL(/\/organizer\/support$/)
   })
 
   test('"Change" on the code step returns to the filled-in details', async ({ page }) => {
@@ -203,8 +205,8 @@ test.describe('organizer signup (UI)', () => {
       await page.goto(door)
       await expect(page).toHaveURL(/\/organizer\/dashboard$/)
     }
-    await page.goto('/organizer/login?redirectTo=%2Forganizer%2Fapply')
-    await expect(page).toHaveURL(/\/organizer\/apply$/)
+    await page.goto('/organizer/login?redirectTo=%2Forganizer%2Fsupport')
+    await expect(page).toHaveURL(/\/organizer\/support$/)
     await context.close()
   })
 
@@ -402,10 +404,12 @@ test.describe('a signed-in delegate has no path to organizer registration', () =
     await expect(page.getByRole('menu')).not.toContainText(/organizer|host|list your mun/i)
     await page.keyboard.press('Escape')
 
-    await page.goto('/organizer/apply')
-    await expect(pageHeading(page)).toHaveText('Access denied')
-    await expect(main(page)).toContainText("isn't an organizer account")
-    await expect(main(page).getByRole('textbox', { name: 'Conference name' })).toHaveCount(0)
+    for (const path of ['/organizer/apply', '/organizer/onboarding']) {
+      await page.goto(path)
+      await expect(pageHeading(page)).toHaveText('Access denied')
+      await expect(main(page)).toContainText("isn't an organizer account")
+      await expect(main(page).getByRole('textbox', { name: 'Title of your MUN' })).toHaveCount(0)
+    }
     await context.close()
   })
 
