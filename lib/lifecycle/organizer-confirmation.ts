@@ -20,6 +20,7 @@ import {
 } from '@/lib/db/schema'
 import type { Mun } from '@/lib/types'
 import type { Session } from '@/lib/auth/adapter'
+import { runInBackground } from '@/lib/background-tasks'
 import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
 import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import { transitionMun } from './mun-state-machine'
@@ -31,11 +32,10 @@ import { validateMunForSubmission } from './validation'
  * failure of the state change that triggered it), duplicated locally rather
  * than imported since this file has no transaction boundary to wait on (see
  * below) and the two call sites otherwise have nothing else in common.
+ * `runInBackground` keeps it alive past the response on Workers.
  */
 function notifyFireAndForget(work: () => Promise<void>): void {
-  work().catch((error) => {
-    console.error('[organizer-confirmation] pipeline notification failed', error)
-  })
+  runInBackground('organizer-confirmation pipeline notification', work)
 }
 
 /**

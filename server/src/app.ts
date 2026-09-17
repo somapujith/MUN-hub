@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import { requestId } from 'hono/request-id'
+import { backgroundTasksMiddleware } from '../middleware/background-tasks'
 import { bodyLimitMiddleware } from '../middleware/body-limit'
 import { corsMiddleware } from '../middleware/cors'
 import { csrfMiddleware } from '../middleware/csrf'
@@ -21,7 +22,7 @@ import type { AppVariables } from './types'
 /**
  * Base Hono app with the full middleware stack (spec Section 8.2):
  * runtime-env bridge → hyperdrive-bridge (both Workers-only, see below) →
- * storage bindings → request-id → security headers → logger → CORS →
+ * background-task keep-alive → storage bindings → request-id → security headers → logger → CORS →
  * body limit → session → [webhooks outside CSRF] → CSRF → rate-limit →
  * /api/v1/files + /api/v1 routes → JSON 404 / error handler
  */
@@ -33,6 +34,9 @@ export function createApp() {
   // or touch `db` — see lib/runtime-env.ts / lib/db/hyperdrive-bridge.ts.
   app.use('*', runtimeEnvMiddleware)
   app.use('*', hyperdriveMiddleware)
+  // Keeps post-commit notifications that lib/ starts without awaiting alive
+  // past the response on Workers — see lib/background-tasks.ts.
+  app.use('*', backgroundTasksMiddleware)
   // Upload storage bindings + request origin for lib/storage, scoped to the
   // request — see lib/storage/bindings.ts.
   app.use('*', storageMiddleware)

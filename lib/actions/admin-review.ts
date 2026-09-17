@@ -13,6 +13,7 @@ import {
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
+import { runInBackground } from '@/lib/background-tasks'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { publishFromQueue, type PublishFromQueueResult } from '@/lib/lifecycle/go-live'
 import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
@@ -202,7 +203,8 @@ function notifyReviewDecisionAfterCommit(
   decision: 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED',
   reason: string | undefined,
 ): void {
-  ;(async () => {
+  // `runInBackground` keeps this alive past the response on Workers.
+  runInBackground('admin-review pipeline notification', async () => {
     const context = await resolveMunNotificationContext(munId)
 
     if (decision === 'APPROVED') {
@@ -225,8 +227,6 @@ function notifyReviewDecisionAfterCommit(
       // function, so `reason` is guaranteed defined on this branch.
       reason: reason ?? 'See review notes.',
     })
-  })().catch((error) => {
-    console.error('[admin-review] pipeline notification failed', error)
   })
 }
 

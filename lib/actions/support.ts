@@ -5,6 +5,7 @@ import { muns, registrations, supportMessages, supportTickets, users } from '@/l
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
+import { runInBackground } from '@/lib/background-tasks'
 import { notifySupportReply } from '@/lib/notifications/support-reply-email'
 import {
   supportCategoryEnum,
@@ -780,9 +781,8 @@ export async function sendMessage(
   // After commit, never inside the transaction. Only the requester is
   // emailed; staff see requester messages in the queue.
   if (isStaffReply) {
-    notifySupportReply(ticketId).catch((error) => {
-      console.error('[support] reply notification failed', error)
-    })
+    // `runInBackground` keeps the email alive past the response on Workers.
+    runInBackground('support reply notification', () => notifySupportReply(ticketId))
   }
 
   return result

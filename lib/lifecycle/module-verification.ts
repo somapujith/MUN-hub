@@ -5,6 +5,7 @@ import type { MunModule, ModuleVerificationState, VerificationSeverity } from '@
 import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
+import { runInBackground } from '@/lib/background-tasks'
 import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
 import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import { getModuleDefinition, TRACKED_MODULES } from './module-registry'
@@ -257,22 +258,20 @@ export async function reviewModule(
   // notifyPipelineEvent itself never throws on delivery failure, but
   // resolveMunNotificationContext hits the DB and could theoretically fail —
   // caught and logged here so it can never surface as an error on an
-  // already-successful review decision.
+  // already-successful review decision. `runInBackground` keeps it alive past
+  // the response on Workers.
   if (decision === 'CHANGES_REQUESTED') {
-    resolveMunNotificationContext(munId)
-      .then((context) =>
-        notifyPipelineEvent({
-          type: 'MODULE_ACTION_REQUIRED',
-          munId,
-          organizerEmail: context.organizerEmail,
-          munName: context.munName,
-          moduleName,
-          issues: issues.map((issue) => issue.reason),
-        }),
-      )
-      .catch((error) => {
-        console.error('[module-verification] pipeline notification failed', error)
+    runInBackground('module-verification pipeline notification', async () => {
+      const context = await resolveMunNotificationContext(munId)
+      await notifyPipelineEvent({
+        type: 'MODULE_ACTION_REQUIRED',
+        munId,
+        organizerEmail: context.organizerEmail,
+        munName: context.munName,
+        moduleName,
+        issues: issues.map((issue) => issue.reason),
       })
+    })
   }
 
   return updated

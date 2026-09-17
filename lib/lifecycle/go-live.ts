@@ -10,6 +10,7 @@ import {
 } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
+import { runInBackground } from '@/lib/background-tasks'
 import { recordAdminAction } from '@/lib/audit/log'
 import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
 import { buildPublicMunUrl, resolveAdminEmails, resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
@@ -82,12 +83,11 @@ export interface SubmitMunForReviewResult {
  * Fire-and-forget notification helper shared by every call site in this
  * file. Wraps the recipient-resolution + `notifyPipelineEvent` call in its
  * own try/catch and logs (never throws) — see the file header comment for
- * why. Never awaited by the caller in a way that blocks its return value.
+ * why. Never awaited by the caller in a way that blocks its return value;
+ * `runInBackground` keeps it alive past the response on Workers.
  */
 function notifyAfterCommit(work: () => Promise<void>): void {
-  work().catch((error) => {
-    console.error('[go-live] pipeline notification failed', error)
-  })
+  runInBackground('go-live pipeline notification', work)
 }
 
 /**
