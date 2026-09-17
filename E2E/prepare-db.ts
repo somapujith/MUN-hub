@@ -166,6 +166,24 @@ async function wipeRegistrations(tx: Tx, munId: string): Promise<number> {
 
 async function main(): Promise<void> {
   const ownerId = await organizerId()
+  // The fixture owner predates the organizer onboarding wizard; mark it done.
+  await db
+    .insert(schema.organizerProfiles)
+    .values({
+      userId: ownerId,
+      firstName: 'E2E',
+      lastName: 'Owner',
+      contactPhone: '9876543210',
+      panName: 'E2E Owner',
+      panLast4: '234F',
+      panCiphertext: 'e2e-not-real-ciphertext',
+      hasGstin: false,
+      upiId: 'e2e-owner@ybl',
+      upiPhone: '9876543210',
+      agreementVersion: 'e2e',
+      completedAt: new Date(),
+    })
+    .onConflictDoNothing()
 
   await db.transaction(async (tx) => {
     const openId = await upsertMun(tx, ownerId, FIXTURE_MUNS.open, 'REGISTRATION_OPEN')

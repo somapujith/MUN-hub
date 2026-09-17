@@ -84,8 +84,36 @@ export async function seedOrganizerLoginCode(email: string, code = TEST_LOGIN_CO
   }
 }
 
-/** Creates a brand-new ORGANIZER through the real passwordless signup endpoint. */
-export async function signUpOrganizerViaApi(name = 'E2E Organizer', email = uniqueEmail('organizer')): Promise<ApiSession> {
+/**
+ * Marks an organizer's onboarding wizard (lib/actions/organizer-onboarding.ts)
+ * as finished, the way server/integration/helpers.ts does. Organizers can't
+ * apply to host until this is done. Safe to call twice.
+ */
+export async function completeOrganizerOnboarding(userId: string): Promise<void> {
+  assertLocalDatabase()
+  const sql = postgres(DATABASE_URL, { max: 1, prepare: false, onnotice: () => {} })
+  try {
+    await sql`
+      insert into organizer_profiles (user_id, first_name, last_name, contact_phone, pan_name, pan_last4,
+        pan_ciphertext, has_gstin, upi_id, upi_phone, agreement_version, completed_at)
+      values (${userId}, 'E2E', 'Organizer', '9876543210', 'E2E Organizer', '234F',
+        'e2e-not-real-ciphertext', false, 'e2e@ybl', '9876543210', 'e2e', now())
+      on conflict (user_id) do nothing`
+  } finally {
+    await sql.end()
+  }
+}
+
+/**
+ * Creates a brand-new ORGANIZER through the real passwordless signup endpoint.
+ * By default its onboarding is marked complete so it can apply to host; pass
+ * `{ onboarded: false }` for tests that walk the onboarding wizard themselves.
+ */
+export async function signUpOrganizerViaApi(
+  name = 'E2E Organizer',
+  email = uniqueEmail('organizer'),
+  { onboarded = true }: { onboarded?: boolean } = {},
+): Promise<ApiSession> {
   await seedOrganizerLoginCode(email)
   const api = await newApiContext()
   const response = await api.post('auth/organizers/session', {
@@ -99,6 +127,7 @@ export async function signUpOrganizerViaApi(name = 'E2E Organizer', email = uniq
     throw new Error(`signUpOrganizerViaApi failed: ${response.status()} ${await response.text()}`)
   }
   const body = (await response.json()) as { userId: string; role: string }
+  if (onboarded) await completeOrganizerOnboarding(body.userId)
   return { api, userId: body.userId, role: body.role, email, password: '' }
 }
 
