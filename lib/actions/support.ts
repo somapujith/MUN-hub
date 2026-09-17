@@ -1,37 +1,377 @@
-import { and, asc, desc, eq, gt, isNull, ne, or } from 'drizzle-orm'
+import { and, desc, eq, gt, ilike, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { db } from '@/lib/db/client'
-import { supportMessages, supportTickets, users } from '@/lib/db/schema'
+import { muns, registrations, supportMessages, supportTickets, users } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
 import { notifySupportReply } from '@/lib/notifications/support-reply-email'
-import type { Role, SupportCategory, SupportPriority, SupportStatus } from '@/lib/db/schema-enums'
+import {
+  supportCategoryEnum,
+  type Role,
+  type SupportCategory,
+  type SupportPriority,
+  type SupportStatus,
+} from '@/lib/db/schema-enums'
 
-const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
+// ---------------------------------------------------------------------------
+// Support desk — one conversation model.
+//
+// A ticket (support_tickets) has a subject, category, priority, status and a
+// message thread (support_messages). Every entry point — the floating chat
+// widget, the /support/new form, the organizer inbox — creates the ticket AND
+// its opening message, so the requester and staff always read the same
+// thread. `description` keeps the opening text on the ticket row for the
+// queue preview and for legacy rows filed before the form wrote a message.
+//
+// Identity is always the caller's `session`; a requester only ever reaches
+// their own tickets, staff (OPERATIONS/ADMIN/SUPER_ADMIN) reach all of them.
+// There are no internal staff notes yet (the schema has no visibility flag on
+// support_messages), so every message is visible to the requester.
+// ---------------------------------------------------------------------------
 
-function isAdminRole(role: Session['role']): boolean {
-  return (ADMIN_ROLES as readonly string[]).includes(role)
+export const STAFF_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const satisfies readonly Role[]
+
+export function isSupportStaff(role: Role): boolean {
+  return (STAFF_ROLES as readonly Role[]).includes(role)
 }
 
+/** Input bounds, shared with server/routes/support.ts's request schemas. */
+export const SUPPORT_LIMITS = {
+  subject: 150,
+  body: 5000,
+  resolutionNotes: 2000,
+  search: 100,
+  pageSizeDefault: 25,
+  pageSizeMax: 100,
+  /** A thread longer than this is abuse, not support — only the latest messages are returned. */
+  threadMax: 1000,
+} as const
+
+/** Statuses that still need staff attention. */
+export const OPEN_TICKET_STATUSES = ['NEW', 'ASSIGNED', 'IN_PROGRESS', 'WAITING'] as const satisfies readonly SupportStatus[]
+
 /**
- * Allowed forward transitions for a support ticket. Lighter-weight than
- * `lib/lifecycle/mun-state-machine.ts`'s `ALLOWED_TRANSITIONS` (no money or
- * public visibility riding on a ticket's status), so this stays an inline
- * constant in this module rather than its own file. CLOSED and RESOLVED (except
- * RESOLVED -> CLOSED) are terminal — in particular a CLOSED ticket can never
- * move back to NEW, and RESOLVED -> RESOLVED is not reachable (so
- * TICKET_RESOLVED can only ever be logged once per ticket).
+ * Categories a requester can file under. REFUND stays in the database enum for
+ * rows filed before this product dropped refunds, but it is never offered or
+ * accepted for a new ticket.
  */
-const ALLOWED_TICKET_TRANSITIONS: Record<SupportStatus, SupportStatus[]> = {
+export const REQUESTER_CATEGORIES = supportCategoryEnum.enumValues.filter(
+  (category): category is Exclude<SupportCategory, 'REFUND'> => category !== 'REFUND',
+)
+
+export type RequesterCategory = (typeof REQUESTER_CATEGORIES)[number]
+
+const CONVERSATION_CLOSED = 'This conversation is closed.'
+
+// ---------------------------------------------------------------------------
+// Ticket state machine
+// ---------------------------------------------------------------------------
+
+/**
+ * Legal status changes. NEW -> ASSIGNED happens only through assignment
+ * (`assignTicket`, or a staff member's first reply). RESOLVED -> IN_PROGRESS
+ * is the reopen path, taken when the requester replies to a resolved ticket
+ * or staff reopen it. CLOSED is terminal: a closed conversation takes no more
+ * messages, and the requester starts a new one instead.
+ */
+export const ALLOWED_TICKET_TRANSITIONS: Record<SupportStatus, readonly SupportStatus[]> = {
   NEW: ['ASSIGNED'],
   ASSIGNED: ['IN_PROGRESS', 'WAITING'],
   IN_PROGRESS: ['WAITING', 'RESOLVED'],
   WAITING: ['IN_PROGRESS', 'RESOLVED'],
-  RESOLVED: ['CLOSED'],
+  RESOLVED: ['IN_PROGRESS', 'CLOSED'],
   CLOSED: [],
 }
 
+export function canTransitionTicket(from: SupportStatus, to: SupportStatus): boolean {
+  return ALLOWED_TICKET_TRANSITIONS[from].includes(to)
+}
+
+/** What a staff reply leaves the ticket as: waiting on the requester by default, or still in progress. */
+export type StaffReplyStatus = 'WAITING' | 'IN_PROGRESS'
+
+/**
+ * Status after a staff reply. A NEW ticket is assigned to the replier on the
+ * way (NEW -> ASSIGNED -> next). A RESOLVED ticket stays resolved — a
+ * follow-up note from staff doesn't reopen it.
+ */
+export function statusAfterStaffReply(current: SupportStatus, next: StaffReplyStatus = 'WAITING'): SupportStatus {
+  switch (current) {
+    case 'CLOSED':
+      throw new Error(CONVERSATION_CLOSED)
+    case 'RESOLVED':
+      return 'RESOLVED'
+    default:
+      return next
+  }
+}
+
+/**
+ * Status after the requester replies: the ball is back with staff, so a
+ * ticket waiting on the requester — or already resolved — goes (back) to IN_PROGRESS.
+ */
+export function statusAfterRequesterReply(current: SupportStatus): SupportStatus {
+  switch (current) {
+    case 'CLOSED':
+      throw new Error(CONVERSATION_CLOSED)
+    case 'WAITING':
+    case 'RESOLVED':
+      return 'IN_PROGRESS'
+    default:
+      return current
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Views
+// ---------------------------------------------------------------------------
+
 export type SupportTicketRow = typeof supportTickets.$inferSelect
+export type SupportMessageRow = typeof supportMessages.$inferSelect
+
+/** What the requester sees of their own ticket — no staff ids or staff read state. */
+export interface SupportTicketView {
+  id: string
+  createdBy: string
+  category: SupportCategory
+  priority: SupportPriority
+  status: SupportStatus
+  subject: string
+  description: string
+  relatedMunId: string | null
+  relatedRegistrationId: string | null
+  resolutionNotes: string | null
+  lastMessageAt: Date | null
+  /** `lastMessageAt`, or `createdAt` for a ticket with no messages. Lists sort on this. */
+  lastActivityAt: Date
+  /** True when the latest message came from the support team. */
+  lastMessageFromStaff: boolean
+  /** Has a message the viewer hasn't seen yet. */
+  unread: boolean
+  createdAt: Date
+  updatedAt: Date
+}
+
+/** What staff see: the requester view plus who filed it, who owns it, and the related MUN. */
+export interface StaffTicketView extends SupportTicketView {
+  assignedTo: string | null
+  assigneeName: string | null
+  requesterName: string
+  requesterEmail: string
+  requesterRole: Role
+  relatedMunName: string | null
+  requesterReadAt: Date | null
+  adminReadAt: Date | null
+}
+
+export interface SupportMessageView {
+  id: string
+  ticketId: string
+  author: 'REQUESTER' | 'STAFF'
+  /** Null for a staff message shown to the requester — staff reply as "the support team". */
+  senderId: string | null
+  /** The sender's name, for staff viewers only. */
+  senderName: string | null
+  senderRole: Role
+  body: string
+  createdAt: Date
+}
+
+export type ConversationView =
+  | { viewer: 'REQUESTER'; ticket: SupportTicketView; messages: SupportMessageView[] }
+  | { viewer: 'STAFF'; ticket: StaffTicketView; messages: SupportMessageView[] }
+
+export interface Page<T> {
+  results: T[]
+  total: number
+}
+
+function lastMessageFromStaff(ticket: SupportTicketRow): boolean {
+  return ticket.lastMessageSenderId !== null && ticket.lastMessageSenderId !== ticket.createdBy
+}
+
+function isAfter(at: Date | null, readAt: Date | null): boolean {
+  if (!at) return false
+  return readAt === null || at.getTime() > readAt.getTime()
+}
+
+function toRequesterView(ticket: SupportTicketRow): SupportTicketView {
+  return {
+    id: ticket.id,
+    createdBy: ticket.createdBy,
+    category: ticket.category,
+    priority: ticket.priority,
+    status: ticket.status,
+    subject: ticket.subject,
+    description: ticket.description,
+    relatedMunId: ticket.relatedMunId,
+    relatedRegistrationId: ticket.relatedRegistrationId,
+    resolutionNotes: ticket.resolutionNotes,
+    lastMessageAt: ticket.lastMessageAt,
+    lastActivityAt: ticket.lastMessageAt ?? ticket.createdAt,
+    lastMessageFromStaff: lastMessageFromStaff(ticket),
+    unread: lastMessageFromStaff(ticket) && isAfter(ticket.lastMessageAt, ticket.requesterReadAt),
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+  }
+}
+
+interface StaffTicketJoin {
+  ticket: SupportTicketRow
+  requesterName: string
+  requesterEmail: string
+  requesterRole: Role
+  assigneeName: string | null
+  relatedMunName: string | null
+}
+
+function toStaffView(row: StaffTicketJoin): StaffTicketView {
+  const { ticket } = row
+  const fromRequester = ticket.lastMessageSenderId !== null && ticket.lastMessageSenderId === ticket.createdBy
+  return {
+    ...toRequesterView(ticket),
+    unread: ticket.status !== 'CLOSED' && fromRequester && isAfter(ticket.lastMessageAt, ticket.adminReadAt),
+    assignedTo: ticket.assignedTo,
+    assigneeName: row.assigneeName,
+    requesterName: row.requesterName,
+    requesterEmail: row.requesterEmail,
+    requesterRole: row.requesterRole,
+    relatedMunName: row.relatedMunName,
+    requesterReadAt: ticket.requesterReadAt,
+    adminReadAt: ticket.adminReadAt,
+  }
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+type Executor = typeof db | Tx
+
+const assignee = alias(users, 'support_assignee')
+
+function staffTicketQuery(executor: Executor) {
+  return executor
+    .select({
+      ticket: supportTickets,
+      requesterName: users.name,
+      requesterEmail: users.email,
+      requesterRole: users.role,
+      assigneeName: assignee.name,
+      relatedMunName: muns.name,
+    })
+    .from(supportTickets)
+    .innerJoin(users, eq(supportTickets.createdBy, users.id))
+    .leftJoin(assignee, eq(supportTickets.assignedTo, assignee.id))
+    .leftJoin(muns, eq(supportTickets.relatedMunId, muns.id))
+}
+
+async function loadStaffTicket(executor: Executor, ticketId: string): Promise<StaffTicketView> {
+  const [row] = await staffTicketQuery(executor).where(eq(supportTickets.id, ticketId)).limit(1)
+  if (!row) throw new Error('Ticket not found')
+  return toStaffView(row)
+}
+
+const lastActivity = sql`coalesce(${supportTickets.lastMessageAt}, ${supportTickets.createdAt})`
+
+// ---------------------------------------------------------------------------
+// Input checks
+// ---------------------------------------------------------------------------
+
+/**
+ * Trims and bounds a text field. The HTTP layer validates the same bounds
+ * first, so these throws only fire for direct (non-HTTP) callers; the
+ * "is required" wording maps to 400 in server/middleware/error.ts.
+ */
+function requireText(value: string | undefined, label: string, max: number): string {
+  const trimmed = (value ?? '').trim()
+  if (!trimmed) throw new Error(`${label} is required`)
+  if (trimmed.length > max) throw new Error(`${label} must be at most ${max} characters`)
+  return trimmed
+}
+
+function messageBody(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) throw new Error('Message cannot be empty')
+  if (trimmed.length > SUPPORT_LIMITS.body) {
+    throw new Error(`Message must be at most ${SUPPORT_LIMITS.body} characters`)
+  }
+  return trimmed
+}
+
+function requesterCategory(category: SupportCategory | undefined, fallback: RequesterCategory): RequesterCategory {
+  if (category === undefined) return fallback
+  if (!(REQUESTER_CATEGORIES as readonly string[]).includes(category)) {
+    throw new Error('A supported category is required')
+  }
+  return category as RequesterCategory
+}
+
+function pageBounds(params: { limit?: number; offset?: number }): { limit: number; offset: number } {
+  const limit = Math.min(Math.max(Math.trunc(params.limit ?? SUPPORT_LIMITS.pageSizeDefault), 1), SUPPORT_LIMITS.pageSizeMax)
+  const offset = Math.max(Math.trunc(params.offset ?? 0), 0)
+  return { limit, offset }
+}
+
+/**
+ * A requester may only point a ticket at records that are theirs: an
+ * organizer at a MUN they run (or a registration for it), a delegate at their
+ * own registration or a MUN they registered for. Staff filing a ticket may
+ * reference anything that exists.
+ */
+async function assertRelatedRecordsAllowed(
+  input: { relatedMunId?: string; relatedRegistrationId?: string },
+  session: Session,
+): Promise<void> {
+  const staff = isSupportStaff(session.role)
+
+  if (input.relatedMunId) {
+    const [mun] = await db
+      .select({ organizerId: muns.organizerId })
+      .from(muns)
+      .where(eq(muns.id, input.relatedMunId))
+      .limit(1)
+    if (!mun) throw new Error('Mun not found')
+    if (!staff && mun.organizerId !== session.userId) {
+      const [registered] = await db
+        .select({ id: registrations.id })
+        .from(registrations)
+        .where(and(eq(registrations.munId, input.relatedMunId), eq(registrations.userId, session.userId)))
+        .limit(1)
+      if (!registered) throw new Error('Forbidden')
+    }
+  }
+
+  if (input.relatedRegistrationId) {
+    const [registration] = await db
+      .select({ userId: registrations.userId, organizerId: muns.organizerId, munId: registrations.munId })
+      .from(registrations)
+      .innerJoin(muns, eq(registrations.munId, muns.id))
+      .where(eq(registrations.id, input.relatedRegistrationId))
+      .limit(1)
+    if (!registration) throw new Error('Registration not found')
+    if (!staff && registration.userId !== session.userId && registration.organizerId !== session.userId) {
+      throw new Error('Forbidden')
+    }
+    if (input.relatedMunId && registration.munId !== input.relatedMunId) {
+      throw new Error('Forbidden')
+    }
+  }
+}
+
+async function lockTicket(tx: Tx, ticketId: string): Promise<SupportTicketRow> {
+  const [ticket] = await tx.select().from(supportTickets).where(eq(supportTickets.id, ticketId)).for('update').limit(1)
+  if (!ticket) throw new Error('Ticket not found')
+  return ticket
+}
+
+function assertCanAccessTicket(ticket: { createdBy: string }, session: Session): void {
+  if (session.userId !== ticket.createdBy && !isSupportStaff(session.role)) {
+    throw new Error('Forbidden')
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Creating conversations
+// ---------------------------------------------------------------------------
 
 export interface CreateTicketInput {
   category: SupportCategory
@@ -42,207 +382,29 @@ export interface CreateTicketInput {
   relatedMunId?: string
 }
 
-/**
- * Any authenticated user (student/organizer/admin) can open a ticket. Actor
- * is always derived from the caller-supplied `session` — never accept a
- * client-supplied `createdBy`, same rule as every other actor-scoped action.
- */
-export async function createTicket(
-  input: CreateTicketInput,
-  session: Session | null,
-): Promise<SupportTicketRow> {
-  if (!session) throw new Error('Forbidden')
-
-  const [ticket] = await db
-    .insert(supportTickets)
-    .values({
-      createdBy: session.userId,
-      category: input.category,
-      priority: input.priority ?? 'NORMAL',
-      subject: input.subject,
-      description: input.description,
-      relatedRegistrationId: input.relatedRegistrationId,
-      relatedMunId: input.relatedMunId,
-    })
-    .returning()
-
-  return ticket
-}
-
-/**
- * OPERATIONS/ADMIN/SUPER_ADMIN only — the admin support queue. Signature is
- * intentionally unpaginated (`filters?: {status}` -> full array): the admin
- * support page and the admin overview dashboard's ticket count both call
- * this directly and expect a plain array, not a paginated shape. Ticket
- * volume for this MVP is low enough that an unbounded read is acceptable;
- * revisit with real pagination if that stops being true.
- */
-export async function listTickets(
-  filters: { status?: SupportStatus } = {},
-  session: Session | null,
-): Promise<SupportTicketRow[]> {
-  requireRole(session, [...ADMIN_ROLES])
-
-  if (filters.status) {
-    return db
-      .select()
-      .from(supportTickets)
-      .where(eq(supportTickets.status, filters.status))
-      .orderBy(desc(supportTickets.createdAt))
-  }
-  return db.select().from(supportTickets).orderBy(desc(supportTickets.createdAt))
-}
-
-export interface AdminTicketListItem extends SupportTicketRow {
-  requesterName: string
-  requesterRole: Role
-}
-
-/**
- * Same admin queue as `listTickets`, joined with the requester's name/role
- * so the admin support page can label each conversation "Student"/
- * "Organizer" ("mapped to admin" — every widget-originated conversation,
- * from either role, lands in this one queue). Kept as a separate function
- * rather than widening `listTickets`'s return type, since that type is a
- * frozen `SupportTicketRow[]` contract two existing call sites depend on.
- */
-export async function listTicketsWithRequester(
-  filters: { status?: SupportStatus } = {},
-  session: Session | null,
-): Promise<AdminTicketListItem[]> {
-  requireRole(session, [...ADMIN_ROLES])
-
-  const conditions = filters.status ? [eq(supportTickets.status, filters.status)] : []
-
-  const rows = await db
-    .select({ ticket: supportTickets, requesterName: users.name, requesterRole: users.role })
-    .from(supportTickets)
-    .innerJoin(users, eq(supportTickets.createdBy, users.id))
-    .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(desc(supportTickets.createdAt))
-
-  return rows.map(({ ticket, requesterName, requesterRole }) => ({ ...ticket, requesterName, requesterRole }))
-}
-
-/**
- * Self-assigns a ticket to the acting session and moves it to ASSIGNED. Logs
- * TICKET_ASSIGNED. The assignee is always `session.userId` — never a
- * client-supplied id — matching the UI, which only ever offers an "assign to
- * me" action (see `app/admin/support/ticket-row.tsx`; there is no picker for
- * assigning to a different admin). Accepting an arbitrary `assigneeId`
- * parameter here would let any caller reaching this action assign a ticket
- * to a third party it never authenticated as.
- */
-export async function assignTicket(ticketId: string, session: Session | null): Promise<SupportTicketRow> {
-  requireRole(session, [...ADMIN_ROLES])
-
-  return db.transaction(async (tx) => {
-    const [updated] = await tx
-      .update(supportTickets)
-      .set({ assignedTo: session.userId, status: 'ASSIGNED', updatedAt: new Date() })
-      .where(eq(supportTickets.id, ticketId))
-      .returning()
-
-    await recordAdminAction(tx, session.userId, 'TICKET_ASSIGNED', 'support_ticket', ticketId)
-
-    return updated
-  })
-}
-
-/**
- * Transitions a ticket's status (e.g. IN_PROGRESS/WAITING/RESOLVED/CLOSED),
- * guarded by `ALLOWED_TICKET_TRANSITIONS` — throws on an invalid transition
- * (e.g. CLOSED -> NEW, or RESOLVED -> RESOLVED) instead of writing it
- * unconditionally. Only RESOLVED writes an admin_actions row
- * (TICKET_RESOLVED) — that's the only status transition in
- * `adminActionEnum`; other transitions are ordinary queue management and
- * don't need an audit entry. The transition guard also means RESOLVED can
- * only ever be reached once per ticket (RESOLVED -> RESOLVED isn't a legal
- * transition), so TICKET_RESOLVED can never be logged twice for the same
- * ticket.
- */
-export async function updateTicketStatus(
-  ticketId: string,
-  status: SupportStatus,
-  resolutionNotes: string | undefined,
-  session: Session | null,
-): Promise<SupportTicketRow> {
-  requireRole(session, [...ADMIN_ROLES])
-
-  return db.transaction(async (tx) => {
-    const [current] = await tx
-      .select({ status: supportTickets.status })
-      .from(supportTickets)
-      .where(eq(supportTickets.id, ticketId))
-      .for('update')
-      .limit(1)
-
-    if (!current) throw new Error('Ticket not found')
-
-    if (!ALLOWED_TICKET_TRANSITIONS[current.status].includes(status)) {
-      throw new Error(`Invalid ticket transition: ${current.status} -> ${status}`)
-    }
-
-    const [updated] = await tx
-      .update(supportTickets)
-      .set({ status, resolutionNotes, updatedAt: new Date() })
-      .where(eq(supportTickets.id, ticketId))
-      .returning()
-
-    if (status === 'RESOLVED') {
-      await recordAdminAction(tx, session.userId, 'TICKET_RESOLVED', 'support_ticket', ticketId, resolutionNotes)
-    }
-
-    return updated
-  })
-}
-
-// ---------------------------------------------------------------------------
-// Chat thread (support widget) — layered on top of the ticket lifecycle
-// above rather than replacing it. A ticket's `status` still only ever moves
-// through `ALLOWED_TICKET_TRANSITIONS` via `assignTicket`/`updateTicketStatus`;
-// sending a message never touches it, so the existing admin queue keeps
-// working exactly as before. Only a CLOSED ticket rejects new messages —
-// RESOLVED still accepts follow-ups (e.g. "actually it's still broken"),
-// same as most helpdesks.
-// ---------------------------------------------------------------------------
-
-export type SupportMessageRow = typeof supportMessages.$inferSelect
-
-function assertCanAccessTicket(ticket: { createdBy: string }, session: Session): void {
-  if (session.userId !== ticket.createdBy && !isAdminRole(session.role)) {
-    throw new Error('Forbidden')
-  }
-}
-
-/**
- * Quick-start entry point for the floating support widget — no category
- * picker, no separate subject field. Creates the ticket and its opening
- * message in one transaction; `subject` is derived from the message body
- * (matches how Intercom/Zendesk launchers title a fresh conversation from
- * the first thing the user types).
- */
-export async function startConversation(
-  input: { body: string; category?: SupportCategory; relatedMunId?: string },
-  session: Session | null,
+async function insertConversation(
+  session: Session,
+  values: {
+    category: RequesterCategory
+    priority: SupportPriority
+    subject: string
+    body: string
+    relatedMunId?: string
+    relatedRegistrationId?: string
+  },
 ): Promise<{ ticket: SupportTicketRow; message: SupportMessageRow }> {
-  if (!session) throw new Error('Forbidden')
-
-  const body = input.body.trim()
-  if (!body) throw new Error('Message cannot be empty')
-
-  const subject = body.length > 80 ? `${body.slice(0, 77)}...` : body
-
   return db.transaction(async (tx) => {
     const now = new Date()
     const [ticket] = await tx
       .insert(supportTickets)
       .values({
         createdBy: session.userId,
-        category: input.category ?? 'GENERAL',
-        subject,
-        description: body,
-        relatedMunId: input.relatedMunId,
+        category: values.category,
+        priority: values.priority,
+        subject: values.subject,
+        description: values.body,
+        relatedMunId: values.relatedMunId,
+        relatedRegistrationId: values.relatedRegistrationId,
         lastMessageAt: now,
         lastMessageSenderId: session.userId,
         requesterReadAt: now,
@@ -251,7 +413,7 @@ export async function startConversation(
 
     const [message] = await tx
       .insert(supportMessages)
-      .values({ ticketId: ticket.id, senderId: session.userId, senderRole: session.role, body })
+      .values({ ticketId: ticket.id, senderId: session.userId, senderRole: session.role, body: values.body })
       .returning()
 
     return { ticket, message }
@@ -259,101 +421,265 @@ export async function startConversation(
 }
 
 /**
- * Posts a reply into an existing conversation — the requester (ticket owner)
- * or any admin-role user. Bumps the sender's own read marker to now in the
- * same write, since sending trivially means you're caught up on your own
- * side of the thread.
+ * The full form (/support/new): category, subject, description and an
+ * optional related MUN/registration. The description becomes the thread's
+ * opening message.
  */
-export async function sendMessage(
-  ticketId: string,
-  body: string,
-  session: Session | null,
-): Promise<SupportMessageRow> {
+export async function createTicket(input: CreateTicketInput, session: Session | null): Promise<SupportTicketView> {
   if (!session) throw new Error('Forbidden')
 
-  const trimmed = body.trim()
-  if (!trimmed) throw new Error('Message cannot be empty')
+  const subject = requireText(input.subject, 'Subject', SUPPORT_LIMITS.subject)
+  const body = requireText(input.description, 'Description', SUPPORT_LIMITS.body)
+  const category = requesterCategory(input.category, 'GENERAL')
+  await assertRelatedRecordsAllowed(input, session)
 
-  let isStaffReply = false
-
-  const message = await db.transaction(async (tx) => {
-    const [ticket] = await tx
-      .select({ createdBy: supportTickets.createdBy, status: supportTickets.status })
-      .from(supportTickets)
-      .where(eq(supportTickets.id, ticketId))
-      .for('update')
-      .limit(1)
-
-    if (!ticket) throw new Error('Ticket not found')
-    assertCanAccessTicket(ticket, session)
-    if (ticket.status === 'CLOSED') throw new Error('This conversation is closed.')
-
-    const now = new Date()
-    const isRequester = session.userId === ticket.createdBy
-    isStaffReply = !isRequester
-
-    const [inserted] = await tx
-      .insert(supportMessages)
-      .values({ ticketId, senderId: session.userId, senderRole: session.role, body: trimmed })
-      .returning()
-
-    await tx
-      .update(supportTickets)
-      .set({
-        lastMessageAt: now,
-        lastMessageSenderId: session.userId,
-        updatedAt: now,
-        ...(isRequester ? { requesterReadAt: now } : { adminReadAt: now }),
-      })
-      .where(eq(supportTickets.id, ticketId))
-
-    return inserted
+  const { ticket } = await insertConversation(session, {
+    category,
+    priority: input.priority ?? 'NORMAL',
+    subject,
+    body,
+    relatedMunId: input.relatedMunId,
+    relatedRegistrationId: input.relatedRegistrationId,
   })
+  return toRequesterView(ticket)
+}
 
-  // After commit, never inside the transaction above (same convention as
-  // every other notify-after-commit call site in this codebase). Only the
-  // requester gets an email — staff already see new requester messages via
-  // the in-app admin queue, they don't need an email for their own reply.
-  if (isStaffReply) {
-    notifySupportReply(ticketId).catch((error) => {
-      console.error('[support] reply notification failed', error)
-    })
+/**
+ * The chat widget's quick start: just a message. The subject is derived from
+ * its first line, the category defaults to GENERAL.
+ */
+export async function startConversation(
+  input: { body: string; category?: SupportCategory; relatedMunId?: string },
+  session: Session | null,
+): Promise<{ ticket: SupportTicketView; message: SupportMessageView }> {
+  if (!session) throw new Error('Forbidden')
+
+  const body = messageBody(input.body)
+  const category = requesterCategory(input.category, 'GENERAL')
+  await assertRelatedRecordsAllowed(input, session)
+
+  const firstLine = body.split('\n', 1)[0].trim()
+  const max = 80
+  const subject = firstLine.length > max ? `${firstLine.slice(0, max - 1).trimEnd()}…` : firstLine
+
+  const { ticket, message } = await insertConversation(session, {
+    category,
+    priority: 'NORMAL',
+    subject,
+    body,
+    relatedMunId: input.relatedMunId,
+  })
+  return { ticket: toRequesterView(ticket), message: toMessageView(message, ticket, 'REQUESTER', null) }
+}
+
+// ---------------------------------------------------------------------------
+// Reading
+// ---------------------------------------------------------------------------
+
+function toMessageView(
+  message: SupportMessageRow,
+  ticket: { createdBy: string },
+  viewer: 'REQUESTER' | 'STAFF',
+  senderName: string | null,
+): SupportMessageView {
+  const author = message.senderId === ticket.createdBy ? 'REQUESTER' : 'STAFF'
+  const hideSender = viewer === 'REQUESTER' && author === 'STAFF'
+  return {
+    id: message.id,
+    ticketId: message.ticketId,
+    author,
+    senderId: hideSender ? null : message.senderId,
+    senderName: viewer === 'STAFF' ? senderName : null,
+    senderRole: message.senderRole,
+    body: message.body,
+    createdAt: message.createdAt,
+  }
+}
+
+/**
+ * One conversation with its thread, oldest message first (ties broken by id
+ * so the order is stable). Staff get the staff view; the requester gets the
+ * requester view; anyone else is refused.
+ */
+export async function getConversation(ticketId: string, session: Session | null): Promise<ConversationView> {
+  if (!session) throw new Error('Forbidden')
+
+  const [row] = await staffTicketQuery(db).where(eq(supportTickets.id, ticketId)).limit(1)
+  if (!row) throw new Error('Ticket not found')
+  assertCanAccessTicket(row.ticket, session)
+
+  const viewer = isSupportStaff(session.role) ? 'STAFF' : 'REQUESTER'
+
+  const latest = await db
+    .select({ message: supportMessages, senderName: users.name })
+    .from(supportMessages)
+    .innerJoin(users, eq(supportMessages.senderId, users.id))
+    .where(eq(supportMessages.ticketId, ticketId))
+    .orderBy(desc(supportMessages.createdAt), desc(supportMessages.id))
+    .limit(SUPPORT_LIMITS.threadMax)
+
+  const messages = latest
+    .reverse()
+    .map(({ message, senderName }) => toMessageView(message, row.ticket, viewer, senderName))
+
+  return viewer === 'STAFF'
+    ? { viewer, ticket: toStaffView(row), messages }
+    : { viewer, ticket: toRequesterView(row.ticket), messages }
+}
+
+/**
+ * The caller's own conversations, most recent activity first — the widget's
+ * and the /dashboard/support + /organizer/support inbox list.
+ */
+export async function listMyConversations(
+  session: Session | null,
+  params: { limit?: number; offset?: number } = {},
+): Promise<Page<SupportTicketView>> {
+  if (!session) throw new Error('Forbidden')
+  const { limit, offset } = pageBounds(params)
+  const mine = eq(supportTickets.createdBy, session.userId)
+
+  const [rows, [{ total }]] = await Promise.all([
+    db
+      .select()
+      .from(supportTickets)
+      .where(mine)
+      .orderBy(desc(lastActivity), desc(supportTickets.id))
+      .limit(limit)
+      .offset(offset),
+    db.select({ total: sql<number>`count(*)::int` }).from(supportTickets).where(mine),
+  ])
+
+  return { results: rows.map(toRequesterView), total }
+}
+
+export interface StaffTicketFilters {
+  /** One status, or OPEN for everything that still needs staff attention. */
+  status?: SupportStatus | 'OPEN'
+  category?: SupportCategory
+  priority?: SupportPriority
+  /** `me`: assigned to the caller. `unassigned`: nobody owns it yet. */
+  assignee?: 'me' | 'unassigned'
+  /** Matches the subject, the requester's name or email, or an exact ticket id. */
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`)
+}
+
+/** The staff support queue — OPERATIONS/ADMIN/SUPER_ADMIN only, filtered and paginated. */
+export async function listStaffTickets(
+  filters: StaffTicketFilters,
+  session: Session | null,
+): Promise<Page<StaffTicketView>> {
+  requireRole(session, [...STAFF_ROLES])
+  const { limit, offset } = pageBounds(filters)
+
+  const conditions: SQL[] = []
+  if (filters.status === 'OPEN') conditions.push(inArray(supportTickets.status, [...OPEN_TICKET_STATUSES]))
+  else if (filters.status) conditions.push(eq(supportTickets.status, filters.status))
+  if (filters.category) conditions.push(eq(supportTickets.category, filters.category))
+  if (filters.priority) conditions.push(eq(supportTickets.priority, filters.priority))
+  if (filters.assignee === 'me') conditions.push(eq(supportTickets.assignedTo, session.userId))
+  if (filters.assignee === 'unassigned') conditions.push(isNull(supportTickets.assignedTo))
+
+  const q = filters.q?.trim().slice(0, SUPPORT_LIMITS.search)
+  if (q) {
+    const pattern = `%${escapeLike(q)}%`
+    conditions.push(
+      or(
+        ilike(supportTickets.subject, pattern),
+        ilike(users.name, pattern),
+        ilike(users.email, pattern),
+        eq(supportTickets.id, q),
+      ) as SQL,
+    )
   }
 
-  return message
+  const where = conditions.length ? and(...conditions) : undefined
+
+  const [rows, [{ total }]] = await Promise.all([
+    staffTicketQuery(db)
+      .where(where)
+      .orderBy(desc(lastActivity), desc(supportTickets.id))
+      .limit(limit)
+      .offset(offset),
+    db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(supportTickets)
+      .innerJoin(users, eq(supportTickets.createdBy, users.id))
+      .where(where),
+  ])
+
+  return { results: rows.map(toStaffView), total }
 }
 
 /**
- * Full thread for one conversation — the requester or any admin-role user.
- * Used by both the floating widget and the full-page inbox routes (student,
- * organizer, admin) so there is exactly one read path for a thread's shape.
+ * Every ticket, unjoined and unpaginated — kept for the admin overview's
+ * open-ticket count (lib/actions/admin-audit.ts). The queue itself uses
+ * `listStaffTickets`.
  */
-export async function getConversation(
-  ticketId: string,
+export async function listTickets(
+  filters: { status?: SupportStatus } = {},
   session: Session | null,
-): Promise<{ ticket: SupportTicketRow; messages: SupportMessageRow[] }> {
-  if (!session) throw new Error('Forbidden')
+): Promise<SupportTicketRow[]> {
+  requireRole(session, [...STAFF_ROLES])
 
-  const [ticket] = await db.select().from(supportTickets).where(eq(supportTickets.id, ticketId)).limit(1)
-  if (!ticket) throw new Error('Ticket not found')
-  assertCanAccessTicket(ticket, session)
-
-  const messages = await db
+  return db
     .select()
-    .from(supportMessages)
-    .where(eq(supportMessages.ticketId, ticketId))
-    .orderBy(asc(supportMessages.createdAt))
+    .from(supportTickets)
+    .where(filters.status ? eq(supportTickets.status, filters.status) : undefined)
+    .orderBy(desc(supportTickets.createdAt))
+}
 
-  return { ticket, messages }
+/** Conversations with a support-team message the requester hasn't opened — the widget badge. */
+export async function getUnreadConversationCount(session: Session | null): Promise<number> {
+  if (!session) return 0
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(supportTickets)
+    .where(
+      and(
+        eq(supportTickets.createdBy, session.userId),
+        ne(supportTickets.lastMessageSenderId, session.userId),
+        or(isNull(supportTickets.requesterReadAt), gt(supportTickets.lastMessageAt, supportTickets.requesterReadAt)),
+      ),
+    )
+
+  return count
 }
 
 /**
- * Marks a conversation read on the caller's side of it. Admin-side read is
- * shared across every admin/operations user rather than per-admin — same
- * scale tradeoff `assignTicket` already makes by not modeling a reviewer
- * queue with per-reviewer state; revisit only if per-admin read receipts
- * turn out to matter.
+ * Conversations whose latest message is from the requester and that no staff
+ * member has opened since. Read state is shared across staff (one
+ * `adminReadAt` per ticket), not tracked per staff member.
  */
+export async function getAdminUnreadConversationCount(session: Session | null): Promise<number> {
+  requireRole(session, [...STAFF_ROLES])
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(supportTickets)
+    .where(
+      and(
+        ne(supportTickets.status, 'CLOSED'),
+        eq(supportTickets.lastMessageSenderId, supportTickets.createdBy),
+        or(isNull(supportTickets.adminReadAt), gt(supportTickets.lastMessageAt, supportTickets.adminReadAt)),
+      ),
+    )
+
+  return count
+}
+
+// ---------------------------------------------------------------------------
+// Writing
+// ---------------------------------------------------------------------------
+
+/** Marks the conversation read on the caller's side (requester, staff, or both if staff filed it). */
 export async function markConversationRead(ticketId: string, session: Session | null): Promise<void> {
   if (!session) throw new Error('Forbidden')
 
@@ -366,71 +692,175 @@ export async function markConversationRead(ticketId: string, session: Session | 
   if (!ticket) throw new Error('Ticket not found')
   assertCanAccessTicket(ticket, session)
 
-  const isRequester = session.userId === ticket.createdBy
+  const now = new Date()
   await db
     .update(supportTickets)
-    .set(isRequester ? { requesterReadAt: new Date() } : { adminReadAt: new Date() })
+    .set({
+      ...(session.userId === ticket.createdBy ? { requesterReadAt: now } : {}),
+      ...(isSupportStaff(session.role) ? { adminReadAt: now } : {}),
+    })
     .where(eq(supportTickets.id, ticketId))
 }
 
 /**
- * A student's or organizer's own conversations — the floating widget's and
- * `/dashboard/support` / `/organizer/support`'s conversation list. Newest
- * activity first, falling back to `createdAt` for tickets filed through the
- * older `/support/new` form that never got a chat reply (`lastMessageAt` is
- * still null on those).
+ * Posts a message into a conversation and moves the ticket along:
+ *
+ * - requester reply: WAITING or RESOLVED -> IN_PROGRESS (a reply reopens a
+ *   resolved ticket and clears its now-stale resolution note)
+ * - staff reply: -> WAITING (waiting on the requester) by default, or
+ *   IN_PROGRESS when `nextStatus` says so; a NEW ticket is assigned to the
+ *   replier on the way; a RESOLVED ticket stays resolved
+ * - CLOSED takes no messages
+ *
+ * The sender's own read marker moves to now. A staff reply emails the
+ * requester after the transaction commits.
  */
-export async function listMyConversations(session: Session | null): Promise<SupportTicketRow[]> {
+export async function sendMessage(
+  ticketId: string,
+  body: string,
+  session: Session | null,
+  options: { nextStatus?: StaffReplyStatus } = {},
+): Promise<{ message: SupportMessageView; ticket: SupportTicketView | StaffTicketView }> {
   if (!session) throw new Error('Forbidden')
+  const text = messageBody(body)
 
-  const rows = await db.select().from(supportTickets).where(eq(supportTickets.createdBy, session.userId))
+  let isStaffReply = false
 
-  return rows.sort((a, b) => {
-    const at = (a.lastMessageAt ?? a.createdAt).getTime()
-    const bt = (b.lastMessageAt ?? b.createdAt).getTime()
-    return bt - at
+  const result = await db.transaction(async (tx) => {
+    const ticket = await lockTicket(tx, ticketId)
+    assertCanAccessTicket(ticket, session)
+
+    const isRequester = session.userId === ticket.createdBy
+    isStaffReply = !isRequester
+    if (options.nextStatus && !isStaffReply) throw new Error('Forbidden')
+
+    const status = isStaffReply
+      ? statusAfterStaffReply(ticket.status, options.nextStatus)
+      : statusAfterRequesterReply(ticket.status)
+
+    const claim = isStaffReply && ticket.status === 'NEW' && ticket.assignedTo === null
+    const reopened = ticket.status === 'RESOLVED' && status === 'IN_PROGRESS'
+
+    const now = new Date()
+    // clock_timestamp(), not the transaction-start now(): read after the row
+    // lock above, so concurrent replies to one ticket are timestamped in the
+    // order they were written.
+    const [inserted] = await tx
+      .insert(supportMessages)
+      .values({ ticketId, senderId: session.userId, senderRole: session.role, body: text, createdAt: sql`clock_timestamp()` })
+      .returning()
+
+    await tx
+      .update(supportTickets)
+      .set({
+        status,
+        lastMessageAt: now,
+        lastMessageSenderId: session.userId,
+        updatedAt: now,
+        ...(isRequester ? { requesterReadAt: now } : { adminReadAt: now }),
+        ...(claim ? { assignedTo: session.userId } : {}),
+        ...(reopened ? { resolutionNotes: null } : {}),
+      })
+      .where(eq(supportTickets.id, ticketId))
+
+    if (claim) {
+      await recordAdminAction(tx, session.userId, 'TICKET_ASSIGNED', 'support_ticket', ticketId)
+    }
+
+    const viewer = isSupportStaff(session.role) ? 'STAFF' : 'REQUESTER'
+    if (viewer === 'STAFF') {
+      const view = await loadStaffTicket(tx, ticketId)
+      const [sender] = await tx.select({ name: users.name }).from(users).where(eq(users.id, session.userId)).limit(1)
+      return { message: toMessageView(inserted, ticket, viewer, sender?.name ?? null), ticket: view }
+    }
+    const [updated] = await tx.select().from(supportTickets).where(eq(supportTickets.id, ticketId)).limit(1)
+    return { message: toMessageView(inserted, ticket, viewer, null), ticket: toRequesterView(updated) }
+  })
+
+  // After commit, never inside the transaction. Only the requester is
+  // emailed; staff see requester messages in the queue.
+  if (isStaffReply) {
+    notifySupportReply(ticketId).catch((error) => {
+      console.error('[support] reply notification failed', error)
+    })
+  }
+
+  return result
+}
+
+/**
+ * Takes a ticket: the caller becomes its assignee. A NEW ticket moves to
+ * ASSIGNED; an open ticket someone else holds keeps its status and changes
+ * hands. Resolved and closed tickets can't be assigned. The assignee is
+ * always the caller — there is no assigning on someone else's behalf.
+ */
+export async function assignTicket(ticketId: string, session: Session | null): Promise<StaffTicketView> {
+  requireRole(session, [...STAFF_ROLES])
+
+  return db.transaction(async (tx) => {
+    const ticket = await lockTicket(tx, ticketId)
+
+    if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
+      throw new Error(`Invalid ticket transition: ${ticket.status} -> ASSIGNED`)
+    }
+
+    if (ticket.assignedTo !== session.userId || ticket.status === 'NEW') {
+      await tx
+        .update(supportTickets)
+        .set({
+          assignedTo: session.userId,
+          status: ticket.status === 'NEW' ? 'ASSIGNED' : ticket.status,
+          updatedAt: new Date(),
+        })
+        .where(eq(supportTickets.id, ticketId))
+      await recordAdminAction(tx, session.userId, 'TICKET_ASSIGNED', 'support_ticket', ticketId)
+    }
+
+    return loadStaffTicket(tx, ticketId)
   })
 }
 
 /**
- * Unread-conversation count for the requester side (floating widget badge).
- * A ticket counts once, not per-message — the badge is "N conversations
- * need your attention", matching how Intercom/Zendesk launchers badge.
+ * Staff status change, guarded by ALLOWED_TICKET_TRANSITIONS. ASSIGNED is
+ * reached only through `assignTicket`. Resolving needs a resolution note (the
+ * requester sees it) and is written to the admin action log every time;
+ * reopening clears the old note. A ticket nobody owns yet is assigned to the
+ * caller as it moves.
  */
-export async function getUnreadConversationCount(session: Session | null): Promise<number> {
-  if (!session) return 0
+export async function updateTicketStatus(
+  ticketId: string,
+  status: SupportStatus,
+  resolutionNotes: string | undefined,
+  session: Session | null,
+): Promise<StaffTicketView> {
+  requireRole(session, [...STAFF_ROLES])
 
-  const rows = await db
-    .select({ id: supportTickets.id })
-    .from(supportTickets)
-    .where(
-      and(
-        eq(supportTickets.createdBy, session.userId),
-        ne(supportTickets.lastMessageSenderId, session.userId),
-        or(isNull(supportTickets.requesterReadAt), gt(supportTickets.lastMessageAt, supportTickets.requesterReadAt)),
-      ),
-    )
+  return db.transaction(async (tx) => {
+    const ticket = await lockTicket(tx, ticketId)
 
-  return rows.length
-}
+    if (status === 'ASSIGNED' || !canTransitionTicket(ticket.status, status)) {
+      throw new Error(`Invalid ticket transition: ${ticket.status} -> ${status}`)
+    }
 
-/**
- * Unread-conversation count for the admin side (any OPERATIONS/ADMIN/
- * SUPER_ADMIN) — conversations whose last message came from the requester
- * and haven't been opened by an admin since. Surfaced on `/admin/support`.
- */
-export async function getAdminUnreadConversationCount(session: Session | null): Promise<number> {
-  requireRole(session, [...ADMIN_ROLES])
+    const notes =
+      status === 'RESOLVED' ? requireText(resolutionNotes, 'A resolution note', SUPPORT_LIMITS.resolutionNotes) : undefined
+    const reopened = ticket.status === 'RESOLVED' && status === 'IN_PROGRESS'
 
-  const rows = await db
-    .select({ id: supportTickets.id })
-    .from(supportTickets)
-    .where(
-      and(
-        eq(supportTickets.lastMessageSenderId, supportTickets.createdBy),
-        or(isNull(supportTickets.adminReadAt), gt(supportTickets.lastMessageAt, supportTickets.adminReadAt)),
-      ),
-    )
+    await tx
+      .update(supportTickets)
+      .set({
+        status,
+        updatedAt: new Date(),
+        ...(notes !== undefined ? { resolutionNotes: notes } : {}),
+        ...(reopened ? { resolutionNotes: null } : {}),
+        ...(ticket.assignedTo === null && status !== 'CLOSED' ? { assignedTo: session.userId } : {}),
+      })
+      .where(eq(supportTickets.id, ticketId))
 
-  return rows.length
+    if (status === 'RESOLVED') {
+      await recordAdminAction(tx, session.userId, 'TICKET_RESOLVED', 'support_ticket', ticketId, notes)
+    }
+
+    return loadStaffTicket(tx, ticketId)
+  })
 }

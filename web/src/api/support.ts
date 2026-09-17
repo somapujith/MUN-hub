@@ -1,76 +1,91 @@
+import { queryClient } from "@/api/query-client";
+import { queryKeys } from "@/api/query-keys";
 import type {
-  AdminTicketListItem,
   ConversationDetail,
   CreateSupportTicketInput,
-  ListAdminTicketsParams,
+  ListStaffTicketsParams,
+  SendMessageResult,
+  StaffReplyStatus,
+  StaffSupportTicket,
   StartConversationInput,
   SupportMessage,
+  SupportPage,
   SupportStatus,
   SupportTicket,
 } from "@/types/support";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    credentials: "include",
-    // Spread options FIRST: spreading them last replaced this merged object
-    // whenever a caller passed its own headers, silently dropping Content-Type.
-    headers: { "Content-Type": "application/json", ...options?.headers },
-  });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
-    throw new Error(body?.error?.message ?? `Request failed (${response.status})`);
+/**
+ * A failed support request. Carries the HTTP status so the shared query
+ * client's retry rule (no retries below 500) applies, and so callers can tell
+ * a lost session from a validation error.
+ */
+export class SupportApiError extends Error {
+  readonly status: number;
+  readonly code: string | undefined;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "SupportApiError";
+    this.status = status;
+    this.code = code;
   }
-  if (response.status === 204) return undefined as T;
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+    });
+  } catch {
+    throw new SupportApiError("Can't reach MUN Hub right now. Check your connection and try again.", 0);
+  }
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: { message?: string; code?: string };
+    } | null;
+    if (response.status === 401) {
+      // The session is gone (expired or signed out elsewhere). Re-ask the API
+      // who is signed in, so the header, the route guards and the chat widget
+      // all switch to signed-out instead of polling into 401s.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session() });
+    }
+    const message =
+      response.status === 401
+        ? "Your session has ended. Sign in again to continue."
+        : (body?.error?.message ?? `Request failed (${response.status})`);
+    throw new SupportApiError(message, response.status, body?.error?.code);
+  }
   return response.json() as Promise<T>;
 }
 
+function query(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") search.set(key, String(value));
+  }
+  const qs = search.toString();
+  return qs ? `?${qs}` : "";
+}
+
+// --- Requester --------------------------------------------------------------
+
+/** Files a ticket from the full form; the description opens the thread. */
 export function createSupportTicket(input: CreateSupportTicketInput) {
-  return request<SupportTicket>("/support/tickets", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+  return request<SupportTicket>("/support/tickets", { method: "POST", body: JSON.stringify(input) });
 }
 
-/** Wraps lib/actions/support.ts#listTicketsWithRequester — OPERATIONS/ADMIN/SUPER_ADMIN only. */
-export function listAdminSupportTickets(params: ListAdminTicketsParams = {}) {
-  const query = new URLSearchParams();
-  if (params.status) query.set("status", params.status);
-  const qs = query.toString();
-  return request<AdminTicketListItem[]>(`/admin/support/tickets${qs ? `?${qs}` : ""}`);
+/** The caller's own conversations, most recent activity first. */
+export function listMyConversations(params: { limit?: number; offset?: number } = {}) {
+  return request<SupportPage<SupportTicket>>(`/support/conversations${query(params)}`);
 }
 
-/** Wraps lib/actions/support.ts#assignTicket — always self-assigns the calling admin, never a client-supplied assignee. */
-export function assignSupportTicketToSelf(ticketId: string) {
-  return request<SupportTicket>(`/admin/support/tickets/${ticketId}/assign`, {
-    method: "POST",
-  });
-}
-
-/** Wraps lib/actions/support.ts#updateTicketStatus — server re-validates the transition against ALLOWED_TICKET_TRANSITIONS regardless of what the UI allowed. */
-export function updateSupportTicketStatus(ticketId: string, status: SupportStatus, resolutionNotes?: string) {
-  return request<SupportTicket>(`/admin/support/tickets/${ticketId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status, resolutionNotes }),
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Chat thread (support widget) — same lib/actions/support.ts chat surface
-// the Next.js app's app/support/chat-actions.ts wraps, exposed here as REST
-// by server/routes/support.ts. Owner-or-admin authorization is enforced
-// server-side, so these same functions serve the student/organizer widget
-// AND the admin reply UI.
-// ---------------------------------------------------------------------------
-
-/** The caller's own conversations, newest activity first. */
-export function listMyConversations() {
-  return request<SupportTicket[]>("/support/conversations");
-}
-
-/** Quick-start entry point — creates the ticket (category defaults GENERAL) and its opening message in one call. */
+/** Quick start from the chat composer: creates the ticket and its first message. */
 export function startConversation(input: StartConversationInput) {
   return request<{ ticket: SupportTicket; message: SupportMessage }>("/support/conversations", {
     method: "POST",
@@ -78,31 +93,54 @@ export function startConversation(input: StartConversationInput) {
   });
 }
 
-/** Full thread for one conversation — the requester or any admin-role user. */
+/** One conversation and its thread — the requester's or, for staff, any. */
 export function getConversation(ticketId: string) {
-  return request<ConversationDetail>(`/support/conversations/${ticketId}`);
+  return request<ConversationDetail>(`/support/conversations/${encodeURIComponent(ticketId)}`);
 }
 
-export function sendConversationMessage(ticketId: string, body: string) {
-  return request<SupportMessage>(`/support/conversations/${ticketId}/messages`, {
+/** Posts a reply. `nextStatus` is staff-only (default: waiting on the requester). */
+export function sendConversationMessage(ticketId: string, body: string, nextStatus?: StaffReplyStatus) {
+  return request<SendMessageResult>(`/support/conversations/${encodeURIComponent(ticketId)}/messages`, {
     method: "POST",
-    body: JSON.stringify({ body }),
+    body: JSON.stringify(nextStatus ? { body, nextStatus } : { body }),
   });
 }
 
-/** Marks a conversation read on the caller's side of it (requester or admin-shared). */
 export function markConversationRead(ticketId: string) {
-  return request<{ ok: true }>(`/support/conversations/${ticketId}/read`, {
-    method: "POST",
-  });
+  return request<{ ok: true }>(`/support/conversations/${encodeURIComponent(ticketId)}/read`, { method: "POST" });
 }
 
-/** Unread-conversation count for the requester side — the floating widget's badge. */
+/** Conversations with an unread support-team reply — the widget badge. */
 export function getUnreadConversationCount() {
   return request<{ count: number }>("/support/conversations/unread-count");
 }
 
-/** Unread-conversation count for the admin side — OPERATIONS/ADMIN/SUPER_ADMIN only. */
+// --- Staff ------------------------------------------------------------------
+
+export function listStaffSupportTickets(params: ListStaffTicketsParams = {}) {
+  return request<SupportPage<StaffSupportTicket>>(`/admin/support/tickets${query({ ...params })}`);
+}
+
+/** Conversations whose latest requester message no staff member has opened. */
 export function getAdminUnreadConversationCount() {
   return request<{ count: number }>("/admin/support/unread-count");
+}
+
+/** Assigns the ticket to the signed-in staff member (never anyone else). */
+export function assignSupportTicketToSelf(ticketId: string) {
+  return request<StaffSupportTicket>(`/admin/support/tickets/${encodeURIComponent(ticketId)}/assign`, {
+    method: "POST",
+  });
+}
+
+/** The server re-checks the transition; RESOLVED needs `resolutionNotes`. */
+export function updateSupportTicketStatus(
+  ticketId: string,
+  status: Exclude<SupportStatus, "NEW" | "ASSIGNED">,
+  resolutionNotes?: string,
+) {
+  return request<StaffSupportTicket>(`/admin/support/tickets/${encodeURIComponent(ticketId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(resolutionNotes === undefined ? { status } : { status, resolutionNotes }),
+  });
 }

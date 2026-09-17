@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboardIcon,
+  LifeBuoyIcon,
   LogOutIcon,
   TicketIcon,
   UserRoundIcon,
@@ -18,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { signOut } from "@/api/auth";
 import { homeUrlForRole, isCrossOrigin, resolveZoneUrl } from "@/lib/host-routing";
+import { inboxUrlForRole } from "@/components/support/support-labels";
 import type { Role } from "@/types/enums";
 
 /**
@@ -122,6 +124,11 @@ export function SiteHeaderUserMenu({ role }: SiteHeaderUserMenuProps) {
                 Profile &amp; account
               </MenuNavItem>
             </>
+          )}
+          {(role === "STUDENT" || role === "ORGANIZER") && (
+            <MenuNavItem url={inboxUrlForRole(role)} icon={<LifeBuoyIcon />}>
+              Support
+            </MenuNavItem>
           )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
