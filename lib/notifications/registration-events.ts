@@ -22,7 +22,7 @@ export interface RegistrationEmailContext {
   userName: string
   munName: string
   productName: string
-  /** Minor currency units (paise for INR), same unit `payments.amount`/`registrationProducts.price` use. */
+  /** Whole currency units (rupees for INR, not paise) — same unit `payments.amount`/`registrationProducts.price` store. */
   amount: number
   currency: string
 }
@@ -56,8 +56,16 @@ async function resolvePaidAmount(registrationId: string, fallback: number): Prom
   return row?.amount ?? fallback
 }
 
-function formatMoney(amountMinorUnits: number, currency: string): string {
-  return `${currency} ${(amountMinorUnits / 100).toFixed(2)}`
+/**
+ * `payments.amount`/`registrationProducts.price` are whole currency units
+ * (rupees for INR — no ×100/÷100 anywhere in this codebase's payment path),
+ * not minor units. en-IN grouping (1,499 not 1499) and the currency's own
+ * symbol (₹ for INR), matching web/src/components/shared/currency.tsx's
+ * `formatPrice`, the same formatting every price shown in the product is
+ * built from.
+ */
+function formatMoney(amount: number, currency: string): string {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount)
 }
 
 async function sendIfOptedIn(userId: string, to: string, subject: string, body: string, adapter: NotificationsAdapter): Promise<void> {
