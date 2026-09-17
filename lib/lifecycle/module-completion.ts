@@ -120,6 +120,13 @@ export async function assertModuleNotLocked(munId: string, moduleKey: MunModule,
   if (!mun) throw new Error('Mun not found')
 
   if (UNDER_ACTIVE_REVIEW_STATUSES.includes(mun.status)) {
+    // A reviewer who sends a module back is asking for exactly these edits.
+    const [row] = await db
+      .select({ state: munModuleVerifications.state })
+      .from(munModuleVerifications)
+      .where(and(eq(munModuleVerifications.munId, munId), eq(munModuleVerifications.moduleName, moduleKey)))
+      .limit(1)
+    if (row?.state === 'CHANGES_REQUESTED') return
     throw new Error(
       `The "${moduleKey}" module is locked while this mun is under MUNHub review (current status: ${mun.status}) — changes to this module are blocked until review completes. Contact MUNHub support if this is urgent.`,
     )
@@ -136,8 +143,16 @@ export async function assertModuleNotLocked(munId: string, moduleKey: MunModule,
  * without requiring a separate write path that could drift out of sync with
  * the real enforcement rule above.
  */
-function isModuleLockedForStatus(moduleKey: MunModule, munStatus: MunStatus): boolean {
-  return isHighImpactModule(moduleKey) && UNDER_ACTIVE_REVIEW_STATUSES.includes(munStatus)
+function isModuleLockedForStatus(
+  moduleKey: MunModule,
+  munStatus: MunStatus,
+  moduleState: ModuleVerificationState | undefined,
+): boolean {
+  return (
+    isHighImpactModule(moduleKey) &&
+    UNDER_ACTIVE_REVIEW_STATUSES.includes(munStatus) &&
+    moduleState !== 'CHANGES_REQUESTED'
+  )
 }
 
 /**
@@ -221,8 +236,9 @@ async function persistModuleCompletion(
   moduleKey: MunModule,
   result: ModuleCompletionResult,
   munStatus: MunStatus,
+  moduleState: ModuleVerificationState | undefined,
 ): Promise<void> {
-  const completionStatus: ModuleCompletionStatus = isModuleLockedForStatus(moduleKey, munStatus)
+  const completionStatus: ModuleCompletionStatus = isModuleLockedForStatus(moduleKey, munStatus, moduleState)
     ? 'LOCKED'
     : result.completionStatus
 
@@ -282,6 +298,9 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
 
     const moduleProgress: ModuleProgressRow[] = []
     const failingKeysByModule = new Map<string, Set<string>>()
+    // LOCKED hides whether the module is filled in; count the real result so
+    // the progress bar doesn't drop to zero while the mun is under review.
+    const completeModules = new Set<MunModule>()
 
     for (const moduleKey of TRACKED_MODULES) {
       const existingRow = rowsByModule.get(moduleKey)
@@ -289,11 +308,14 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
 
       const result = await computeModuleCompletion(munId, moduleKey, validationContext)
       failingKeysByModule.set(moduleKey, new Set(result.issues.map((issue) => issue.key)))
-      await persistModuleCompletion(transaction, munId, moduleKey, result, mun.status)
+      if (result.completionStatus === 'COMPLETE') completeModules.add(moduleKey)
+      await persistModuleCompletion(transaction, munId, moduleKey, result, mun.status, existingRow?.state)
 
       moduleProgress.push({
         key: moduleKey,
-        completionStatus: isModuleLockedForStatus(moduleKey, mun.status) ? 'LOCKED' : result.completionStatus,
+        completionStatus: isModuleLockedForStatus(moduleKey, mun.status, existingRow?.state)
+          ? 'LOCKED'
+          : result.completionStatus,
         completionPercentage: result.completionPercentage,
         blockingIssueCount: result.blockingIssueCount,
         isRequired,
@@ -320,7 +342,7 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
 
     const requiredModules = moduleProgress.filter((m) => m.isRequired)
     const requiredTotal = requiredModules.length
-    const requiredComplete = requiredModules.filter((m) => m.completionStatus === 'COMPLETE').length
+    const requiredComplete = requiredModules.filter((m) => completeModules.has(m.key)).length
     const overallPercentage = requiredTotal === 0 ? 100 : Math.round((requiredComplete / requiredTotal) * 100)
 
     // Unresolved BLOCKER-severity issues across all tracked modules (not just
@@ -440,14 +462,14 @@ export async function onModuleDataChanged(munId: string, moduleKey: MunModule, a
     // Ensure the row exists before computing/persisting against it.
     // `transaction` threaded through — see getModuleVerificationState's
     // docstring for why this matters.
-    await getModuleVerificationState(munId, moduleKey, transaction)
+    const moduleRow = await getModuleVerificationState(munId, moduleKey, transaction)
 
     const [mun] = await transaction.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).limit(1)
     if (!mun) throw new Error('Mun not found')
 
     // 1. Recompute and persist that ONE module's completion row.
     const moduleResult = await computeModuleCompletion(munId, moduleKey)
-    await persistModuleCompletion(transaction, munId, moduleKey, moduleResult, mun.status)
+    await persistModuleCompletion(transaction, munId, moduleKey, moduleResult, mun.status, moduleRow.state)
 
     // 2. Recompute the mun's aggregate progress (reuses the same per-module
     // logic, including re-persisting every module's row — see

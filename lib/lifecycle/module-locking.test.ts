@@ -1,10 +1,10 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
-import { muns, users } from '@/lib/db/schema'
+import { munModuleVerifications, muns, users } from '@/lib/db/schema'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
-import { assertModuleNotLocked } from './module-completion'
+import { assertModuleNotLocked, recomputeMunProgress } from './module-completion'
 import { createCommittee, createPortfolio, createRegistrationProduct, updateMunDetails } from '@/lib/actions/mun-config'
 import { createEbMember } from '@/lib/actions/executive-board'
 import { uploadMunDocument } from '@/lib/actions/mun-documents'
@@ -109,6 +109,23 @@ describe('assertModuleNotLocked (unit)', () => {
     const mun = await makeMun(organizer.id, 'VERIFICATION')
 
     await expect(assertModuleNotLocked(mun.id, 'COMMITTEES', null)).rejects.toThrow('Forbidden')
+  })
+
+  it('unlocks only the module a reviewer sent back, and shows the rest as LOCKED', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'VERIFICATION')
+    await db.insert(munModuleVerifications).values([
+      { munId: mun.id, moduleName: 'COMMITTEES', state: 'CHANGES_REQUESTED' },
+      { munId: mun.id, moduleName: 'CONTACT', state: 'PENDING_REVIEW' },
+    ])
+
+    await expect(assertModuleNotLocked(mun.id, 'COMMITTEES', sessionFor(organizer))).resolves.toBeUndefined()
+    await expect(assertModuleNotLocked(mun.id, 'CONTACT', sessionFor(organizer))).rejects.toThrow(/locked/i)
+
+    const progress = await recomputeMunProgress(mun.id)
+    const statusOf = (key: string) => progress.modules.find((m) => m.key === key)?.completionStatus
+    expect(statusOf('COMMITTEES')).not.toBe('LOCKED')
+    expect(statusOf('CONTACT')).toBe('LOCKED')
   })
 })
 
