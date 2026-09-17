@@ -15,6 +15,7 @@ import {
   disableMfa,
   getMfaEnrollmentStatus,
   hasConfirmedMfa,
+  looksLikeRecoveryCode,
   MFA_ERRORS,
   regenerateMfaRecoveryCodes,
   resetStaffMfa,
@@ -41,6 +42,24 @@ async function enrollAndConfirm(user: { id: string; role: AnyRole }) {
   const { recoveryCodes } = await confirmMfaEnrollment(code, sess(user))
   return { secret, recoveryCodes }
 }
+
+// Guards the shape check that keeps a wrong TOTP guess from scanning every
+// unused recovery code — each candidate is a scrypt verification.
+describe('looksLikeRecoveryCode', () => {
+  it('accepts every code the enrollment flow actually mints', async () => {
+    const admin = await makeUser('ADMIN')
+    const { recoveryCodes } = await enrollAndConfirm(admin)
+
+    expect(recoveryCodes).toHaveLength(10)
+    expect(recoveryCodes.filter(looksLikeRecoveryCode)).toEqual(recoveryCodes)
+  })
+
+  it('rejects a 6-digit TOTP code and other non-recovery input', () => {
+    for (const code of ['000000', '123456', '', 'not-a-code', 'ABCDE12345', 'ABCDE-1234', 'ABCDE-12345Z', 'ZZZZZ-ZZZZZ']) {
+      expect(looksLikeRecoveryCode(code), code).toBe(false)
+    }
+  })
+})
 
 describe('beginMfaEnrollment', () => {
   it('rejects a non-staff account', async () => {

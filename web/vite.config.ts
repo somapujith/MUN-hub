@@ -1,12 +1,47 @@
+import fs from "node:fs";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+import { resolveApiOrigin, withApiOrigin } from "./build/security-headers.ts";
 
 const PRODUCTION_API_URL = "https://api.munhub.in/api/v1";
 
+/**
+ * Points the CSP's connect-src at whichever API this bundle was built against.
+ * public/_headers holds the production value; a build with VITE_API_URL set
+ * elsewhere (staging, a preview) would otherwise ship a CSP that blocks every
+ * one of its own API calls. See build/security-headers.ts.
+ */
+function apiConnectSrcHeaders(apiUrl: string | undefined): Plugin {
+  let headersFile = "";
+  let log: (message: string) => void = () => {};
+
+  return {
+    name: "munhub:api-connect-src",
+    apply: "build",
+    configResolved(config) {
+      headersFile = path.resolve(config.root, config.build.outDir, "_headers");
+      log = (message) => config.logger.info(message);
+    },
+    // The public directory is copied into outDir before the bundle is written,
+    // so by now dist/_headers is the committed file, ready to rewrite.
+    closeBundle() {
+      const apiOrigin = resolveApiOrigin(apiUrl);
+      if (!apiOrigin || !fs.existsSync(headersFile)) return;
+
+      const original = fs.readFileSync(headersFile, "utf8");
+      const rewritten = withApiOrigin(original, apiOrigin);
+      if (rewritten !== original) {
+        fs.writeFileSync(headersFile, rewritten);
+        log(`_headers: CSP connect-src rewritten to allow ${apiOrigin}`);
+      }
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), apiConnectSrcHeaders(process.env.VITE_API_URL)],
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),

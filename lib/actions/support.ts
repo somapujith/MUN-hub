@@ -5,6 +5,7 @@ import { muns, registrations, supportMessages, supportTickets, users } from '@/l
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
+import { runInBackground } from '@/lib/background-tasks'
 import { notifySupportReply } from '@/lib/notifications/support-reply-email'
 import {
   supportCategoryEnum,
@@ -778,17 +779,13 @@ export async function sendMessage(
   })
 
   // After commit, never inside the transaction. Only the requester is
-  // emailed; staff see requester messages in the queue. Awaited, not
-  // fire-and-forget: on Cloudflare Workers, work still pending after the
-  // response is sent can be dropped, so an un-awaited send would silently
-  // never happen in production. A failure is logged and never fails the
-  // reply, which has already been saved.
+  // emailed; staff see requester messages in the queue. A failure is logged
+  // and never fails the reply, which has already been saved.
   if (isStaffReply) {
-    try {
-      await notifySupportReply(ticketId)
-    } catch (error) {
-      console.error('[support] reply notification failed', error)
-    }
+    // On Cloudflare Workers, work still pending once the response is sent can
+    // be dropped silently; `runInBackground` hands it to the request's
+    // waitUntil so the email survives without the caller waiting on it.
+    runInBackground('support reply notification', () => notifySupportReply(ticketId))
   }
 
   return result

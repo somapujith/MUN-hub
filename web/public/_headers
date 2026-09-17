@@ -2,6 +2,10 @@
 # web/wrangler.jsonc). Vite copies this file into dist/. Keep in sync with
 # web/vercel.json.
 #
+# The API origin in the CSP below is the production one. A build against a
+# different API (VITE_API_URL=…, e.g. staging) rewrites it in dist/_headers —
+# see web/build/security-headers.ts and the plugin in web/vite.config.ts.
+#
 # CSP notes:
 # - No inline scripts: the build emits only external module scripts, and
 #   next-themes' anti-flash <script> is rendered as an inert
