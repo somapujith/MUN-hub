@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { and, eq, gt, isNull } from 'drizzle-orm'
+import { and, desc, eq, gt, isNull } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { emailVerificationTokens, users } from '@/lib/db/schema'
 import { getNotificationsAdapter } from '@/lib/notifications/select-adapter'
@@ -38,13 +38,36 @@ export async function sendVerificationEmail(
   const [user] = await db.select({ email: users.email, name: users.name }).from(users).where(eq(users.id, userId)).limit(1)
   if (!user) throw new Error('User not found')
 
+  const rawToken = await insertVerificationToken(db, userId, new Date())
+  await deliverVerificationEmail({ id: userId, ...user }, rawToken, appUrl, adapter)
+}
+
+/** A resend is ignored when the account got a verification link within this window… */
+export const VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000
+/** …or already got this many in the last hour. */
+export const VERIFICATION_EMAILS_PER_HOUR = 3
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+type Executor = Tx | typeof db
+
+/** Stores the hash of a new token and returns the raw token, which exists only in the email. */
+async function insertVerificationToken(executor: Executor, userId: string, now: Date): Promise<string> {
   const rawToken = crypto.randomBytes(32).toString('hex')
-  await db.insert(emailVerificationTokens).values({
+  await executor.insert(emailVerificationTokens).values({
     userId,
     tokenHash: hashToken(rawToken),
-    expiresAt: new Date(Date.now() + TOKEN_TTL_MS),
+    expiresAt: new Date(now.getTime() + TOKEN_TTL_MS),
+    createdAt: now,
   })
+  return rawToken
+}
 
+async function deliverVerificationEmail(
+  user: { id: string; email: string; name: string },
+  rawToken: string,
+  appUrl: string,
+  adapter: NotificationsAdapter,
+): Promise<void> {
   const verifyUrl = `${appUrl}/verify-email?token=${rawToken}`
 
   try {
@@ -57,31 +80,71 @@ export async function sendVerificationEmail(
         `If you didn't create this account, you can ignore this email.`,
     })
   } catch (error) {
-    console.error('[email-verification] delivery failed', { userId, error })
+    console.error('[email-verification] delivery failed', { userId: user.id, error })
   }
 }
 
 /**
- * Resend — invalidates every still-unused token for this email first
- * (deleted outright, not just left to expire) so an earlier email's link
- * stops working the moment a new one is requested, then sends a fresh one.
- * Always resolves successfully whether or not the email matches an account
- * — same no-enumeration stance requestPasswordReset already takes, and for
- * the same reason: this is reachable from a plain "enter your email" form.
+ * Resend from the public "enter your email" form. Sends nothing when the
+ * address has no account, is already verified, got a link in the last
+ * minute, or got three in the last hour — silently, so the caller can't
+ * tell these cases apart (same stance as requestPasswordReset). The HTTP
+ * layer adds per-IP and per-email request limits on top.
+ *
+ * Otherwise every still-usable earlier link is expired on the spot (kept,
+ * not deleted, so it still counts toward the hourly cap) and a fresh one is
+ * sent. The user row is locked so concurrent resends can't both pass the
+ * throttle.
  */
-export async function resendVerificationEmail(email: string, appUrl: string): Promise<void> {
-  const [user] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.email, email.trim().toLowerCase()))
-    .limit(1)
-  if (!user) return
+export async function resendVerificationEmail(
+  email: string,
+  appUrl: string,
+  adapter?: NotificationsAdapter,
+): Promise<void> {
+  const issued = await db.transaction(async (tx) => {
+    const [user] = await tx
+      .select({ id: users.id, email: users.email, name: users.name, emailVerifiedAt: users.emailVerifiedAt })
+      .from(users)
+      .where(eq(users.email, email.trim().toLowerCase()))
+      .limit(1)
+      .for('update')
+    if (!user || user.emailVerifiedAt) return null
 
-  await db
-    .delete(emailVerificationTokens)
-    .where(and(eq(emailVerificationTokens.userId, user.id), isNull(emailVerificationTokens.usedAt)))
+    const now = new Date()
+    const recent = await tx
+      .select({ createdAt: emailVerificationTokens.createdAt })
+      .from(emailVerificationTokens)
+      .where(
+        and(
+          eq(emailVerificationTokens.userId, user.id),
+          gt(emailVerificationTokens.createdAt, new Date(now.getTime() - 60 * 60 * 1000)),
+        ),
+      )
+      .orderBy(desc(emailVerificationTokens.createdAt))
 
-  await sendVerificationEmail(user.id, appUrl)
+    const coolingDown = recent[0] && now.getTime() - recent[0].createdAt.getTime() < VERIFICATION_RESEND_COOLDOWN_MS
+    if (coolingDown || recent.length >= VERIFICATION_EMAILS_PER_HOUR) {
+      console.info('[email-verification] resend throttled', { userId: user.id })
+      return null
+    }
+
+    await tx
+      .update(emailVerificationTokens)
+      .set({ expiresAt: now })
+      .where(
+        and(
+          eq(emailVerificationTokens.userId, user.id),
+          isNull(emailVerificationTokens.usedAt),
+          gt(emailVerificationTokens.expiresAt, now),
+        ),
+      )
+
+    const rawToken = await insertVerificationToken(tx, user.id, now)
+    return { user, rawToken }
+  })
+
+  if (!issued) return
+  await deliverVerificationEmail(issued.user, issued.rawToken, appUrl, adapter ?? getNotificationsAdapter())
 }
 
 /**

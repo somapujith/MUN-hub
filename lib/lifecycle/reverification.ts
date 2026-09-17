@@ -36,7 +36,31 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
  */
 const HIGH_IMPACT_FIELDS: Record<MunModule, string[]> = {
   BASIC_INFO: ['name', 'edition'],
-  DATES_VENUE: ['startDate', 'endDate', 'venue', 'city', 'country', 'registrationDeadline'],
+  // The whole public "where" block, not just venue/city. The public MUN page
+  // (marketplace.ts's PUBLIC_MUN_COLUMNS → mun-key-facts) shows the street
+  // address and links out to `mapUrl`, and DATES_VENUE's own validator
+  // requires an address — so leaving those four off this list let an
+  // organizer point paying delegates at an unreviewed location or an
+  // unreviewed link after passing review, which is exactly the switch
+  // `venue`/`city` already blocked.
+  //
+  // `registrationOpensAt` is deliberately NOT here even though
+  // `registrationDeadline` is: registration-lifecycle.ts tells an organizer
+  // whose live MUN hasn't opened yet to "move the opening date in Setup to
+  // open it sooner", and making that edit bounce the MUN back to VERIFICATION
+  // would break the one remedy the product offers them.
+  DATES_VENUE: [
+    'startDate',
+    'endDate',
+    'venue',
+    'addressLine1',
+    'addressState',
+    'postalCode',
+    'city',
+    'country',
+    'mapUrl',
+    'registrationDeadline',
+  ],
   BRANDING: [],
   COMMITTEES: ['name', 'capacity', 'agenda'],
   PORTFOLIOS: ['name', 'availability'],

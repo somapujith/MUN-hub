@@ -2,6 +2,12 @@ export interface UploadResult {
   url: string
 }
 
+/**
+ * Thrown by an upload when a deployed API has no storage binding. The API
+ * maps it to 503 (server/middleware/error.ts), and no row is written.
+ */
+export const STORAGE_UNAVAILABLE_MESSAGE = 'File uploads are temporarily unavailable. Please try again later.'
+
 /** What every real adapter records next to the bytes (KV metadata, R2 customMetadata, local sidecar). */
 export interface StoredObjectMetadata {
   contentType: string

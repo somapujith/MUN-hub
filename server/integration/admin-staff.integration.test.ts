@@ -143,11 +143,35 @@ describe('staff writes', () => {
     expect(notStaff.status).toBe(404)
   })
 
+  // The MFA reset lives in staff-mfa.ts but is a staff write like any other:
+  // clearing your own MFA here would sidestep the code /auth/mfa/disable asks
+  // for, and an arbitrary id would answer 204 for students or unknown users.
+  it('the MFA reset refuses your own account (409), a non-staff target and an unknown id (404)', async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    const student = await makeUser('STUDENT')
+    const target = await makeUser('ADMIN')
+
+    const self = await call(superAdmin.id, 'POST', `/admin/staff/${superAdmin.id}/mfa/reset`)
+    expect(self.status).toBe(409)
+
+    const notStaff = await call(superAdmin.id, 'POST', `/admin/staff/${student.id}/mfa/reset`)
+    expect(notStaff.status).toBe(404)
+
+    const unknown = await call(superAdmin.id, 'POST', `/admin/staff/${crypto.randomUUID()}/mfa/reset`)
+    expect(unknown.status).toBe(404)
+
+    expect(await db.select().from(adminActions).where(eq(adminActions.targetId, student.id))).toEqual([])
+
+    const ok = await call(superAdmin.id, 'POST', `/admin/staff/${target.id}/mfa/reset`)
+    expect(ok.status).toBe(204)
+  })
+
   it.each([
     ['PATCH', 'role', { role: 'SUPER_ADMIN' }],
     ['POST', 'suspend', { reason: 'x' }],
     ['POST', 'reinstate', undefined],
     ['POST', 'set-password-link', undefined],
+    ['POST', 'mfa/reset', undefined],
   ] as const)('refuses ADMIN on %s /%s with 403', async (method, action, body) => {
     const admin = await makeUser('ADMIN')
     const target = await makeUser('OPERATIONS')

@@ -30,6 +30,31 @@ describe('submitOrganizerApplication', () => {
     expect(owned).toHaveLength(1)
   })
 
+  // `organizer_applications` has no unique constraint left to fall back on
+  // (migration 0030 dropped the organizer_id one), so the "one pending
+  // application" rule is only as strong as the row lock the check runs under.
+  it('lets exactly one of several simultaneous submissions through', async () => {
+    const organizer = await makeOrganizer()
+
+    const settled = await Promise.allSettled(
+      Array.from({ length: 5 }, (_, i) => submitOrganizerApplication(inputFor(organizer.id, `Race MUN ${i}`))),
+    )
+
+    const fulfilled = settled.filter((r) => r.status === 'fulfilled')
+    expect(fulfilled).toHaveLength(1)
+    for (const result of settled.filter((r) => r.status === 'rejected')) {
+      expect((result as PromiseRejectedResult).reason).toMatchObject({ message: APPLICATION_PENDING })
+    }
+
+    const applications = await db
+      .select({ id: organizerApplications.id })
+      .from(organizerApplications)
+      .where(eq(organizerApplications.organizerId, organizer.id))
+    expect(applications).toHaveLength(1)
+    const owned = await db.select({ id: muns.id }).from(muns).where(eq(muns.organizerId, organizer.id))
+    expect(owned).toHaveLength(1)
+  })
+
   it('lets an organizer apply for another MUN once the earlier application is reviewed', async () => {
     const organizer = await makeOrganizer()
     const first = await submitOrganizerApplication(inputFor(organizer.id, 'First MUN'))

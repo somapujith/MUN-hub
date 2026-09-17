@@ -3,8 +3,8 @@ import type { StorageAdapter, StoredObject, UploadResult } from './adapter'
 /**
  * Test-only adapter: returns a placeholder URL and discards the bytes, so
  * `get` always returns null. selectStorageAdapter() falls back to it when no
- * binding is present and STORAGE_ADAPTER is not `local` (logging an error if
- * that happens in production).
+ * binding is present and STORAGE_ADAPTER is not `local`, but never in
+ * production, where uploads are refused instead.
  */
 export const mockStorageAdapter: StorageAdapter = {
   async upload(_file: Buffer, key: string, _contentType: string): Promise<UploadResult> {

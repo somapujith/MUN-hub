@@ -6,6 +6,7 @@ import type { Session } from '@/lib/auth/adapter'
 import {
   createMunFaq,
   deleteMunFaq,
+  FAQ_DISPLAY_ORDER_MAX,
   FAQ_QUESTION_MAX_LENGTH,
   listMunFaqsForOrganizer,
   listPublicMunFaqs,
@@ -92,6 +93,32 @@ describe('mun-faq actions', () => {
     await expect(
       createMunFaq(publishedMunId, { question: 'x'.repeat(FAQ_QUESTION_MAX_LENGTH + 1), answer: 'A' }, ownerSession),
     ).rejects.toThrow(/at most/)
+  })
+
+  // display_order is a Postgres integer and createMunFaq appends with
+  // `max(display_order) + 1` — an out-of-range value used to 500 on insert,
+  // and one stored near the ceiling would break every later append.
+  it('refuses a displayOrder outside the supported range, on create and on update', async () => {
+    const tooBig = FAQ_DISPLAY_ORDER_MAX + 1
+    await expect(
+      createMunFaq(publishedMunId, { question: 'Q', answer: 'A', displayOrder: tooBig }, ownerSession),
+    ).rejects.toThrow(`Display order must be a whole number from 0 to ${FAQ_DISPLAY_ORDER_MAX}`)
+    await expect(
+      createMunFaq(publishedMunId, { question: 'Q', answer: 'A', displayOrder: 3_000_000_000 }, ownerSession),
+    ).rejects.toThrow(/Display order/)
+    await expect(
+      createMunFaq(publishedMunId, { question: 'Q', answer: 'A', displayOrder: -1 }, ownerSession),
+    ).rejects.toThrow(/Display order/)
+
+    const faq = await createMunFaq(publishedMunId, { question: 'In range?', answer: 'Yes.' }, ownerSession)
+    await expect(updateMunFaq(faq.id, { displayOrder: tooBig }, ownerSession)).rejects.toThrow(/Display order/)
+    await expect(updateMunFaq(faq.id, { displayOrder: 1.5 }, ownerSession)).rejects.toThrow(/Display order/)
+
+    // The bound itself is still usable, and a later append still works.
+    const pinned = await updateMunFaq(faq.id, { displayOrder: FAQ_DISPLAY_ORDER_MAX }, ownerSession)
+    expect(pinned.displayOrder).toBe(FAQ_DISPLAY_ORDER_MAX)
+    const appended = await createMunFaq(publishedMunId, { question: 'After?', answer: 'Yes.' }, ownerSession)
+    expect(appended.displayOrder).toBe(FAQ_DISPLAY_ORDER_MAX + 1)
   })
 
   it('updates only the fields given and bumps updatedAt', async () => {

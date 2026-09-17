@@ -16,6 +16,15 @@ import { assertMunPubliclyVisible } from './marketplace'
 export const FAQ_QUESTION_MAX_LENGTH = 300
 export const FAQ_ANSWER_MAX_LENGTH = 4000
 
+/**
+ * `mun_faqs.display_order` is a Postgres `integer`, and `createMunFaq`
+ * appends with `max(display_order) + 1`, so an unbounded value both fails the
+ * insert with a raw "integer out of range" 500 and — once stored near
+ * 2147483647 — would break every later append for that mun. Far above any
+ * real FAQ list, far below the column's ceiling.
+ */
+export const FAQ_DISPLAY_ORDER_MAX = 100_000
+
 export interface MunFaq {
   id: string
   munId: string
@@ -57,6 +66,14 @@ function cleanText(value: string, label: string, maxLength: number): string {
   return trimmed
 }
 
+/** Bounds `displayOrder` for direct lib callers; the API schema applies the same bound up front. */
+function cleanDisplayOrder(value: number): number {
+  if (!Number.isInteger(value) || value < 0 || value > FAQ_DISPLAY_ORDER_MAX) {
+    throw new Error(`Display order must be a whole number from 0 to ${FAQ_DISPLAY_ORDER_MAX}`)
+  }
+  return value
+}
+
 /** Internal read (no visibility check) — prefer listPublicMunFaqs / listMunFaqsForOrganizer. */
 export async function listMunFaqs(munId: string): Promise<MunFaq[]> {
   return orderedFaqs(munId)
@@ -92,7 +109,7 @@ export async function createMunFaq(munId: string, input: MunFaqInput, session: S
   const question = cleanText(input.question, 'Question', FAQ_QUESTION_MAX_LENGTH)
   const answer = cleanText(input.answer, 'Answer', FAQ_ANSWER_MAX_LENGTH)
 
-  let displayOrder = input.displayOrder
+  let displayOrder = input.displayOrder === undefined ? undefined : cleanDisplayOrder(input.displayOrder)
   if (displayOrder === undefined) {
     const [{ next }] = await db
       .select({ next: sql<number>`coalesce(max(${munFaqs.displayOrder}) + 1, 0)::int` })
@@ -127,7 +144,7 @@ export async function updateMunFaq(
     values.answer = cleanText(input.answer, 'Answer', FAQ_ANSWER_MAX_LENGTH)
   }
   if (input.displayOrder !== undefined) {
-    values.displayOrder = input.displayOrder
+    values.displayOrder = cleanDisplayOrder(input.displayOrder)
   }
 
   const [updated] = await db

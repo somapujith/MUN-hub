@@ -61,7 +61,9 @@
     { "name": "RL_SUPPORT_MESSAGE_USER", "namespace_id": "1018", "simple": { "limit": 30, "period": 60 } },
     { "name": "RL_ACCOUNT_DELETE_USER", "namespace_id": "1019", "simple": { "limit": 5, "period": 60 } },
     { "name": "RL_MFA_MANAGE_USER", "namespace_id": "1020", "simple": { "limit": 5, "period": 60 } },
-    { "name": "RL_FILES_IP", "namespace_id": "1021", "simple": { "limit": 600, "period": 60 } }
+    { "name": "RL_FILES_IP", "namespace_id": "1021", "simple": { "limit": 600, "period": 60 } },
+    { "name": "RL_VERIFY_RESEND_IP", "namespace_id": "1022", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_VERIFY_RESEND_EMAIL", "namespace_id": "1023", "simple": { "limit": 3, "period": 60 } }
   ],
   // Hyperdrive config "munhub-db", created 2026-09-17 against the production
   // Neon instance. Pools/terminates Postgres connections at Cloudflare's edge
@@ -78,8 +80,8 @@
   // lib/storage/select-adapter.ts. R2 is not enabled on the account yet, so
   // uploads go to Workers KV. The namespace doesn't exist yet (the deploy
   // token can't create KV namespaces — docs/autonomous-run/USER_ACTIONS.md),
-  // so the binding is commented out and production keeps the mock store,
-  // which logs an error on every upload. To enable real uploads:
+  // so the binding is commented out and production refuses uploads (503,
+  // nothing is written, and an error is logged). To enable real uploads:
   //   npx wrangler kv namespace create munhub-uploads
   // then uncomment this block with the printed id and redeploy.
   // "kv_namespaces": [
@@ -163,7 +165,9 @@
         { "name": "RL_SUPPORT_MESSAGE_USER", "namespace_id": "2018", "simple": { "limit": 30, "period": 60 } },
         { "name": "RL_ACCOUNT_DELETE_USER", "namespace_id": "2019", "simple": { "limit": 5, "period": 60 } },
         { "name": "RL_MFA_MANAGE_USER", "namespace_id": "2020", "simple": { "limit": 5, "period": 60 } },
-        { "name": "RL_FILES_IP", "namespace_id": "2021", "simple": { "limit": 600, "period": 60 } }
+        { "name": "RL_FILES_IP", "namespace_id": "2021", "simple": { "limit": 600, "period": 60 } },
+        { "name": "RL_VERIFY_RESEND_IP", "namespace_id": "2022", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_VERIFY_RESEND_EMAIL", "namespace_id": "2023", "simple": { "limit": 3, "period": 60 } }
       ],
       "hyperdrive": [
         {

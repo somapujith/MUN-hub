@@ -10,7 +10,7 @@ import { createSession } from '@/lib/auth/session'
 import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
 import { getRuntimeEnv } from '@/lib/runtime-env'
-import { STAFF_ROLES } from './admin-staff'
+import { lockStaffTarget, lockSuperAdmins, STAFF_ERRORS, STAFF_ROLES } from './admin-staff'
 import type { Session } from '@/lib/auth/adapter'
 import type { Role } from '@/lib/db/schema-enums'
 
@@ -319,17 +319,38 @@ export async function disableMfa(code: string, session: Session): Promise<void> 
 }
 
 /**
- * SUPER_ADMIN-only: clears a staff member's TOTP enrollment and recovery
- * codes (e.g. a lost device) so they can re-enroll from scratch. Audit-logged
- * as STAFF_MFA_RESET (with the same name in `metadata.event`, like
- * admin-staff.ts's writes).
+ * SUPER_ADMIN-only: clears another staff member's TOTP enrollment, recovery
+ * codes and any open sign-in challenge (e.g. a lost device) so they can
+ * re-enroll from scratch. Audit-logged as STAFF_MFA_RESET (with the same
+ * name in `metadata.event`, like admin-staff.ts's writes).
+ *
+ * Takes the same three guards every other staff write in admin-staff.ts
+ * takes, and for the same reasons:
+ *  - refuses the actor's own account, so this never becomes a second,
+ *    code-free route to `disableMfa` (which exists precisely to make a
+ *    stolen session cookie insufficient to take the safety net down);
+ *  - `lockSuperAdmins` re-checks, under a row lock, that the caller is still
+ *    an active SUPER_ADMIN at commit time;
+ *  - `lockStaffTarget` makes an unknown or non-staff id answer
+ *    `Staff member not found` (404) instead of succeeding and writing a
+ *    misleading audit row for a student, organizer or nonexistent user.
  */
 export async function resetStaffMfa(targetUserId: string, session: Session): Promise<void> {
   requireRole(session, ['SUPER_ADMIN'])
+  if (targetUserId === session.userId) throw new Error(STAFF_ERRORS.self)
 
   await db.transaction(async (tx) => {
+    await lockSuperAdmins(tx, session.userId)
+    await lockStaffTarget(tx, targetUserId)
+
     await tx.delete(userMfa).where(eq(userMfa.userId, targetUserId))
     await tx.delete(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, targetUserId))
+    // An unconsumed challenge outlives the secret it was minted against, so
+    // drop it too rather than leave a five-minute window open.
+    await tx
+      .delete(mfaPendingChallenges)
+      .where(and(eq(mfaPendingChallenges.userId, targetUserId), isNull(mfaPendingChallenges.consumedAt)))
+
     await recordAdminAction(tx, session.userId, 'STAFF_MFA_RESET', 'user', targetUserId, undefined, {
       event: 'STAFF_MFA_RESET',
     })
