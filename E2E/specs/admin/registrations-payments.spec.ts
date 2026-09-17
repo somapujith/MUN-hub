@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
+import postgres from 'postgres'
+import { DATABASE_URL, assertLocalDatabase } from '../../env'
 import { getMun, signUpViaApi, type ApiSession } from '../../fixtures/api'
 import { OPEN } from '../../fixtures/fixture-muns'
 import { watchForCrashes } from '../../fixtures/ui'
@@ -28,6 +30,17 @@ async function registeredDelegate(outcome?: 'success' | 'failure') {
     expect(pay.ok(), await pay.text()).toBeTruthy()
   }
   return { delegate, name, registrationId }
+}
+
+/** Releases a registration's seat hold the way the expiry sweep would. */
+async function releaseSeatHold(registrationId: string) {
+  assertLocalDatabase()
+  const sql = postgres(DATABASE_URL, { max: 1, prepare: false, onnotice: () => {} })
+  try {
+    await sql`update registrations set status = 'CANCELLED', updated_at = now() where id = ${registrationId}`
+  } finally {
+    await sql.end()
+  }
 }
 
 async function searchRegistrations(page: Page, q: string) {
@@ -110,21 +123,41 @@ test.describe('admin payments', () => {
     crashes.assertNone()
   })
 
-  test('a failed payment is listed as a "Payment failed" exception', async ({ page }) => {
+  test('a failed payment releases the seat but is not an exception (no money was taken)', async ({ page }) => {
     const { name, registrationId } = await registeredDelegate('failure')
+    await page.goto('/admin/payments')
+    await expect(heading(page, 'Payments')).toBeVisible()
+    await expect(main(page).getByRole('table').or(main(page).getByText('No payment exceptions'))).toBeVisible()
+    await expect(tableRow(page, registrationId)).toHaveCount(0)
+
+    await searchRegistrations(page, registrationId)
+    const registration = tableRow(page, name)
+    await expect(registration).toContainText('Cancelled')
+    await expect(registration).toContainText('Payment failed')
+  })
+
+  test('a payment after the seat hold lapsed is an exception an admin resolves with a note', async ({ page }) => {
+    const { delegate, name, registrationId } = await registeredDelegate()
+    // The hold lapsing takes 15 minutes; release it directly instead.
+    await releaseSeatHold(registrationId)
+    const pay = await delegate.api.post(`registrations/${registrationId}/mock-payment`, { data: { outcome: 'success' } })
+    expect(await pay.json()).toEqual({ ok: true, exception: true })
+
     await page.goto('/admin/payments')
     const row = tableRow(page, registrationId)
     await expect(row).toHaveCount(1)
     await expect(row).toContainText(name)
     await expect(row).toContainText(OPEN.name)
     await expect(row).toContainText('₹1,499')
-    await expect(row).toContainText('Payment failed')
+    await expect(row).toContainText('Paid after hold expired')
 
-    // …and the registration itself shows the released seat.
-    await searchRegistrations(page, registrationId)
-    const registration = tableRow(page, name)
-    await expect(registration).toContainText('Cancelled')
-    await expect(registration).toContainText('Payment failed')
+    await row.getByRole('button', { name: /resolve/i }).click()
+    const dialog = page.getByRole('dialog', { name: 'Resolve payment exception' })
+    await expect(dialog.getByRole('button', { name: 'Mark resolved' })).toBeDisabled()
+    await dialog.getByLabel('Resolution note').fill('Returned to the original payment method (E2E)')
+    await dialog.getByRole('button', { name: 'Mark resolved' }).click()
+    await expect(dialog).toBeHidden()
+    await expect(tableRow(page, registrationId)).toHaveCount(0)
   })
 
   test('a successfully paid, confirmed registration is not an exception', async ({ page }) => {

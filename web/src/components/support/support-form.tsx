@@ -10,10 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { SupportCategory } from "@/types";
 
+// No "Refund" choice: all payments are final (/legal/refunds). Payment
+// errors go under "Payment". The REFUND enum value stays for old tickets.
 const CATEGORIES: { value: SupportCategory; label: string }[] = [
   { value: "REGISTRATION", label: "Registration" },
   { value: "PAYMENT", label: "Payment" },
-  { value: "REFUND", label: "Refund" },
   { value: "MUN_INFO", label: "MUN info" },
   { value: "ACCOUNT", label: "Account" },
   { value: "CERTIFICATE", label: "Certificate" },

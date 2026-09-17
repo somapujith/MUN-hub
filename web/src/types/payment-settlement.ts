@@ -27,10 +27,19 @@ export interface MaskedPaymentSettings {
   accountType: string;
   gateway: string;
   currency: string;
-  refundPolicy: string | null;
   settlementNotes: string | null;
   verificationState: PaymentVerificationState;
   verifiedAt: string | null;
+}
+
+/** Mirrors lib/actions/payment-settlement.ts#MunPaymentsSummary (one per currency). */
+export interface MunPaymentsSummary {
+  currency: string;
+  grossCollected: number;
+  platformFee: number;
+  platformFeeTax: number;
+  organizerNet: number;
+  paidRegistrations: number;
 }
 
 /**
@@ -57,6 +66,5 @@ export interface UpsertPaymentSettingsInput {
   accountType: string;
   gateway: string;
   currency?: string;
-  refundPolicy?: string | null;
   settlementNotes?: string | null;
 }

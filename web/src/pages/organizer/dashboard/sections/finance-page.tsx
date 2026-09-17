@@ -4,7 +4,7 @@ import { Helmet } from "react-helmet-async";
 import { CircleCheck, CircleDashed, ShieldAlert, TriangleAlert } from "lucide-react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
-import { getPaymentSettings, upsertPaymentSettings } from "@/api/payment-settlement";
+import { getPaymentSettings, getPaymentsSummary, upsertPaymentSettings } from "@/api/payment-settlement";
 import { queryKeys } from "@/api/query-keys";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
-import type { MaskedPaymentSettings, PaymentVerificationState } from "@/types/payment-settlement";
+import type {
+  MaskedPaymentSettings,
+  MunPaymentsSummary,
+  PaymentVerificationState,
+} from "@/types/payment-settlement";
 
 const ORG_TYPE_OPTIONS = [
   "Individual",
@@ -57,7 +61,6 @@ interface PaymentFormState {
   accountType: string;
   gateway: string;
   currency: string;
-  refundPolicy: string;
   settlementNotes: string;
 }
 
@@ -80,7 +83,6 @@ const EMPTY_FORM: PaymentFormState = {
   accountType: ACCOUNT_TYPE_OPTIONS[0],
   gateway: "Razorpay",
   currency: "INR",
-  refundPolicy: "",
   settlementNotes: "",
 };
 
@@ -107,7 +109,6 @@ function toForm(settings: MaskedPaymentSettings): PaymentFormState {
     accountType: settings.accountType,
     gateway: settings.gateway,
     currency: settings.currency,
-    refundPolicy: settings.refundPolicy ?? "",
     settlementNotes: settings.settlementNotes ?? "",
   };
 }
@@ -129,6 +130,69 @@ const REQUIRED_FIELDS: Array<[keyof PaymentFormState, string]> = [
   ["accountType", "Account type"],
   ["gateway", "Gateway"],
 ];
+
+function formatMoney(amount: number, currency: string): string {
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
+}
+
+/**
+ * What delegates have paid for this MUN and how it splits: the platform fee
+ * and GST on it are included in each ticket price, the rest is the
+ * organizer's. Counts only paid registrations that still stand.
+ */
+function PaymentsSummaryCard({ munId }: { munId: string }) {
+  const summaryQuery = useQuery({
+    queryKey: queryKeys.paymentsSummary(munId),
+    queryFn: () => getPaymentsSummary(munId),
+    enabled: Boolean(munId),
+  });
+  const totals: MunPaymentsSummary[] =
+    summaryQuery.data && summaryQuery.data.length > 0
+      ? summaryQuery.data
+      : [
+          {
+            currency: "INR",
+            grossCollected: 0,
+            platformFee: 0,
+            platformFeeTax: 0,
+            organizerNet: 0,
+            paidRegistrations: 0,
+          },
+        ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Payments summary</CardTitle>
+        <p className="text-body-md text-muted-foreground">
+          From confirmed, paid registrations. MUN Hub&apos;s platform fee and the GST on it are included in each
+          ticket price; the rest is yours.
+        </p>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-md">
+        {summaryQuery.isLoading && <p className="text-body-md text-muted-foreground">Loading payments...</p>}
+        {summaryQuery.isError && <p className="text-body-md text-destructive">{summaryQuery.error.message}</p>}
+        {summaryQuery.isSuccess &&
+          totals.map((summary) => (
+            <dl key={summary.currency} className="grid grid-cols-2 gap-sm lg:grid-cols-5">
+              {[
+                { label: "Gross collected", value: formatMoney(summary.grossCollected, summary.currency) },
+                { label: "Platform fee", value: formatMoney(summary.platformFee, summary.currency) },
+                { label: "GST on fee", value: formatMoney(summary.platformFeeTax, summary.currency) },
+                { label: "Your net", value: formatMoney(summary.organizerNet, summary.currency) },
+                { label: "Paid registrations", value: summary.paidRegistrations.toLocaleString("en-IN") },
+              ].map((stat) => (
+                <div key={stat.label} className="rounded-md border border-border bg-card p-md">
+                  <dt className="text-body-md text-muted-foreground">{stat.label}</dt>
+                  <dd className="font-display text-title-lg tabular-nums text-ink">{stat.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ))}
+      </CardContent>
+    </Card>
+  );
+}
 
 export function OrganizerFinancePage() {
   const { munId = "" } = useParams();
@@ -168,7 +232,6 @@ export function OrganizerFinancePage() {
         accountType: form.accountType.trim(),
         gateway: form.gateway.trim(),
         currency: form.currency.trim() || undefined,
-        refundPolicy: form.refundPolicy.trim() || null,
         settlementNotes: form.settlementNotes.trim() || null,
       }),
     onSuccess: (settings) => {
@@ -201,6 +264,8 @@ export function OrganizerFinancePage() {
         description="Payments collected, platform fees, and settlement settings."
       >
         <div className="flex flex-col gap-lg">
+          <PaymentsSummaryCard munId={munId} />
+
           {settingsQuery.isLoading && (
             <p className="text-body-md text-muted-foreground">Loading settlement settings...</p>
           )}
@@ -427,7 +492,7 @@ export function OrganizerFinancePage() {
 
                 <fieldset className="flex flex-col gap-md">
                   <legend className="font-display text-body-md font-medium text-ink">
-                    Gateway &amp; policies
+                    Gateway &amp; notes
                   </legend>
                   <div className="grid gap-md sm:grid-cols-2">
                     <div className="flex flex-col gap-xs">
@@ -445,15 +510,6 @@ export function OrganizerFinancePage() {
                         id="pay-currency"
                         value={form.currency}
                         onChange={(event) => setForm({ ...form, currency: event.target.value })}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-xs sm:col-span-2">
-                      <Label htmlFor="pay-refund-policy">Refund policy (optional)</Label>
-                      <textarea
-                        id="pay-refund-policy"
-                        className="min-h-24 rounded-sm border border-input bg-background px-md py-sm text-body-md text-ink outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
-                        value={form.refundPolicy}
-                        onChange={(event) => setForm({ ...form, refundPolicy: event.target.value })}
                       />
                     </div>
                     <div className="flex flex-col gap-xs sm:col-span-2">
