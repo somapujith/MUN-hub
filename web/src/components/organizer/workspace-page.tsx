@@ -19,7 +19,9 @@ export function WorkspacePage({
   return (
     <div
       className={cn(
-        "flex w-full max-w-[86rem] flex-1 flex-col gap-lg px-md py-lg sm:px-lg xl:px-xl xl:py-xl",
+        // Bottom padding clears the floating support button, so it never
+        // covers a page's last action (e.g. a form's Save button).
+        "flex w-full max-w-[86rem] flex-1 flex-col gap-lg px-md pt-lg pb-24 sm:px-lg xl:px-xl xl:pt-xl",
         className,
       )}
     >

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2Icon, ChevronDownIcon, CircleAlertIcon, CircleIcon, SendIcon } from "lucide-react";
+import { CheckCircle2Icon, ChevronDownIcon, CircleAlertIcon, CircleIcon, InfoIcon, SendIcon } from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { confirmModule } from "@/api/module-verification";
@@ -96,18 +96,22 @@ function ChecklistRow({
   onSend: () => void;
 }) {
   const failing = module.checks.filter((check) => !check.passed);
+  // Only BLOCKER checks stop a submission; the rest (e.g. payment
+  // verification, which MUN Hub does) are shown as notes, not to-dos.
+  const toFix = failing.filter((check) => check.severity === "BLOCKER");
   const [open, setOpen] = useState(false);
   const segment = MODULE_SECTION[module.key as MunModule];
   const section = segment ? getMunNavSection(segment) : undefined;
-  const complete = module.completionStatus === "COMPLETE" || (module.completionStatus === "LOCKED" && failing.length === 0);
+  const complete = module.completionStatus === "COMPLETE" || (module.completionStatus === "LOCKED" && toFix.length === 0);
   const checksId = `checks-${module.key}`;
+  const total = module.checks.length;
 
   return (
     <li className="flex flex-col gap-xs py-sm" data-testid={`module-${module.key}`}>
       <div className="flex flex-wrap items-center gap-xs">
         {complete ? (
           <CheckCircle2Icon className="size-4 shrink-0 text-success-text" aria-hidden />
-        ) : failing.length > 0 ? (
+        ) : toFix.length > 0 ? (
           <CircleAlertIcon className="size-4 shrink-0 text-warning-text" aria-hidden />
         ) : (
           <CircleIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -125,12 +129,12 @@ function ChecklistRow({
       </div>
 
       <div className="flex flex-wrap items-center gap-sm pl-6">
-        {failing.length > 0 && (
+        {toFix.length > 0 && (
           <span className="text-caption text-warning-text">
-            {failing.length} of {module.checks.length} checks need attention
+            {toFix.length === 1 ? "1 thing to fix" : `${toFix.length} things to fix`}
           </span>
         )}
-        {module.checks.length > 0 && (
+        {total > 0 && (
           <button
             type="button"
             className="inline-flex items-center gap-xxs text-caption font-medium text-body hover:text-ink"
@@ -139,7 +143,7 @@ function ChecklistRow({
             onClick={() => setOpen((value) => !value)}
           >
             <ChevronDownIcon className={"size-3.5 transition-transform " + (open ? "rotate-180" : "")} aria-hidden />
-            {open ? "Hide passed checks" : `Show all ${module.checks.length} checks`}
+            {open ? "Hide checks" : total === 1 ? "Show the check" : `Show all ${total} checks`}
           </button>
         )}
         {section && segment !== "setup" && (
@@ -153,30 +157,33 @@ function ChecklistRow({
         {canSendModuleForReview(module) && (
           <Button size="xs" variant="outline" disabled={sending} onClick={onSend} className="ml-auto">
             <SendIcon aria-hidden />
-            {sending
-              ? "Sending..."
-              : module.verificationState === "CHANGES_REQUESTED"
-                ? `Send ${module.label} back for review`
-                : `Send ${module.label} for review`}
+            {sending ? "Sending..." : `Send ${module.label} back for review`}
           </Button>
         )}
       </div>
 
       {(open || failing.length > 0) && (
         <ul id={checksId} className="flex flex-col gap-xxs pl-6">
-          {(open ? module.checks : failing).map((check) => (
-            <li key={check.key} className="flex items-start gap-xs text-caption">
-              {check.passed ? (
-                <CheckCircle2Icon className="mt-px size-3.5 shrink-0 text-success-text" aria-hidden />
-              ) : (
-                <CircleAlertIcon className="mt-px size-3.5 shrink-0 text-warning-text" aria-hidden />
-              )}
-              <span className={check.passed ? "text-muted-foreground" : "text-body"}>
-                <span className="sr-only">{check.passed ? "Passed: " : "Needs attention: "}</span>
-                {check.passed ? check.label : (check.message ?? check.label)}
-              </span>
-            </li>
-          ))}
+          {(open ? module.checks : failing).map((check) => {
+            const blocking = check.severity === "BLOCKER";
+            return (
+              <li key={check.key} className="flex items-start gap-xs text-caption">
+                {check.passed ? (
+                  <CheckCircle2Icon className="mt-px size-3.5 shrink-0 text-success-text" aria-hidden />
+                ) : blocking ? (
+                  <CircleAlertIcon className="mt-px size-3.5 shrink-0 text-warning-text" aria-hidden />
+                ) : (
+                  <InfoIcon className="mt-px size-3.5 shrink-0 text-info-text" aria-hidden />
+                )}
+                <span className={check.passed ? "text-muted-foreground" : "text-body"}>
+                  <span className="sr-only">
+                    {check.passed ? "Passed: " : blocking ? "To fix: " : "Note: "}
+                  </span>
+                  {check.passed ? check.label : (check.message ?? check.label)}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </li>

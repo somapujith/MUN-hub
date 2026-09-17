@@ -79,15 +79,26 @@ function stepsDone(row: ProfileRow | undefined): OnboardingStep[] {
   return done
 }
 
-function toOnboarding(row: ProfileRow | undefined, fallbackName: string | null): OrganizerOnboarding {
+/** A signup phone in the wizard's 10-digit form, or null if it isn't one. */
+function signupPhone(phone: string | null | undefined): string | null {
+  const digits = (phone ?? '').replace(/[\s-]/g, '').replace(/^\+?91(?=\d{10}$)/, '')
+  return PHONE_PATTERN.test(digits) ? digits : null
+}
+
+function toOnboarding(
+  row: ProfileRow | undefined,
+  fallbackName: string | null,
+  fallbackPhone: string | null = null,
+): OrganizerOnboarding {
   const completedSteps = stepsDone(row)
-  // Pre-fill the name step from the name given at signup.
+  // Pre-fill the name and phone from what was given at signup.
   const [first, ...rest] = (fallbackName ?? '').trim().split(/\s+/)
+  const contactPhone = row?.contactPhone ?? signupPhone(fallbackPhone)
   return {
     profile: {
       firstName: row?.firstName ?? (first || null),
       lastName: row?.lastName ?? (rest.join(' ') || null),
-      contactPhone: row?.contactPhone ?? null,
+      contactPhone,
       munName: row?.munName ?? null,
       munCity: row?.munCity ?? null,
       munStartDate: row?.munStartDate ? row.munStartDate.toISOString().slice(0, 10) : null,
@@ -96,7 +107,8 @@ function toOnboarding(row: ProfileRow | undefined, fallbackName: string | null):
       previousEditions: row?.previousEditions ?? null,
       websiteUrl: row?.websiteUrl ?? null,
       upiId: row?.upiId ?? null,
-      upiPhone: row?.upiPhone ?? null,
+      // Most organizers take payouts on the number they gave us.
+      upiPhone: row?.upiPhone ?? contactPhone ?? null,
     },
     completedSteps,
     nextStep: ONBOARDING_STEPS.find((step) => !completedSteps.includes(step)) ?? null,
@@ -113,8 +125,12 @@ async function loadRow(userId: string): Promise<ProfileRow | undefined> {
 
 export async function getOrganizerOnboarding(session: Session | null): Promise<OrganizerOnboarding> {
   assertOrganizer(session)
-  const [user] = await db.select({ name: users.name }).from(users).where(eq(users.id, session.userId)).limit(1)
-  return toOnboarding(await loadRow(session.userId), user?.name ?? null)
+  const [user] = await db
+    .select({ name: users.name, phone: users.phone })
+    .from(users)
+    .where(eq(users.id, session.userId))
+    .limit(1)
+  return toOnboarding(await loadRow(session.userId), user?.name ?? null, user?.phone ?? null)
 }
 
 /** Whether `userId` has finished onboarding — the gate on applying to host. */

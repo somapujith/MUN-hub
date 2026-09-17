@@ -7,6 +7,7 @@ import {
   publishFromQueue,
   reviewSubmission,
   submitMunForReview,
+  withdrawSubmission,
 } from '@/lib/lifecycle/go-live'
 import type { AppVariables } from '../src/types'
 
@@ -48,6 +49,11 @@ export const goLiveRoutes = new Hono<{ Variables: AppVariables }>()
     // Validation failure is HTTP 200 with {passed:false, blockers} — NOT 4xx.
     const result = await submitMunForReview(munId, session)
     return c.json(result, 200)
+  })
+  // "Make changes first": step back from Gate 3 to edit before confirming.
+  .post('/muns/:munId/actions/withdraw-submission', async (c) => {
+    await withdrawSubmission(c.req.param('munId'), c.get('session'))
+    return c.body(null, 204)
   })
   .post('/muns/:munId/submission/actions/review', zValidator('json', reviewBodySchema), async (c) => {
     const munId = c.req.param('munId')

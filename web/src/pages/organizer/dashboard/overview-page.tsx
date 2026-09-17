@@ -9,6 +9,81 @@ import { formatDateRange } from "@/components/shared/date-range";
 import { munSectionHref } from "@/lib/organizer/nav-config";
 import { queryKeys } from "@/api/query-keys";
 import { getOrganizerWorkspaceOverview } from "@/api/organizer-dashboard";
+import type { WorkspaceMun } from "@/types/organizer";
+
+interface NextStep {
+  text: string;
+  cta: string;
+  href: string;
+  /** The organizer has something to do. */
+  primary: boolean;
+}
+
+/** What each MUN is waiting for, in the organizer's words, and where to go next. */
+function nextStep(mun: WorkspaceMun): NextStep {
+  const section = (segment: string) => munSectionHref(mun.id, segment);
+  switch (mun.status) {
+    case "DRAFT":
+    case "SUBMITTED":
+    case "UNDER_REVIEW":
+      return {
+        text: "MUN Hub is reviewing your application. We'll email you within 2 business days.",
+        cta: "View application",
+        href: "/organizer/apply",
+        primary: false,
+      };
+    case "CHANGES_REQUESTED":
+      return {
+        text: "MUN Hub asked for changes to your application.",
+        cta: "See what to change",
+        href: "/organizer/apply",
+        primary: true,
+      };
+    case "REJECTED":
+      return { text: "This application wasn't approved.", cta: "View application", href: "/organizer/apply", primary: false };
+    case "APPROVED":
+    case "ONBOARDING":
+    case "ACTION_REQUIRED":
+    case "READY_FOR_SUBMISSION":
+      return {
+        text: "Approved. Set up your MUN, then submit it for review.",
+        cta: "Continue setup",
+        href: section("setup"),
+        primary: true,
+      };
+    case "CONTENT_SUBMITTED":
+    case "AUTOMATED_VALIDATION":
+    case "ORGANIZER_CONFIRMATION":
+      return {
+        text: "Your MUN passed the checks. Confirm your submission to send it to MUN Hub.",
+        cta: "Confirm submission",
+        href: section("setup"),
+        primary: true,
+      };
+    case "VERIFICATION":
+      return {
+        text: "MUN Hub is reviewing your MUN and will email you the result.",
+        cta: "Review status",
+        href: section("setup"),
+        primary: false,
+      };
+    case "VERIFIED":
+    case "GO_LIVE_QUEUE":
+    case "PUBLISHING":
+      return { text: "Approved. MUN Hub will publish it shortly.", cta: "Manage", href: section("setup"), primary: false };
+    case "PUBLISHED":
+      return {
+        text: "Live on MUN Hub. Open registration when you're ready.",
+        cta: "Registration settings",
+        href: section("settings"),
+        primary: true,
+      };
+    case "REGISTRATION_OPEN":
+      return { text: "Registration is open.", cta: "View registrations", href: section("registrations"), primary: false };
+    default:
+      return { text: "", cta: "Manage", href: section("setup"), primary: false };
+  }
+}
 
 export function OrganizerOverviewPage() {
   const workspaceQuery = useQuery({
@@ -75,26 +150,36 @@ export function OrganizerOverviewPage() {
                 </div>
               ) : (
                 <ul className="flex flex-col gap-sm">
-                  {munSummaries.map((mun) => (
-                    <li
-                      key={mun.id}
-                      className="flex flex-wrap items-center justify-between gap-sm rounded-md border border-border bg-card p-md"
-                    >
-                      <div className="flex min-w-0 flex-col gap-xxs">
-                        <div className="flex flex-wrap items-center gap-xs">
-                          <span className="font-medium text-ink">{mun.name}</span>
-                          <MunStatusBadge status={mun.status} />
+                  {munSummaries.map((mun) => {
+                    const step = nextStep(mun);
+                    return (
+                      <li
+                        key={mun.id}
+                        data-testid={`overview-mun-${mun.id}`}
+                        className="flex flex-wrap items-center justify-between gap-sm rounded-md border border-border bg-card p-md"
+                      >
+                        <div className="flex min-w-0 flex-col gap-xxs">
+                          <div className="flex flex-wrap items-center gap-xs">
+                            <span className="font-medium text-ink">{mun.name}</span>
+                            <MunStatusBadge status={mun.status} />
+                          </div>
+                          <p className="text-body-md text-muted-foreground">
+                            {formatDateRange(mun.startDate, mun.endDate)}
+                            {mun.capacity > 0 && ` · ${mun.confirmedCount}/${mun.capacity} confirmed`}
+                          </p>
+                          <p className="text-body-md text-body">{step.text}</p>
                         </div>
-                        <p className="text-body-md text-muted-foreground">
-                          {formatDateRange(mun.startDate, mun.endDate)} · {mun.confirmedCount}/{mun.capacity} confirmed
-                        </p>
-                      </div>
-                      <Button variant="outline" size="sm" render={<Link to={munSectionHref(mun.id, "setup")} />}>
-                        Manage
-                        <ArrowRightIcon aria-hidden strokeWidth={1.75} />
-                      </Button>
-                    </li>
-                  ))}
+                        <Button
+                          variant={step.primary ? "default" : "outline"}
+                          size="sm"
+                          render={<Link to={step.href} />}
+                        >
+                          {step.cta}
+                          <ArrowRightIcon aria-hidden strokeWidth={1.75} />
+                        </Button>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>

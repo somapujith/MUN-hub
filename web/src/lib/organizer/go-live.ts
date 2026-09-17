@@ -85,12 +85,41 @@ export function hasReviewFeedback(feedback: MunReviewFeedback | undefined): feed
   );
 }
 
-/** A module the organizer can send for review from the checklist. */
+/**
+ * A section the organizer can send back to MUN Hub from the checklist: one a
+ * reviewer returned, once it's complete again. Sections never sent are all
+ * sent together by "Run checks and submit", so no per-section button there.
+ */
 export function canSendModuleForReview(module: {
   key: string;
   completionStatus: string;
   verificationState: string;
 }): boolean {
   if (module.key === "FINAL_REVIEW" || module.completionStatus !== "COMPLETE") return false;
-  return module.verificationState === "NOT_SUBMITTED" || module.verificationState === "CHANGES_REQUESTED";
+  return module.verificationState === "CHANGES_REQUESTED";
 }
+
+/** Statuses after MUN Hub has approved the MUN. The go-live steps are done. */
+export const POST_APPROVAL_STATUSES: readonly MunStatus[] = [
+  "VERIFIED",
+  "GO_LIVE_QUEUE",
+  "PUBLISHING",
+  "PUBLISHED",
+  "REGISTRATION_OPEN",
+  "REGISTRATION_CLOSED",
+  "CONFERENCE_ACTIVE",
+  "RESULTS_PENDING",
+  "RESULTS_UNDER_REVIEW",
+  "COMPLETED",
+  "ARCHIVED",
+];
+
+export const LIVE_STATUSES: readonly MunStatus[] = [
+  "PUBLISHED",
+  "REGISTRATION_OPEN",
+  "REGISTRATION_CLOSED",
+  "CONFERENCE_ACTIVE",
+  "RESULTS_PENDING",
+  "RESULTS_UNDER_REVIEW",
+  "COMPLETED",
+];

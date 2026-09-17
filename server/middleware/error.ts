@@ -5,6 +5,7 @@ import { ONBOARDING_ERRORS } from '@/lib/actions/organizer-onboarding'
 import { ORGANIZER_OPS_ERROR_STATUS } from '@/lib/actions/organizer-ops-errors'
 import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
 import { MFA_ERRORS } from '@/lib/actions/staff-mfa'
+import { MODULE_LOCKED_PATTERN } from '@/lib/lifecycle/module-completion'
 import type { AppVariables } from '../src/types'
 
 export type ErrorCode =
@@ -215,11 +216,11 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
 
   // lib/lifecycle/module-completion.ts#assertModuleNotLocked and
   // organizer-confirmation.ts#submitFinalConfirmation — previously 500s.
-  if (/^The ".+" module is locked while this mun is under MUNHub review/.test(message)) {
+  if (MODULE_LOCKED_PATTERN.test(message)) {
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
 
-  if (/^Cannot (submit|publish|transition|confirm|queue)/.test(message)) {
+  if (/^Cannot (submit|publish|transition|confirm|queue|withdraw)/.test(message)) {
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
 
@@ -313,8 +314,7 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'MUN title is required', status: 400, code: 'VALIDATION_FAILED' },
   { message: APPLICATION_PENDING, status: 409, code: 'CONFLICT_DUPLICATE' },
   {
-    message:
-      'The "PORTFOLIOS" module is locked while this mun is under MUNHub review (current status: VERIFICATION) — changes to this module are blocked until review completes. Contact MUNHub support if this is urgent.',
+    message: 'Portfolios is locked while MUN Hub reviews this MUN. You can edit it again if a reviewer sends it back.',
     status: 409,
     code: 'CONFLICT_STATE',
   },

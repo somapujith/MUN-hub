@@ -41,6 +41,19 @@ async function fillAllButAgreement(session: Session) {
 }
 
 describe('organizer onboarding', () => {
+  it('prefills the contact and UPI numbers from the phone given at signup', async () => {
+    const session = await makeUser('ORGANIZER', 'Meera Iyer')
+    await db.update(users).set({ phone: '+91 98450 12345' }).where(eq(users.id, session.userId))
+
+    const initial = await getOrganizerOnboarding(session)
+    expect(initial.profile).toMatchObject({ contactPhone: '9845012345', upiPhone: '9845012345' })
+
+    // A signup phone that isn't an Indian mobile number isn't prefilled.
+    const other = await makeUser('ORGANIZER', 'Tom Hale')
+    await db.update(users).set({ phone: '+44 20 7946 0958' }).where(eq(users.id, other.userId))
+    expect((await getOrganizerOnboarding(other)).profile).toMatchObject({ contactPhone: null, upiPhone: null })
+  })
+
   it('walks the five steps and submits the MUN as the organizer application', async () => {
     const session = await makeUser('ORGANIZER', 'Asha Rao Kumar')
 

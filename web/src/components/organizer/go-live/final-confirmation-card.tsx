@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2Icon } from "lucide-react";
+import { CheckCircle2Icon, PencilIcon } from "lucide-react";
 import { getConfirmationPreview } from "@/api/go-live";
 import { queryKeys } from "@/api/query-keys";
 import { formatPrice } from "@/components/shared/currency";
@@ -35,10 +35,15 @@ export function FinalConfirmationCard({
   munId,
   confirming,
   onConfirm,
+  withdrawing,
+  onWithdraw,
 }: {
   munId: string;
   confirming: boolean;
   onConfirm: () => void;
+  withdrawing: boolean;
+  /** "Make changes first": unlock the sections to fix something before confirming. */
+  onWithdraw: () => void;
 }) {
   const [attested, setAttested] = useState(false);
   const attestationId = useId();
@@ -57,7 +62,7 @@ export function FinalConfirmationCard({
       <CardContent className="flex flex-col gap-md">
         <p className="text-body-md text-muted-foreground">
           Your MUN passed the automated checks. Review this summary, then confirm to send it to MUN Hub for
-          verification.
+          verification. Your sections are locked meanwhile; if something needs fixing, choose Make changes first.
         </p>
         {previewQuery.isLoading && <Skeleton className="h-40 w-full rounded-md" />}
         {previewQuery.isError && <p className="text-body-md text-destructive">{previewQuery.error.message}</p>}
@@ -75,8 +80,12 @@ export function FinalConfirmationCard({
                 {previewQuery.data.attestation}
               </label>
             </div>
-            <div className="flex justify-end">
-              <Button size="sm" disabled={!attested || confirming} onClick={onConfirm}>
+            <div className="flex flex-wrap justify-end gap-xs">
+              <Button size="sm" variant="outline" disabled={withdrawing || confirming} onClick={onWithdraw}>
+                <PencilIcon aria-hidden />
+                {withdrawing ? "Unlocking..." : "Make changes first"}
+              </Button>
+              <Button size="sm" disabled={!attested || confirming || withdrawing} onClick={onConfirm}>
                 <CheckCircle2Icon aria-hidden />
                 {confirming ? "Confirming..." : "Confirm & send for verification"}
               </Button>
