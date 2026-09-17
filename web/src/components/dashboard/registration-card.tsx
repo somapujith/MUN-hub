@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { ArrowRightIcon, CalendarIcon, CalendarXIcon, CreditCardIcon, MapPinIcon, ReceiptTextIcon } from "lucide-react";
+import { ArrowRightIcon, CalendarIcon, CalendarXIcon, CreditCardIcon, MapPinIcon, ReceiptTextIcon, UsersRoundIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -79,6 +79,12 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
               </Badge>
             )}
             <RegistrationStatusChip status={registration.status} />
+            {registration.registrationGroupId && (
+              <Badge variant="outline" className={getToneClassName("muted")}>
+                <UsersRoundIcon className="size-3" strokeWidth={1.75} aria-hidden />
+                Group registration
+              </Badge>
+            )}
           </div>
 
           <dl className="flex flex-wrap items-center gap-x-md gap-y-xxs text-body-md text-muted-foreground">
@@ -176,6 +182,20 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
               View MUN
               <ArrowRightIcon className="size-3.5" strokeWidth={1.75} />
             </span>
+          )}
+
+          {/* Head-only: a claimed teammate's own row also carries
+              registrationGroupId (that's what drives the "Group
+              registration" badge above), but only the head can manage the
+              team — getGroupRoster 403s anyone else. */}
+          {registration.registrationGroupId && registration.isGroupHead && (
+            <Link
+              to={`/dashboard/groups/${registration.registrationGroupId}`}
+              className="relative z-10 inline-flex items-center gap-xxs rounded-sm text-body-md text-link underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              <UsersRoundIcon className="size-3.5" strokeWidth={1.75} aria-hidden />
+              Manage your team
+            </Link>
           )}
         </div>
       </CardContent>

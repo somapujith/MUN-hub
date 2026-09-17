@@ -76,7 +76,14 @@ export function RegisterConfirmationPage() {
       <Helmet><title>Registration status | MUN Hub</title></Helmet>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-xl px-lg py-xxl sm:px-xl">
-        {renderStatus(registration.status, slug, receipt, registrationId, payment?.status)}
+        {renderStatus(
+          registration.status,
+          slug,
+          receipt,
+          registrationId,
+          payment?.status,
+          registration.isGroupHead ? registration.registrationGroupId : null,
+        )}
       </main>
       <SiteFooter />
     </div>
@@ -90,23 +97,31 @@ function renderStatus(
   registrationId: string,
   /** Undefined when the pass was free (no payment row). */
   paymentStatus: PaymentStatus | undefined,
+  /** Set when this registration is the head delegate's own row from a group/delegation registration. */
+  registrationGroupId: string | null | undefined,
 ) {
   switch (status) {
     case "CONFIRMED":
       return (
         <RegistrationNotice
           tone="success"
-          title="You're registered"
+          title={registrationGroupId ? "Your team is registered" : "You're registered"}
           message={
-            paymentStatus
-              ? "Payment went through and your seat is confirmed. Your pass carries the check-in code you show at the registration desk."
-              : "Your seat is confirmed. Your pass carries the check-in code you show at the registration desk."
+            registrationGroupId
+              ? "Payment went through and every seat on your team is confirmed. Invite your teammates next — nobody else needs to pay."
+              : paymentStatus
+                ? "Payment went through and your seat is confirmed. Your pass carries the check-in code you show at the registration desk."
+                : "Your seat is confirmed. Your pass carries the check-in code you show at the registration desk."
           }
           detail={receipt}
         >
-          <Button render={<Link to={`/dashboard/registrations/${encodeURIComponent(registrationId)}/pass`} />}>
-            View your pass
-          </Button>
+          {registrationGroupId ? (
+            <Button render={<Link to={`/dashboard/groups/${registrationGroupId}`} />}>Invite your team</Button>
+          ) : (
+            <Button render={<Link to={`/dashboard/registrations/${encodeURIComponent(registrationId)}/pass`} />}>
+              View your pass
+            </Button>
+          )}
           <Button
             variant="outline"
             render={<Link to={`/dashboard/registrations/${encodeURIComponent(registrationId)}/receipt`} />}

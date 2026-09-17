@@ -168,7 +168,34 @@ function raiseException(
 type TxResult =
   | { kind: 'duplicate' }
   | { kind: 'not_found' }
-  | { kind: 'done'; body: WebhookResponseBody; confirmedRegistrationId?: string; failedRegistrationId?: string }
+  | { kind: 'done'; body: WebhookResponseBody; confirmedRegistrationIds?: string[]; failedRegistrationIds?: string[] }
+
+/**
+ * Selects either every registration row in `registrationGroupId`'s group, or
+ * just `registrationId` alone when there's no group — the WHERE-scope every
+ * confirm/cancel below applies, so a group's seats settle together with the
+ * same statement a solo registration already used.
+ */
+function memberScope(registrationGroupId: string | null, registrationId: string) {
+  return registrationGroupId ? eq(registrations.registrationGroupId, registrationGroupId) : eq(registrations.id, registrationId)
+}
+
+/**
+ * Which of `rows` (a batch confirm/cancel's `RETURNING`) should get a
+ * delegate email: the payment's own anchor registration (`payment.registrationId`
+ * — always, solo or group), plus, for a group, any sibling already claimed by
+ * a distinct real member (`userId !== headUserId`). An unclaimed placeholder
+ * slot (still `userId === headUserId`) has no one to email yet — it gets its
+ * own invitation email later, from `lib/actions/registration-group.ts`, not
+ * a payment-lifecycle one.
+ */
+function notifyTargets(
+  rows: Array<{ id: string; userId: string }>,
+  anchorRegistrationId: string,
+  headUserId: string,
+): string[] {
+  return rows.filter((row) => row.id === anchorRegistrationId || row.userId !== headUserId).map((row) => row.id)
+}
 
 async function applyEvent(
   tx: Tx,
@@ -202,11 +229,22 @@ async function applyEvent(
   }
 
   const [registration] = await tx
-    .select({ status: registrations.status, expiresAt: registrations.expiresAt })
+    .select({
+      status: registrations.status,
+      expiresAt: registrations.expiresAt,
+      userId: registrations.userId,
+      registrationGroupId: registrations.registrationGroupId,
+    })
     .from(registrations)
     .where(eq(registrations.id, payment.registrationId))
     .for('update')
     .limit(1)
+  // `payment.registrationId` is always the group's own head/anchor row (see
+  // initiateGroupRegistration), so its `userId` is the head delegate's —
+  // exactly the id `notifyTargets` needs to tell an unclaimed placeholder
+  // slot apart from an already-joined teammate.
+  const headUserId = registration?.userId ?? ''
+  const groupScope = memberScope(registration?.registrationGroupId ?? null, payment.registrationId)
 
   // LEGACY: before payment exceptions existed, a late payment was stored as
   // REFUNDED. Either way the money was captured.
@@ -231,16 +269,19 @@ async function applyEvent(
       })
       .where(eq(payments.id, payment.id))
 
+    // For a group registration this releases every seat together (all-or-
+    // nothing hold, same as a solo registration's single seat) — see
+    // memberScope's header comment.
     const released = await tx
       .update(registrations)
       .set({ status: 'CANCELLED', updatedAt: now })
-      .where(and(eq(registrations.id, payment.registrationId), eq(registrations.status, 'PAYMENT_PENDING')))
-      .returning({ id: registrations.id })
+      .where(and(groupScope, eq(registrations.status, 'PAYMENT_PENDING')))
+      .returning({ id: registrations.id, userId: registrations.userId })
 
     return {
       kind: 'done',
       body: await finish('FAILED', { ok: true }),
-      failedRegistrationId: released.length > 0 ? payment.registrationId : undefined,
+      failedRegistrationIds: notifyTargets(released, payment.registrationId, headUserId),
     }
   }
 
@@ -295,10 +336,11 @@ async function applyEvent(
     registration.expiresAt !== null &&
     registration.expiresAt.getTime() < capturedAt.getTime()
   if (holdExpired) {
+    // Same all-together release as the FAILED branch above.
     await tx
       .update(registrations)
       .set({ status: 'CANCELLED', updatedAt: now })
-      .where(and(eq(registrations.id, payment.registrationId), eq(registrations.status, 'PAYMENT_PENDING')))
+      .where(and(groupScope, eq(registrations.status, 'PAYMENT_PENDING')))
   }
 
   if (registration?.status === 'PAYMENT_PENDING' && !holdExpired) {
@@ -306,14 +348,20 @@ async function applyEvent(
       .update(payments)
       .set({ status: 'PAID', providerPaymentId: event.providerPaymentId, updatedAt: now })
       .where(eq(payments.id, payment.id))
-    await tx
+    // One statement confirms every seat in the group together — see
+    // memberScope's header comment. The `status = 'PAYMENT_PENDING'` guard
+    // (unnecessary for the solo case, where this row was already locked and
+    // checked above) protects sibling rows, which weren't individually
+    // locked before this update.
+    const confirmed = await tx
       .update(registrations)
       .set({ status: 'CONFIRMED', updatedAt: now })
-      .where(eq(registrations.id, payment.registrationId))
+      .where(and(groupScope, eq(registrations.status, 'PAYMENT_PENDING')))
+      .returning({ id: registrations.id, userId: registrations.userId })
     return {
       kind: 'done',
       body: await finish('CONFIRMED', { ok: true, confirmed: true }),
-      confirmedRegistrationId: payment.registrationId,
+      confirmedRegistrationIds: notifyTargets(confirmed, payment.registrationId, headUserId),
     }
   }
 
@@ -385,13 +433,16 @@ export async function processPaymentWebhook(
     return { ok: false, error: 'PAYMENT_NOT_FOUND', message: 'Payment not found' }
   }
 
-  // Hooks run only now that the transaction has committed.
+  // Hooks run only now that the transaction has committed. A group payment
+  // can confirm/fail more than one registration at once (the head's own,
+  // plus any teammate who had already joined) — one hook call per id, same
+  // as a solo registration's single call, never batched into one email.
   const hooks: Promise<void>[] = []
-  if (result.confirmedRegistrationId) {
-    hooks.push(runPaymentHook(onRegistrationConfirmed, result.confirmedRegistrationId))
+  for (const registrationId of result.confirmedRegistrationIds ?? []) {
+    hooks.push(runPaymentHook(onRegistrationConfirmed, registrationId))
   }
-  if (result.failedRegistrationId) {
-    hooks.push(runPaymentHook(onPaymentFailed, result.failedRegistrationId))
+  for (const registrationId of result.failedRegistrationIds ?? []) {
+    hooks.push(runPaymentHook(onPaymentFailed, registrationId))
   }
   return { ok: true, body: result.body, afterCommit: Promise.all(hooks).then(() => undefined) }
 }

@@ -4,6 +4,7 @@ import { APPLICATION_PENDING } from '@/lib/actions/organizer-application'
 import { ONBOARDING_ERRORS } from '@/lib/actions/organizer-onboarding'
 import { ORGANIZER_OPS_ERROR_STATUS } from '@/lib/actions/organizer-ops-errors'
 import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
+import { GROUP_ERRORS } from '@/lib/actions/registration-group'
 import { UPLOAD_LIMIT_ERROR_PATTERN, UPLOAD_LIMIT_ERRORS } from '@/lib/actions/upload-limits'
 import { MFA_ERRORS } from '@/lib/actions/staff-mfa'
 import { MODULE_LOCKED_PATTERN } from '@/lib/lifecycle/module-completion'
@@ -227,6 +228,35 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     return { status: 409, code: 'CONFLICT_DUPLICATE', message }
   }
 
+  // lib/actions/registration-group.ts — group/delegation registration roster,
+  // invite/resend/cancel, and invitation accept.
+  if (
+    message === GROUP_ERRORS.notPaid ||
+    message === GROUP_ERRORS.cancelled ||
+    message === GROUP_ERRORS.alreadyMember ||
+    message === GROUP_ERRORS.isHead ||
+    message === GROUP_ERRORS.notPending
+  ) {
+    return { status: 409, code: 'CONFLICT_STATE', message }
+  }
+  if (message === GROUP_ERRORS.full) {
+    return { status: 409, code: 'CONFLICT_CAPACITY', message }
+  }
+  if (message === GROUP_ERRORS.invalidInvite) {
+    return { status: 400, code: 'VALIDATION_FAILED', message }
+  }
+  if (message === GROUP_ERRORS.resendCooldown) {
+    return { status: 429, code: 'RATE_LIMITED', message }
+  }
+
+  // lib/actions/registration.ts#initiateGroupRegistration
+  if (message === 'This pass does not support group registration') {
+    return { status: 409, code: 'CONFLICT_STATE', message }
+  }
+  if (/^Team size must be a whole number from \d+ to \d+$/.test(message)) {
+    return { status: 400, code: 'VALIDATION_FAILED', message }
+  }
+
   if (message === 'Message cannot be empty') {
     return { status: 400, code: 'VALIDATION_FAILED', message }
   }
@@ -404,4 +434,13 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: MFA_ERRORS.tooManyAttempts, status: 429, code: 'RATE_LIMITED' },
   { message: MFA_ERRORS.unavailable, status: 503, code: 'MFA_UNAVAILABLE' },
   { message: MFA_ERRORS.lockedOut, status: 429, code: 'RATE_LIMITED' },
+  { message: GROUP_ERRORS.notFound, status: 404, code: 'NOT_FOUND' },
+  { message: GROUP_ERRORS.notPaid, status: 409, code: 'CONFLICT_STATE' },
+  { message: GROUP_ERRORS.cancelled, status: 409, code: 'CONFLICT_STATE' },
+  { message: GROUP_ERRORS.alreadyMember, status: 409, code: 'CONFLICT_STATE' },
+  { message: GROUP_ERRORS.isHead, status: 409, code: 'CONFLICT_STATE' },
+  { message: GROUP_ERRORS.notPending, status: 409, code: 'CONFLICT_STATE' },
+  { message: GROUP_ERRORS.full, status: 409, code: 'CONFLICT_CAPACITY' },
+  { message: GROUP_ERRORS.invalidInvite, status: 400, code: 'VALIDATION_FAILED' },
+  { message: GROUP_ERRORS.resendCooldown, status: 429, code: 'RATE_LIMITED' },
 ]

@@ -5,6 +5,7 @@ import {
   muns,
   paymentWebhookEvents,
   payments,
+  registrationGroups,
   registrationProducts,
   registrations,
   users,
@@ -101,6 +102,89 @@ function deliver(webhook: { rawBody: string; headers: Headers }, now?: Date) {
 
 function orderOf(payment: typeof payments.$inferSelect) {
   return { orderId: payment.providerOrderId, amount: payment.amount, currency: payment.currency }
+}
+
+/**
+ * Seeds a group/delegation registration: a `registrationGroups` row, a head
+ * registration (own `userId`), `placeholderCount` teammate slots still
+ * temporarily owned by the head, and one claimed teammate slot with a
+ * distinct real `userId` (so notifyTargets' "already-joined member" branch
+ * has something to exercise). One payment attaches to the head's own row,
+ * matching initiateGroupRegistration.
+ */
+async function seedGroup(options: { placeholderCount?: number; amount?: number; registrationStatus?: RegistrationStatus } = {}) {
+  const suffix = crypto.randomUUID()
+  const placeholderCount = options.placeholderCount ?? 2
+  const [organizer] = await db
+    .insert(users)
+    .values({ name: 'Group Org', email: `grp-org-${suffix}@test.dev`, role: 'ORGANIZER' })
+    .returning()
+  const [head] = await db
+    .insert(users)
+    .values({ name: 'Group Head', email: `grp-head-${suffix}@test.dev`, role: 'STUDENT' })
+    .returning()
+  const [joinedMember] = await db
+    .insert(users)
+    .values({ name: 'Group Member', email: `grp-member-${suffix}@test.dev`, role: 'STUDENT' })
+    .returning()
+  const [mun] = await db
+    .insert(muns)
+    .values({ organizerId: organizer.id, name: 'Group Mun', slug: `grp-${suffix}`, status: 'REGISTRATION_OPEN' })
+    .returning()
+  const [product] = await db
+    .insert(registrationProducts)
+    .values({ munId: mun.id, name: 'Delegation', price: options.amount ?? 1000, capacity: 20, allowsDelegation: true })
+    .returning()
+
+  const [group] = await db
+    .insert(registrationGroups)
+    .values({ munId: mun.id, registrationProductId: product.id, headUserId: head.id, teamSize: placeholderCount + 2 })
+    .returning()
+
+  const status = options.registrationStatus ?? 'PAYMENT_PENDING'
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
+
+  const [headRegistration] = await db
+    .insert(registrations)
+    .values({ userId: head.id, munId: mun.id, registrationProductId: product.id, registrationGroupId: group.id, status, expiresAt })
+    .returning()
+  const [joinedRegistration] = await db
+    .insert(registrations)
+    .values({ userId: joinedMember.id, munId: mun.id, registrationProductId: product.id, registrationGroupId: group.id, status, expiresAt })
+    .returning()
+  const placeholders =
+    placeholderCount > 0
+      ? await db
+          .insert(registrations)
+          .values(
+            Array.from({ length: placeholderCount }, () => ({
+              userId: head.id,
+              munId: mun.id,
+              registrationProductId: product.id,
+              registrationGroupId: group.id,
+              status,
+              expiresAt,
+            })),
+          )
+          .returning()
+      : []
+
+  await db.update(registrationGroups).set({ headRegistrationId: headRegistration.id }).where(eq(registrationGroups.id, group.id))
+
+  const totalAmount = (options.amount ?? 1000) * (placeholderCount + 2)
+  const [payment] = await db
+    .insert(payments)
+    .values({
+      registrationId: headRegistration.id,
+      provider: MOCK_PROVIDER,
+      providerOrderId: `mock_order_${suffix}`,
+      amount: totalAmount,
+      currency: 'INR',
+      status: 'PENDING',
+    })
+    .returning()
+
+  return { group, head, joinedMember, headRegistration, joinedRegistration, placeholders, payment }
 }
 
 describe('processPaymentWebhook — captures', () => {
@@ -397,5 +481,91 @@ describe('processPaymentWebhook — rejections', () => {
       error: 'PAYMENT_NOT_FOUND',
     })
     expect((await reload(registration.id, payment.id)).registration.status).toBe('PAYMENT_PENDING')
+  })
+})
+
+describe('processPaymentWebhook — group/delegation registration', () => {
+  it('confirms every seat in the group together on capture, and notifies only the head + already-joined members', async () => {
+    const { headRegistration, joinedRegistration, placeholders, payment } = await seedGroup({ placeholderCount: 2 })
+
+    const result = await deliver(simulatePaymentOutcome(orderOf(payment), 'success', { providerPaymentId: 'pay_group_1' }))
+    expect(result).toMatchObject({ ok: true, body: { ok: true, confirmed: true } })
+    if (result.ok) await result.afterCommit
+
+    const rows = await db.select().from(registrations).where(eq(registrations.registrationGroupId, (await reload(headRegistration.id, payment.id)).registration.registrationGroupId!))
+    expect(rows.every((r) => r.status === 'CONFIRMED')).toBe(true)
+    expect(rows).toHaveLength(4) // head + joined member + 2 placeholders
+
+    const after = await reload(headRegistration.id, payment.id)
+    expect(after.payment.status).toBe('PAID')
+
+    // The head's own row and the already-claimed teammate get the
+    // registration-confirmed hook; the two still-unclaimed placeholders do
+    // not (they have nothing to email yet).
+    expect(onRegistrationConfirmed).toHaveBeenCalledTimes(2)
+    expect(onRegistrationConfirmed).toHaveBeenCalledWith(headRegistration.id)
+    expect(onRegistrationConfirmed).toHaveBeenCalledWith(joinedRegistration.id)
+    for (const placeholder of placeholders) {
+      expect(onRegistrationConfirmed).not.toHaveBeenCalledWith(placeholder.id)
+    }
+  })
+
+  it('cancels every seat in the group together on a failed payment', async () => {
+    const { headRegistration, joinedRegistration, placeholders, payment } = await seedGroup({ placeholderCount: 2 })
+    const groupId = (await reload(headRegistration.id, payment.id)).registration.registrationGroupId!
+
+    const result = await deliver(simulatePaymentOutcome(orderOf(payment), 'failure'))
+    expect(result).toMatchObject({ ok: true, body: { ok: true } })
+    if (result.ok) await result.afterCommit
+
+    const rows = await db.select().from(registrations).where(eq(registrations.registrationGroupId, groupId))
+    expect(rows.every((r) => r.status === 'CANCELLED')).toBe(true)
+
+    expect(onPaymentFailed).toHaveBeenCalledTimes(2)
+    expect(onPaymentFailed).toHaveBeenCalledWith(headRegistration.id)
+    expect(onPaymentFailed).toHaveBeenCalledWith(joinedRegistration.id)
+    for (const placeholder of placeholders) {
+      expect(onPaymentFailed).not.toHaveBeenCalledWith(placeholder.id)
+    }
+  })
+
+  it('releases every seat in the group together when the hold expired before the capture arrived', async () => {
+    const { headRegistration, payment } = await seedGroup({
+      placeholderCount: 2,
+      registrationStatus: 'PAYMENT_PENDING',
+    })
+    const groupId = (await reload(headRegistration.id, payment.id)).registration.registrationGroupId!
+    // Back-date every seat's hold so it's already expired at capture time.
+    await db
+      .update(registrations)
+      .set({ expiresAt: new Date(Date.now() - 60_000) })
+      .where(eq(registrations.registrationGroupId, groupId))
+
+    const result = await deliver(simulatePaymentOutcome(orderOf(payment), 'success'))
+    expect(result).toMatchObject({ ok: true, body: { ok: true, exception: true } })
+    if (result.ok) await result.afterCommit
+
+    const rows = await db.select().from(registrations).where(eq(registrations.registrationGroupId, groupId))
+    expect(rows.every((r) => r.status === 'CANCELLED')).toBe(true)
+    expect((await reload(headRegistration.id, payment.id)).payment.exceptionReason).toBe('PAYMENT_AFTER_HOLD_EXPIRED')
+    expect(onRegistrationConfirmed).not.toHaveBeenCalled()
+  })
+
+  it('only confirms seats that were still PAYMENT_PENDING, leaving an already-cancelled slot alone', async () => {
+    const { headRegistration, joinedRegistration, placeholders, payment } = await seedGroup({ placeholderCount: 1 })
+    const groupId = (await reload(headRegistration.id, payment.id)).registration.registrationGroupId!
+    // One placeholder was released independently (e.g. by the expired-holds
+    // sweep reaching it a moment earlier) before the capture arrives.
+    await db.update(registrations).set({ status: 'CANCELLED' }).where(eq(registrations.id, placeholders[0].id))
+
+    const result = await deliver(simulatePaymentOutcome(orderOf(payment), 'success'))
+    expect(result).toMatchObject({ ok: true, body: { ok: true, confirmed: true } })
+    if (result.ok) await result.afterCommit
+
+    const rows = await db.select().from(registrations).where(eq(registrations.registrationGroupId, groupId))
+    const byId = new Map(rows.map((r) => [r.id, r.status]))
+    expect(byId.get(headRegistration.id)).toBe('CONFIRMED')
+    expect(byId.get(joinedRegistration.id)).toBe('CONFIRMED')
+    expect(byId.get(placeholders[0].id)).toBe('CANCELLED')
   })
 })

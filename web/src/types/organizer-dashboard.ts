@@ -36,6 +36,13 @@ export interface DelegatePayment {
   currency: string;
 }
 
+/** Set only when this row belongs to a group/delegation registration — see lib/actions/organizer-dashboard.ts's `registrationGroup` join. */
+export interface DelegateGroupInfo {
+  id: string;
+  teamSize: number;
+  headUser: { name: string };
+}
+
 export interface DelegateRow {
   id: string;
   status: RegistrationStatus;
@@ -46,6 +53,7 @@ export interface DelegateRow {
   portfolio: DelegatePortfolio | null;
   registrationProduct: DelegatePass;
   payment: DelegatePayment[];
+  registrationGroup: DelegateGroupInfo | null;
 }
 
 export interface DelegateListResult {

@@ -64,4 +64,7 @@ export const queryKeys = {
   // Gate 2 publish queue (getGoLiveQueue) — never the organizer-facing
   // per-mun progress key (munProgress) above.
   adminGoLiveQueue: (params: Record<string, unknown>) => ["admin", "go-live-queue", params] as const,
+  // Group/delegation registration (2026-09-17).
+  groupRoster: (groupId: string) => ["registration-group", groupId] as const,
+  groupInvitationPreview: (token: string) => ["registration-group", "invitation", token] as const,
 };

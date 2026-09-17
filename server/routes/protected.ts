@@ -25,6 +25,7 @@ import { organizerDashboardRoutes } from './organizer-dashboard'
 import { organizerOnboardingRoutes } from './organizer-onboarding'
 import { paymentSettlementRoutes } from './payment-settlement'
 import { registrationFormRoutes } from './registration-form'
+import { registrationGroupsRoutes } from './registration-groups'
 import { registrationsRoutes } from './registrations'
 import { resultsRoutes } from './results'
 import { studentDashboardRoutes } from './student-dashboard'
@@ -36,6 +37,7 @@ import type { AppVariables } from '../src/types'
 export const protectedRoutes = new Hono<{ Variables: AppVariables }>()
 
 protectedRoutes.route('/', registrationsRoutes)
+protectedRoutes.route('/', registrationGroupsRoutes)
 protectedRoutes.route('/', accountRoutes)
 protectedRoutes.route('/', munConfigRoutes)
 protectedRoutes.route('/', munScheduleRoutes)

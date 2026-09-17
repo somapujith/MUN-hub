@@ -260,6 +260,13 @@
       "when": 1789657664516,
       "tag": "0036_admin_reporting_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789657921468,
+      "tag": "0037_registration_groups",
+      "breakpoints": true
     }
   ]
 }
