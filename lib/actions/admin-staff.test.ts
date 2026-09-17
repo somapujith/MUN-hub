@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client'
 import { adminActions, passwordResetTokens, sessions, users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { createSession, getSessionByToken } from '@/lib/auth/session'
+import { hashOpaqueToken } from '@/lib/auth/opaque-token'
 import { resetPassword } from './password-reset'
 import {
   bootstrapSuperAdmin,
@@ -305,7 +306,7 @@ describe('issueStaffSetPasswordLink', () => {
       .select({ token: passwordResetTokens.token })
       .from(passwordResetTokens)
       .where(and(eq(passwordResetTokens.userId, created.staff.id), isNull(passwordResetTokens.usedAt)))
-    expect(open.map((row) => row.token)).toEqual([tokenFrom(fresh.setPasswordUrl)])
+    expect(open.map((row) => row.token)).toEqual([hashOpaqueToken(tokenFrom(fresh.setPasswordUrl))])
 
     await expect(resetPassword(tokenFrom(created.setPasswordUrl), 'a-strong-password')).rejects.toThrow()
     await resetPassword(tokenFrom(fresh.setPasswordUrl), 'a-strong-password')

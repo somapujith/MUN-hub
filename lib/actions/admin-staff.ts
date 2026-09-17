@@ -1,4 +1,3 @@
-import crypto from 'node:crypto'
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { passwordResetTokens, sessions, users } from '@/lib/db/schema'
@@ -6,6 +5,7 @@ import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import type { AdminAction, Role } from '@/lib/db/schema-enums'
 import { recordAdminAction } from '@/lib/audit/log'
+import { insertPasswordResetToken } from './password-reset'
 
 // -----------------------------------------------------------------------------
 // Staff management — the /admin/staff console (OPERATIONS/ADMIN/SUPER_ADMIN
@@ -22,12 +22,9 @@ import { recordAdminAction } from '@/lib/audit/log'
 // audit feed (admin-audit.ts#listAdminActions) displays `metadata.event` when
 // present. Dedicated enum values are a follow-up.
 //
-// Set-password links: lib/actions/password-reset.ts exports no function that
-// hands a token back to the caller (requestPasswordReset only emails it), so
-// `mintSetPasswordLink` below writes a password_reset_tokens row in the same
-// shape requestPasswordReset does and returns the link. resetPassword()
-// consumes it unchanged. If reset tokens ever become hashed at rest, this is
-// the one function that must change with them.
+// Set-password links: `mintSetPasswordLink` below mints its token through
+// password-reset.ts#insertPasswordResetToken (which stores only the token's
+// SHA-256) and returns the link; resetPassword() consumes it unchanged.
 // -----------------------------------------------------------------------------
 
 export const STAFF_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const satisfies readonly Role[]
@@ -131,9 +128,8 @@ export async function mintSetPasswordLink(
     .set({ usedAt: now })
     .where(and(eq(passwordResetTokens.userId, userId), isNull(passwordResetTokens.usedAt)))
 
-  const token = crypto.randomBytes(32).toString('hex')
   const expiresAt = new Date(now.getTime() + STAFF_SET_PASSWORD_TTL_MS)
-  await executor.insert(passwordResetTokens).values({ userId, token, expiresAt })
+  const token = await insertPasswordResetToken(executor, userId, expiresAt, now)
 
   return { setPasswordUrl: `${appUrl.replace(/\/+$/, '')}/reset-password?token=${token}`, expiresAt }
 }
