@@ -29,6 +29,10 @@ The repo root `.env` on the team's machines points at **production Neon**. It ex
 
 Staging runs the same code as production on Cloudflare, on `workers.dev` hostnames only. Neither staging Worker has a custom domain or route, so a staging deploy can't take over a `munhub.in` hostname. Routes are inherited from the top-level config unless overridden, which is why `env.staging.routes` is an explicit empty list.
 
+`vars`, `hyperdrive` and `ratelimits` are the opposite: wrangler never inherits them into a named environment, so `env.staging` repeats each one. The rate-limit bindings matter most — without them the publicly reachable staging API would fall back to a per-isolate in-memory counter, and its Neon branch is forked from production. A test (`server/middleware/rate-limit.test.ts`) checks that every named environment declares the same bindings with the same limits and its own namespace ids.
+
+The staging web bundle's CSP follows `VITE_API_URL`: `web/vite.config.ts` rewrites `connect-src` in `dist/_headers` at build time, so the staging SPA is allowed to call the staging API (`web/build/security-headers.ts`). Nothing to patch by hand.
+
 ### One-time setup
 
 1. **Neon**: create a branch named `staging` from production (Neon console → Branches). A branch is a copy-on-write fork, so it starts with production's data. Before sharing staging with anyone, scrub it or recreate it from an earlier point in time: it holds real delegates' personal data. Use the branch's **direct** connection string for migrations.
