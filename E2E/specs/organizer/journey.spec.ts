@@ -77,8 +77,9 @@ test.describe.serial('new organizer: sign up, onboard (which applies), get appro
     await page.goto('/organizer/dashboard/muns')
     await expect(pageHeading(page)).toHaveText('My MUNs')
     await expect(main(page).getByRole('heading', { name: 'No conferences yet' })).toBeVisible()
-    // The host application is the onboarding wizard.
-    await main(page).getByRole('button', { name: /apply to host a mun/i }).click()
+    // The host application is the onboarding wizard. Two "Host a MUN" buttons
+    // render (page header + empty state); either leads to the same place.
+    await main(page).getByRole('button', { name: 'Host a MUN' }).first().click()
     await expect(page).toHaveURL(/\/organizer\/onboarding$/)
     await expect(pageHeading(page)).toHaveText('Create your organizer profile')
     crashes.assertNone()
@@ -92,7 +93,8 @@ test.describe.serial('new organizer: sign up, onboard (which applies), get appro
 
     await expect(page).toHaveURL(/\/organizer\/apply\/submitted$/)
     await expect(pageHeading(page)).toHaveText('Application submitted')
-    await main(page).getByRole('button', { name: /go to dashboard/i }).click()
+    // Styled as a button but rendered as a link (Application submitted page, organizer shell).
+    await main(page).getByRole('link', { name: /go to dashboard/i }).click()
     await expect(page).toHaveURL(/\/organizer\/dashboard$/)
     await expect(main(page).getByText(conferenceName)).toBeVisible()
 

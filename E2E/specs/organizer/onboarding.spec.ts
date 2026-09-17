@@ -143,7 +143,8 @@ test.describe('onboarding wizard', () => {
     })
     await admin.dispose()
 
-    await main(page).getByRole('button', { name: /go to dashboard/i }).click()
+    // Styled as a button but rendered as a link (Application submitted page, organizer shell).
+    await main(page).getByRole('link', { name: /go to dashboard/i }).click()
     await expect(page).toHaveURL(/\/organizer\/dashboard$/)
     await expect(main(page).getByText(answers.munName)).toBeVisible()
 
