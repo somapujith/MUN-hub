@@ -32,15 +32,18 @@
   ],
   // Uploaded files (organizer logos, covers, PDF documents) — see
   // lib/storage/select-adapter.ts. R2 is not enabled on the account yet, so
-  // uploads go to Workers KV. Before deploying, create the namespace and
-  // paste its id here:
+  // uploads go to Workers KV. The namespace doesn't exist yet (the deploy
+  // token can't create KV namespaces — docs/autonomous-run/USER_ACTIONS.md),
+  // so the binding is commented out and production keeps the mock store,
+  // which logs an error on every upload. To enable real uploads:
   //   npx wrangler kv namespace create munhub-uploads
-  "kv_namespaces": [
-    {
-      "binding": "UPLOADS_KV",
-      "id": "REPLACE_WITH_UPLOADS_KV_ID"
-    }
-  ],
+  // then uncomment this block with the printed id and redeploy.
+  // "kv_namespaces": [
+  //   {
+  //     "binding": "UPLOADS_KV",
+  //     "id": "<munhub-uploads namespace id>"
+  //   }
+  // ],
   // Once R2 is enabled (`npx wrangler r2 bucket create munhub-uploads`),
   // uncomment this and keep UPLOADS_KV: new uploads then go to R2, and files
   // already in KV are still served (reads fall back to KV). See
