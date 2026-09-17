@@ -153,3 +153,37 @@ for `www.munhub.in` specifically (it returned 200 but whether that's freshly red
 integration or still cached/unchanged wasn't independently confirmed), setting `SYSTEM_ACTOR_USER_ID`
 (the scheduled lifecycle-transition job stays a no-op without it — logs a warning, doesn't fail),
 and the demo-account password rotation from item #1 (still outstanding, still important).
+
+## 11. FULL INTEGRATION COMPLETE + DEPLOYED (final, supersedes #9/#10)
+
+All 8 review-fix lanes + the delegate/visitor UX pass are now merged, tested, and deployed:
+- 8 merge commits landed on `main` (delegate UX `dfe1363`, camera fix `e97f0d0`, then 5 more
+  resolving real overlapping work from independently re-run fixer agents — see each merge
+  commit's message for what was kept/discarded and why. Real bugs were found and fixed
+  *during* the merges themselves: double-counted rate limits (2 separate accidental
+  duplicates), a recovery-code case-sensitivity auth bug, a `.find()` vs `.some()` branding
+  validator bug, and a stale test asserting a pre-fix upload-validation-order behavior).
+- Full suite: **1803/1803 tests passing**, root/server/web `tsc --noEmit` clean, `oxlint`
+  clean (pre-existing warnings only), production `vite build` clean.
+- Deployed: `munhub-api` and `munhub-web`, each verified separately (no more chaining through
+  `| tail`). All 5 hosts (www/app/admin/publish/api) return 200. A DB-backed public endpoint
+  confirmed returning real data.
+- No new migrations required this pass (one schema.ts change was comment-only).
+
+**Known follow-ups from the merge** (not blocking, worth a look):
+1. Two independent, fully-wired implementations of the same waitUntil/background-task
+   keepalive mechanism now coexist: `lib/background-tasks.ts` (6 call sites) and
+   `lib/runtime-background.ts` (1 call site, `registration.ts`). Harmless but is real tech
+   debt — worth migrating the one call site and deleting the smaller pair.
+2. A design call was made merging branch `-71`: `registrationOpensAt` changes on a live MUN do
+   **not** trigger re-verification (kept `main`'s existing exclusion over the incoming
+   branch's inclusion), because moving the opening date earlier is the documented remedy for
+   a live-but-not-yet-open MUN. Reconsider if that reasoning doesn't hold.
+3. Storage adapter selection is now stricter: fails closed (refuses uploads) unless
+   `STORAGE_ADAPTER` is explicitly `local` or `mock`, in every environment (not just
+   production, as it briefly was). Confirmed this doesn't regress local dev/tests via
+   `.env`/`.env.test`, but it's a real behavior change worth knowing about.
+
+Everything else outstanding is still tracked in items #1-#7 above (demo password rotation,
+`.github/workflows` restore, `SYSTEM_ACTOR_USER_ID`, KV uploads namespace, business
+confirmations, the re-check-takes-a-MUN-offline decision, and team access).
