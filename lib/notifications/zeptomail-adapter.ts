@@ -67,7 +67,7 @@ export const zeptoMailNotificationsAdapter: NotificationsAdapter = {
       to: [{ email_address: { address: notification.to, name: notification.to } }],
       subject: notification.subject,
       textbody: notification.body,
-      htmlbody: toHtmlBody(notification.body),
+      htmlbody: notification.html ?? toHtmlBody(notification.body),
     })
   },
 }
