@@ -87,3 +87,8 @@ payout execution.
   `runConferenceReminders` (lib/notifications/reminder-job.ts), `runOrganizerDigest`
   (lib/notifications/organizer-digest-job.ts). Conference-cancelled emails wired (`e5c6471`).
   sec-edge merged (`270680b`).
+- 10:45 From 84: (a) republish after unpublish is impossible (409 no active submission) → routed to
+  f1. (b) sec-auth worktree tests rehashed `student@munhub.test` in the shared local DB with the new
+  `scrypt$N$r$p$…` format that main can't verify yet — resolves when sec-auth merges; at that merge,
+  make seed.ts reset seeded demo hashes that don't verify against munhub-demo (local only).
+  devops merged (`0e5b00a`); root `tsc --noEmit` clean at `e99a78f`.
