@@ -69,7 +69,13 @@ export const users = pgTable('users', {
   suspended: boolean('suspended').notNull().default(false),
   suspendedReason: text('suspended_reason'),
   suspendedAt: timestamp('suspended_at', { withTimezone: true }),
-})
+},
+(table) => [
+  // Admin reporting (lib/actions/admin-reporting.ts): new-organizer/new-delegate
+  // signup trend and the existing admin-analytics "new organizers this week"
+  // count both filter by role + a createdAt range.
+  index('users_role_created_at_idx').on(table.role, table.createdAt),
+])
 
 export const usersRelations = relations(users, ({ one, many }) => ({
   organizedMuns: many(muns),
@@ -621,6 +627,9 @@ export const registrations = pgTable(
       table.status,
     ),
     index('registrations_user_id_idx').on(table.userId),
+    // Admin reporting (lib/actions/admin-reporting.ts): registration trend and
+    // the conversion funnel both filter/group a date range of createdAt.
+    index('registrations_created_at_idx').on(table.createdAt),
   ],
 )
 
@@ -682,6 +691,10 @@ export const payments = pgTable(
     index('payments_exception_open_idx')
       .on(table.exceptionRaisedAt)
       .where(sql`${table.exceptionReason} is not null and ${table.exceptionResolvedAt} is null`),
+    // Admin reporting (lib/actions/admin-reporting.ts): revenue trend, the
+    // payment funnel, and the platform fee summary all filter by status
+    // together with a createdAt range.
+    index('payments_status_created_at_idx').on(table.status, table.createdAt),
   ],
 )
 
