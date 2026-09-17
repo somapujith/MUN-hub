@@ -45,3 +45,9 @@ mun-hub-62 does not run E2E itself. This session is the only one that runs the s
 
 | Time | Commit | Change |
 |---|---|---|
+| run 1 | a2e88f0 | Change log started. Every E2E project except organizer, at 271f4bd: 297 passed, 8 skipped, 0 failed |
+| run 1 | 6699007 | E2E API now starts with `MOCK_PAYMENTS_ENABLED=true` and `ALLOW_LOCALHOST_ORIGINS=true` |
+| run 1 | f63f54d | Organizer subagent: onboarding-wizard spec, journey through the wizard, and marker cleanup. The organizer project passes 148 tests with 0 bug markers |
+| run 1 | b24846a | New `organizer/multi-mun.spec.ts`, 13 tests covering multi-MUN hosting (57943d3) |
+| run 1 | 50b19db | Accommodation "offered?" question (73bcdf4), and `/organizer/apply` as the host-another-MUN page, in the onboarding and workspace specs |
+| run 1 | full run | Fresh prepare: 437 passed, 16 skipped, 5 failed. All 5 were test drift, now fixed |
