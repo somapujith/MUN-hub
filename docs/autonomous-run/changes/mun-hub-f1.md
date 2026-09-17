@@ -99,6 +99,13 @@ Lane: organizer workspace pages (not settings, finance, communications, registra
   - The onboarding profile step asks for it.
   - `PUT /organizer/organization` edits it, and the overview has a "hosted by" card.
   - Stored in `users.institution` (no migration). Public pages and search use it, falling back to the organizer's name.
+- Declined the lead's request to build scoped team access (`mun_team_members`, invitations, roles) without the user's approval — it's on CLAUDE.md's deferred list and out of scope per `docs/autonomous-run/CONTEXT.md`. The lead added it to `docs/autonomous-run/USER_ACTIONS.md` and released migration slot 0037.
+- `8ec283c`: Registration Form field keys, found in the UX pass (every card showed "Field key: grade_class").
+  - New fields get a key generated from the label; the organizer no longer has to invent one.
+  - The key input moved under a collapsed "Advanced" section and is read-only once a field exists.
+  - The field list and the conditional-field dropdown show only labels, never keys.
+  - Deleting a field another field's condition depends on now shows a plain toast up front.
+  - Checked in a browser, desktop and mobile, against the local API.
 
 ### Bugs found while mapping (status)
 
