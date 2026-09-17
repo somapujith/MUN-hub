@@ -1,6 +1,7 @@
-import { and, eq, gt, lte } from 'drizzle-orm'
+import { and, eq, gt, inArray, lte } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, registrations, users } from '@/lib/db/schema'
+import type { MunStatus } from '@/lib/db/schema-enums'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import { buildPublicMunUrl } from './resolve-recipients'
 import { getNotificationsAdapter } from './select-adapter'
@@ -8,6 +9,18 @@ import type { NotificationsAdapter } from './adapter'
 
 const REMINDER_LEAD_MS = 24 * 60 * 60 * 1000 // 24 hours before the conference starts
 const CRON_WINDOW_MS = 5 * 60 * 1000 // matches the assumed 5-minute cron cadence
+
+/**
+ * The statuses in which a conference is still going ahead: live, taking or
+ * past registration, or already started (start-conference is allowed from the
+ * day before `startDate`). This is an allowlist, not a blocklist, so a mun
+ * that isn't clearly going ahead gets no reminder. Cancelling keeps CONFIRMED
+ * registrations (there are no refunds), so without this check the delegates
+ * of a CANCELLED, SUSPENDED or UNPUBLISHED mun would still be told "see you
+ * there". A mun sent back to VERIFICATION after a high-impact change is
+ * skipped too, because its new details haven't been approved yet.
+ */
+const REMINDER_MUN_STATUSES: MunStatus[] = ['PUBLISHED', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'CONFERENCE_ACTIVE']
 
 function formatDateRange(startDate: Date, endDate: Date | null): string {
   const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' }
@@ -67,6 +80,7 @@ export async function runConferenceReminders(
     .where(
       and(
         eq(registrations.status, 'CONFIRMED'),
+        inArray(muns.status, REMINDER_MUN_STATUSES),
         gt(muns.startDate, lowerBoundExclusive),
         lte(muns.startDate, upperBoundInclusive),
       ),

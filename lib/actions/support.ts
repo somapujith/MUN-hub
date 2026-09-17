@@ -778,11 +778,17 @@ export async function sendMessage(
   })
 
   // After commit, never inside the transaction. Only the requester is
-  // emailed; staff see requester messages in the queue.
+  // emailed; staff see requester messages in the queue. Awaited, not
+  // fire-and-forget: on Cloudflare Workers, work still pending after the
+  // response is sent can be dropped, so an un-awaited send would silently
+  // never happen in production. A failure is logged and never fails the
+  // reply, which has already been saved.
   if (isStaffReply) {
-    notifySupportReply(ticketId).catch((error) => {
+    try {
+      await notifySupportReply(ticketId)
+    } catch (error) {
       console.error('[support] reply notification failed', error)
-    })
+    }
   }
 
   return result
