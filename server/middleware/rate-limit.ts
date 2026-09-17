@@ -43,6 +43,22 @@ export const LIMITERS = {
   // different tokens from one IP, and hammering one token's endpoint fast.
   mfaVerifyIp: { binding: 'RL_MFA_VERIFY_IP', limit: 20, periodSeconds: 60, perIp: true },
   mfaVerifyToken: { binding: 'RL_MFA_VERIFY_TOKEN', limit: 10, periodSeconds: 60, perIp: false },
+  // Self-service MFA management: disable, and regenerate recovery codes. Both
+  // take a TOTP or recovery code to prove the caller is the account holder
+  // rather than just whoever holds the session cookie, and neither keeps an
+  // attempt counter of its own (unlike the sign-in challenge above) — so this
+  // is what stops a stolen session cookie from being used to guess 6-digit
+  // codes until MFA comes off the account. Keyed per user: more addresses
+  // must not buy more guesses.
+  mfaManageUser: { binding: 'RL_MFA_MANAGE_USER', limit: 5, periodSeconds: 60, perIp: false },
+  // Uploaded files (logos, covers, PDFs) are fetched by the browser as <img>
+  // sources — one marketplace page is two dozen of them. They get their own,
+  // much higher per-IP budget INSTEAD of the global API one (`replacesGlobal`
+  // below): a shared campus NAT address would otherwise spend the whole
+  // 300/min API budget on cover images and 429 every API call behind it. Safe
+  // to set high — the keys are unguessable, the bytes are immutable, and the
+  // responses carry a one-year immutable cache.
+  filesIp: { binding: 'RL_FILES_IP', limit: 600, periodSeconds: 60, perIp: true },
   // Organizer email-code sign-in. lib/actions/organizer-otp.ts also enforces a
   // per-address resend cooldown and hourly cap, and a per-code attempt limit.
   // The per-IP cap bounds how many different addresses one IP can send codes to.
@@ -68,9 +84,22 @@ type Check = { limiter: LimiterSpec; key: string }
 type LimitRule = {
   method: string
   path: string
+  /** Match `path` as a prefix rather than exactly (e.g. `/files/` + a storage key). */
+  prefix?: boolean
+  /**
+   * Count the request against this rule's own limits INSTEAD of the global
+   * per-IP cap. Only for routes a browser fetches many of per page; every
+   * other rule stacks on top of the global cap.
+   */
+  replacesGlobal?: boolean
   readsEmail?: boolean
   readsPendingToken?: boolean
   checks: (facts: RequestFacts) => Check[]
+}
+
+/** Both self-service MFA management routes share one per-user budget. */
+function mfaManageChecks({ ip, sessionUserId }: RequestFacts): Check[] {
+  return [{ limiter: LIMITERS.mfaManageUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` }]
 }
 
 const RULES: LimitRule[] = [
@@ -120,6 +149,16 @@ const RULES: LimitRule[] = [
   },
   {
     method: 'POST',
+    path: '/auth/mfa/disable',
+    checks: mfaManageChecks,
+  },
+  {
+    method: 'POST',
+    path: '/auth/mfa/recovery-codes',
+    checks: mfaManageChecks,
+  },
+  {
+    method: 'POST',
     path: '/auth/organizers/code',
     readsEmail: true,
     checks: ({ ip, email }) => [
@@ -152,6 +191,15 @@ const RULES: LimitRule[] = [
     path: '/muns',
     checks: ({ ip }) => [{ limiter: LIMITERS.munsListIp, key: `ip:${ip}` }],
   },
+  // Uploaded-file reads (server/routes/files.ts): their own, much larger
+  // per-IP budget instead of the global API one — see LIMITERS.filesIp.
+  {
+    method: 'GET',
+    path: '/files/',
+    prefix: true,
+    replacesGlobal: true,
+    checks: ({ ip }) => [{ limiter: LIMITERS.filesIp, key: `ip:${ip}` }],
+  },
 ]
 
 async function readBodyEmail(c: Context): Promise<string | undefined> {
@@ -177,13 +225,17 @@ async function readBodyPendingToken(c: Context): Promise<string | undefined> {
  * Rate limits per spec Section 4.6, mounted on /api/v1 (webhook routes are
  * mounted outside it). Every request counts against the global per-IP cap;
  * a request matching a route rule additionally counts against each of that
- * rule's limits — a route rule never exempts a request from the global cap.
- * The first exhausted limit answers 429 with Retry-After.
+ * rule's limits. The one exception is a rule marked `replacesGlobal` (image
+ * and document reads), whose own per-IP limit stands in for the global cap
+ * instead of stacking on it. The first exhausted limit answers 429 with
+ * Retry-After.
  */
 export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   const path = c.req.path.replace(/^\/api\/v1/, '') || '/'
   const method = c.req.method
-  const matched = RULES.filter((rule) => rule.method === method && rule.path === path)
+  const matched = RULES.filter(
+    (rule) => rule.method === method && (rule.prefix ? path.startsWith(rule.path) : rule.path === path),
+  )
 
   const facts: RequestFacts = {
     ip: getClientIp(c),
@@ -197,7 +249,7 @@ export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }>
   }
 
   const checks: Check[] = [
-    { limiter: LIMITERS.globalIp, key: `ip:${facts.ip}` },
+    ...(matched.some((rule) => rule.replacesGlobal) ? [] : [{ limiter: LIMITERS.globalIp, key: `ip:${facts.ip}` }]),
     ...matched.flatMap((rule) => rule.checks(facts)),
   ]
 

@@ -154,6 +154,50 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
     expect(otherUser.status).toBe(200)
   })
 
+  describe('self-service MFA management', () => {
+    it('limits disable attempts per signed-in user, not per address', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const result = await statuses(LIMITERS.mfaManageUser.limit + 1, () =>
+        send('/auth/mfa/disable', { ip: freshIp(), user, body: { code: '000000' } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.mfaManageUser.limit))
+
+      const otherUser = await send('/auth/mfa/disable', { ip: freshIp(), user: `user-${crypto.randomUUID()}`, body: { code: '000000' } })
+      expect(otherUser.status).toBe(200)
+    })
+
+    it('shares one budget with recovery-code regeneration', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      for (let i = 0; i < LIMITERS.mfaManageUser.limit; i += 1) {
+        expect((await send('/auth/mfa/recovery-codes', { ip: freshIp(), user, body: { code: '000000' } })).status).toBe(200)
+      }
+
+      const disable = await send('/auth/mfa/disable', { ip: freshIp(), user, body: { code: '000000' } })
+      expect(disable.status).toBe(429)
+    })
+  })
+
+  describe('uploaded files', () => {
+    it('does not spend the global per-IP API budget', async () => {
+      process.env.RATE_LIMIT_GLOBAL_PER_MINUTE = '3'
+      const ip = freshIp()
+
+      const files = await statuses(10, (i) => send(`/files/muns/abc/logo/${i}`, { ip, method: 'GET' }))
+      expect(files.every((status) => status === 200)).toBe(true)
+
+      // The API calls the same page makes are unaffected.
+      expect(await statuses(3, () => send('/muns', { ip, method: 'GET' }))).toEqual([200, 200, 200])
+    })
+
+    it('still has a per-IP ceiling of its own', async () => {
+      const ip = freshIp()
+      const result = await statuses(LIMITERS.filesIp.limit + 1, (i) => send(`/files/muns/abc/logo/${i}`, { ip, method: 'GET' }))
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.filesIp.limit))
+
+      expect((await send('/files/muns/abc/logo/other', { ip: freshIp(), method: 'GET' })).status).toBe(200)
+    })
+  })
+
   it('keeps the organizer code limits: per IP+email and per IP', async () => {
     const ip = freshIp()
     const email = freshEmail('org-code')
@@ -297,10 +341,14 @@ describe('server/wrangler.jsonc ratelimits', () => {
     return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1'))
   }
 
+  type RateLimitBindingConfig = { name: string; namespace_id: string; simple: { limit: number; period: number } }
+
   const config = parseJsonc(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8')) as {
-    ratelimits?: Array<{ name: string; namespace_id: string; simple: { limit: number; period: number } }>
+    ratelimits?: RateLimitBindingConfig[]
+    env?: Record<string, { ratelimits?: RateLimitBindingConfig[] }>
   }
   const declared = config.ratelimits ?? []
+  const namedEnvs = Object.entries(config.env ?? {})
 
   it('declares a binding with the same limit and period for every limiter', () => {
     for (const spec of Object.values(LIMITERS)) {
@@ -319,5 +367,30 @@ describe('server/wrangler.jsonc ratelimits', () => {
 
   it('only uses periods Workers supports', () => {
     for (const entry of declared) expect([10, 60]).toContain(entry.simple.period)
+  })
+
+  // wrangler does NOT inherit `ratelimits` into a named environment: leaving
+  // them out of env.staging deploys a public Worker whose limits are only the
+  // per-isolate in-memory fallback.
+  it('repeats every binding in each named environment, with the same limits', () => {
+    expect(namedEnvs.length).toBeGreaterThan(0)
+    for (const [name, env] of namedEnvs) {
+      expect(env.ratelimits, name).toBeDefined()
+      expect(
+        env.ratelimits!.map((entry) => [entry.name, entry.simple.limit, entry.simple.period]),
+        name,
+      ).toEqual(declared.map((entry) => [entry.name, entry.simple.limit, entry.simple.period]))
+    }
+  })
+
+  it('gives each environment its own namespace ids, so counters never mix', () => {
+    const seen = new Set(declared.map((entry) => entry.namespace_id))
+    for (const [name, env] of namedEnvs) {
+      for (const entry of env.ratelimits ?? []) {
+        expect(entry.namespace_id, `${name}:${entry.name}`).toMatch(/^[1-9]\d*$/)
+        expect(seen.has(entry.namespace_id), `${name}:${entry.name} reuses namespace ${entry.namespace_id}`).toBe(false)
+        seen.add(entry.namespace_id)
+      }
+    }
   })
 })

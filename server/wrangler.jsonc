@@ -52,7 +52,9 @@
     { "name": "RL_AVAILABILITY_IP", "namespace_id": "1013", "simple": { "limit": 60, "period": 60 } },
     { "name": "RL_MUNS_LIST_IP", "namespace_id": "1014", "simple": { "limit": 120, "period": 60 } },
     { "name": "RL_MFA_VERIFY_IP", "namespace_id": "1015", "simple": { "limit": 20, "period": 60 } },
-    { "name": "RL_MFA_VERIFY_TOKEN", "namespace_id": "1016", "simple": { "limit": 10, "period": 60 } }
+    { "name": "RL_MFA_VERIFY_TOKEN", "namespace_id": "1016", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_MFA_MANAGE_USER", "namespace_id": "1017", "simple": { "limit": 5, "period": 60 } },
+    { "name": "RL_FILES_IP", "namespace_id": "1018", "simple": { "limit": 600, "period": 60 } }
   ],
   // Hyperdrive config "munhub-db", created 2026-09-17 against the production
   // Neon instance. Pools/terminates Postgres connections at Cloudflare's edge
@@ -108,7 +110,8 @@
       // list keeps staging off every munhub.in hostname.
       "routes": [],
       "workers_dev": true,
-      // `vars` and `hyperdrive` are never inherited; staging lists its own.
+      // `vars`, `hyperdrive` and `ratelimits` are never inherited; staging
+      // lists its own.
       "vars": {
         // Empty on purpose: workers.dev is a public suffix, so the session
         // cookie has to stay host-only.
@@ -128,6 +131,35 @@
           // then paste its id here. Deploying staging fails until then.
           "id": "00000000000000000000000000000000"
         }
+      ],
+      // Repeated, not inherited: wrangler treats `ratelimits` as
+      // non-inheritable, so leaving this out would deploy munhub-api-staging
+      // with no RL_* bindings at all — every limit would silently fall back to
+      // the per-isolate in-memory counter (server/lib/rate-limit-store.ts),
+      // which resets with each new isolate. Staging is publicly reachable on
+      // workers.dev and its Neon branch is forked from production, so its
+      // sign-in limits have to be real. Same names/limits/periods as the top
+      // level (a test checks that), with their own namespace ids in the 2000
+      // range so staging counters never share a bucket with production's.
+      "ratelimits": [
+        { "name": "RL_GLOBAL_IP", "namespace_id": "2001", "simple": { "limit": 300, "period": 60 } },
+        { "name": "RL_LOGIN_IP", "namespace_id": "2002", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RL_LOGIN_ACCOUNT", "namespace_id": "2003", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_SIGNUP_IP", "namespace_id": "2004", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_RESET_REQUEST_IP", "namespace_id": "2005", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_RESET_REQUEST_EMAIL", "namespace_id": "2006", "simple": { "limit": 3, "period": 60 } },
+        { "name": "RL_RESET_CONFIRM_IP", "namespace_id": "2007", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_CHANGE_PASSWORD_USER", "namespace_id": "2008", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_ORGANIZER_CODE_IP", "namespace_id": "2009", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_ORGANIZER_CODE_IP_EMAIL", "namespace_id": "2010", "simple": { "limit": 3, "period": 60 } },
+        { "name": "RL_ORGANIZER_VERIFY_IP_EMAIL", "namespace_id": "2011", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_REGISTRATIONS_USER", "namespace_id": "2012", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_AVAILABILITY_IP", "namespace_id": "2013", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_MUNS_LIST_IP", "namespace_id": "2014", "simple": { "limit": 120, "period": 60 } },
+        { "name": "RL_MFA_VERIFY_IP", "namespace_id": "2015", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RL_MFA_VERIFY_TOKEN", "namespace_id": "2016", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_MFA_MANAGE_USER", "namespace_id": "2017", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_FILES_IP", "namespace_id": "2018", "simple": { "limit": 600, "period": 60 } }
       ]
     }
   }

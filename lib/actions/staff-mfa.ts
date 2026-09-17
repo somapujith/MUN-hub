@@ -159,6 +159,18 @@ function generateRecoveryCode(): string {
 }
 
 /**
+ * Whether `code` even has the shape `generateRecoveryCode` produces. Checked
+ * before `matchRecoveryCode` scans an account's unused codes: each candidate
+ * costs a scrypt verification (~65 ms and 32 MiB, lib/auth/password.ts), so a
+ * wrong 6-digit TOTP must not pay for up to ten of them. Nothing that could
+ * have matched is excluded — `matchRecoveryCode` compares against the hash of
+ * the exact generated string, so only this shape can ever verify.
+ */
+export function looksLikeRecoveryCode(code: string): boolean {
+  return /^[0-9a-fA-F]{5}-[0-9a-fA-F]{5}$/.test(code)
+}
+
+/**
  * Called by `signIn` once the password has verified for a staff account with
  * confirmed MFA — mints a short-lived, single-use, hashed-at-rest pending
  * token (mirrors lib/auth/session.ts's opaque tokens) instead of a session.
@@ -211,7 +223,8 @@ export async function completeMfaChallenge(
     const matchedStep = /^\d{6}$/.test(trimmedCode)
       ? verifyTotp(decryptField(mfa.totpSecretCiphertext, TOTP_KEY_NAMES), trimmedCode, { lastUsedStep: mfa.lastUsedStep })
       : null
-    const recoveryCodeId = matchedStep === null ? await matchRecoveryCode(tx, row.userId, trimmedCode) : null
+    const recoveryCodeId =
+      matchedStep === null && looksLikeRecoveryCode(trimmedCode) ? await matchRecoveryCode(tx, row.userId, trimmedCode) : null
 
     if (matchedStep === null && !recoveryCodeId) {
       const attempts = row.attempts + 1
@@ -295,7 +308,8 @@ export async function disableMfa(code: string, session: Session): Promise<void> 
   const matchedStep = /^\d{6}$/.test(trimmedCode)
     ? verifyTotp(decryptField(row.totpSecretCiphertext, TOTP_KEY_NAMES), trimmedCode, { lastUsedStep: row.lastUsedStep })
     : null
-  const recoveryCodeId = matchedStep === null ? await matchRecoveryCode(db, session.userId, trimmedCode) : null
+  const recoveryCodeId =
+    matchedStep === null && looksLikeRecoveryCode(trimmedCode) ? await matchRecoveryCode(db, session.userId, trimmedCode) : null
   if (matchedStep === null && !recoveryCodeId) throw new Error(MFA_ERRORS.invalidCode)
 
   await db.transaction(async (tx) => {
