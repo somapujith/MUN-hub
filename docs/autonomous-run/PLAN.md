@@ -59,3 +59,16 @@ Lead-agent lanes must not add migrations without a slot from the lead.
 5. Push `main`; deploy `munhub-api` and `munhub-web` from a clean worktree at the verified
    commit; apply additive migrations to Neon; set new Worker vars/secrets.
 6. Compile `docs/autonomous-run/CHANGELOG.md`; update `CLAUDE.md`.
+
+## Phase 3 — UX pass (requested 09:30, after all lanes are merged and verified)
+
+1. Persona walkthroughs in a real browser against the integrated build (own ports, local DB):
+   first-time visitor, delegate (sign up → profile → discover → register → pay (mock) →
+   dashboard → pass/receipt → support), organizer (sign up → onboarding → application →
+   setup + every module → submit → go-live → open registration → roster → communications →
+   check-in → results), admin/operations (applications → verification → go-live queue →
+   conferences → payments exceptions → support → staff → audit). Desktop + mobile widths.
+2. Each walkthrough records friction with screenshots: confusing copy, dead ends, missing
+   feedback/loading/empty/error states, inconsistent layout, accessibility problems.
+3. Fix agents per area (isolated worktrees), serialized merge, E2E re-run by mun-hub-84, and a
+   second walkthrough to confirm.
