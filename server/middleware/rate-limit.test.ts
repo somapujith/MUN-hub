@@ -154,6 +154,56 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
     expect(otherUser.status).toBe(200)
   })
 
+  describe('support and account deletion (per signed-in user)', () => {
+    it('shares one ticket budget between new tickets and new conversations', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const result = await statuses(LIMITERS.supportTicketUser.limit + 1, (i) =>
+        send(i % 2 === 0 ? '/support/tickets' : '/support/conversations', { ip: freshIp(), user, body: {} }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.supportTicketUser.limit))
+
+      const otherUser = await send('/support/tickets', { ip: freshIp(), user: `user-${crypto.randomUUID()}`, body: {} })
+      expect(otherUser.status).toBe(200)
+    })
+
+    it('limits messages per user across conversations', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const result = await statuses(LIMITERS.supportMessageUser.limit + 1, () =>
+        send(`/support/conversations/${crypto.randomUUID()}/messages`, { ip: freshIp(), user, body: { body: 'hi' } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.supportMessageUser.limit))
+      // Reading a conversation or marking it read isn't a message.
+      const conversation = `/support/conversations/${crypto.randomUUID()}`
+      expect((await send(`${conversation}/read`, { ip: freshIp(), user, body: {} })).status).toBe(200)
+      expect((await send(conversation, { ip: freshIp(), user, method: 'GET' })).status).toBe(200)
+    })
+
+    it('limits account deletion attempts per user', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const result = await statuses(LIMITERS.accountDeleteUser.limit + 1, () =>
+        send('/account/delete', { ip: freshIp(), user, body: { confirmation: 'DELETE', password: 'guess' } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.accountDeleteUser.limit))
+    })
+
+    it('does not count anonymous calls against these limits (the routes answer 401)', async () => {
+      const ip = freshIp()
+      const result = await statuses(LIMITERS.accountDeleteUser.limit + 3, () => send('/account/delete', { ip, body: {} }))
+      expect(result.every((status) => status === 200)).toBe(true)
+    })
+
+    it('counts against the user binding when bindings are present', async () => {
+      const env = Object.fromEntries(
+        Object.values(LIMITERS).map((spec) => [spec.binding, { limit: vi.fn(async () => ({ success: true })) }]),
+      )
+      const user = `user-${crypto.randomUUID()}`
+      const res = await send(`/support/conversations/${crypto.randomUUID()}/messages`, { ip: freshIp(), user, env, body: {} })
+      expect(res.status).toBe(200)
+      expect(env.RL_SUPPORT_MESSAGE_USER.limit).toHaveBeenCalledWith({ key: `user:${user}` })
+      expect(env.RL_SUPPORT_TICKET_USER.limit).not.toHaveBeenCalled()
+    })
+  })
+
   it('keeps the organizer code limits: per IP+email and per IP', async () => {
     const ip = freshIp()
     const email = freshEmail('org-code')
