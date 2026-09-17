@@ -1,13 +1,14 @@
 import { expect, request, test, type APIRequestContext } from '@playwright/test'
 import { API_ORIGIN, WEB_URL } from '../../env'
 import { newApiContext, signUpOrganizerViaApi, signUpViaApi } from '../../fixtures/api'
+import { recreateReadyMun } from '../../fixtures/fixture-db'
 import { REVIEW, SUSPEND } from '../../fixtures/fixture-muns'
 import { STORAGE_STATE } from '../../paths'
 import { adminApi } from './_helpers'
 
 /**
  * Gate 2 end to end through the API, on MUNs whose go-live modules are all
- * filled in (prepare-db recreates them every run):
+ * filled in (recreated at the start of this spec):
  * - e2e-review-mun: submit → organizer confirmation → changes requested →
  *   resubmit → approve → go-live queue → publish → unpublish.
  * - e2e-suspend-mun: published the same way, then suspended and reinstated.
@@ -87,15 +88,9 @@ async function approveAndPublish(munId: string) {
 test.beforeAll(async () => {
   admin = await adminApi()
   owner = await organizerApi()
-  const overview = await owner.get('organizer/workspace/overview')
-  const muns = ((await overview.json()) as { muns: Array<{ id: string; slug: string }> }).muns
-  const find = (slug: string) => {
-    const mun = muns.find((m) => m.slug === slug)
-    expect(mun, `prepare-db created ${slug}`).toBeTruthy()
-    return mun!.id
-  }
-  reviewId = find(REVIEW.slug)
-  suspendId = find(SUSPEND.slug)
+  // Start from a clean copy every time, so a rerun without prepare-db works.
+  reviewId = await recreateReadyMun(REVIEW)
+  suspendId = await recreateReadyMun(SUSPEND)
 })
 
 test.afterAll(async () => {
@@ -212,13 +207,12 @@ test.describe('go-live', () => {
     expect(await publicStatus(REVIEW.slug)).toBe(404)
   })
 
-  test('an unpublished MUN can be queued and published again', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG?: after unpublish there is no way back — enqueueForGoLive needs an active submission, but the published one is finished, so it returns 409 "No active submission found for this mun" (the state machine does allow UNPUBLISHED → GO_LIVE_QUEUE)',
-    )
+  test('an unpublished MUN can be queued and published again (fc05d9e)', async () => {
     const queued = await admin.post(`muns/${reviewId}/submission/actions/enqueue`)
     expect(queued.status(), await queued.text()).toBe(200)
+    expect(await status(reviewId)).toBe('GO_LIVE_QUEUE')
+    const queue = await (await admin.get('admin/go-live-queue?limit=100')).json()
+    expect(JSON.stringify(queue)).toContain(reviewId)
     const published = await admin.post(`muns/${reviewId}/actions/publish`, {
       headers: { 'Idempotency-Key': crypto.randomUUID() },
     })

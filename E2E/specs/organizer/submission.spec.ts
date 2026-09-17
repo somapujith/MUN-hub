@@ -1,9 +1,10 @@
 import { expect, request, test, type APIRequestContext, type Page } from '@playwright/test'
 import { API_ORIGIN, WEB_URL } from '../../env'
+import { recreateReadyMun } from '../../fixtures/fixture-db'
 import { CONFIRM } from '../../fixtures/fixture-muns'
 import { watchForCrashes } from '../../fixtures/ui'
 import { STORAGE_STATE } from '../../paths'
-import { main, openSection, organizerApi, ownedMunBySlug, toast } from './_helpers'
+import { main, openSection, organizerApi, toast } from './_helpers'
 
 /**
  * The organizer's side of Gate 2 in the UI (87d7102), on e2e-confirm-mun
@@ -34,7 +35,8 @@ function banner(page: Page) {
 
 test.beforeAll(async () => {
   api = await organizerApi()
-  munId = (await ownedMunBySlug(api, CONFIRM.slug)).id
+  // Start from a clean copy every time, so a rerun without prepare-db works.
+  munId = await recreateReadyMun(CONFIRM)
 })
 
 test.afterAll(async () => {
