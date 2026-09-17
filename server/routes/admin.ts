@@ -1,10 +1,14 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { getAdminAnalytics } from '@/lib/actions/admin-analytics'
 import { getAdminOverviewStats, listAdminActions } from '@/lib/actions/admin-audit'
+import { recordPiiRead } from '@/lib/actions/admin-pii-read'
 import { getRegistrationsQueue } from '@/lib/actions/admin-review'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
 import type { AppVariables } from '../src/types'
+import { adminMunsRoutes } from './admin-muns'
+import { adminStaffRoutes } from './admin-staff'
 
 const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
 
@@ -35,6 +39,17 @@ adminRoutes.get(
   },
 )
 
+// Platform totals for the overview cards (GMV, platform fees, registrations
+// by status, live MUNs, new organizers).
+adminRoutes.get(
+  '/admin/analytics',
+  requireAuth,
+  requireRole([...ADMIN_ROLES]),
+  async (c) => {
+    return c.json(await getAdminAnalytics(c.get('session')))
+  },
+)
+
 adminRoutes.get(
   '/admin/audit',
   requireAuth,
@@ -57,7 +72,20 @@ adminRoutes.get(
   requireRole([...ADMIN_ROLES]),
   async (c) => {
     const params = registrationsQuerySchema.parse(c.req.query())
-    const result = await getRegistrationsQueue(params, c.get('session'))
+    const session = c.get('session')!
+    const result = await getRegistrationsQueue(params, session)
+    // Rows carry delegate names and emails.
+    recordPiiRead({
+      actorId: session.userId,
+      route: 'GET /admin/registrations',
+      targetType: 'registration',
+      targetIds: result.results.map((row) => row.id),
+      hasQuery: Boolean(params.q),
+    })
     return c.json(result)
   },
 )
+
+// Staff management and the conferences console live in their own files.
+adminRoutes.route('/', adminStaffRoutes)
+adminRoutes.route('/', adminMunsRoutes)

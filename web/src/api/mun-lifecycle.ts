@@ -73,8 +73,11 @@ export function getMunLifecycle(munId: string) {
  * which is written to be shown as-is.
  */
 export function runLifecycleAction(munId: string, action: LifecycleAction, reason?: string) {
+  // A blank reason is sent as no reason, so the server's own "reason required"
+  // check answers for cancel instead of a whitespace string slipping through.
+  const trimmed = reason?.trim();
   return request<LifecycleActionResult>(`/muns/${munId}/lifecycle/${action}`, {
     method: "POST",
-    body: JSON.stringify(reason === undefined ? {} : { reason }),
+    body: JSON.stringify(trimmed ? { reason: trimmed } : {}),
   });
 }

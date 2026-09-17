@@ -1,5 +1,4 @@
 import { Link, Outlet, useLocation } from "react-router";
-import { cn } from "cn";
 import { RequireAuth } from "@/guards/require-auth";
 import { RequireRole } from "@/guards/require-role";
 import { SiteHeader } from "@/components/layout/site-header";
@@ -28,12 +27,14 @@ export function AdminLayout() {
                   key={item.href}
                   to={item.href}
                   aria-current={isNavActive(pathname, item.href, item.exact) ? "page" : undefined}
-                  className={cn(
-                    "shrink-0 rounded-sm px-2 py-1 text-body-md whitespace-nowrap transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none",
+                  // Plain concatenation, not cn(): cn() treats the custom
+                  // text-body-md size token and a text colour as one conflict
+                  // group and silently drops the size.
+                  className={`shrink-0 rounded-sm px-2 py-1 text-body-md whitespace-nowrap transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none ${
                     isNavActive(pathname, item.href, item.exact)
                       ? "font-medium text-ink"
-                      : "text-muted-foreground hover:text-ink",
-                  )}
+                      : "text-muted-foreground hover:text-ink"
+                  }`}
                 >
                   {item.label}
                 </Link>

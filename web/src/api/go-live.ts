@@ -8,6 +8,7 @@ import type {
   PublishFromQueueResult,
   SubmitMunForReviewResult,
 } from "@/types/go-live";
+import type { GoLiveQueueDetailResult, ReviewSubmissionInput } from "@/types/admin-muns";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -68,6 +69,37 @@ export function getGoLiveQueue(params: GoLiveQueueParams = {}) {
     // The server also sends Cache-Control: no-store on this route — set here
     // too so a browser-level HTTP cache never serves a stale SLA computation.
     cache: "no-store",
+  });
+}
+
+/**
+ * The go-live queue plus each submission's reviewer, organizer and
+ * payment-account state (`GET /admin/go-live-queue/details`,
+ * lib/actions/admin-muns.ts#getGoLiveQueueDetails). Staff only.
+ */
+export function getGoLiveQueueDetails(params: GoLiveQueueParams = {}) {
+  const query = new URLSearchParams();
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  if (params.offset !== undefined) query.set("offset", String(params.offset));
+  const qs = query.toString();
+  return request<GoLiveQueueDetailResult>(`/admin/go-live-queue/details${qs ? `?${qs}` : ""}`, {
+    cache: "no-store",
+  });
+}
+
+/**
+ * Gate 2 content-review decision on the MUN's active submission — wraps
+ * lib/lifecycle/go-live.ts#reviewSubmission (OPERATIONS/ADMIN/SUPER_ADMIN).
+ * Legal only while the MUN is in VERIFICATION. APPROVED -> VERIFIED,
+ * CHANGES_REQUESTED -> ACTION_REQUIRED, REJECTED -> REJECTED (the server
+ * requires `reason` for REJECTED). Never route a Gate 1 organizer-application
+ * decision through this — that is `reviewMunApplication` in
+ * `@/api/admin-review`.
+ */
+export function reviewSubmission(munId: string, input: ReviewSubmissionInput) {
+  return request<MunSubmissionRow>(`/muns/${munId}/submission/actions/review`, {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }
 

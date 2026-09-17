@@ -4,7 +4,7 @@ import { db } from '@/lib/db/client'
 import { adminActions, users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 
-import { listOrganizers, reinstateOrganizer, suspendOrganizer } from './organizer-admin'
+import { listOrganizers, ORGANIZER_NOT_FOUND, reinstateOrganizer, suspendOrganizer } from './organizer-admin'
 
 async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' | 'SUPER_ADMIN') {
   const [user] = await db
@@ -62,6 +62,29 @@ describe('suspendOrganizer', () => {
     const [updated] = await db.select().from(users).where(eq(users.id, organizer.id))
     expect(updated.suspended).toBe(true)
   })
+
+  // Regression: OPERATIONS could suspend an ADMIN/SUPER_ADMIN (or any user)
+  // here just by passing their id. Only ORGANIZER accounts are suspendable
+  // through this action; staff go through admin-staff.ts (SUPER_ADMIN only).
+  it.each(['STUDENT', 'OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const)(
+    'refuses to suspend a %s account, leaving it and the audit log untouched',
+    async (role) => {
+      const ops = await makeUser('OPERATIONS')
+      const target = await makeUser(role)
+
+      await expect(suspendOrganizer(target.id, 'nope', sess(ops))).rejects.toThrow(ORGANIZER_NOT_FOUND)
+
+      const [unchanged] = await db.select().from(users).where(eq(users.id, target.id))
+      expect(unchanged.suspended).toBe(false)
+      const logs = await db.select().from(adminActions).where(eq(adminActions.targetId, target.id))
+      expect(logs).toEqual([])
+    },
+  )
+
+  it('refuses an unknown user id with ORGANIZER_NOT_FOUND', async () => {
+    const admin = await makeUser('ADMIN')
+    await expect(suspendOrganizer(crypto.randomUUID(), 'x', sess(admin))).rejects.toThrow(ORGANIZER_NOT_FOUND)
+  })
 })
 
 describe('reinstateOrganizer', () => {
@@ -102,6 +125,26 @@ describe('reinstateOrganizer', () => {
     const __actor = sess(student)
 
     await expect(reinstateOrganizer(organizer.id, __actor)).rejects.toThrow('Forbidden')
+  })
+
+  it('refuses to reinstate a suspended staff account', async () => {
+    const ops = await makeUser('OPERATIONS')
+    const [suspendedAdmin] = await db
+      .insert(users)
+      .values({
+        name: 'Suspended admin',
+        email: `suspended-admin-${Date.now()}-${Math.random()}@test.dev`,
+        role: 'ADMIN',
+        suspended: true,
+        suspendedReason: 'offboarded',
+        suspendedAt: new Date(),
+      })
+      .returning()
+
+    await expect(reinstateOrganizer(suspendedAdmin.id, sess(ops))).rejects.toThrow(ORGANIZER_NOT_FOUND)
+
+    const [unchanged] = await db.select().from(users).where(eq(users.id, suspendedAdmin.id))
+    expect(unchanged.suspended).toBe(true)
   })
 })
 

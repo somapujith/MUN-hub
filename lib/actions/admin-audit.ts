@@ -100,7 +100,10 @@ export const GATE1_AUDIT_ACTIONS = [
  * reviewer clicks through from to reach that per-target detail view.
  *
  * Two sources:
- * - every `admin_actions` row (suspensions, Gate 2 decisions, publishes, …);
+ * - every `admin_actions` row (suspensions, Gate 2 decisions, publishes, …),
+ *   labelled with `metadata.event` when the row carries one. Staff-management
+ *   writes (admin-staff.ts) store the closest existing enum value and put the
+ *   precise event name (STAFF_CREATED, STAFF_ROLE_CHANGED, …) there;
  * - Gate 1 organizer-application decisions (`reviewMunApplication`), which
  *   are recorded only as `verification_logs` transitions. A row counts as a
  *   Gate 1 decision when it is APPROVED/REJECTED/CHANGES_REQUESTED and the
@@ -125,7 +128,8 @@ export async function listAdminActions(
   const offset = params.offset ?? 0
 
   const feed = sql`
-    SELECT aa.id, aa.actor_id, aa.action::text AS action, aa.target_type, aa.target_id, aa.reason, aa.created_at
+    SELECT aa.id, aa.actor_id, COALESCE(aa.metadata->>'event', aa.action::text) AS action,
+      aa.target_type, aa.target_id, aa.reason, aa.created_at
     FROM admin_actions aa
     UNION ALL
     SELECT vl.id, vl.reviewer_id, 'APPLICATION_' || vl.action, 'mun', vl.mun_id, vl.notes, vl.created_at

@@ -1,48 +1,43 @@
 import { useRef, useState } from "react";
+import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RocketIcon } from "lucide-react";
 import { toast } from "sonner";
-import { enqueueForGoLive, getGoLiveQueue, publishFromQueue } from "@/api/go-live";
-import { queryKeys } from "@/api/query-keys";
+import { enqueueForGoLive, getGoLiveQueueDetails, publishFromQueue } from "@/api/go-live";
+import { setPaymentVerificationState } from "@/api/payment-settlement";
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
+import { Gate2ReviewDialog } from "@/components/admin/gate2-review-dialog";
 import { MunStatusBadge } from "@/components/mun/mun-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { SlaState, SubmissionStatus } from "@/types/go-live";
+import {
+  formatAdminDate,
+  paymentVerificationMeta,
+  SLA_META,
+  SUBMISSION_STATUS_META,
+} from "@/lib/admin/go-live-labels";
+import { useAdminPermissions } from "@/lib/admin/permissions";
+import { adminQueryKeys } from "@/lib/admin/query-keys";
+import type { GoLiveQueueDetailRow } from "@/types/admin-muns";
+import type { PaymentVerificationState } from "@/types/payment-settlement";
 
 const PAGE_SIZE = 20;
 
-const SLA_META: Record<SlaState, { label: string; variant: "success" | "warning" | "destructive" | "secondary" | "info" }> = {
-  ON_TRACK: { label: "On track", variant: "success" },
-  DUE_SOON: { label: "Due soon", variant: "warning" },
-  OVERDUE: { label: "Overdue", variant: "destructive" },
-  PAUSED: { label: "Paused", variant: "secondary" },
-  COMPLETED: { label: "Completed", variant: "info" },
-};
+const statLabelClassName = "text-[12px] font-medium tracking-[0.16px] text-muted-foreground uppercase";
 
-const SUBMISSION_STATUS_META: Record<SubmissionStatus, { label: string; variant: "success" | "warning" | "destructive" | "secondary" | "info" | "outline" }> = {
-  SUBMITTED: { label: "Submitted", variant: "info" },
-  UNDER_REVIEW: { label: "Under review", variant: "info" },
-  CHANGES_REQUESTED: { label: "Changes requested", variant: "warning" },
-  APPROVED: { label: "Approved", variant: "success" },
-  REJECTED: { label: "Rejected", variant: "destructive" },
-  QUEUED: { label: "Queued", variant: "secondary" },
-  PUBLISHED: { label: "Published", variant: "success" },
-  WITHDRAWN: { label: "Withdrawn", variant: "outline" },
-};
-
-function formatDate(value: string | null): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
+/**
+ * Gate 2 publish pipeline: every MUN with an active submission. Staff review
+ * the submitted content here (approve / request changes / reject); admins
+ * also verify the payout account, queue approved MUNs and publish them.
+ * OPERATIONS never sees the queue/publish/verify controls — the server
+ * refuses them anyway.
+ */
 export function AdminGoLiveQueuePage() {
   const queryClient = useQueryClient();
+  const { canPublish } = useAdminPermissions();
   const [page, setPage] = useState(0);
+  const [reviewTarget, setReviewTarget] = useState<{ munId: string; munName: string } | null>(null);
   // One idempotency key per in-flight publish attempt, keyed by munId —
   // reused across a retry of the SAME attempt (never regenerated on retry),
   // per publishFromQueue's docstring. Cleared once that mun's publish
@@ -52,12 +47,18 @@ export function AdminGoLiveQueuePage() {
 
   const params = { limit: PAGE_SIZE, offset: page * PAGE_SIZE };
   const queueQuery = useQuery({
-    queryKey: queryKeys.adminGoLiveQueue(params),
-    queryFn: () => getGoLiveQueue(params),
+    queryKey: adminQueryKeys.goLiveQueueDetails(params),
+    queryFn: () => getGoLiveQueueDetails(params),
     placeholderData: (previous) => previous,
   });
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["admin", "go-live-queue"] });
+  // The queue feeds the overview counts and the conference pages too.
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["admin", "go-live-queue"] }),
+      queryClient.invalidateQueries({ queryKey: adminQueryKeys.munsAll() }),
+      queryClient.invalidateQueries({ queryKey: ["admin", "overview"] }),
+    ]);
 
   const enqueueMutation = useMutation({
     mutationFn: enqueueForGoLive,
@@ -65,7 +66,7 @@ export function AdminGoLiveQueuePage() {
       await refresh();
       toast.success("Moved to the go-live queue");
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to queue this mun"),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to queue this MUN"),
   });
 
   const publishMutation = useMutation({
@@ -85,29 +86,106 @@ export function AdminGoLiveQueuePage() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to publish"),
   });
 
+  const paymentMutation = useMutation({
+    mutationFn: ({ munId, state }: { munId: string; state: PaymentVerificationState }) =>
+      setPaymentVerificationState(munId, state),
+    onSuccess: async (_result, { state }) => {
+      await refresh();
+      toast.success(state === "VERIFIED" ? "Payment account verified" : "Payment account marked as failed");
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Unable to update the payment account"),
+  });
+
   const results = queueQuery.data?.results ?? [];
   const total = queueQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const awaitingReviewCount = results.filter((row) => row.munStatus === "VERIFICATION").length;
   const readyToPublishCount = results.filter((row) => row.munStatus === "GO_LIVE_QUEUE").length;
+  const overdueCount = results.filter((row) => row.slaState === "OVERDUE").length;
+
+  const confirmPayment = (row: GoLiveQueueDetailRow, state: PaymentVerificationState) => {
+    const message =
+      state === "VERIFIED"
+        ? `Mark ${row.munName}'s payout account as verified? Do this only after checking the account off-platform.`
+        : `Mark ${row.munName}'s payout account as failed? The organizer will need to fix their payout details.`;
+    if (window.confirm(message)) paymentMutation.mutate({ munId: row.munId, state });
+  };
+
+  const renderAction = (row: GoLiveQueueDetailRow) => {
+    const isEnqueuing = enqueueMutation.isPending && enqueueMutation.variables === row.munId;
+    const isPublishing = publishMutation.isPending && publishMutation.variables === row.munId;
+
+    switch (row.munStatus) {
+      case "VERIFICATION":
+        return (
+          <Button size="sm" onClick={() => setReviewTarget({ munId: row.munId, munName: row.munName })}>
+            Review
+          </Button>
+        );
+      case "VERIFIED":
+        return canPublish ? (
+          <Button size="sm" variant="outline" disabled={isEnqueuing} onClick={() => enqueueMutation.mutate(row.munId)}>
+            {isEnqueuing ? "Queueing…" : "Queue for go-live"}
+          </Button>
+        ) : (
+          <span className="text-body-md text-muted-foreground">Approved, waiting for an admin</span>
+        );
+      case "GO_LIVE_QUEUE": {
+        if (!canPublish) {
+          return <span className="text-body-md text-muted-foreground">Queued, waiting for an admin</span>;
+        }
+        const paymentReady = row.paymentVerificationState === "VERIFIED";
+        return (
+          <div className="flex flex-col items-end gap-xxs">
+            <Button
+              size="sm"
+              disabled={isPublishing || !paymentReady}
+              onClick={() => {
+                if (window.confirm(`Publish ${row.munName}? It will go live on the public marketplace immediately.`)) {
+                  publishMutation.mutate(row.munId);
+                }
+              }}
+            >
+              {isPublishing ? "Publishing…" : "Publish"}
+            </Button>
+            {!paymentReady && (
+              <span className="text-body-md text-muted-foreground">Verify the payment account first</span>
+            )}
+          </div>
+        );
+      }
+      case "ORGANIZER_CONFIRMATION":
+        return <span className="text-body-md text-muted-foreground">Waiting for organizer confirmation</span>;
+      case "ACTION_REQUIRED":
+        return <span className="text-body-md text-muted-foreground">Waiting for organizer changes</span>;
+      default:
+        return <span className="text-body-md text-muted-foreground">—</span>;
+    }
+  };
 
   return (
     <AdminPageFrame
       title="Go-live queue"
-      description="Gate 2 — MUNs that have cleared content review and are on their way to going live. SLA is computed on read, never a stale snapshot."
+      description="Gate 2 — MUNs submitted for content review, on their way to going live. SLA is computed on read, never a stale snapshot."
     >
       {total > 0 && (
-        <dl className="flex items-center gap-lg">
+        <dl className="flex flex-wrap items-center gap-lg">
           <div className="flex flex-col gap-0.5">
-            <dt className="text-[12px] font-medium tracking-[0.16px] text-muted-foreground uppercase">
-              In pipeline
-            </dt>
+            <dt className={statLabelClassName}>In pipeline</dt>
             <dd className="font-display text-title-lg tabular-nums text-ink">{total}</dd>
           </div>
           <div className="flex flex-col gap-0.5">
-            <dt className="text-[12px] font-medium tracking-[0.16px] text-muted-foreground uppercase">
-              Ready to publish (this page)
-            </dt>
+            <dt className={statLabelClassName}>Awaiting review (this page)</dt>
+            <dd className="font-display text-title-lg tabular-nums text-ink">{awaitingReviewCount}</dd>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <dt className={statLabelClassName}>Ready to publish (this page)</dt>
             <dd className="font-display text-title-lg tabular-nums text-ink">{readyToPublishCount}</dd>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <dt className={statLabelClassName}>Overdue (this page)</dt>
+            <dd className="font-display text-title-lg tabular-nums text-ink">{overdueCount}</dd>
           </div>
         </dl>
       )}
@@ -115,7 +193,7 @@ export function AdminGoLiveQueuePage() {
       {queueQuery.isLoading ? (
         <div className="flex flex-col gap-sm">
           {Array.from({ length: 4 }).map((_, index) => (
-            <Skeleton key={index} className="h-14 w-full" />
+            <Skeleton key={index} className="h-16 w-full" />
           ))}
         </div>
       ) : queueQuery.isError ? (
@@ -127,72 +205,91 @@ export function AdminGoLiveQueuePage() {
           <RocketIcon className="size-8 text-muted-foreground" strokeWidth={1.25} aria-hidden />
           <p className="font-display text-title-md text-ink">Nothing in the pipeline.</p>
           <p className="max-w-sm text-body-md text-muted-foreground">
-            MUNs appear here once an organizer submits for review and haven&apos;t yet published.
+            MUNs appear here once an organizer submits for review and stay until they publish.
           </p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-md border border-border bg-card">
-          <table className="w-full min-w-[56rem] text-left text-body-md">
+          <table className="w-full min-w-[64rem] text-left text-body-md">
             <thead className="border-b border-border bg-surface-soft/80 text-muted-foreground">
               <tr>
                 <th className="px-md py-sm font-medium">MUN</th>
-                <th className="px-md py-sm font-medium">Lifecycle status</th>
-                <th className="px-md py-sm font-medium">Submission</th>
-                <th className="px-md py-sm font-medium">Submitted</th>
-                <th className="px-md py-sm font-medium">SLA deadline</th>
-                <th className="px-md py-sm font-medium">SLA state</th>
-                <th className="px-md py-sm font-medium">Queued</th>
-                <th className="px-md py-sm font-medium text-right">Actions</th>
+                <th className="px-md py-sm font-medium">Status</th>
+                <th className="px-md py-sm font-medium">SLA</th>
+                <th className="px-md py-sm font-medium">Reviewer</th>
+                <th className="px-md py-sm font-medium">Payment account</th>
+                <th className="px-md py-sm text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {results.map((row) => {
                 const sla = SLA_META[row.slaState];
                 const submission = SUBMISSION_STATUS_META[row.submissionStatus];
-                const isEnqueuing = enqueueMutation.isPending && enqueueMutation.variables === row.munId;
-                const isPublishing = publishMutation.isPending && publishMutation.variables === row.munId;
+                const payment = paymentVerificationMeta(row.paymentVerificationState);
+                const isUpdatingPayment = paymentMutation.isPending && paymentMutation.variables?.munId === row.munId;
 
                 return (
-                  <tr key={row.submissionId} className="border-b border-border last:border-0">
-                    <td className="px-md py-sm font-medium text-ink">{row.munName}</td>
+                  <tr key={row.submissionId} className="border-b border-border align-top last:border-0">
                     <td className="px-md py-sm">
-                      <MunStatusBadge status={row.munStatus} />
+                      <Link to={`/admin/muns/${row.munId}`} className="font-medium text-link hover:text-link-active">
+                        {row.munName}
+                      </Link>
+                      <p className="text-body-md text-muted-foreground">{row.organizerName}</p>
+                      <p className="text-body-md whitespace-nowrap tabular-nums text-muted-foreground">
+                        Submitted {formatAdminDate(row.submittedAt)}
+                      </p>
                     </td>
                     <td className="px-md py-sm">
-                      <Badge variant={submission.variant}>{submission.label}</Badge>
+                      <div className="flex flex-col items-start gap-xxs">
+                        <MunStatusBadge status={row.munStatus} />
+                        <Badge variant={submission.variant}>Submission: {submission.label}</Badge>
+                      </div>
                     </td>
-                    <td className="px-md py-sm tabular-nums text-muted-foreground">{formatDate(row.submittedAt)}</td>
-                    <td className="px-md py-sm tabular-nums text-muted-foreground">{formatDate(row.slaDeadline)}</td>
                     <td className="px-md py-sm">
-                      <Badge variant={sla.variant}>{sla.label}</Badge>
+                      <div className="flex flex-col items-start gap-xxs">
+                        <Badge variant={sla.variant}>{sla.label}</Badge>
+                        <span className="text-body-md whitespace-nowrap tabular-nums text-muted-foreground">
+                          Due {formatAdminDate(row.slaDeadline)}
+                        </span>
+                      </div>
                     </td>
-                    <td className="px-md py-sm tabular-nums text-muted-foreground">{formatDate(row.queuedAt)}</td>
-                    <td className="px-md py-sm text-right">
-                      {row.munStatus === "GO_LIVE_QUEUE" ? (
-                        <Button
-                          size="sm"
-                          disabled={isPublishing}
-                          onClick={() => {
-                            if (window.confirm(`Publish ${row.munName}? It will immediately go live on the public marketplace.`)) {
-                              publishMutation.mutate(row.munId);
-                            }
-                          }}
-                        >
-                          {isPublishing ? "Publishing…" : "Publish"}
-                        </Button>
-                      ) : row.munStatus === "VERIFIED" ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isEnqueuing}
-                          onClick={() => enqueueMutation.mutate(row.munId)}
-                        >
-                          {isEnqueuing ? "Queueing…" : "Queue for go-live"}
-                        </Button>
+                    <td className="px-md py-sm">
+                      {row.reviewerName ? (
+                        <span className="text-ink">{row.reviewerName}</span>
                       ) : (
-                        <span className="text-body-md text-muted-foreground">Awaiting Gate 2 decision</span>
+                        <span className="text-muted-foreground">Unassigned</span>
                       )}
                     </td>
+                    <td className="px-md py-sm">
+                      <div className="flex flex-col items-start gap-xs">
+                        <Badge variant={payment.variant}>{payment.label}</Badge>
+                        {canPublish && row.paymentVerificationState !== null && (
+                          <div className="flex flex-wrap gap-xs">
+                            {row.paymentVerificationState !== "VERIFIED" && (
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                disabled={isUpdatingPayment}
+                                onClick={() => confirmPayment(row, "VERIFIED")}
+                              >
+                                Verify
+                              </Button>
+                            )}
+                            {row.paymentVerificationState !== "FAILED" && (
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                disabled={isUpdatingPayment}
+                                onClick={() => confirmPayment(row, "FAILED")}
+                              >
+                                Reject
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-md py-sm text-right">{renderAction(row)}</td>
                   </tr>
                 );
               })}
@@ -219,6 +316,8 @@ export function AdminGoLiveQueuePage() {
           )}
         </div>
       )}
+
+      <Gate2ReviewDialog target={reviewTarget} onClose={() => setReviewTarget(null)} onDecided={refresh} />
     </AdminPageFrame>
   );
 }

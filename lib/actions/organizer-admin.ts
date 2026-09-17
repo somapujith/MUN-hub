@@ -80,22 +80,51 @@ export async function listOrganizers(
   return { results, total: count }
 }
 
+/** Thrown when the target id is not an ORGANIZER account (the API maps it to 404). */
+export const ORGANIZER_NOT_FOUND = 'Organizer not found'
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+
+/**
+ * Row-locks the target user inside `tx` and throws `ORGANIZER_NOT_FOUND`
+ * unless it exists AND has role ORGANIZER. Suspend/reinstate here are open to
+ * OPERATIONS, so without this check an OPERATIONS account could suspend (or
+ * reinstate) an ADMIN/SUPER_ADMIN just by passing that user's id. Staff
+ * accounts are managed only through lib/actions/admin-staff.ts, which is
+ * SUPER_ADMIN-only. A non-organizer id reads as "not found", not "forbidden",
+ * so this endpoint can't be used to probe which ids belong to staff.
+ */
+async function lockOrganizer(tx: Tx, userId: string): Promise<void> {
+  const [target] = await tx
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .for('update')
+    .limit(1)
+  if (!target || target.role !== 'ORGANIZER') {
+    throw new Error(ORGANIZER_NOT_FOUND)
+  }
+}
+
 /**
  * Blocks an organizer's login (`getSession`/`signIn` already reject
  * suspended users — see lib/auth/session.ts and lib/actions/auth.ts).
  * Deliberately does NOT cascade to the organizer's MUNs: a suspension is an
  * account-level login block, not a content takedown — an admin unpublishes
  * or suspends a specific MUN separately if the content itself is the
- * problem. Requires OPERATIONS/ADMIN/SUPER_ADMIN.
+ * problem. Requires OPERATIONS/ADMIN/SUPER_ADMIN, and only ever acts on an
+ * ORGANIZER account (see `lockOrganizer`).
  */
 export async function suspendOrganizer(userId: string, reason: string, session: Session | null): Promise<void> {
   requireRole(session, [...ADMIN_ROLES])
 
   await db.transaction(async (tx) => {
+    await lockOrganizer(tx, userId)
+
     await tx
       .update(users)
       .set({ suspended: true, suspendedReason: reason, suspendedAt: new Date() })
-      .where(eq(users.id, userId))
+      .where(and(eq(users.id, userId), eq(users.role, 'ORGANIZER')))
 
     await recordAdminAction(tx, session.userId, 'ORGANIZER_SUSPENDED', 'user', userId, reason)
   })
@@ -103,16 +132,20 @@ export async function suspendOrganizer(userId: string, reason: string, session: 
 
 /**
  * Clears a suspension, restoring the organizer's login access. Requires
- * OPERATIONS/ADMIN/SUPER_ADMIN.
+ * OPERATIONS/ADMIN/SUPER_ADMIN, and only ever acts on an ORGANIZER account
+ * (see `lockOrganizer`) — a suspended staff account is reinstated through
+ * lib/actions/admin-staff.ts instead.
  */
 export async function reinstateOrganizer(userId: string, session: Session | null): Promise<void> {
   requireRole(session, [...ADMIN_ROLES])
 
   await db.transaction(async (tx) => {
+    await lockOrganizer(tx, userId)
+
     await tx
       .update(users)
       .set({ suspended: false, suspendedReason: null, suspendedAt: null })
-      .where(eq(users.id, userId))
+      .where(and(eq(users.id, userId), eq(users.role, 'ORGANIZER')))
 
     await recordAdminAction(tx, session.userId, 'ORGANIZER_REINSTATED', 'user', userId)
   })
