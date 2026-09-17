@@ -6,13 +6,19 @@ import type { Session } from '@/lib/auth/adapter'
 export interface AccountSettings {
   name: string
   email: string
+  phone: string | null
   emailNotificationsEnabled: boolean
 }
 
 /** Reads the signed-in user's account-level info + preferences. */
 export async function getAccountSettings(session: Session): Promise<AccountSettings> {
   const [user] = await db
-    .select({ name: users.name, email: users.email, emailNotificationsEnabled: users.emailNotificationsEnabled })
+    .select({
+      name: users.name,
+      email: users.email,
+      phone: users.phone,
+      emailNotificationsEnabled: users.emailNotificationsEnabled,
+    })
     .from(users)
     .where(eq(users.id, session.userId))
     .limit(1)

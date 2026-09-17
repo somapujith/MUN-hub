@@ -10,9 +10,12 @@ import type { Role } from "@/types/enums";
 /** UX-only role gate — 403, not login loop. Server is authoritative. */
 export function RequireRole({
   roles,
+  description = "Your account doesn't have permission to view this page.",
   children,
 }: {
   roles: readonly Role[];
+  /** Explains the refusal on the 403 screen. */
+  description?: string;
   children: ReactNode;
 }) {
   const { data: session } = useSession();
@@ -29,9 +32,7 @@ export function RequireRole({
         <main className="content-container flex flex-1 flex-col justify-center gap-md py-xxl">
           <p className="text-caption uppercase text-muted-foreground">403</p>
           <h1 className="font-display text-display-md text-ink">Access denied</h1>
-          <p className="max-w-[50ch] text-body-md text-muted-foreground">
-            Your account doesn&apos;t have permission to view this page.
-          </p>
+          <p className="max-w-[50ch] text-body-md text-muted-foreground">{description}</p>
           <Button render={<Link to="/" />} className="self-start">
             Back to home
           </Button>

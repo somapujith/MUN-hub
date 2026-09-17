@@ -18,29 +18,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export interface ProductAvailability {
-  capacity: number;
-  taken: number;
-  available: number;
-}
-
-/**
- * Wraps `GET /products/availability` (server/routes/registrations.ts,
- * wrapping lib/actions/registration.ts#getProductsAvailability) — public
- * read, no session required.
- */
-export async function getProductsAvailability(
-  productIds: string[],
-): Promise<Map<string, ProductAvailability>> {
-  if (productIds.length === 0) return new Map();
-
-  const params = new URLSearchParams({ ids: productIds.join(",") });
-  const { availability } = await request<{ availability: Record<string, ProductAvailability> }>(
-    `/products/availability?${params.toString()}`,
-  );
-  return new Map(Object.entries(availability));
-}
-
 export interface InitiateRegistrationInput {
   munId: string;
   registrationProductId: string;

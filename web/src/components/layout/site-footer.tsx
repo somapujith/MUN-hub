@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { useListYourMunHref } from "@/hooks/use-list-your-mun-href";
 
 /**
  * `footer` — docs/prd/DESIGN-airtable.md § Navigation Variants.
@@ -47,8 +48,12 @@ const FOOTER_COLUMNS = [
   },
 ] as const;
 
+/** The footer's organizer-registration link; resolved per viewer by `useListYourMunHref`. */
+const LIST_YOUR_MUN_HREF = "/organizer/apply";
+
 export function SiteFooter() {
   const year = new Date().getFullYear();
+  const listYourMunHref = useListYourMunHref();
 
   return (
     <footer className="border-t border-border bg-background">
@@ -74,16 +79,21 @@ export function SiteFooter() {
                 {column.heading}
               </h2>
               <ul className="mt-md flex flex-col gap-sm">
-                {column.links.map((link) => (
-                  <li key={`${column.heading}-${link.label}`}>
-                    <Link
-                      to={link.href}
-                      className="rounded-sm text-body-md text-muted-foreground transition-colors duration-150 hover:text-ink focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background focus-visible:outline-none"
-                    >
-                      {link.label}
-                    </Link>
-                  </li>
-                ))}
+                {column.links.map((link) => {
+                  // Delegate accounts never get an organizer-registration link.
+                  const href = link.href === LIST_YOUR_MUN_HREF ? listYourMunHref : link.href;
+                  if (!href) return null;
+                  return (
+                    <li key={`${column.heading}-${link.label}`}>
+                      <Link
+                        to={href}
+                        className="rounded-sm text-body-md text-muted-foreground transition-colors duration-150 hover:text-ink focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background focus-visible:outline-none"
+                      >
+                        {link.label}
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             </nav>
           ))}

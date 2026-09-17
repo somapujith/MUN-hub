@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
-import { changePassword, signIn, signOut, signUp } from '@/lib/actions/auth'
+import { changePassword, signIn, signOut, signUp, signUpOrganizer } from '@/lib/actions/auth'
 import { SESSION_COOKIE_NAME } from '@/lib/auth/session'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import { requireAuth } from '../middleware/require-auth'
@@ -73,6 +73,19 @@ const signUpBodySchema = z
   })
   .strict()
 
+// Mirrors lib/actions/auth.ts's OrganizerSignUpInput. Deliberately none of the
+// delegate profile fields — organizer accounts don't have a student profile.
+const organizerSignUpBodySchema = z
+  .object({
+    name: z.string().trim().min(1),
+    email: z.string().trim().min(1).email(),
+    password: z.string().min(8),
+    phone: z.string().optional(),
+    acceptedTermsOfService: z.boolean(),
+    acceptedPrivacyPolicy: z.boolean(),
+  })
+  .strict()
+
 const changePasswordBodySchema = z
   .object({
     currentPassword: z.string().min(1),
@@ -106,6 +119,18 @@ authRoutes.post('/session', async (c) => {
 authRoutes.post('/users', async (c) => {
   const body = signUpBodySchema.parse(await c.req.json())
   const { userId, role, token, expiresAt } = await signUp(body)
+
+  setSessionCookie(c, token, expiresAt)
+
+  return c.json({ userId, role }, 201)
+})
+
+// The only way an ORGANIZER account comes into existence. Separate from
+// POST /users on purpose: a delegate account is never turned into an
+// organizer one — see lib/actions/auth.ts's signUpOrganizer.
+authRoutes.post('/organizers', async (c) => {
+  const body = organizerSignUpBodySchema.parse(await c.req.json())
+  const { userId, role, token, expiresAt } = await signUpOrganizer(body)
 
   setSessionCookie(c, token, expiresAt)
 

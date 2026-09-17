@@ -14,6 +14,7 @@ import {
   SignatureCardEyebrow,
   SignatureCardTitle,
 } from "@/components/ui/signature-card";
+import { useListYourMunHref } from "@/hooks/use-list-your-mun-href";
 import { resolvePriceBand, resolveStatusFilter } from "@/lib/home-filters";
 import { getMarketplaceFacets, searchMuns, type MunSearchParams } from "@/api/marketplace";
 import { queryKeys } from "@/api/query-keys";
@@ -30,6 +31,7 @@ function seeAllHref(city: string): string {
 
 export function HomePage() {
   const [searchParams] = useSearchParams();
+  const listYourMunHref = useListYourMunHref();
   const facetsQuery = useQuery({
     queryKey: queryKeys.marketplaceFacets(),
     queryFn: getMarketplaceFacets,
@@ -227,34 +229,37 @@ export function HomePage() {
           </div>
         </section>
 
-        <section className="pb-section">
-          <div className="content-container">
-            <SignatureCard
-              variant="cream"
-              padding="xl"
-              className="gap-xl lg:flex-row lg:items-center lg:justify-between"
-            >
-              <div className="max-w-xl">
-                <SignatureCardEyebrow className="opacity-60">
-                  For secretariats
-                </SignatureCardEyebrow>
-                <SignatureCardTitle>
-                  List your conference where delegates are already looking.
-                </SignatureCardTitle>
-                <SignatureCardDescription className="text-title-md text-[#333840] opacity-100">
-                  Apply once, get reviewed, then run registrations, committee
-                  allotments and delegate lists from a single dashboard — no
-                  spreadsheets, no manual payment reconciliation.
-                </SignatureCardDescription>
-              </div>
-              <SignatureCardActions className="mt-0 shrink-0">
-                <Button render={<Link to="/organizer/apply" />}>
-                  List your MUN
-                </Button>
-              </SignatureCardActions>
-            </SignatureCard>
-          </div>
-        </section>
+        {/* Organizer pitch — hidden from signed-in delegates (see useListYourMunHref). */}
+        {listYourMunHref ? (
+          <section className="pb-section">
+            <div className="content-container">
+              <SignatureCard
+                variant="cream"
+                padding="xl"
+                className="gap-xl lg:flex-row lg:items-center lg:justify-between"
+              >
+                <div className="max-w-xl">
+                  <SignatureCardEyebrow className="opacity-60">
+                    For secretariats
+                  </SignatureCardEyebrow>
+                  <SignatureCardTitle>
+                    List your conference where delegates are already looking.
+                  </SignatureCardTitle>
+                  <SignatureCardDescription className="text-title-md text-[#333840] opacity-100">
+                    Apply once, get reviewed, then run registrations, committee
+                    allotments and delegate lists from a single dashboard — no
+                    spreadsheets, no manual payment reconciliation.
+                  </SignatureCardDescription>
+                </div>
+                <SignatureCardActions className="mt-0 shrink-0">
+                  <Button render={<Link to={listYourMunHref} />}>
+                    List your MUN
+                  </Button>
+                </SignatureCardActions>
+              </SignatureCard>
+            </div>
+          </section>
+        ) : null}
 
         <section>
           <div className="content-container">

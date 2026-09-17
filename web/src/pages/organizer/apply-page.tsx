@@ -2,7 +2,7 @@ import * as React from "react";
 import { Helmet } from "react-helmet-async";
 import { Link, useNavigate } from "react-router";
 import { ArrowRightIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
-import { RequireAuth } from "@/guards/require-auth";
+import { RequireOrganizer } from "@/guards/require-organizer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
@@ -121,7 +121,7 @@ export function OrganizerApplyPage() {
   }
 
   return (
-    <RequireAuth>
+    <RequireOrganizer>
       <Helmet title="Host a MUN" />
       <div className="flex min-h-full flex-1 flex-col">
         <SiteHeader />
@@ -219,6 +219,6 @@ export function OrganizerApplyPage() {
         </main>
         <SiteFooter />
       </div>
-    </RequireAuth>
+    </RequireOrganizer>
   );
 }

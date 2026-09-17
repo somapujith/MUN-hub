@@ -22,11 +22,13 @@ export function HostAwareIndexPage() {
       // publish.munhub.in opens on its own sign-in page rather than bouncing
       // through the dashboard's auth guard first — the host IS the organizer
       // entrance, so a signed-out visitor should see a login form, not a flash
-      // of redirect.
+      // of redirect. The session cookie is shared across munhub.in hosts, so a
+      // signed-in delegate lands on the organizer sign-in too, not the
+      // organizer workspace.
       if (isPending) return null;
       return (
         <Navigate
-          to={session ? ZONE_DEFAULT_PATH.organizer : ZONE_LOGIN_PATH.organizer}
+          to={session?.role === "ORGANIZER" ? ZONE_DEFAULT_PATH.organizer : ZONE_LOGIN_PATH.organizer}
           replace
         />
       );

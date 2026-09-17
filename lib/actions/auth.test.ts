@@ -3,8 +3,8 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { sessions, studentProfiles, userConsents, users } from '@/lib/db/schema'
 import { hashPassword } from '@/lib/auth/password'
-import { changePassword, signIn, signOut, signUp } from './auth'
-import type { SignUpInput } from './auth'
+import { changePassword, signIn, signOut, signUp, signUpOrganizer } from './auth'
+import type { OrganizerSignUpInput, SignUpInput } from './auth'
 
 const DEFAULT_TEST_PASSWORD = 'test-password-123'
 
@@ -38,6 +38,78 @@ async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'ADMIN', password: strin
   const [user] = await db.insert(users).values({ name: `Test ${role}`, email, role, passwordHash }).returning()
   return user
 }
+
+function organizerSignUpInput(overrides: Partial<OrganizerSignUpInput> = {}): OrganizerSignUpInput {
+  return {
+    name: 'New Organizer',
+    email: `org-signup-${Date.now()}-${Math.random()}@test.com`,
+    password: 'a-good-password',
+    acceptedTermsOfService: true,
+    acceptedPrivacyPolicy: true,
+    ...overrides,
+  }
+}
+
+describe('signUpOrganizer', () => {
+  it('creates an ORGANIZER-role user with a live session and can sign in with the same password', async () => {
+    const input = organizerSignUpInput({ phone: ' 9990003333 ' })
+    const result = await signUpOrganizer(input)
+
+    expect(result.role).toBe('ORGANIZER')
+    const rows = await db.select().from(sessions).where(eq(sessions.token, result.token))
+    expect(rows[0]?.userId).toBe(result.userId)
+
+    const [user] = await db.select().from(users).where(eq(users.id, result.userId))
+    expect(user.role).toBe('ORGANIZER')
+    expect(user.phone).toBe('9990003333')
+
+    const signedIn = await signIn(input.email, input.password)
+    expect(signedIn.userId).toBe(result.userId)
+    expect(signedIn.role).toBe('ORGANIZER')
+  })
+
+  it('records Terms + Privacy consent and never creates a student profile', async () => {
+    const { userId } = await signUpOrganizer(organizerSignUpInput())
+
+    const consents = await db.select().from(userConsents).where(eq(userConsents.userId, userId))
+    expect(consents.map((row) => row.consentType).sort()).toEqual(['PRIVACY_POLICY', 'TERMS_OF_SERVICE'])
+
+    const profiles = await db.select().from(studentProfiles).where(eq(studentProfiles.userId, userId))
+    expect(profiles).toHaveLength(0)
+  })
+
+  it('refuses an email that already belongs to a delegate account, and leaves that account a STUDENT', async () => {
+    const student = await makeUser('STUDENT')
+
+    await expect(signUpOrganizer(organizerSignUpInput({ email: student.email }))).rejects.toThrow(
+      'An account with that email already exists',
+    )
+
+    const [unchanged] = await db.select({ role: users.role }).from(users).where(eq(users.id, student.id))
+    expect(unchanged.role).toBe('STUDENT')
+  })
+
+  it('matches the email case-insensitively when checking for duplicates', async () => {
+    const student = await makeUser('STUDENT')
+
+    await expect(
+      signUpOrganizer(organizerSignUpInput({ email: `  ${student.email.toUpperCase()} ` })),
+    ).rejects.toThrow('An account with that email already exists')
+  })
+
+  it('rejects a short password, a blank name, and missing consent', async () => {
+    await expect(signUpOrganizer(organizerSignUpInput({ password: 'short' }))).rejects.toThrow(
+      'Password must be at least 8 characters',
+    )
+    await expect(signUpOrganizer(organizerSignUpInput({ name: '  ' }))).rejects.toThrow('Name is required')
+    await expect(signUpOrganizer(organizerSignUpInput({ acceptedTermsOfService: false }))).rejects.toThrow(
+      'You must accept the Terms of Service to create an account',
+    )
+    await expect(signUpOrganizer(organizerSignUpInput({ acceptedPrivacyPolicy: false }))).rejects.toThrow(
+      'You must accept the Privacy Policy to create an account',
+    )
+  })
+})
 
 describe('signUp', () => {
   it('creates a STUDENT-role user, returns a valid session, and a matching sessions row exists', async () => {

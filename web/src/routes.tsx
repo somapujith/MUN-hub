@@ -23,6 +23,7 @@ import { MunDetailPage } from "@/pages/mun-detail-page";
 import { NotFoundPage } from "@/pages/not-found-page";
 import { OrganizerApplyPage } from "@/pages/organizer/apply-page";
 import { OrganizerApplySubmittedPage } from "@/pages/organizer/apply-submitted-page";
+import { OrganizerSignupPage } from "@/pages/organizer/organizer-signup-page";
 import { OrganizerSupportPage } from "@/pages/organizer/support-page";
 import { MunIndexRedirect } from "@/pages/organizer/dashboard/mun-index-redirect";
 import { OrganizerMunsPage } from "@/pages/organizer/dashboard/muns-page";
@@ -67,6 +68,9 @@ export const router = createBrowserRouter([
       // differ only in signposting and post-login destination. /admin/login is
       // intentionally unlinked from the public nav.
       { path: "organizer/login", element: <OrganizerLoginPage /> },
+      // Organizer accounts are created here, never by converting a delegate
+      // account — see lib/actions/auth.ts's signUpOrganizer.
+      { path: "organizer/signup", element: <OrganizerSignupPage /> },
       { path: "admin/login", element: <AdminLoginPage /> },
       { path: "signup", element: <SignupPage /> },
       { path: "forgot-password", element: <ForgotPasswordPage /> },

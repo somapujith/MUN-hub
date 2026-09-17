@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { submitOrganizerApplication } from '@/lib/actions/organizer-application'
 import { requireAuth } from '../middleware/require-auth'
+import { requireRole } from '../middleware/require-role'
 import type { AppVariables } from '../src/types'
 
 const submitApplicationBodySchema = z
@@ -19,14 +20,13 @@ const submitApplicationBodySchema = z
 
 export const organizerApplicationRoutes = new Hono<{ Variables: AppVariables }>()
 
-// Any authenticated user (STUDENT included) can apply — becoming an organizer
-// IS what this endpoint does; requiring ORGANIZER role first would make it
-// unreachable by the exact users it's for. Matches the pre-migration Next.js
-// behavior (app/organizer/apply/actions.ts, since deleted), which only ever
-// checked for a session, never a role.
+// ORGANIZER only. Organizer accounts are created separately
+// (POST /auth/organizers); a delegate account can't apply to host, and nothing
+// promotes one into an organizer.
 organizerApplicationRoutes.post(
   '/organizer/applications',
   requireAuth,
+  requireRole(['ORGANIZER']),
   zValidator('json', submitApplicationBodySchema),
   async (c) => {
     const body = c.req.valid('json')

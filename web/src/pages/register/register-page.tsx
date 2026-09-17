@@ -13,8 +13,7 @@ import { hasPassed } from "@/components/registration/deadline";
 import type { ProductWithAvailability } from "@/components/registration/types";
 import { formatDateRange } from "@/components/shared/date-range";
 import { queryKeys } from "@/api/query-keys";
-import { getProductsAvailability } from "@/api/registration";
-import { getMunBySlug } from "@/api/marketplace";
+import { getMunBySlug, getProductsAvailability } from "@/api/marketplace";
 import { getProfileFormDefaults } from "@/api/student-profile";
 import { getAccountSettings } from "@/api/account";
 import { useSession } from "@/hooks/use-session";
@@ -161,7 +160,11 @@ export function RegisterPage() {
     );
   }
 
-  if (availabilityQuery.isPending) {
+  // RegistrationForm reads the profile/account defaults only once, in its
+  // initial state — so it must not mount until they've loaded. Coming from
+  // the MUN page, the mun + availability queries are already cached, and
+  // without this the form mounted instantly with empty, never-updated fields.
+  if (availabilityQuery.isPending || profileDefaultsQuery.isLoading || accountQuery.isLoading) {
     return (
       <>
         <Helmet>
@@ -193,10 +196,10 @@ export function RegisterPage() {
     );
   }
 
-  const availabilityByProduct = availabilityQuery.data ?? new Map();
+  const availabilityByProduct = availabilityQuery.data ?? {};
   const availability: ProductWithAvailability[] = mun.registrationProducts.map((product) => ({
     product,
-    ...(availabilityByProduct.get(product.id) ?? {
+    ...(availabilityByProduct[product.id] ?? {
       capacity: product.capacity,
       taken: 0,
       available: product.capacity,
@@ -255,7 +258,7 @@ export function RegisterPage() {
           accountDefaults={{
             fullName: account?.name ?? "",
             email: account?.email ?? "",
-            phone: "",
+            phone: account?.phone ?? "",
           }}
           preselectedProductId={validPreselected}
         />

@@ -55,12 +55,13 @@ export function OrganizerLoginPage() {
                 <Button
                   variant="outline"
                   className="w-full"
-                  render={<Link to={`/signup?redirectTo=${encodeURIComponent("/organizer/apply")}`} />}
+                  render={<Link to="/organizer/signup" />}
                 >
                   New organizer? Create an account
                 </Button>
                 <p className="text-center text-body-md text-muted-foreground">
-                  Then tell us about your conference — we review applications within 5 business days.
+                  Organizer accounts are separate from delegate accounts. Once yours is set up, tell us
+                  about your conference — we review applications within 5 business days.
                 </p>
               </div>
             ),

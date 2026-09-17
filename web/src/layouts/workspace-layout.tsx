@@ -1,5 +1,5 @@
 import { Outlet } from "react-router";
-import { RequireAuth } from "@/guards/require-auth";
+import { RequireOrganizer } from "@/guards/require-organizer";
 import { WorkspaceShell } from "@/components/organizer/workspace-shell";
 import { MOCK_ORGANIZER_SESSION } from "@/mocks/session";
 import { MOCK_WORKSPACE_MUNS } from "@/mocks/organizer";
@@ -10,7 +10,7 @@ import { MOCK_WORKSPACE_MUNS } from "@/mocks/organizer";
  */
 export function WorkspaceLayout() {
   return (
-    <RequireAuth>
+    <RequireOrganizer>
       <WorkspaceShell
         muns={MOCK_WORKSPACE_MUNS}
         currentMun={null}
@@ -18,6 +18,6 @@ export function WorkspaceLayout() {
       >
         <Outlet />
       </WorkspaceShell>
-    </RequireAuth>
+    </RequireOrganizer>
   );
 }

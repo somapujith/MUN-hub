@@ -167,10 +167,7 @@ export async function signUp(
       gender,
     })
 
-    const consentRows: (typeof userConsents.$inferInsert)[] = [
-      { userId: createdUser.id, consentType: 'TERMS_OF_SERVICE', policyVersion: CURRENT_TERMS_OF_SERVICE_VERSION, acceptedAt: now },
-      { userId: createdUser.id, consentType: 'PRIVACY_POLICY', policyVersion: CURRENT_PRIVACY_POLICY_VERSION, acceptedAt: now },
-    ]
+    const consentRows = requiredConsentRows(createdUser.id, now)
     if (input.acceptedGuardianAcknowledgement) {
       consentRows.push({
         userId: createdUser.id,
@@ -180,6 +177,83 @@ export async function signUp(
       })
     }
     await tx.insert(userConsents).values(consentRows)
+
+    return createdUser
+  })
+
+  const { token, expiresAt } = await createSession(user.id)
+
+  return { userId: user.id, role: user.role, token, expiresAt }
+}
+
+/** The Terms + Privacy consent rows every account records at creation, stamped with the current policy versions. */
+function requiredConsentRows(userId: string, acceptedAt: Date): (typeof userConsents.$inferInsert)[] {
+  return [
+    { userId, consentType: 'TERMS_OF_SERVICE', policyVersion: CURRENT_TERMS_OF_SERVICE_VERSION, acceptedAt },
+    { userId, consentType: 'PRIVACY_POLICY', policyVersion: CURRENT_PRIVACY_POLICY_VERSION, acceptedAt },
+  ]
+}
+
+export interface OrganizerSignUpInput {
+  name: string
+  email: string
+  password: string
+  phone?: string
+  acceptedTermsOfService: boolean
+  acceptedPrivacyPolicy: boolean
+}
+
+/**
+ * Creates an ORGANIZER account and signs it in (same return shape and
+ * cookie-setting responsibility as `signIn`).
+ *
+ * Organizer and delegate accounts are deliberately separate: this is the only
+ * path that creates an ORGANIZER, it never creates a student profile, and
+ * nothing anywhere converts an existing STUDENT account into an ORGANIZER. A
+ * person who wants to both host and attend conferences uses two accounts.
+ *
+ * An ORGANIZER account can't list anything by itself — hosting still requires
+ * submitting an organizer application and passing admin review.
+ *
+ * Throws the same errors as `signUp` for a missing name, short password,
+ * duplicate email or missing consent.
+ */
+export async function signUpOrganizer(
+  input: OrganizerSignUpInput,
+): Promise<{ userId: string; role: Role; token: string; expiresAt: Date }> {
+  const trimmedName = required(input.name, 'Name')
+  const normalizedEmail = input.email.trim().toLowerCase()
+  if (input.password.length < MIN_PASSWORD_LENGTH) {
+    throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+  }
+  if (!input.acceptedTermsOfService) {
+    throw new Error('You must accept the Terms of Service to create an account')
+  }
+  if (!input.acceptedPrivacyPolicy) {
+    throw new Error('You must accept the Privacy Policy to create an account')
+  }
+
+  const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, normalizedEmail)).limit(1)
+  if (existing) {
+    throw new Error('An account with that email already exists')
+  }
+
+  const passwordHash = await hashPassword(input.password)
+  const now = new Date()
+
+  const user = await db.transaction(async (tx) => {
+    const [createdUser] = await tx
+      .insert(users)
+      .values({
+        name: trimmedName,
+        email: normalizedEmail,
+        phone: input.phone?.trim() || null,
+        passwordHash,
+        role: 'ORGANIZER',
+      })
+      .returning()
+
+    await tx.insert(userConsents).values(requiredConsentRows(createdUser.id, now))
 
     return createdUser
   })

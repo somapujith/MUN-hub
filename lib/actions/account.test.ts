@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
@@ -12,14 +13,22 @@ async function createTestUser() {
 }
 
 describe('getAccountSettings', () => {
-  it('returns name, email, and emailNotificationsEnabled defaulting to true', async () => {
+  it('returns name, email, phone, and emailNotificationsEnabled defaulting to true', async () => {
     const { user, session } = await createTestUser()
 
     await expect(getAccountSettings(session)).resolves.toEqual({
       name: user.name,
       email: user.email,
+      phone: null,
       emailNotificationsEnabled: true,
     })
+  })
+
+  it('returns the saved phone, so registration can pre-fill it', async () => {
+    const { user, session } = await createTestUser()
+    await db.update(users).set({ phone: '9876500000' }).where(eq(users.id, user.id))
+
+    await expect(getAccountSettings(session)).resolves.toMatchObject({ phone: '9876500000' })
   })
 
   it('throws "Account not found" for a session whose userId does not exist', async () => {

@@ -1,14 +1,14 @@
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router";
 import { ArrowRightIcon, CheckIcon } from "lucide-react";
-import { RequireAuth } from "@/guards/require-auth";
+import { RequireOrganizer } from "@/guards/require-organizer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
 
 export function OrganizerApplySubmittedPage() {
   return (
-    <RequireAuth>
+    <RequireOrganizer>
       <Helmet title="Application submitted" />
       <div className="flex min-h-full flex-1 flex-col">
         <SiteHeader />
@@ -39,6 +39,6 @@ export function OrganizerApplySubmittedPage() {
         </main>
         <SiteFooter />
       </div>
-    </RequireAuth>
+    </RequireOrganizer>
   );
 }
