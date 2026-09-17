@@ -77,6 +77,16 @@ Lane: organizer workspace pages (not settings, finance, communications, registra
   - `/organizer/muns/:munId/preview` renders the public page with a preview banner and registration turned off, marked noindex.
   - MUN Setup has a button that opens it.
 - All seven lane items are done.
+- Organizer UX pass (Phase 3). The full organizer journey was walked twice in a real browser, desktop and mobile. Findings, fixes and hand-offs are in `docs/autonomous-run/ux/organizer.md` (`5888df1`).
+- `4e62a1d`: fixes from the UX pass.
+  - Gate-3 "Make changes first" (`withdrawSubmission`; new ORGANIZER_CONFIRMATION → READY_FOR_SUBMISSION transition).
+  - Plain-language lock errors.
+  - Approval recomputes section progress.
+  - Onboarding prefills the phone number; the signup error clears on edit.
+  - The overview shows the next step for each MUN; the "Application submitted" page uses the organizer shell.
+  - MUN Setup shows a status card per stage, a "live" card and a "next up" link, and hides the checklist after approval.
+  - Checklist: blocking checks vs notes, and the per-section send button only for sections a reviewer sent back.
+  - Support-button padding; en-IN dates.
 
 ### Bugs found while mapping (status)
 
