@@ -92,6 +92,29 @@ export const FIXTURE_MUNS = {
     committees: [{ name: 'E2E Suspend Committee', capacity: 60, portfolios: ['Peru'] }],
     products: [{ name: 'E2E Suspend Pass', price: 900, capacity: 80, status: 'active', displayOrder: 0 }],
   },
+
+  /**
+   * Conference-day operations (check-in, passes, delegate messages, attendance,
+   * results). Deleted and recreated (fixtures/ops-fixture-db.ts#recreateOpsMun)
+   * by the specs that use it, REGISTRATION_OPEN with the conference starting in
+   * two hours so door check-in is already open; conference-ops.spec then moves
+   * it to CONFERENCE_ACTIVE and through results review. Recreating also clears
+   * its hourly delegate-message quota. Reserved for
+   * specs/organizer/conference-ops.spec.ts and operations.spec.ts's
+   * Communications › sending tests.
+   */
+  ops: {
+    slug: 'e2e-ops-mun',
+    name: 'E2E Ops MUN',
+    committees: [
+      { name: 'E2E Ops Committee', capacity: 100, portfolioSeats: 100, portfolios: ['Italy', 'Spain'] },
+      { name: 'E2E Ops Press Room', capacity: 100, portfolioSeats: 100, portfolios: ['Reuters'] },
+    ],
+    products: [
+      { name: 'E2E Ops Delegate Pass', price: 1200, capacity: 100, status: 'active', displayOrder: 0 },
+      { name: 'E2E Ops Observer Pass', price: 600, capacity: 100, status: 'active', displayOrder: 1 },
+    ],
+  },
 } as const
 
 export const OPEN = FIXTURE_MUNS.open
@@ -102,3 +125,4 @@ export const ADMIN_CONSOLE = FIXTURE_MUNS.adminConsole
 export const LIFECYCLE = FIXTURE_MUNS.lifecycle
 export const SANDBOX = FIXTURE_MUNS.sandbox
 export const CLOSED = FIXTURE_MUNS.closed
+export const OPS = FIXTURE_MUNS.ops

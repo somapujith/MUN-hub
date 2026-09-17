@@ -16,14 +16,15 @@ export function main(page: Page) {
 }
 
 /**
- * Holds a seat on the open fixture MUN through the API. Returns the
- * registration id. `pay` completes the mock payment so it ends up CONFIRMED.
+ * Holds a seat on the open fixture MUN (or another open MUN, by `slug`)
+ * through the API. Returns the registration id. `pay` completes the mock
+ * payment so it ends up CONFIRMED.
  */
 export async function registerOnOpenMun(
   session: ApiSession,
-  opts: { pass?: string; committee?: string; portfolio?: string; pay?: boolean } = {},
+  opts: { slug?: string; pass?: string; committee?: string; portfolio?: string; pay?: boolean } = {},
 ): Promise<string> {
-  const mun = await getMun(session.api, OPEN.slug)
+  const mun = await getMun(session.api, opts.slug ?? OPEN.slug)
   const product = mun.registrationProducts.find((p) => p.name === (opts.pass ?? OPEN.products[0].name))
   expect(product, 'fixture pass exists').toBeTruthy()
   const committee = opts.committee ? mun.committees.find((c) => c.name === opts.committee) : undefined
