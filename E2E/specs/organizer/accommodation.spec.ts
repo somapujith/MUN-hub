@@ -134,15 +134,17 @@ test.describe('accommodation UI', () => {
     acceptNextConfirm(page)
     await main(page).getByRole('button', { name: `Archive ${name}` }).click()
     await expect(card).toContainText('Archived')
-    // Archived options stay visible to the organizer but not to delegates.
+    // Archived options leave the active list; only includeInactive shows them.
+    expect((await listOptions(false)).map((o) => o.id)).not.toContain(saved.id)
+    expect((await listOptions(true)).map((o) => o.id)).toContain(saved.id)
+    // The sandbox isn't published, so its options stay private (b411b4b).
     const anon = await anonApi()
-    expect((await listOptions(false, anon)).map((o) => o.id)).not.toContain(saved.id)
-    expect((await listOptions(true, anon)).map((o) => o.id)).not.toContain(saved.id)
+    expect((await anon.get(`muns/${munId}/accommodation`)).status()).toBe(404)
+    await anon.dispose()
 
     await main(page).getByRole('button', { name: `Restore ${name}` }).click()
     await expect(card).not.toContainText('Archived')
-    expect((await listOptions(false, anon)).map((o) => o.id)).toContain(saved.id)
-    await anon.dispose()
+    expect((await listOptions(false)).map((o) => o.id)).toContain(saved.id)
   })
 
   test('manage an option\'s custom fields', async ({ page }) => {

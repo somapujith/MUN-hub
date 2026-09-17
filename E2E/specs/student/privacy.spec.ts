@@ -126,7 +126,7 @@ test.describe('privacy — other students\' records', () => {
     const page = await context.newPage()
     await page.goto(`/register/${OPEN.slug}/confirmation?registrationId=${owner.registrationId}`)
     // The page renders "Page not found" for a registration the viewer can't read.
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText(/not found/i)
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(/couldn't find that page|not found/i)
     await expect(page.locator('body')).not.toContainText(OPEN.committees[0].name)
     await expect(page.locator('body')).not.toContainText(/you're registered/i)
     await context.close()

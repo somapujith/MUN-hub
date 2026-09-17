@@ -165,6 +165,7 @@ test.describe('onboarding wizard', () => {
     const { page } = org
     const answers = onboardingAnswers()
     await page.goto('/organizer/onboarding')
+    await main(page).getByLabel('Organizing body').fill(answers.organization)
     await main(page).getByLabel('Contact number').fill(answers.contactPhone)
     await continueButton(page).click()
     await expect(pageHeading(page)).toHaveText('Tell us about your MUN')
@@ -192,6 +193,10 @@ test.describe('onboarding wizard', () => {
     await expect(form.getByRole('alert')).toHaveText('Enter a valid 10-digit mobile number.')
     await expect(continueButton(page)).toBeDisabled()
     await form.getByLabel('Contact number').fill(answers.contactPhone)
+    // The organizing body is required too.
+    await expect(continueButton(page)).toBeDisabled()
+    await form.getByLabel('Organizing body').fill(answers.organization)
+    await expect(continueButton(page)).toBeEnabled()
     await form.getByLabel('First name').fill('   ')
     await expect(continueButton(page)).toBeDisabled()
     await form.getByLabel('First name').fill('Riya')
@@ -256,7 +261,17 @@ test.describe('onboarding wizard', () => {
       'Contact number must be a 10-digit Indian mobile number',
     )
     await expectError(await put('profile', { firstName: ' ', lastName: 'Org', contactPhone: answers.contactPhone }), 400, 'First name is required')
-    expect((await put('profile', { firstName: 'E2E', lastName: 'Org', contactPhone: '+91 98765 43210' })).status()).toBe(200)
+    await expectError(
+      await put('profile', { firstName: 'E2E', lastName: 'Org', contactPhone: answers.contactPhone, organization: '   ' }),
+      400,
+      'Organization is required',
+    )
+    await expectError(
+      await put('profile', { firstName: 'E2E', lastName: 'Org', contactPhone: answers.contactPhone, organization: 'x'.repeat(121) }),
+      400,
+      'Organization must be at most 120 characters',
+    )
+    expect((await put('profile', { firstName: 'E2E', lastName: 'Org', contactPhone: '+91 98765 43210', organization: answers.organization })).status()).toBe(200)
     expect((await onboardingOf(api)).profile.contactPhone).toBe('9876543210')
 
     await expectError(await put('mun', { munName: ' ', munCity: 'Hyderabad', munStartDate: answers.munStartDate }), 400, 'MUN title is required')

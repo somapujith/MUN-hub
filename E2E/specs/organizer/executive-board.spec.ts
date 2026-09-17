@@ -16,6 +16,11 @@ import {
 
 const REGION = 'Executive board members'
 const COMMITTEE = SANDBOX.committees[0].name
+// 1x1 transparent PNG.
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+  'base64',
+)
 
 interface Member {
   id: string
@@ -25,6 +30,7 @@ interface Member {
   committeeId: string | null
   isPublic: boolean
   displayOrder: number
+  photoUrl: string | null
 }
 
 let api: APIRequestContext
@@ -84,8 +90,9 @@ test.describe('executive board UI', () => {
 
     const saved = (await listMembers()).find((m) => m.name === name)!
     expect(saved).toMatchObject({ role: 'DIRECTOR', isPublic: true })
+    // The sandbox isn't published, so its board stays private (b411b4b).
     const publicBoard = await anonApi()
-    expect(((await (await publicBoard.get(`muns/${munId}/executive-board`)).json()) as Member[]).map((m) => m.id)).toContain(saved.id)
+    expect((await publicBoard.get(`muns/${munId}/executive-board`)).status()).toBe(404)
 
     await main(page).getByRole('button', { name: `Edit ${name}` }).click()
     await expect(form.getByLabel('Name')).toHaveValue(name)
@@ -97,14 +104,76 @@ test.describe('executive board UI', () => {
     await expect(card).toContainText('Chair · Conference-wide')
     await expect(card).toContainText('Hidden')
 
-    // Hidden members stay off the public roster.
-    expect(((await (await publicBoard.get(`muns/${munId}/executive-board`)).json()) as Member[]).map((m) => m.id)).not.toContain(saved.id)
+    // Hidden from the public roster once the MUN is live.
+    expect((await listMembers()).find((m) => m.id === saved.id)?.isPublic).toBe(false)
     await publicBoard.dispose()
 
     acceptNextConfirm(page)
     await main(page).getByRole('button', { name: `Delete ${name}` }).click()
     await expect(main(page).getByRole('heading', { name, exact: true })).toHaveCount(0)
     expect((await listMembers()).map((m) => m.id)).not.toContain(saved.id)
+  })
+
+  test('a photo can be uploaded with a new member, then changed and removed (cb5abc7)', async ({ page }) => {
+    const name = `E2E Photo Chair ${uid()}`
+    await openBoard(page)
+    await main(page).getByRole('button', { name: 'Add member' }).first().click()
+    const form = main(page).locator('form')
+    await expect(form.getByLabel('Photo URL')).toHaveCount(0)
+    await expect(form.getByLabel('Display order')).toHaveCount(0)
+    await expect(form).toContainText('A square headshot works best. PNG, JPEG or WebP, max 5MB.')
+    await form.getByLabel('Name').fill(name)
+    await form.getByLabel('Role', { exact: true }).selectOption({ label: 'Director' })
+
+    // A non-image is refused before upload.
+    await form.getByLabel('Photo (optional)').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hi') })
+    await expect(toast(page, 'Use a PNG, JPEG or WebP image')).toBeVisible()
+
+    await form.getByLabel('Photo (optional)').setInputFiles({ name: 'chair.png', mimeType: 'image/png', buffer: PNG })
+    await expect(form.getByRole('button', { name: 'Change photo' })).toBeVisible()
+    await form.getByRole('button', { name: 'Add member' }).click()
+    await expect(toast(page, 'Board member added')).toBeVisible()
+    await expect.poll(async () => (await listMembers()).find((m) => m.name === name)?.photoUrl ?? null).toBeTruthy()
+    const saved = (await listMembers()).find((m) => m.name === name)!
+
+    // While editing, photo changes apply immediately.
+    await main(page).getByRole('button', { name: `Edit ${name}` }).click()
+    await form.getByLabel('Photo (optional)').setInputFiles({ name: 'chair-2.png', mimeType: 'image/png', buffer: PNG })
+    await expect(toast(page, 'Photo updated')).toBeVisible()
+    await form.getByRole('button', { name: 'Remove' }).click()
+    await expect(toast(page, 'Photo removed')).toBeVisible()
+    await expect.poll(async () => (await listMembers()).find((m) => m.id === saved.id)?.photoUrl ?? null).toBeNull()
+    await api.delete(`executive-board/${saved.id}`)
+  })
+
+  test('the photo API accepts only real images, from the owner', async () => {
+    const created = await api.post(`muns/${munId}/executive-board`, { data: { name: `E2E Photo API ${uid()}`, role: 'DIRECTOR' } })
+    expect(created.status(), await created.text()).toBe(201)
+    const member = (await created.json()) as Member
+    try {
+      const up = await api.post(`executive-board/${member.id}/photo`, {
+        data: { contentType: 'image/png', fileBase64: PNG.toString('base64') },
+      })
+      expect(up.status(), await up.text()).toBe(200)
+      expect(((await up.json()) as Member).photoUrl).toBeTruthy()
+
+      const fake = await api.post(`executive-board/${member.id}/photo`, {
+        data: { contentType: 'image/png', fileBase64: Buffer.from('not an image').toString('base64') },
+      })
+      expect(fake.status()).toBe(400)
+      expect((await api.post(`executive-board/${member.id}/photo`, { data: { contentType: 'image/gif', fileBase64: PNG.toString('base64') } })).status()).toBe(400)
+
+      const anon = await anonApi()
+      expect((await anon.post(`executive-board/${member.id}/photo`, { data: { contentType: 'image/png', fileBase64: PNG.toString('base64') } })).status()).toBe(401)
+      expect((await anon.delete(`executive-board/${member.id}/photo`)).status()).toBe(401)
+      await anon.dispose()
+
+      const removed = await api.delete(`executive-board/${member.id}/photo`)
+      expect(removed.status()).toBe(200)
+      expect(((await removed.json()) as Member).photoUrl).toBeNull()
+    } finally {
+      await api.delete(`executive-board/${member.id}`)
+    }
   })
 
   test('a custom role needs its title', async ({ page }) => {

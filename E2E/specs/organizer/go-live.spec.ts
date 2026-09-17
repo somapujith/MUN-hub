@@ -83,15 +83,23 @@ test.describe('go-live progress', () => {
   })
 
   test('the setup page shows progress and each incomplete module', async ({ page }) => {
+    // Badges show a translated label, not the raw completionStatus (web/src/lib/organizer/go-live.ts).
+    const COMPLETION_LABEL: Record<string, string> = {
+      NOT_STARTED: 'Not started',
+      IN_PROGRESS: 'In progress',
+      ACTION_REQUIRED: 'Needs work',
+      COMPLETE: 'Complete',
+      LOCKED: 'Locked for review',
+    }
     const p = await progress()
     await openSection(page, munId, 'setup', 'MUN Setup')
-    const panel = main(page).getByRole('complementary')
-    await expect(panel).toContainText('Go-live progress')
-    await expect(panel).toContainText(`${p.requiredComplete}/${p.requiredTotal} required modules complete`)
+    // The percent/status summary lives in the aside; the per-module checklist is in the main flow (4e62a1d).
+    const summary = main(page).getByRole('complementary').filter({ hasText: 'Go-live progress' })
+    await expect(summary).toContainText(`${p.requiredComplete} of ${p.requiredTotal} required sections complete`)
     for (const m of p.modules.filter((x) => x.completionStatus !== 'COMPLETE')) {
-      await expect(panel.getByRole('listitem').filter({ hasText: m.label }).first()).toContainText(m.completionStatus)
+      await expect(page.getByTestId(`module-${m.key}`)).toContainText(COMPLETION_LABEL[m.completionStatus] ?? m.completionStatus)
     }
-    await expect(panel.getByRole('listitem').filter({ hasText: 'Branding' })).not.toContainText('COMPLETE')
+    await expect(page.getByTestId('module-BRANDING')).not.toContainText('Complete')
   })
 
   test('progress is private to the owner', async () => {

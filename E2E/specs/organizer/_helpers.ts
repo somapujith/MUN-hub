@@ -129,6 +129,7 @@ export async function createFreshOrganizer(name = 'E2E Organizer', { onboarded =
 export function onboardingAnswers(conferenceName = `E2E Wizard MUN ${uid()}`) {
   return {
     contactPhone: '9876543210',
+    organization: 'E2E Debating Society',
     munName: conferenceName,
     munCity: 'Hyderabad',
     // YYYY-MM-DD, ~4 months out.
@@ -160,6 +161,7 @@ export async function completeOnboardingThroughUi(page: Page, answers: Onboardin
   const next = form.getByRole('button', { name: 'Continue' })
 
   await expect(heading).toHaveText('Create your organizer profile')
+  await form.getByLabel('Organizing body').fill(answers.organization)
   await form.getByLabel('Contact number').fill(answers.contactPhone)
   await next.click()
 
@@ -192,7 +194,7 @@ export async function completeOnboardingViaApi(
   answers: OnboardingAnswers = onboardingAnswers(),
 ): Promise<void> {
   const steps: Array<[string, 'put' | 'post', Record<string, unknown>]> = [
-    ['profile', 'put', { firstName: 'E2E', lastName: 'Organizer', contactPhone: answers.contactPhone }],
+    ['profile', 'put', { firstName: 'E2E', lastName: 'Organizer', contactPhone: answers.contactPhone, organization: answers.organization }],
     ['mun', 'put', { munName: answers.munName, munCity: answers.munCity, munStartDate: answers.munStartDate }],
     [
       'details',

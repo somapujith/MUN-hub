@@ -90,7 +90,7 @@ test.describe('contact settings UI', () => {
 })
 
 test.describe('contact settings API', () => {
-  test('upsert is public to read and owner-only to write', async () => {
+  test('upsert is owner-only to write, and private until the MUN is live', async () => {
     const tag = uid()
     const res = await api.put(`muns/${munId}/contact`, {
       data: { officialEmail: `api-${tag}@example.com`, contactPersonName: 'E2E API Contact', contactPersonEmail: `api-person-${tag}@example.com` },
@@ -98,7 +98,9 @@ test.describe('contact settings API', () => {
     expect(res.status()).toBe(200)
 
     const anon = await anonApi()
-    expect((await (await anon.get(`muns/${munId}/contact`)).json()).officialEmail).toBe(`api-${tag}@example.com`)
+    // The sandbox isn't published, so its contact details stay private (b411b4b).
+    expect((await anon.get(`muns/${munId}/contact`)).status()).toBe(404)
+    expect((await (await api.get(`muns/${munId}/contact`)).json()).officialEmail).toBe(`api-${tag}@example.com`)
     const anonWrite = await anon.put(`muns/${munId}/contact`, {
       data: { officialEmail: 'x@example.com', contactPersonName: 'x', contactPersonEmail: 'x@example.com' },
     })

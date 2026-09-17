@@ -93,10 +93,23 @@ test.describe('org-wide workspace', () => {
     crashes.assertNone()
   })
 
-  test('overview "Manage" links to the MUN\'s setup section', async ({ page }) => {
+  test('overview rows lead to each MUN\'s next step (4e62a1d)', async ({ page }) => {
     await page.goto('/organizer/dashboard')
-    const row = main(page).getByRole('listitem').filter({ hasText: SANDBOX.name })
-    await expect(row.getByRole('button', { name: /manage/i })).toHaveAttribute('href', sectionPath(sandbox, 'setup'))
+    const cta = (row: ReturnType<Page['getByTestId']>, name: string) =>
+      row.getByRole('link', { name }).or(row.getByRole('button', { name }))
+
+    const sandboxRow = page.getByTestId(`overview-mun-${sandbox}`)
+    await expect(sandboxRow).toContainText(SANDBOX.name)
+    await expect(cta(sandboxRow, 'Continue setup')).toHaveAttribute('href', sectionPath(sandbox, 'setup'))
+
+    const open = idOf(OPEN.slug)
+    const openRow = page.getByTestId(`overview-mun-${open}`)
+    await expect(cta(openRow, 'View registrations')).toHaveAttribute('href', sectionPath(open, 'registrations'))
+    // "Manage" is still the fallback for a few statuses (e.g. VERIFIED,
+    // GO_LIVE_QUEUE), and this organizer owns other fixture MUNs that cycle
+    // through those in other specs — don't assert a page-wide count.
+    await expect(sandboxRow.getByRole('button', { name: /^manage$/i })).toHaveCount(0)
+    await expect(openRow.getByRole('button', { name: /^manage$/i })).toHaveCount(0)
   })
 
   test('My MUNs lists each conference with its status and registration counts', async ({ page }) => {
@@ -138,9 +151,9 @@ test.describe('org-wide workspace', () => {
     await expect(pageHeading(page)).toHaveText('Overview')
   })
 
-  test('"Apply to host" opens the host-another-MUN page', async ({ page }) => {
+  test('"Host a MUN" opens the host-another-MUN page', async ({ page }) => {
     await page.goto('/organizer/dashboard/muns')
-    await main(page).getByRole('button', { name: 'Apply to host' }).click()
+    await main(page).getByRole('button', { name: 'Host a MUN' }).click()
     // The seeded organizer has finished onboarding, so it gets the form (or,
     // if an earlier run left an application under review, the waiting notice).
     await expect(page).toHaveURL(/\/organizer\/apply$/)
@@ -207,13 +220,13 @@ test.describe('per-MUN workspace shell', () => {
   })
 
   test('the switcher jumps to the same section of another conference', async ({ page }) => {
-    await openSection(page, sandbox, 'committees', 'Committees')
+    await openSection(page, sandbox, 'committees', 'Committees & Portfolios')
     const switcher = sidebar(page).getByRole('button', { name: `Conference: ${SANDBOX.name}. Switch conference` })
     await switcher.click()
     await page.getByRole('menu').getByRole('menuitem', { name: new RegExp(OPEN.name) }).click()
 
     await expect(page).toHaveURL(new RegExp(`${sectionPath(idOf(OPEN.slug), 'committees')}$`))
-    await expect(pageHeading(page)).toHaveText('Committees')
+    await expect(pageHeading(page)).toHaveText('Committees & Portfolios')
     await expect(main(page).getByRole('heading', { name: OPEN.committees[0].name })).toBeVisible()
     await expect(sidebar(page).getByRole('button', { name: `Conference: ${OPEN.name}. Switch conference` })).toBeVisible()
   })
