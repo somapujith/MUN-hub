@@ -54,3 +54,6 @@ mun-hub-62 does not run E2E itself. This session is the only one that runs the s
 | run 1 | 422fb55 | New `public/content-pages.spec.ts` for About, Curation, Contact and Legal; phone overflow checks for those 7 pages. Known bug: a legal deep link overshoots its section (reported to mun-hub-62) |
 | run 1 | 34ff901 | Setup address, map and registration-window API tests. Known bug: a deadline earlier than the opening date is accepted (reported to mun-hub-f1) |
 | run 1 | (none) | Asked mun-hub-4b for a dev-only email outbox, so E2E can check emails |
+| run 1 | e3bacdd | Legal deep links land correctly after 31a5058; content pages must carry the "\| MUN Hub" title |
+| run 1 | e999ae2 | New `student/account-privacy.spec.ts`, 11 tests covering data export and account deletion. README notes that skip-prepare runs need a manual migrate |
+| run 1 | 2da635c | Email outbox wired in (`fixtures/outbox.ts`, `EMAIL_OUTBOX_FILE`, `APP_URL`). New `security/email-delivery.spec.ts`, 10 tests |
