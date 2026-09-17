@@ -1,8 +1,8 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { studentProfiles, userConsents, users } from '@/lib/db/schema'
-import { createSession, destroySession } from '@/lib/auth/session'
-import { hashPassword, verifyPassword } from '@/lib/auth/password'
+import { sessions, studentProfiles, userConsents, users } from '@/lib/db/schema'
+import { createSession, destroySession, otherSessionsOf } from '@/lib/auth/session'
+import { DUMMY_PASSWORD_HASH, hashPassword, needsRehash, verifyPassword } from '@/lib/auth/password'
 import { buildOptionalProfileFields, required } from '@/lib/actions/student-profile'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
@@ -32,11 +32,36 @@ export interface SignUpInput extends StudentProfileInput {
   gender: string
   acceptedTermsOfService: boolean
   acceptedPrivacyPolicy: boolean
-  /** Only meaningful (and only ever recorded) when true — no row is written for a declined/absent guardian ack. */
+  /**
+   * Required (must be true) when `dateOfBirth` makes the user under 18.
+   * Only ever recorded when true — no row is written for a declined/absent ack.
+   */
   acceptedGuardianAcknowledgement?: boolean
 }
 
 const MIN_PASSWORD_LENGTH = 8
+const ADULT_AGE_YEARS = 18
+
+/**
+ * Thrown by `signUp` when a minor signs up without the parent/guardian
+ * acknowledgement. Ends in "is required" so server/middleware/error.ts's
+ * signup-validation rule maps it to 400.
+ */
+export const GUARDIAN_CONSENT_REQUIRED = 'For users under 18, parent or guardian consent is required'
+
+/**
+ * Whether someone born on `dateOfBirth` is younger than 18 at `now`, by
+ * calendar birthday in UTC (a `YYYY-MM-DD` date input parses as UTC
+ * midnight). A 29 February birthday reaches 18 on 1 March in non-leap years.
+ */
+export function isUnderAdultAge(dateOfBirth: Date, now: Date = new Date()): boolean {
+  const adultOn = Date.UTC(
+    dateOfBirth.getUTCFullYear() + ADULT_AGE_YEARS,
+    dateOfBirth.getUTCMonth(),
+    dateOfBirth.getUTCDate(),
+  )
+  return now.getTime() < adultOn
+}
 
 /**
  * Real password sign-in (replaces the old email-only mock). Looks up the
@@ -46,7 +71,12 @@ const MIN_PASSWORD_LENGTH = 8
  * Throws the same generic `Error('Invalid email or password')` whether the
  * email doesn't exist or the password is wrong — and also when the account
  * predates real signup and has no `passwordHash` at all — so a caller can
- * never use response differences to enumerate valid emails.
+ * never use response differences to enumerate valid emails. The same goes
+ * for timing: every path runs exactly one scrypt verification (an unknown
+ * email is checked against `DUMMY_PASSWORD_HASH`).
+ *
+ * A successful sign-in against a hash in an outdated format or at an
+ * outdated cost transparently re-hashes the password (`needsRehash`).
  *
  * Throws `Error('Account suspended')` if the matched user is suspended.
  *
@@ -60,12 +90,14 @@ export async function signIn(
   password: string,
 ): Promise<{ userId: string; role: Role; token: string; expiresAt: Date }> {
   const [user] = await db
-    .select()
+    .select({ id: users.id, role: users.role, passwordHash: users.passwordHash, suspended: users.suspended })
     .from(users)
     .where(eq(users.email, email.trim().toLowerCase()))
     .limit(1)
 
-  if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+  const storedHash = user?.passwordHash ?? null
+  const passwordMatches = await verifyPassword(password, storedHash ?? DUMMY_PASSWORD_HASH)
+  if (!user || !storedHash || !passwordMatches) {
     throw new Error('Invalid email or password')
   }
 
@@ -73,9 +105,31 @@ export async function signIn(
     throw new Error('Account suspended')
   }
 
+  if (needsRehash(storedHash)) {
+    await upgradePasswordHash(user.id, storedHash, password)
+  }
+
   const { token, expiresAt } = await createSession(user.id)
 
   return { userId: user.id, role: user.role, token, expiresAt }
+}
+
+/**
+ * Replaces a verified-but-outdated password hash. Conditional on the stored
+ * hash still being the one that was verified, so a password change or reset
+ * landing in between is never overwritten. Best-effort: on failure the old
+ * (still valid) hash stays and the sign-in goes ahead.
+ */
+async function upgradePasswordHash(userId: string, verifiedHash: string, password: string): Promise<void> {
+  try {
+    const passwordHash = await hashPassword(password)
+    await db
+      .update(users)
+      .set({ passwordHash })
+      .where(and(eq(users.id, userId), eq(users.passwordHash, verifiedHash)))
+  } catch (error) {
+    console.error('[auth] password rehash failed', { userId, error })
+  }
 }
 
 /**
@@ -98,8 +152,10 @@ export async function signIn(
  *
  * Throws `Error('An account with that email already exists')` on a
  * duplicate email, `Error('Password must be at least 8 characters')` for a
- * too-short password, and a plain `Error` naming the first missing required
- * profile/consent field otherwise.
+ * too-short password, `GUARDIAN_CONSENT_REQUIRED` when the date of birth
+ * makes the user under 18 and `acceptedGuardianAcknowledgement` isn't true,
+ * and a plain `Error` naming the first missing required profile/consent
+ * field otherwise.
  */
 export async function signUp(
   input: SignUpInput,
@@ -135,6 +191,9 @@ export async function signUp(
   }
   if (!input.acceptedPrivacyPolicy) {
     throw new Error('You must accept the Privacy Policy to create an account')
+  }
+  if (isUnderAdultAge(dateOfBirth) && input.acceptedGuardianAcknowledgement !== true) {
+    throw new Error(GUARDIAN_CONSENT_REQUIRED)
   }
 
   const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, normalizedEmail)).limit(1)
@@ -210,27 +269,37 @@ export function requiredConsentRows(userId: string, acceptedAt: Date): (typeof u
  * Throws `Error('Password must be at least 8 characters')` for a too-short
  * `newPassword`.
  *
- * Deliberately does NOT invalidate other sessions — the user is actively
- * signed in and choosing this themselves, unlike a reset-token recovery
- * (which does invalidate everything, since that path implies the old
- * credential may be compromised).
+ * Signs the user out everywhere else: every session except the caller's own
+ * (`currentSessionToken`) is deleted in the same transaction as the
+ * password update. A password change is often a reaction to a suspected
+ * compromise, and a stolen session cookie must not outlive it. The
+ * signed-out reset flow (`lib/actions/password-reset.ts`) has no current
+ * session and deletes all of them.
  */
 export async function changePassword(
   currentPassword: string,
   newPassword: string,
   session: Session,
+  currentSessionToken: string,
 ): Promise<void> {
   if (newPassword.length < MIN_PASSWORD_LENGTH) {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
   }
 
-  const [user] = await db.select().from(users).where(eq(users.id, session.userId)).limit(1)
+  const [user] = await db
+    .select({ passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.id, session.userId))
+    .limit(1)
   if (!user || !user.passwordHash || !(await verifyPassword(currentPassword, user.passwordHash))) {
     throw new Error('Current password is incorrect')
   }
 
   const passwordHash = await hashPassword(newPassword)
-  await db.update(users).set({ passwordHash }).where(eq(users.id, session.userId))
+  await db.transaction(async (tx) => {
+    await tx.update(users).set({ passwordHash }).where(eq(users.id, session.userId))
+    await tx.delete(sessions).where(otherSessionsOf(session.userId, currentSessionToken))
+  })
 }
 
 /**

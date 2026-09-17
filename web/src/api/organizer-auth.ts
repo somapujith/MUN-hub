@@ -30,12 +30,13 @@ export type OrganizerCodeVerification =
 
 /**
  * POST /api/v1/auth/organizers/code — emails a 6-digit sign-in code. Succeeds
- * the same way for any address, registered or not.
+ * the same way for any address, registered or not. `turnstileToken` is
+ * required by the server only when its Turnstile bot check is enabled.
  */
-export function requestOrganizerCode(email: string) {
+export function requestOrganizerCode(email: string, turnstileToken?: string) {
   return request<void>("/auth/organizers/code", {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, turnstileToken }),
   });
 }
 

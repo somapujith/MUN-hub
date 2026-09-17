@@ -12,9 +12,22 @@ import { getRuntimeEnv } from '@/lib/runtime-env'
 //
 // Key handling: PAYMENT_FIELD_KEY must be a base64-encoded 32-byte value.
 // There is deliberately NO default key and NO fallback — a silently-weak key
-// is worse than a crash. This is validated and decoded ONCE, cached, and
-// reused (see getEncryptionKey below) so a misconfigured deployment fails
-// loudly on first real use rather than silently encrypting with a bad key.
+// is worse than a crash. A misconfigured key fails loudly on first real use
+// rather than silently encrypting with a bad key.
+//
+// Key rotation: set the new key as PAYMENT_FIELD_KEY and move the old one to
+// PAYMENT_FIELD_KEY_PREVIOUS. New ciphertexts always use PAYMENT_FIELD_KEY;
+// the previous key is decrypt-only (tried when the current key's GCM tag
+// doesn't verify), so rows written before the rotation stay readable until
+// they are re-encrypted.
+//
+// Ciphertext format:
+//   v1:base64(iv):base64(authTag):base64(ciphertext)   ← written now
+//   base64(iv):base64(authTag):base64(ciphertext)      ← legacy, still read
+// The version prefix leaves room to change the scheme later without
+// guessing. Both use a 12-byte IV and a full 16-byte tag; decryption pins
+// the tag length, so a truncated tag (which would weaken GCM's forgery
+// resistance) is rejected rather than accepted.
 //
 // Loaded lazily rather than at module top-level: under Cloudflare Workers
 // this module is evaluated once at cold start, before any request (and
@@ -26,53 +39,98 @@ import { getRuntimeEnv } from '@/lib/runtime-env'
 // or the key would still silently be missing on every real request in
 // production despite being correctly configured as a Workers secret. Same
 // class of problem `lib/db/client.ts`'s `resolveConnectionString`/
-// Hyperdrive-bridge solves. Local Node dev/tests are unaffected: this still
-// runs the exact same synchronous, cached logic, just on first use rather
-// than on import, reading real `process.env.PAYMENT_FIELD_KEY` there.
+// Hyperdrive-bridge solves. Local Node dev/tests are unaffected: they read
+// real `process.env.PAYMENT_FIELD_KEY` on first use.
 
 const KEY_BYTE_LENGTH = 32
 const IV_BYTE_LENGTH = 12
+const AUTH_TAG_BYTE_LENGTH = 16
 const SEPARATOR = ':'
+const CURRENT_VERSION = 'v1'
 
-function loadKey(): Buffer {
-  const raw = getRuntimeEnv('PAYMENT_FIELD_KEY')
-  if (!raw) {
-    throw new Error('PAYMENT_FIELD_KEY environment variable is not set — refusing to start without a field-encryption key')
-  }
+const decodedKeys = new Map<string, Buffer>()
+
+function decodeKey(name: string, raw: string): Buffer {
+  const cached = decodedKeys.get(raw)
+  if (cached) return cached
 
   const key = Buffer.from(raw, 'base64')
   if (key.length !== KEY_BYTE_LENGTH) {
     throw new Error(
-      `PAYMENT_FIELD_KEY must decode to exactly ${KEY_BYTE_LENGTH} bytes (base64-encoded); got ${key.length} bytes`,
+      `${name} must decode to exactly ${KEY_BYTE_LENGTH} bytes (base64-encoded); got ${key.length} bytes`,
     )
   }
-
+  decodedKeys.set(raw, key)
   return key
 }
 
-let cachedKey: Buffer | undefined
-
 function getEncryptionKey(): Buffer {
-  if (!cachedKey) cachedKey = loadKey()
-  return cachedKey
+  const raw = getRuntimeEnv('PAYMENT_FIELD_KEY')
+  if (!raw) {
+    throw new Error('PAYMENT_FIELD_KEY environment variable is not set — refusing to start without a field-encryption key')
+  }
+  return decodeKey('PAYMENT_FIELD_KEY', raw)
+}
+
+/** Current key first, then the decrypt-only previous key when one is configured. */
+function getDecryptionKeys(): Buffer[] {
+  const keys = [getEncryptionKey()]
+  const previous = getRuntimeEnv('PAYMENT_FIELD_KEY_PREVIOUS')
+  if (previous) keys.push(decodeKey('PAYMENT_FIELD_KEY_PREVIOUS', previous))
+  return keys
 }
 
 /**
- * Encrypts `plaintext` with AES-256-GCM using a fresh random 12-byte IV.
- * Output is `base64(iv):base64(authTag):base64(ciphertext)` as one string.
+ * Encrypts `plaintext` with AES-256-GCM under PAYMENT_FIELD_KEY, using a
+ * fresh random 12-byte IV. Output is
+ * `v1:base64(iv):base64(authTag):base64(ciphertext)` as one string.
  */
 export function encryptField(plaintext: string): string {
   const iv = randomBytes(IV_BYTE_LENGTH)
-  const cipher = createCipheriv('aes-256-gcm', getEncryptionKey(), iv)
+  const cipher = createCipheriv('aes-256-gcm', getEncryptionKey(), iv, { authTagLength: AUTH_TAG_BYTE_LENGTH })
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
   const authTag = cipher.getAuthTag()
 
-  return [iv.toString('base64'), authTag.toString('base64'), ciphertext.toString('base64')].join(SEPARATOR)
+  return [CURRENT_VERSION, iv.toString('base64'), authTag.toString('base64'), ciphertext.toString('base64')].join(
+    SEPARATOR,
+  )
+}
+
+function parseCiphertext(value: string): { iv: Buffer; authTag: Buffer; data: Buffer } {
+  const parts = value.split(SEPARATOR)
+  let segments: string[]
+  if (parts.length === 4 && parts[0] === CURRENT_VERSION) {
+    segments = parts.slice(1)
+  } else if (parts.length === 3) {
+    segments = parts
+  } else {
+    throw new Error('Malformed ciphertext: expected v1:iv:authTag:ciphertext')
+  }
+
+  const [ivB64, authTagB64, dataB64] = segments
+  const iv = Buffer.from(ivB64, 'base64')
+  const authTag = Buffer.from(authTagB64, 'base64')
+  if (iv.length !== IV_BYTE_LENGTH) {
+    throw new Error(`Malformed ciphertext: IV must be ${IV_BYTE_LENGTH} bytes`)
+  }
+  if (authTag.length !== AUTH_TAG_BYTE_LENGTH) {
+    throw new Error(`Malformed ciphertext: auth tag must be ${AUTH_TAG_BYTE_LENGTH} bytes`)
+  }
+  return { iv, authTag, data: Buffer.from(dataB64, 'base64') }
+}
+
+function decryptWithKey(key: Buffer, iv: Buffer, authTag: Buffer, data: Buffer): string {
+  const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: AUTH_TAG_BYTE_LENGTH })
+  decipher.setAuthTag(authTag)
+  return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8')
 }
 
 /**
- * Decrypts a string produced by `encryptField`. Throws if the format is
- * malformed or if the GCM auth tag doesn't verify (tampering).
+ * Decrypts a string produced by `encryptField` (current `v1:` format or the
+ * legacy unprefixed one), trying PAYMENT_FIELD_KEY and then
+ * PAYMENT_FIELD_KEY_PREVIOUS. Throws if the format is malformed (including a
+ * tag that isn't 16 bytes) or if no configured key verifies the GCM tag
+ * (tampering, or a key that has been rotated out).
  *
  * NOTHING IN THIS CODEBASE CALLS THIS FUNCTION YET. It is exported and
  * tested (round-trip + tamper detection) so the encryption format is proven
@@ -83,19 +141,15 @@ export function encryptField(plaintext: string): string {
  * into any action or query without a dedicated threat review first.
  */
 export function decryptField(ciphertext: string): string {
-  const parts = ciphertext.split(SEPARATOR)
-  if (parts.length !== 3) {
-    throw new Error('Malformed ciphertext: expected iv:authTag:ciphertext')
+  const { iv, authTag, data } = parseCiphertext(ciphertext)
+
+  let lastError: unknown
+  for (const key of getDecryptionKeys()) {
+    try {
+      return decryptWithKey(key, iv, authTag, data)
+    } catch (error) {
+      lastError = error
+    }
   }
-  const [ivB64, authTagB64, dataB64] = parts
-
-  const iv = Buffer.from(ivB64, 'base64')
-  const authTag = Buffer.from(authTagB64, 'base64')
-  const data = Buffer.from(dataB64, 'base64')
-
-  const decipher = createDecipheriv('aes-256-gcm', getEncryptionKey(), iv)
-  decipher.setAuthTag(authTag)
-
-  const plaintext = Buffer.concat([decipher.update(data), decipher.final()])
-  return plaintext.toString('utf8')
+  throw lastError instanceof Error ? lastError : new Error('Unable to decrypt field')
 }

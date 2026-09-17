@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { sessions, users } from '@/lib/db/schema'
 import type { AuthAdapter, Session } from './adapter'
+import { hashOpaqueToken } from './opaque-token'
 import { createSession, destroySession } from './session'
 import { verifyPassword } from './password'
 
@@ -34,7 +35,7 @@ export const mockAuthAdapter: AuthAdapter = {
     const [row] = await db
       .select({ userId: sessions.userId })
       .from(sessions)
-      .where(eq(sessions.token, sessionToken))
+      .where(eq(sessions.token, hashOpaqueToken(sessionToken)))
       .limit(1)
 
     return row?.userId ?? null

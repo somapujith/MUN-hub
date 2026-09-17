@@ -13,12 +13,29 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTurnstile } from "@/hooks/use-turnstile";
 import { cn } from "cn";
 import { safeRedirectTo } from "@/lib/redirect";
 
 // Mirrors lib/actions/auth.ts's MIN_PASSWORD_LENGTH — checked client-side for
 // fast feedback, but the server re-validates regardless.
 const MIN_PASSWORD_LENGTH = 8;
+
+const GUARDIAN_CONSENT_MESSAGE =
+  "You're under 18, so a parent or guardian must consent before you can create an account.";
+
+/**
+ * Mirrors lib/actions/auth.ts's isUnderAdultAge: younger than 18 by calendar
+ * birthday, in UTC (a date input's `YYYY-MM-DD` parses as UTC midnight).
+ * The server enforces the same rule.
+ */
+function isUnderAdultAge(dateOfBirth: string): boolean {
+  if (!dateOfBirth) return false;
+  const dob = new Date(dateOfBirth);
+  if (Number.isNaN(dob.getTime())) return false;
+  const adultOn = Date.UTC(dob.getUTCFullYear() + 18, dob.getUTCMonth(), dob.getUTCDate());
+  return Date.now() < adultOn;
+}
 
 const textareaClassName = cn(
   "w-full resize-y rounded-sm border border-input bg-background px-md py-sm text-body-md text-ink outline-none",
@@ -143,7 +160,10 @@ function toSignUpInput(form: FormState): SignUpInput {
     emergencyContactRelation: form.emergencyContactRelation.trim(),
     acceptedTermsOfService: form.acceptedTermsOfService,
     acceptedPrivacyPolicy: form.acceptedPrivacyPolicy,
-    acceptedGuardianAcknowledgement: form.acceptedGuardianAcknowledgement || undefined,
+    // Only meaningful for a minor; a box ticked before the date of birth was
+    // corrected to an adult one isn't sent.
+    acceptedGuardianAcknowledgement:
+      (isUnderAdultAge(form.dateOfBirth) && form.acceptedGuardianAcknowledgement) || undefined,
     munExperience: form.munExperience.trim() || undefined,
     referralCode: form.referralCode.trim() || undefined,
     preferredName: form.preferredName.trim() || undefined,
@@ -178,6 +198,8 @@ export function SignupPage() {
   const redirectTo = safeRedirectTo(searchParams.get("redirectTo") ?? searchParams.get("redirect"));
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | undefined>(undefined);
+  const turnstile = useTurnstile("delegate-signup");
+  const isMinor = isUnderAdultAge(form.dateOfBirth);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -185,6 +207,8 @@ export function SignupPage() {
 
   const signUpMutation = useMutation({
     mutationFn: signUp,
+    // A Turnstile token is single-use: fetch a fresh one for any retry.
+    onSettled: turnstile.reset,
     onSuccess: (session) => {
       // Drop everything cached under whatever (anonymous) identity was
       // active before, then seed the session query directly with the real
@@ -218,18 +242,19 @@ export function SignupPage() {
       setFormError("You must accept the Terms of Service and Privacy Policy to create an account.");
       return;
     }
+    if (isMinor && !form.acceptedGuardianAcknowledgement) {
+      setFormError(GUARDIAN_CONSENT_MESSAGE);
+      return;
+    }
+    if (!turnstile.ready) {
+      setFormError("Complete the verification check above, then try again.");
+      return;
+    }
 
-    signUpMutation.mutate(toSignUpInput(form));
+    signUpMutation.mutate({ ...toSignUpInput(form), turnstileToken: turnstile.token });
   }
 
   const loginHref = redirectTo !== "/" ? `/login?redirectTo=${encodeURIComponent(redirectTo)}` : "/login";
-  const isMinor = (() => {
-    if (!form.dateOfBirth) return false;
-    const dob = new Date(form.dateOfBirth);
-    if (Number.isNaN(dob.getTime())) return false;
-    const age = (Date.now() - dob.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-    return age < 18;
-  })();
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
@@ -696,17 +721,26 @@ export function SignupPage() {
                   </Label>
                 </label>
                 {isMinor ? (
-                  <label className="flex items-start gap-sm text-body-md text-body" htmlFor="acceptGuardian">
-                    <Checkbox
-                      id="acceptGuardian"
-                      checked={form.acceptedGuardianAcknowledgement}
-                      onCheckedChange={(checked) => set("acceptedGuardianAcknowledgement", checked === true)}
-                    />
-                    <Label htmlFor="acceptGuardian" className="cursor-pointer">
-                      My parent/guardian acknowledges and consents to my use of MUN Hub
-                    </Label>
-                  </label>
+                  <div className="flex flex-col gap-xs">
+                    <label className="flex items-start gap-sm text-body-md text-body" htmlFor="acceptGuardian">
+                      <Checkbox
+                        id="acceptGuardian"
+                        required
+                        aria-describedby="acceptGuardianHint"
+                        checked={form.acceptedGuardianAcknowledgement}
+                        onCheckedChange={(checked) => set("acceptedGuardianAcknowledgement", checked === true)}
+                      />
+                      <Label htmlFor="acceptGuardian" className="cursor-pointer">
+                        My parent/guardian acknowledges and consents to my use of MUN Hub *
+                      </Label>
+                    </label>
+                    {/* pl-xl: the checkbox (20px) plus gap-sm (12px), so the hint lines up with the label. */}
+                    <p id="acceptGuardianHint" className="pl-xl text-body-md text-muted-foreground">
+                      Required because your date of birth shows you&apos;re under 18.
+                    </p>
+                  </div>
                 ) : null}
+                {turnstile.widget}
               </CardContent>
             </Card>
 

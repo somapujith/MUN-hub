@@ -1,6 +1,8 @@
 import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { requestPasswordReset, resetPassword } from '@/lib/actions/password-reset'
+import { getRuntimeEnv } from '@/lib/runtime-env'
+import { isProductionRuntime } from '@/lib/runtime-platform'
 import type { AppVariables } from '../src/types'
 
 const requestResetBodySchema = z
@@ -11,26 +13,40 @@ const requestResetBodySchema = z
 
 const confirmResetBodySchema = z
   .object({
-    token: z.string().min(1),
+    token: z.string().min(1).max(256),
     newPassword: z.string().min(8),
   })
   .strict()
 
-/**
- * Resolves the origin to build the reset link against. Prefers the `Origin`
- * header (present on the browser fetch() calls this API is actually served
- * from) and falls back to `Host` + `X-Forwarded-Proto`, mirroring the
- * next/headers-based resolution `app/forgot-password/actions.ts` used before
- * this route existed — kept framework-agnostic (lib/actions/password-reset.ts
- * takes a plain `appUrl` string, never imports next/headers or Hono types).
- */
-function resolveAppUrl(c: Context<{ Variables: AppVariables }>): string {
-  const origin = c.req.header('Origin')
-  if (origin) return origin
+const LOOPBACK_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?$/
+const DEV_FALLBACK_APP_URL = 'http://localhost:5173'
 
-  const host = c.req.header('Host')
-  const protocol = c.req.header('X-Forwarded-Proto') ?? 'https'
-  return host ? `${protocol}://${host}` : 'http://localhost:3000'
+/**
+ * The origin reset links point at. A reset link carries a live credential,
+ * so it is never built from a request header an attacker controls (an
+ * `Origin`/`Host` of their choosing would send the victim's token to their
+ * site):
+ *
+ * - Production (Workers, or NODE_ENV=production): always APP_URL. Missing
+ *   APP_URL is a misconfiguration and fails the request.
+ * - Local development: a loopback `Origin` (the Vite dev server on whatever
+ *   port) is used as-is, so links open the SPA being developed; otherwise
+ *   APP_URL, otherwise the default Vite dev URL.
+ */
+export function resolveResetAppUrl(origin: string | undefined): string {
+  const configured = getRuntimeEnv('APP_URL')?.trim().replace(/\/+$/, '')
+
+  if (isProductionRuntime()) {
+    if (!configured) throw new Error('APP_URL must be set to build password-reset links')
+    return configured
+  }
+
+  if (origin && LOOPBACK_ORIGIN.test(origin)) return origin
+  return configured || DEV_FALLBACK_APP_URL
+}
+
+function resolveAppUrl(c: Context<{ Variables: AppVariables }>): string {
+  return resolveResetAppUrl(c.req.header('Origin'))
 }
 
 export const passwordResetRoutes = new Hono<{ Variables: AppVariables }>()

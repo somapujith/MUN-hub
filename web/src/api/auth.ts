@@ -55,7 +55,10 @@ export interface SignUpInput {
   emergencyContactRelation: string;
   acceptedTermsOfService: boolean;
   acceptedPrivacyPolicy: boolean;
+  /** Required (true) by the server when dateOfBirth makes the user under 18. */
   acceptedGuardianAcknowledgement?: boolean;
+  /** Cloudflare Turnstile token, when the bot check is enabled (hooks/use-turnstile.tsx). */
+  turnstileToken?: string;
   munExperience?: string;
   referralCode?: string;
   preferredName?: string;
@@ -117,8 +120,8 @@ export function signOut() {
 /**
  * In-app "change password while signed in" — POST /api/v1/auth/session/password
  * (`server/routes/auth.ts`). Requires the current password (re-verified
- * server-side) and, unlike the signed-out reset flow in
- * `password-reset.ts`, does not invalidate the caller's other sessions.
+ * server-side). Signs the account out on every other device; this session
+ * stays signed in.
  */
 export function changePassword(currentPassword: string, newPassword: string) {
   return request<void>("/auth/session/password", {

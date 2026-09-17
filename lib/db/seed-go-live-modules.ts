@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm'
+import { assertSeedTargetIsLocalFromEnv } from './seed-guard'
 
 // -----------------------------------------------------------------------------
 // seed-go-live-modules — Task 13 Step 1: full 15-module demo data for the two
@@ -98,6 +99,9 @@ export async function seedFullGoLiveModules({
   organizerId,
   committees,
 }: SeedFullGoLiveModulesArgs): Promise<void> {
+  // Same guard as lib/db/seed.ts, in case this is ever called from elsewhere.
+  assertSeedTargetIsLocalFromEnv()
+
   const { munMedia, munExecutiveBoard, munFormFields, munPaymentSettings, munDocuments, munScheduleItems, munContacts, organizerApplications } =
     tables
 

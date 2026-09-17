@@ -18,11 +18,14 @@ import { config } from 'dotenv'
 // (Tests are already safe: vitest.setup.ts pins them to .env.test regardless.)
 // The hardcoded `.env` path below is repo-wide tooling convention -- do not
 // change it unilaterally; override DATABASE_URL instead.
+// Since 2026-09-17 main() refuses to run at all unless DATABASE_URL points
+// at this machine (or ALLOW_REMOTE_SEED=true) — see ./seed-guard.ts.
 config({ path: '.env' })
 
 import { eq } from 'drizzle-orm'
 import { hashPassword } from '@/lib/auth/password'
 import { seedFullGoLiveModules, type GoLiveModuleTables } from './seed-go-live-modules'
+import { assertSeedTargetIsLocalFromEnv } from './seed-guard'
 
 // Shown verbatim on the login page's demo-accounts panel
 // (app/login/page.tsx) — must match exactly.
@@ -415,6 +418,9 @@ async function seedMun(db: Db, tables: Tables, organizerId: string, seed: MunSee
 }
 
 async function main() {
+  // Before anything connects: never seed demo accounts into a remote database.
+  assertSeedTargetIsLocalFromEnv()
+
   // Dynamic import: see the note above config() for why this must not be a
   // static top-level import.
   const { db } = await import('./client')
