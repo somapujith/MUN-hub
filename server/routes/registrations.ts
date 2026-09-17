@@ -2,6 +2,7 @@ import { zValidator } from '../lib/zod-validator'
 import { eq } from 'drizzle-orm'
 import { Hono, type Context } from 'hono'
 import { z } from 'zod'
+import { assertEmailVerifiedIfRequired } from '@/lib/actions/email-verification'
 import {
   REGISTRATION_ERRORS,
   REGISTRATION_ERROR_STATUS,
@@ -140,6 +141,9 @@ registrationsRoutes.post(
     if (!(await isProfileComplete(session.userId))) {
       return registrationErrorResponse(c, REGISTRATION_ERRORS.profileIncomplete)
     }
+    // A no-op unless REQUIRE_EMAIL_VERIFICATION is "true"; its error is
+    // mapped to 403 by the shared handler (server/middleware/error.ts).
+    await assertEmailVerifiedIfRequired(session.userId)
 
     try {
       const result = await initiateRegistration(body, session, { idempotencyKey })

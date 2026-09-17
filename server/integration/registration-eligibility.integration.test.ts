@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { REGISTRATION_ERRORS } from '@/lib/actions/registration'
 import { completeStudentProfile } from '@/lib/actions/student-profile'
 import { db } from '@/lib/db/client'
-import { committees, muns, registrationProducts } from '@/lib/db/schema'
+import { committees, muns, registrationProducts, users } from '@/lib/db/schema'
 import { createApp } from '../src/app'
 import { authHeaders, makeUser } from './helpers'
 
@@ -22,6 +23,10 @@ async function makeMun(status: (typeof muns.$inferInsert)['status']) {
 }
 
 async function makeStudent(completeProfile: boolean) {
+  return (await makeStudentWithId(completeProfile)).headers
+}
+
+async function makeStudentWithId(completeProfile: boolean) {
   const student = await makeUser('STUDENT')
   if (completeProfile) {
     await completeStudentProfile(
@@ -39,7 +44,7 @@ async function makeStudent(completeProfile: boolean) {
       { userId: student.id, role: 'STUDENT' },
     )
   }
-  return authHeaders(student.id)
+  return { id: student.id, headers: await authHeaders(student.id) }
 }
 
 function register(headers: Record<string, string>, body: Record<string, unknown>) {
@@ -102,5 +107,39 @@ describe('POST /registrations eligibility', () => {
     const second = await register(await makeStudent(true), { munId: mun.id, registrationProductId: pass.id, committeeId: committee.id })
     expect(second.status).toBe(409)
     expect((await second.json()).error).toEqual({ code: 'CONFLICT_CAPACITY', message: 'Committee is at capacity' })
+  })
+})
+
+describe('POST /registrations email verification gate', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('refuses an unverified student with 403 only while REQUIRE_EMAIL_VERIFICATION is "true"', async () => {
+    const { mun, pass } = await makeMun('REGISTRATION_OPEN')
+    const headers = await makeStudent(true)
+
+    vi.stubEnv('REQUIRE_EMAIL_VERIFICATION', 'true')
+    const refused = await register(headers, { munId: mun.id, registrationProductId: pass.id })
+    expect(refused.status).toBe(403)
+    expect((await refused.json()).error).toEqual({
+      code: 'FORBIDDEN',
+      message: 'Please verify your email address before registering for a MUN',
+    })
+
+    vi.stubEnv('REQUIRE_EMAIL_VERIFICATION', '')
+    const allowed = await register(headers, { munId: mun.id, registrationProductId: pass.id })
+    expect(allowed.status).toBe(201)
+  })
+
+  it('lets a verified student register while the gate is on', async () => {
+    const { mun, pass } = await makeMun('REGISTRATION_OPEN')
+    const student = await makeStudentWithId(true)
+    await db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, student.id))
+    const headers = student.headers
+
+    vi.stubEnv('REQUIRE_EMAIL_VERIFICATION', 'true')
+    const res = await register(headers, { munId: mun.id, registrationProductId: pass.id })
+    expect(res.status).toBe(201)
   })
 })

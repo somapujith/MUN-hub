@@ -492,7 +492,9 @@ async function reserveAndStartPayment(
   const { registration, total, currency, fees } = reservation
 
   if (!fees || !adapter) {
-    void runPaymentHook(onRegistrationConfirmed, registration.id)
+    // Awaited (it never rejects): the hook sends the confirmation email, and
+    // on Workers un-awaited work can be dropped once the response is sent.
+    await runPaymentHook(onRegistrationConfirmed, registration.id)
     return { registrationId: registration.id, orderId: null, status: registration.status, replayed: false }
   }
 
