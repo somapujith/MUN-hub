@@ -10,6 +10,9 @@
 # - style-src needs 'unsafe-inline' for index.html's <style> block, the <style>
 #   next-themes injects for disableTransitionOnChange, and style attributes.
 # - challenges.cloudflare.com is Cloudflare Turnstile.
+# - Permissions-Policy allows the camera for this origin only: the organizer
+#   check-in panel scans delegate passes with it. camera=() would make every
+#   getUserMedia call fail with no prompt the user could answer.
 # - A real payment gateway (e.g. Razorpay Checkout) needs its script, frame and
 #   connect origins added here and in vercel.json.
 /*
@@ -17,5 +20,5 @@
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
-  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Permissions-Policy: camera=(self), microphone=(), geolocation=()
   X-Frame-Options: DENY

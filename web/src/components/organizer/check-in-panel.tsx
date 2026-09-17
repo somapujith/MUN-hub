@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cameraAllowedByPolicy, describeCameraFailure, readCameraPermission } from "@/lib/camera-access";
 import type { CheckInResult } from "@/types/check-in";
 import type { MunStatus } from "@/types/enums";
 
@@ -231,12 +232,17 @@ function OutcomeNotice({ outcome }: { outcome: Outcome }) {
 
 /**
  * Camera + BarcodeDetector loop. `supported` is false on browsers without the
- * Shape Detection API (e.g. desktop Firefox/Safari), where the panel falls
- * back to typing the code.
+ * Shape Detection API (e.g. desktop Firefox/Safari), where the page's
+ * Permissions-Policy turns the camera off, and once the browser has refused
+ * the camera without asking. The panel then falls back to typing the code.
  */
 function useCameraScanner(videoRef: RefObject<HTMLVideoElement | null>) {
   const Detector = getBarcodeDetector();
-  const supported = Boolean(Detector && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia);
+  const [blocked, setBlocked] = useState(false);
+  const supported =
+    !blocked &&
+    Boolean(Detector && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia) &&
+    cameraAllowedByPolicy(typeof document === "undefined" ? undefined : document);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
   const [active, setActive] = useState(false);
@@ -257,13 +263,20 @@ function useCameraScanner(videoRef: RefObject<HTMLVideoElement | null>) {
   const start = async (onCode: (raw: string) => void) => {
     if (!Detector) return;
     setError(null);
+    // Read the permission state alongside the request rather than awaiting it
+    // first, so getUserMedia still runs in the click's task. The query settles
+    // long before anyone could answer a prompt, so it reflects the state from
+    // before the request.
+    const permissionBefore = readCameraPermission(navigator);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       streamRef.current = stream;
       setPending({ stream, onCode });
       setActive(true);
-    } catch {
-      setError("Couldn't open the camera. Allow camera access, or type the code instead.");
+    } catch (cause) {
+      const failure = describeCameraFailure(cause, await permissionBefore);
+      setError(failure.message);
+      if (failure.blocked) setBlocked(true);
       stop();
     }
   };
