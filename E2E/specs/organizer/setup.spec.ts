@@ -139,6 +139,70 @@ test.describe('MUN setup API', () => {
     expect(after.status).toMatch(/ONBOARDING|ACTION_REQUIRED/)
   })
 
+  test('address, map link and registration window are saved and can be cleared (73bcdf4)', async () => {
+    const opens = new Date(Date.now() + 7 * 86_400_000)
+    const deadline = new Date(Date.now() + 30 * 86_400_000)
+    const data = {
+      addressLine1: `E2E Hall ${uid()}, Jubilee Hills`,
+      addressState: 'Telangana',
+      postalCode: '500033',
+      mapUrl: 'https://maps.example.com/e2e-venue',
+      registrationOpensAt: opens.toISOString(),
+      registrationDeadline: deadline.toISOString(),
+    }
+    try {
+      const res = await api.patch(`muns/${munId}`, { data })
+      expect(res.status(), await res.text()).toBe(200)
+      const saved = await res.json()
+      expect(saved).toMatchObject({
+        addressLine1: data.addressLine1,
+        addressState: 'Telangana',
+        postalCode: '500033',
+        mapUrl: data.mapUrl,
+      })
+      expect(new Date(saved.registrationOpensAt).getTime()).toBe(opens.getTime())
+      expect(new Date(saved.registrationDeadline).getTime()).toBe(deadline.getTime())
+    } finally {
+      const cleared = await api.patch(`muns/${munId}`, {
+        data: {
+          addressLine1: null,
+          addressState: null,
+          postalCode: null,
+          mapUrl: null,
+          registrationOpensAt: null,
+          registrationDeadline: null,
+        },
+      })
+      expect(cleared.status()).toBe(200)
+      expect(await cleared.json()).toMatchObject({ addressLine1: null, mapUrl: null, registrationDeadline: null })
+    }
+  })
+
+  test('a map link must be a URL and dates must be dates', async () => {
+    for (const data of [{ mapUrl: 'not a url' }, { registrationOpensAt: 'soon' }, { registrationDeadline: 'later' }]) {
+      const res = await api.patch(`muns/${munId}`, { data })
+      expect(res.status(), JSON.stringify(data)).toBe(400)
+    }
+  })
+
+  test('a registration deadline before registration opens is refused', async () => {
+    test.fail(
+      !process.env.E2E_SHOW_KNOWN_BUGS,
+      'BUG: updateMunDetails (lib/actions/mun-config.ts) accepts registrationDeadline earlier than registrationOpensAt',
+    )
+    const res = await api.patch(`muns/${munId}`, {
+      data: {
+        registrationOpensAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+        registrationDeadline: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+      },
+    })
+    try {
+      expect(res.status()).toBe(400)
+    } finally {
+      await api.patch(`muns/${munId}`, { data: { registrationOpensAt: null, registrationDeadline: null } })
+    }
+  })
+
   test('an optional detail can be cleared and restored', async () => {
     const res = await api.patch(`muns/${munId}`, { data: { venue: null } })
     expect(res.status()).toBe(200)
