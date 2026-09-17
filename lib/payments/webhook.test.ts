@@ -225,6 +225,28 @@ describe('processPaymentWebhook — captures', () => {
     expect(after.payment.exceptionReason).toBe('AMOUNT_MISMATCH')
   })
 
+  // The payment row has no column for the charge behind an exception, so the
+  // log line is the only record of which charge to return.
+  it('logs the payment id and amount of the charge behind every exception', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { payment } = await seed()
+    await deliver(simulatePaymentOutcome(orderOf(payment), 'success', { amount: 1, providerPaymentId: 'pay_odd' }))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('AMOUNT_MISMATCH for charge pay_odd (1 INR)'))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining(payment.providerOrderId))
+
+    // A second bad charge while that exception is open changes no column, so
+    // it must still be named in the log.
+    await deliver(simulatePaymentOutcome(orderOf(payment), 'success', { amount: 2, providerPaymentId: 'pay_odd_2' }))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('already has open exception AMOUNT_MISMATCH'))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('charge pay_odd_2 (2 INR)'))
+
+    const paid = await seed()
+    await deliver(simulatePaymentOutcome(orderOf(paid.payment), 'success', { providerPaymentId: 'pay_first' }))
+    await deliver(simulatePaymentOutcome(orderOf(paid.payment), 'success', { providerPaymentId: 'pay_second' }))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('DUPLICATE_PAYMENT for charge pay_second (1499 INR)'))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('payment on file pay_first'))
+  })
+
   it('treats a legacy REFUNDED (late-payment) row as already captured', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { payment } = await seed({ registrationStatus: 'CANCELLED', paymentStatus: 'REFUNDED', providerPaymentId: 'pay_old' })
