@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { deleteMunMedia, listMunMedia, reorderGallery, uploadMunMedia } from '@/lib/actions/mun-branding'
+import { assertMunReadable } from '@/lib/actions/mun-read-access'
 import { munMediaKindEnum } from '@/lib/db/schema-enums'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
@@ -23,8 +24,11 @@ const reorderGalleryBodySchema = z
 
 export const munBrandingRoutes = new Hono<{ Variables: AppVariables }>()
 
+// Published MUNs for anyone; unpublished ones for the owner and staff only (404 otherwise).
 munBrandingRoutes.get('/muns/:munId/media', async (c) => {
-  const media = await listMunMedia(c.req.param('munId'))
+  const munId = c.req.param('munId')
+  await assertMunReadable(munId, c.get('session'))
+  const media = await listMunMedia(munId)
   return c.json(media)
 })
 

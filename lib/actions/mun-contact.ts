@@ -79,8 +79,36 @@ export async function upsertMunContact(
   return result
 }
 
-/** Public read, no auth — the mun detail page renders contact info. */
+/**
+ * Full contact row, including the named contact person — for the owning
+ * organizer and staff only. The route layer decides who gets this (see
+ * lib/actions/mun-read-access.ts); anonymous visitors get
+ * `getPublicMunContact` instead.
+ */
 export async function getMunContact(munId: string): Promise<MunContact | null> {
   const [contact] = await db.select().from(munContacts).where(eq(munContacts.munId, munId)).limit(1)
+  return contact ?? null
+}
+
+/** The conference's official channels — what the public MUN page shows. No contact-person PII. */
+export type PublicMunContact = Pick<MunContact, 'id' | 'munId' | 'officialEmail' | 'phone' | 'website' | 'socialLinks'>
+
+/**
+ * Public read of the official contact channels. Columns are listed explicitly
+ * so the contact person's name, role, email and phone can never ride along.
+ */
+export async function getPublicMunContact(munId: string): Promise<PublicMunContact | null> {
+  const [contact] = await db
+    .select({
+      id: munContacts.id,
+      munId: munContacts.munId,
+      officialEmail: munContacts.officialEmail,
+      phone: munContacts.phone,
+      website: munContacts.website,
+      socialLinks: munContacts.socialLinks,
+    })
+    .from(munContacts)
+    .where(eq(munContacts.munId, munId))
+    .limit(1)
   return contact ?? null
 }

@@ -11,25 +11,15 @@ import {
   updateAccommodationOption,
   updateAccommodationOptionField,
 } from '@/lib/actions/accommodation'
+import {
+  assertMunReadable,
+  findMunIdForAccommodationOption,
+  resolveMunReadAccess,
+} from '@/lib/actions/mun-read-access'
 import { accommodationFieldTypeEnum } from '@/lib/db/schema-enums'
-import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
-
-async function resolveIncludeInactive(
-  munId: string,
-  raw: string | undefined,
-  session: AppVariables['session'],
-): Promise<boolean> {
-  if (raw !== 'true') return false
-  try {
-    await assertOwnsOrAdmin(munId, session)
-    return true
-  } catch {
-    return false
-  }
-}
 
 const createOptionBodySchema = z
   .object({
@@ -89,13 +79,12 @@ accommodationRoutes.put(
   },
 )
 
+// Published MUNs for anyone; unpublished ones for the owner and staff only
+// (404 otherwise). Archived options only for the owner/admin.
 accommodationRoutes.get('/muns/:munId/accommodation', async (c) => {
   const munId = c.req.param('munId')
-  const includeInactive = await resolveIncludeInactive(
-    munId,
-    c.req.query('includeInactive'),
-    c.get('session'),
-  )
+  const access = await assertMunReadable(munId, c.get('session'))
+  const includeInactive = access === 'owner' && c.req.query('includeInactive') === 'true'
   const options = await listAccommodationOptions(munId, { includeInactive })
   return c.json(options)
 })
@@ -128,8 +117,15 @@ accommodationRoutes.delete('/accommodation/:optionId', requireAuth, async (c) =>
   return c.body(null, 204)
 })
 
+// Same visibility as the option's MUN; an unknown option and an unreadable
+// one both answer 404.
 accommodationRoutes.get('/accommodation/:optionId/fields', async (c) => {
-  const fields = await listAccommodationOptionFields(c.req.param('optionId'))
+  const optionId = c.req.param('optionId')
+  const munId = await findMunIdForAccommodationOption(optionId)
+  if (!munId || (await resolveMunReadAccess(munId, c.get('session'))) === 'none') {
+    throw new Error('Accommodation option not found')
+  }
+  const fields = await listAccommodationOptionFields(optionId)
   return c.json(fields)
 })
 

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { deleteMunDocument, listMunDocuments, uploadMunDocument } from '@/lib/actions/mun-documents'
+import { assertMunReadable } from '@/lib/actions/mun-read-access'
 import { munDocumentKindEnum } from '@/lib/db/schema-enums'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
@@ -17,8 +18,11 @@ const uploadDocumentBodySchema = z
 
 export const munDocumentsRoutes = new Hono<{ Variables: AppVariables }>()
 
+// Published MUNs for anyone; unpublished ones for the owner and staff only (404 otherwise).
 munDocumentsRoutes.get('/muns/:munId/documents', async (c) => {
-  const documents = await listMunDocuments(c.req.param('munId'))
+  const munId = c.req.param('munId')
+  await assertMunReadable(munId, c.get('session'))
+  const documents = await listMunDocuments(munId)
   return c.json(documents)
 })
 

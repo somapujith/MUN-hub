@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { getMunContact, upsertMunContact } from '@/lib/actions/mun-contact'
+import { getMunContact, getPublicMunContact, upsertMunContact } from '@/lib/actions/mun-contact'
+import { assertMunReadable } from '@/lib/actions/mun-read-access'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
@@ -20,8 +21,12 @@ const upsertContactBodySchema = z
 
 export const munContactRoutes = new Hono<{ Variables: AppVariables }>()
 
+// Published MUNs: the official channels for anyone. The contact person's
+// details are for the owner and staff only. Unpublished: owner/staff only.
 munContactRoutes.get('/muns/:munId/contact', async (c) => {
-  const contact = await getMunContact(c.req.param('munId'))
+  const munId = c.req.param('munId')
+  const access = await assertMunReadable(munId, c.get('session'))
+  const contact = access === 'public' ? await getPublicMunContact(munId) : await getMunContact(munId)
   return c.json(contact)
 })
 

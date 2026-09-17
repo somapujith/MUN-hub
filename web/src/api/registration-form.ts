@@ -22,7 +22,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-/** Public read (no auth) — also lazily seeds the mun's default fields server-side. */
+/**
+ * For the owning organizer (or an admin) this also materializes the mun's
+ * default fields server-side, so every returned field is editable. Anyone
+ * else gets a read-only view, and only of a published mun.
+ */
 export function listFormFields(munId: string) {
   return request<FormField[]>(`/muns/${munId}/form-fields`);
 }

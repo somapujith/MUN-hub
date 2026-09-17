@@ -6,6 +6,7 @@ import {
   listScheduleItems,
   updateScheduleItem,
 } from '@/lib/actions/mun-schedule'
+import { assertMunReadable } from '@/lib/actions/mun-read-access'
 import { scheduleItemKindEnum } from '@/lib/db/schema-enums'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
@@ -38,8 +39,11 @@ const updateScheduleBodySchema = z
 
 export const munScheduleRoutes = new Hono<{ Variables: AppVariables }>()
 
+// Published MUNs for anyone; unpublished ones for the owner and staff only (404 otherwise).
 munScheduleRoutes.get('/muns/:munId/schedule', async (c) => {
-  const items = await listScheduleItems(c.req.param('munId'))
+  const munId = c.req.param('munId')
+  await assertMunReadable(munId, c.get('session'))
+  const items = await listScheduleItems(munId)
   return c.json(items)
 })
 

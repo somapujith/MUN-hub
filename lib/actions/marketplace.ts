@@ -18,7 +18,7 @@ const DEFAULT_PUBLIC_STATUSES: MunStatus[] = [
 ]
 
 /** Statuses considered "publicly visible" for getMunBySlug (PUBLISHED and later lifecycle states). */
-const PUBLIC_DETAIL_STATUSES: MunStatus[] = [
+export const PUBLIC_DETAIL_STATUSES: MunStatus[] = [
   'PUBLISHED',
   'REGISTRATION_OPEN',
   'REGISTRATION_CLOSED',

@@ -1,35 +1,33 @@
 import { createMiddleware } from 'hono/factory'
-import { getRuntimeEnv } from '@/lib/runtime-env'
+import { isTrustedOrigin } from '../lib/origins'
 import type { AppVariables } from '../src/types'
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
-const ALLOWED_ORIGINS = new Set([
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:5174',
-])
+/**
+ * The origin a request claims to come from: the Origin header, or failing
+ * that the origin of the Referer URL (scheme + host + port only — a
+ * string-trimmed Referer could smuggle a path or userinfo past the check).
+ */
+export function requestOrigin(originHeader: string | undefined, refererHeader: string | undefined): string | null {
+  if (originHeader) return originHeader
+  if (!refererHeader) return null
+  try {
+    return new URL(refererHeader).origin
+  } catch {
+    return null
+  }
+}
 
-// Production origins: apex, www, the role subdomains, and any per-MUN wildcard
-// host. Kept in sync with makeCorsOriginMatcher's MUNHUB_ORIGIN_PATTERN in
-// server/src/app.ts — duplicated rather than imported to avoid an app.ts <->
-// csrf.ts import cycle. Without this, every mutating request from the deployed
-// SPA fails CSRF, because Origin (munhub.in) never equals the API host
-// (api.munhub.in).
-const MUNHUB_ORIGIN_PATTERN = /^https:\/\/([a-z0-9-]+\.)?munhub\.in$/
-
-function isAllowedOrigin(origin: string): boolean {
-  if (ALLOWED_ORIGINS.has(origin)) return true
-  if (MUNHUB_ORIGIN_PATTERN.test(origin)) return true
-  const extra = getRuntimeEnv('CORS_ORIGINS') ?? getRuntimeEnv('ALLOWED_ORIGINS') ?? ''
-  return extra
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean)
-    .includes(origin)
+/**
+ * True when a request may proceed past CSRF: every read, and any mutating
+ * request whose origin is one of the trusted web hosts (server/lib/origins.ts).
+ * Per-MUN slug hosts are deliberately not trusted for writes.
+ */
+export function passesCsrfCheck(method: string, originHeader: string | undefined, refererHeader: string | undefined): boolean {
+  if (!MUTATING.has(method)) return true
+  const origin = requestOrigin(originHeader, refererHeader)
+  return origin !== null && isTrustedOrigin(origin)
 }
 
 /** Origin/Referer allowlist for mutating /api/v1 routes (spec §4.4). Skipped in Vitest. */
@@ -39,13 +37,7 @@ export const csrfMiddleware = createMiddleware<{ Variables: AppVariables }>(asyn
     return
   }
 
-  if (!MUTATING.has(c.req.method)) {
-    await next()
-    return
-  }
-
-  const origin = c.req.header('Origin') ?? c.req.header('Referer')?.replace(/\/[^/]*$/, '') ?? ''
-  if (!origin || !isAllowedOrigin(origin)) {
+  if (!passesCsrfCheck(c.req.method, c.req.header('Origin'), c.req.header('Referer'))) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'CSRF check failed' } }, 403)
   }
 

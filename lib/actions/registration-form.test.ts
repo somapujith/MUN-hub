@@ -9,9 +9,18 @@ import {
   createFormField,
   deleteFormField,
   listFormFields,
+  listFormFieldsForOrganizer,
   reorderFormFields,
   updateFormField,
 } from './registration-form'
+import { DEFAULT_REGISTRATION_FIELDS } from './registration-form-defaults'
+
+const DEFAULT_KEYS = new Set(DEFAULT_REGISTRATION_FIELDS.map((f) => f.fieldKey))
+
+async function storedRowCount(munId: string): Promise<number> {
+  const rows = await db.select({ id: munFormFields.id }).from(munFormFields).where(eq(munFormFields.munId, munId))
+  return rows.length
+}
 
 async function makeUser(role: 'ORGANIZER' | 'ADMIN' | 'SUPER_ADMIN' | 'STUDENT') {
   const [user] = await db
@@ -346,9 +355,73 @@ describe('registration-form actions', () => {
       await createFormField({ munId: munB.id, fieldKey: 'b1', fieldType: 'SHORT_TEXT', label: 'B1' }, session)
 
       const listA = await listFormFields(munA.id)
-      expect(listA).toHaveLength(2)
-      expect(listA[0].fieldKey).toBe('a1')
-      expect(listA[1].fieldKey).toBe('a2')
+      const custom = listA.filter((f) => !DEFAULT_KEYS.has(f.fieldKey))
+      expect(custom.map((f) => f.fieldKey)).toEqual(['a1', 'a2'])
+      expect(listA.map((f) => f.fieldKey)).not.toContain('b1')
+      // displayOrder: a1 (0), a2 (1), then the defaults (10+).
+      expect(listA.map((f) => f.fieldKey)).toEqual(['a1', 'a2', ...DEFAULT_REGISTRATION_FIELDS.map((f) => f.fieldKey)])
+    })
+
+    it('never writes: missing default fields are returned as synthetic read-only fields', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+
+      const fields = await listFormFields(mun.id)
+
+      expect(await storedRowCount(mun.id)).toBe(0)
+      expect(fields.map((f) => f.fieldKey)).toEqual(DEFAULT_REGISTRATION_FIELDS.map((f) => f.fieldKey))
+      expect(fields.every((f) => f.id === `default:${f.fieldKey}` && f.munId === mun.id)).toBe(true)
+    })
+
+    it('prefers a stored default field over its synthetic stand-in', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      await listFormFieldsForOrganizer(mun.id, sessionFor(organizer))
+      const [stored] = await db
+        .update(munFormFields)
+        .set({ label: 'Class / year' })
+        .where(and(eq(munFormFields.munId, mun.id), eq(munFormFields.fieldKey, 'grade_class')))
+        .returning()
+
+      const fields = await listFormFields(mun.id)
+
+      expect(fields).toHaveLength(DEFAULT_REGISTRATION_FIELDS.length)
+      expect(fields.find((f) => f.fieldKey === 'grade_class')).toMatchObject({ id: stored.id, label: 'Class / year' })
+      expect(fields.some((f) => f.id.startsWith('default:'))).toBe(false)
+    })
+  })
+
+  describe('listFormFieldsForOrganizer', () => {
+    it('materializes the default fields once for the owner and returns real rows', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+
+      const first = await listFormFieldsForOrganizer(mun.id, session)
+      const second = await listFormFieldsForOrganizer(mun.id, session)
+
+      expect(await storedRowCount(mun.id)).toBe(DEFAULT_REGISTRATION_FIELDS.length)
+      expect(first.map((f) => f.id)).toEqual(second.map((f) => f.id))
+      expect(first.some((f) => f.id.startsWith('default:'))).toBe(false)
+    })
+
+    it('lets an admin through', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const admin = await makeUser('ADMIN')
+      const mun = await makeMun(organizer.id)
+
+      const fields = await listFormFieldsForOrganizer(mun.id, sessionFor(admin))
+      expect(fields).toHaveLength(DEFAULT_REGISTRATION_FIELDS.length)
+    })
+
+    it('rejects anyone else without writing', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const other = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+
+      await expect(listFormFieldsForOrganizer(mun.id, sessionFor(other))).rejects.toThrow('Forbidden')
+      await expect(listFormFieldsForOrganizer(mun.id, null)).rejects.toThrow('Forbidden')
+      expect(await storedRowCount(mun.id)).toBe(0)
     })
   })
 

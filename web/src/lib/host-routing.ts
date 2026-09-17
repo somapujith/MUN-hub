@@ -97,6 +97,16 @@ export function resolveZoneUrl(zone: NamedZone, path: string, hostname: string =
   return subdomain ? `https://${subdomain}.${ROOT_DOMAIN}${path}` : `https://${ROOT_DOMAIN}${path}`;
 }
 
+/**
+ * `fetch` credentials mode for API calls made from this host. The API trusts
+ * only the marketplace/role hosts with the session cookie; a per-MUN slug host
+ * gets anonymous CORS (server/lib/origins.ts), and a browser only lets a page
+ * read such a response when the request carried no cookies.
+ */
+export function apiCredentialsMode(hostname: string = currentHostname()): RequestCredentials {
+  return getHostZone(hostname).zone === "mun" ? "omit" : "include";
+}
+
 /** True when `resolveZoneUrl` produced an absolute URL, i.e. a full page navigation is required. */
 export function isCrossOrigin(url: string): boolean {
   return url.startsWith("http://") || url.startsWith("https://");
@@ -142,6 +152,12 @@ export function loginPathFor(pathname: string, hostname: string = currentHostnam
  */
 export function canonicalUrlFor(pathname: string, search = "", hostname: string = currentHostname()): string | null {
   const owner = zoneForPath(pathname);
+  // A per-MUN slug host only renders its own MUN page at "/". Everything else
+  // (registering, signing in, browsing) belongs to a host the API trusts with
+  // the session cookie — it never does for slug hosts (see apiCredentialsMode).
+  if (getHostZone(hostname).zone === "mun") {
+    return pathname === "/" ? null : resolveZoneUrl(owner ?? "marketplace", `${pathname}${search}`, hostname);
+  }
   // Scoped to the organizer workspace — that's the zone that has been given a
   // dedicated host. /admin/* is left where it's served today.
   if (owner !== "organizer") return null;
