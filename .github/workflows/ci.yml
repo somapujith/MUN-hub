@@ -199,13 +199,13 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      # The suite starts the API with `tsx --env-file=.env` from server/.
-      # Only the committed, mock-only test values go in; the database URL is
-      # overridden by playwright.config.ts anyway.
+      # The suite starts the API with `tsx --env-file=.env` from server/, and
+      # that flag fails if the file is missing. Only the committed, mock-only
+      # test values go in; playwright.config.ts overrides the database URL and
+      # sets every E2E-specific switch (mock payments, localhost origins, the
+      # email outbox, APP_URL, the raised global rate limit).
       - name: Write server/.env from .env.test
-        run: |
-          cp .env.test server/.env
-          echo 'MOCK_PAYMENTS_ENABLED="true"' >> server/.env
+        run: cp .env.test server/.env
 
       - name: Run Playwright
         run: npx playwright test -c E2E/playwright.config.ts
@@ -215,7 +215,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
+          # The outbox holds every email the test API "sent", for debugging email specs.
           path: |
             E2E/playwright-report/
             E2E/test-results/
+            E2E/.outbox/
+          include-hidden-files: true
           retention-days: 14
