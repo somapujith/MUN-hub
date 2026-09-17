@@ -47,9 +47,9 @@ export default defineConfig({
   },
 
   projects: [
-    // Signs in once per role and saves the session, so the login rate limit
-    // (5/min per IP+email, server/middleware/rate-limit.ts) is hit ~3 times
-    // total instead of once per test.
+    // Signs in once per role and saves the session, so the login rate limits
+    // (5/min per account plus 20/min per IP, server/middleware/rate-limit.ts)
+    // are hit ~3 times total instead of once per test.
     { name: 'setup', testMatch: /setup\/.*\.setup\.ts/ },
 
     { name: 'public', testMatch: /specs\/public\/.*\.spec\.ts/ },
@@ -113,9 +113,11 @@ export default defineConfig({
         CORS_ORIGINS: WEB_URL,
         COOKIE_DOMAIN: '',
         // Every request in a local run comes from 127.0.0.1, so the default
-        // 300/min per-IP cap would throttle the suite. Only the generic cap
-        // is raised; the login and organizer-code limits stay as in prod.
+        // 300/min per-IP cap and the per-IP login/signup/reset limits would
+        // throttle the suite. Per-IP limits are raised; per-account and
+        // per-email limits stay as in prod.
         RATE_LIMIT_GLOBAL_PER_MINUTE: '100000',
+        RATE_LIMIT_IP_MULTIPLIER: '1000',
         TRUST_PROXY_HEADERS: '',
         // Local-only switches the suite depends on: the mock checkout (off in
         // production until the real gateway lands) and trusting the

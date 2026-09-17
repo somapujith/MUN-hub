@@ -43,7 +43,7 @@ export async function signUpViaApi(overrides: Partial<SignUpPayload> = {}): Prom
 
 /**
  * Signs an existing account in through the real login endpoint. Mind the
- * login rate limit (5/min per IP+email) — prefer the per-role storageState
+ * login rate limit (5/min per account) — prefer the per-role storageState
  * from setup/auth.setup.ts for the seeded accounts.
  */
 export async function signInViaApi(email: string, password = DEMO_PASSWORD): Promise<ApiSession> {

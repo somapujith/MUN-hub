@@ -1,5 +1,4 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test'
-import postgres from 'postgres'
 import {
   TEST_LOGIN_CODE,
   seedOrganizerLoginCode,
@@ -8,7 +7,8 @@ import {
   type ApiSession,
 } from '../../fixtures/api'
 import { ADULT_DOB, uniqueEmail } from '../../fixtures/data'
-import { API_URL, DATABASE_URL, assertLocalDatabase } from '../../env'
+import { emailsTo, linkIn } from '../../fixtures/outbox'
+import { API_URL } from '../../env'
 
 export const FRESH_PASSWORD = 'e2e-strong-password'
 
@@ -63,23 +63,14 @@ export async function submitLogin(page: Page, email: string, password: string) {
 }
 
 /**
- * Reads the newest unused reset token for an account straight from the local
- * test database (read-only). Reset emails only go to the server console.
+ * The token from the newest reset link emailed to an account, read from the
+ * local API's email outbox (fixtures/outbox.ts). The database only stores the
+ * token's SHA-256 (lib/auth/opaque-token.ts), so the email is the one place a
+ * usable token exists.
  */
 export async function latestResetToken(email: string): Promise<string | null> {
-  assertLocalDatabase(DATABASE_URL)
-  const sql = postgres(DATABASE_URL, { max: 1, prepare: false, onnotice: () => {} })
-  try {
-    const rows = await sql<{ token: string }[]>`
-      select t.token from password_reset_tokens t
-      join users u on u.id = t.user_id
-      where u.email = ${email.toLowerCase()} and t.used_at is null
-      order by t.created_at desc
-      limit 1`
-    return rows[0]?.token ?? null
-  } finally {
-    await sql.end()
-  }
+  const mail = (await emailsTo(email)).filter((message) => message.text.includes('/reset-password')).at(-1)
+  return mail ? linkIn(mail, '/reset-password').searchParams.get('token') : null
 }
 
 // Delegate signup form (/signup).

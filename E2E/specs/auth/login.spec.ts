@@ -26,7 +26,7 @@ import {
  * /organizer/login an emailed 6-digit code.
  *
  * Every test signs in a FRESH account created through the API so the login
- * rate limit (5/min per IP+email) is never hit; the seeded admin is used
+ * rate limit (5/min per account) is never hit; the seeded admin is used
  * exactly once, because a fresh admin can't be created.
  */
 
