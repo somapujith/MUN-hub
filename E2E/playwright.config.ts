@@ -1,10 +1,18 @@
 import { defineConfig, devices } from '@playwright/test'
 import path from 'node:path'
 import { API_PORT, API_URL, DATABASE_URL, WEB_PORT, WEB_URL, assertLocalDatabase } from './env'
-import { STORAGE_STATE } from './paths'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { EMAIL_OUTBOX_FILE, STORAGE_STATE } from './paths'
 
 // Fail fast, before Playwright spawns anything, if the target DB isn't local.
 assertLocalDatabase()
+
+// Start every run with an empty email outbox (the API only ever appends).
+// Worker processes re-load this config, so only the main process truncates.
+if (!process.env.TEST_WORKER_INDEX) {
+  mkdirSync(path.dirname(EMAIL_OUTBOX_FILE), { recursive: true })
+  writeFileSync(EMAIL_OUTBOX_FILE, '')
+}
 
 const ROOT = path.resolve(__dirname, '..')
 
@@ -114,6 +122,10 @@ export default defineConfig({
         // localhost web origin for CORS/CSRF.
         MOCK_PAYMENTS_ENABLED: 'true',
         ALLOW_LOCALHOST_ORIGINS: 'true',
+        // Every email the API "sends" is appended here; fixtures/outbox.ts reads it.
+        EMAIL_OUTBOX_FILE,
+        // Links in emails point at the local web app.
+        APP_URL: WEB_URL,
       },
     },
     {

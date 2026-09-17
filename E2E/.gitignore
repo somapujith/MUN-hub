@@ -1,0 +1,2 @@
+# Emails the local test API "sent" (fixtures/outbox.ts)
+.outbox/
