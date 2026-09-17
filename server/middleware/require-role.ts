@@ -12,7 +12,11 @@ import type { AppVariables } from '../src/types'
  * REQUIRE_STAFF_2FA=true, additionally requires *confirmed* TOTP enrollment
  * (lib/actions/staff-mfa.ts) — a staff account can always sign in and reach
  * the enrollment routes (requireAuth only, not this), but every other
- * staff-gated route is blocked until setup is confirmed. The env check comes
+ * staff-gated route is blocked until setup is confirmed. Routes that grant
+ * staff powers from inside a lib action behind `requireAuth` alone never
+ * reach this guard, so the same rule is applied to the whole API by
+ * server/middleware/staff-mfa-gate.ts; this check stays as the guard route
+ * modules reach for directly. The env check comes
  * first so this is a single boolean comparison — no extra query — whenever
  * REQUIRE_STAFF_2FA is unset, which keeps every existing staff-role route
  * (including the seeded admin's E2E login) byte-for-byte unchanged until the

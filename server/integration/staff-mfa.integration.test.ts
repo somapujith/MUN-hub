@@ -141,3 +141,57 @@ describe('staff-role routes + REQUIRE_STAFF_2FA', () => {
     expect(res.status).toBe(200)
   })
 })
+
+describe('REQUIRE_STAFF_2FA on routes that grant staff powers without requireRole', () => {
+  const SETUP_REQUIRED = 'Two-factor authentication setup is required for this account'
+
+  /** requireAuth-only, but `isPermitted` lets any staff role cancel any MUN from inside the action. */
+  function cancelSomeMun(auth: Record<string, string>) {
+    return post(`/muns/${crypto.randomUUID()}/lifecycle/cancel`, { reason: 'not this one' }, auth)
+  }
+
+  it('blocks an unenrolled staff session, not just the /admin routes', async () => {
+    const staff = await makeStaff('OPERATIONS')
+    const auth = cookieHeader(await post('/auth/session', { email: staff.email, password: PASSWORD }))
+
+    vi.stubEnv('REQUIRE_STAFF_2FA', 'true')
+    const res = await cancelSomeMun(auth)
+
+    // requireRole never runs on this route, so before the gate was applied to
+    // the whole API this reached the action and could cancel any conference.
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ error: { message: SETUP_REQUIRED } })
+  })
+
+  it('leaves the same request alone while the flag is unset', async () => {
+    const staff = await makeStaff('OPERATIONS')
+    const auth = cookieHeader(await post('/auth/session', { email: staff.email, password: PASSWORD }))
+
+    const res = await cancelSomeMun(auth)
+
+    expect(res.status).not.toBe(403)
+  })
+
+  it('never touches a non-staff session', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'delegate', email: `mfa-gate-${crypto.randomUUID()}@test.dev`, role: 'STUDENT', passwordHash: await hashPassword(PASSWORD) })
+      .returning()
+    const auth = cookieHeader(await post('/auth/session', { email: student.email, password: PASSWORD }))
+
+    vi.stubEnv('REQUIRE_STAFF_2FA', 'true')
+    const res = await cancelSomeMun(auth)
+
+    expect(res.status).not.toBe(403)
+  })
+
+  it('still lets an unenrolled staff session sign out', async () => {
+    const staff = await makeStaff()
+    const auth = cookieHeader(await post('/auth/session', { email: staff.email, password: PASSWORD }))
+
+    vi.stubEnv('REQUIRE_STAFF_2FA', 'true')
+    const res = await app.request('/api/v1/auth/session', { method: 'DELETE', headers: { ...JSON_HEADERS, ...auth } })
+
+    expect(res.status).toBeLessThan(400)
+  })
+})
