@@ -1,0 +1,45 @@
+# Local secrets and var overrides for `wrangler dev` (munhub-api in workerd).
+# Copy to server/.dev.vars (gitignored). Values here override `vars` from
+# wrangler.jsonc during `wrangler dev` only; deployed Workers use
+# `wrangler secret put` instead (docs/operations/RUNBOOK.md).
+#
+# LOCAL VALUES ONLY. Never paste production secrets here.
+#
+# The database is not configured here: the Worker reaches Postgres through
+# its HYPERDRIVE binding. Point that binding at Docker when starting wrangler:
+#   CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="postgresql://mun_hub:mun_hub_dev@localhost:5432/mun_hub" \
+#     npx wrangler dev --env="" --test-scheduled
+# (--test-scheduled exposes /__scheduled for triggering the cron jobs.)
+
+# wrangler.jsonc sets production values for these; override them locally.
+COOKIE_DOMAIN=""
+CORS_ORIGINS="http://localhost:5174,http://localhost:5173"
+APP_URL="http://localhost:5174"
+
+# Required: base64 of 32 random bytes (a local key, never production's).
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+PAYMENT_FIELD_KEY="REPLACE_WITH_BASE64_32_BYTE_KEY"
+# Mock payment provider webhook secret (dev/test only).
+MOCK_PAYMENT_WEBHOOK_SECRET="dev-webhook-secret-change-me"
+
+# Empty = emails (sign-in codes, reset links) are only written to the log.
+ZEPTOMAIL_TOKEN=""
+
+# Optional
+# RATE_LIMIT_GLOBAL_PER_MINUTE="300"
+# TRUST_PROXY_HEADERS=""
+# SENTRY_DSN=""
+# SENTRY_ENVIRONMENT="development"
+
+# Added by other lanes of the 2026-09-17 run (confirm against merged code):
+# MOCK_PAYMENTS_ENABLED="true"
+# PAYMENTS_ADAPTER="mock"
+# PLATFORM_FEE_BPS=""
+# PLATFORM_FEE_TAX_BPS=""
+# PAYMENT_FIELD_KEY_PREVIOUS=""
+# ALLOW_LOCALHOST_ORIGINS="true"
+# COOKIE_SECURE="false"
+# TURNSTILE_SECRET_KEY=""
+# RATE_LIMIT_IP_MULTIPLIER=""
+# SYSTEM_ACTOR_USER_ID=""
+# CHECKIN_CODE_SECRET=""

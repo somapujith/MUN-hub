@@ -1,41 +1,53 @@
-# `/web` — MUN Hub SPA
+# MUN Hub web app (`/web`)
 
-Vite + React 19 frontend that will replace the Next.js `app/**` tree.
+The MUN Hub single-page app: marketplace, delegate area, organizer workspace and admin console, all in one Vite build. In production it's served by the Cloudflare Worker `munhub-web` (`app.`, `publish.`, `organize.`, `admin.` and `*.munhub.in`) and by Vercel (`munhub.in`, `www`).
 
-## Intended stack (locked)
+## Stack
 
 | Layer | Choice |
 |---|---|
-| Bundler | **Vite** (`vite` ^8 in this scaffold) |
-| UI | **React 19** + TypeScript |
-| Routing | **React Router v7 data-router mode only** (`createBrowserRouter`) — not framework mode; **no loaders for data fetching** |
-| Server state | **TanStack Query** (`@tanstack/react-query` v5) |
-| Styling | **Tailwind CSS v4** (`@tailwindcss/vite` preferred) + `docs/prd/DESIGN-airtable.md` tokens ported from `app/globals.css` |
-| Head / titles | **react-helmet-async** (browser tab titles; crawler HTML is a backend prerender concern) |
-| Theme | **next-themes** (framework-agnostic despite the name) |
+| Bundler | Vite 8 |
+| UI | React 19 + TypeScript |
+| Routing | React Router v7 in data-router mode (`createBrowserRouter`, `src/routes.tsx`). No loaders for data fetching. |
+| Server state | TanStack Query v5; API clients in `src/api/*`, query keys in `src/api/query-keys.ts` |
+| Styling | Tailwind CSS v4 with the tokens in `src/index.css`, components in `src/components/ui` (design reference: `docs/prd/DESIGN-airtable.md`) |
+| Head | react-helmet-async |
+| Theme | next-themes (framework-agnostic despite the name) |
 
-Authoritative design: `docs/superpowers/specs/2026-09-15-vite-frontend-migration-design.md`  
-Task plan: `docs/superpowers/plans/2026-09-15-vite-frontend-migration.md`
+## Hosts
 
-## Hard rules
+Every host serves the same bundle. `src/lib/host-routing.ts` decides what a hostname means: `app.` is the delegate area, `publish.` the organizer workspace (`organize.` is an alias), `admin.` the admin console, any other `*.munhub.in` label a MUN's own page, and everything else, including localhost, the marketplace with plain path routing. Links that change zone must be full navigations (`<a href>`); React Router can't cross origins.
 
-- **CSR-only** for every route — no Vite SSR entry.
-- **Never trust client `userId` / `role`.** Route guards are UX only; the API session cookie is authoritative.
-- **Type-only imports** from repo-root `lib/actions` / `lib/types`. Never pull runtime `lib/` (DB, crypto) into the browser bundle.
-- Preserve the Airtable editorial visual system — do not invent a new look.
-- API base (when wired): `/api/v1` with `credentials: 'include'`.
+## Rules
 
-## Status (prep)
+- Client-side rendering only. There's no SSR entry.
+- Route guards (`src/guards`) are for UX only. The API's session cookie decides who can do what. Never trust a client-side user id or role.
+- Only type imports may come from the repo-root `lib/`. Never bundle runtime `lib/` code (database, crypto) into the browser.
+- API calls go to `VITE_API_URL` (default `http://localhost:3001/api/v1` in development, `https://api.munhub.in/api/v1` in production builds) with `credentials: 'include'`.
+- `cn()` (the `cn` package) drops custom text-size tokens such as `text-body-md` when a text colour class follows. Don't combine the two through `cn()`.
 
-Scaffold exists (create-vite + Router / Query / helmet deps). **Do not re-scaffold.** Next work is Task 3.1+ in the frontend plan (normalize shell, Tailwind tokens, route tree, public pages with mocks). **Do not port `app/` pages until Phase 1 signatures land** for the typed client; mock-data UI may proceed earlier per the plan.
-
-## Scripts
+## Develop
 
 ```bash
-cd web
-npx vite          # dev
-npx vite build    # production client bundle
-npx vite preview
+npm ci
+npx vite                      # http://localhost:5174, expects the API on :3001
 ```
 
-Root Semgrep-Guardian hooks may misfire on `npm run`; prefer `npx` binaries. Never attempt Semgrep login.
+Start the API from `server/` first (see `server/README.md`) and make sure its `CORS_ORIGINS` includes `http://localhost:5174`.
+
+## Check and build
+
+```bash
+npx tsc -b --noEmit           # typecheck (also: npm run typecheck)
+npx oxlint                    # lint (config: .oxlintrc.json)
+npx vite build                # production bundle in dist/
+```
+
+## Deploy
+
+```bash
+VITE_API_URL=https://api.munhub.in/api/v1 npx vite build
+npx wrangler deploy --env=""
+```
+
+Production deploys normally go through the **Deploy (production)** GitHub Actions workflow (`docs/operations/RUNBOOK.md`). For staging (`--env staging`, built against the staging API), see `docs/operations/ENVIRONMENTS.md`.
