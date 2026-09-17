@@ -108,6 +108,55 @@ describe('exportAccountData', () => {
     expect(serialized).not.toContain(fixture.sessionToken)
   })
 
+  // An award is personal data recorded against the account by an organizer,
+  // so a data-access request has to return it.
+  it("includes the delegate's awards", async () => {
+    const fixture = await makeDelegateWithHistory()
+
+    const data = await exportAccountData({ userId: fixture.delegate.id, role: 'STUDENT' })
+
+    expect(data.achievements).toEqual([
+      {
+        munName: 'Finished Privacy MUN',
+        committee: 'UNSC',
+        portfolio: 'France',
+        award: 'Best Delegate',
+        createdAt: expect.any(Date),
+      },
+    ])
+  })
+
+  // Organizers see the same "Download my data" button as delegates, so their
+  // own profile and applications belong in the file too.
+  it("includes an organizer's profile and applications", async () => {
+    const fixture = await makeDelegateWithHistory()
+
+    const data = await exportAccountData({ userId: fixture.organizer.id, role: 'ORGANIZER' })
+
+    expect(data.organizerProfile).toMatchObject({
+      firstName: 'Privacy',
+      lastName: 'Organizer',
+      contactPhone: '9876500003',
+      upiId: 'privacy@ybl',
+      upiPhone: '9876500003',
+      agreementVersion: 'test',
+    })
+    expect(data.organizerApplications).toEqual([
+      {
+        munName: 'Upcoming Privacy MUN',
+        status: 'APPROVED',
+        reviewNotes: 'Looks good',
+        expectedDelegateCount: 200,
+        previousEditions: null,
+        websiteUrl: 'https://privacy-mun.test',
+        submittedAt: expect.any(Date),
+      },
+    ])
+    // Still scoped to the caller: no delegate rows leak into an organizer's file.
+    expect(data.registrations).toEqual([])
+    expect(JSON.stringify(data)).not.toContain(fixture.delegate.id)
+  })
+
   it("never includes another user's rows", async () => {
     const fixture = await makeDelegateWithHistory()
     const bystander = await makeAccount('STUDENT')
@@ -119,6 +168,9 @@ describe('exportAccountData', () => {
     expect(data.consents).toEqual([])
     expect(data.registrations).toEqual([])
     expect(data.payments).toEqual([])
+    expect(data.achievements).toEqual([])
+    expect(data.organizerProfile).toBeNull()
+    expect(data.organizerApplications).toEqual([])
     expect(data.supportTickets).toEqual([])
     expect(JSON.stringify(data)).not.toContain(fixture.delegate.id)
   })
