@@ -95,5 +95,7 @@ filesRoutes.get('/:key{.+}', async (c) => {
 
   const length = object.body instanceof Uint8Array ? object.body.byteLength : object.size
   headers.set('Content-Length', String(length))
-  return new Response(object.body, { status: 200, headers })
+  // Cast: the root tsconfig (DOM lib) types BodyInit as needing
+  // Uint8Array<ArrayBuffer>; the stored body is Uint8Array<ArrayBufferLike>.
+  return new Response(object.body as ConstructorParameters<typeof Response>[0], { status: 200, headers })
 })
