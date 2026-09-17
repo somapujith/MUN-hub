@@ -8,23 +8,10 @@ import type {
   SupportPage,
   SupportTicket,
 } from "@/types/support";
+import { conversationRefetchInterval } from "./poll";
 
-/**
- * Polling cadence. Every support query polls only while it is mounted and
- * enabled (the widget is open, a thread is selected) and only while the tab is
- * visible — TanStack Query pauses `refetchInterval` for hidden tabs when
- * `refetchIntervalInBackground` is false, and refetches on focus instead.
- */
-export const SUPPORT_POLL_MS = {
-  /** The widget badge, while the widget is closed. */
-  badge: 60_000,
-  /** A conversation list that is on screen. */
-  list: 15_000,
-  /** The open thread. */
-  thread: 5_000,
-  /** The staff queue. */
-  staffQueue: 30_000,
-} as const;
+// Re-exported so existing callers keep importing the cadences from here.
+export { SUPPORT_POLL_MS, conversationRefetchInterval } from "./poll";
 
 const LIST_PREFIXES = [
   ["support", "conversation-list"],
@@ -63,7 +50,10 @@ export function useConversation(ticketId: string | null, enabled = true) {
     queryFn: () => getConversation(ticketId as string),
     enabled: enabled && ticketId !== null,
     staleTime: 2_000,
-    refetchInterval: SUPPORT_POLL_MS.thread,
+    // Wrapped rather than passed directly: a function parameter here is an
+    // inference site for the query's error type, and the helper's deliberately
+    // loose one would widen it for every caller of this hook.
+    refetchInterval: (query) => conversationRefetchInterval(query),
     refetchIntervalInBackground: false,
   });
 

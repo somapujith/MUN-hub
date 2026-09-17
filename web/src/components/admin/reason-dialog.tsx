@@ -46,6 +46,21 @@ export function ReasonDialog({
   const [showError, setShowError] = useState(false);
   const missing = reason.trim().length === 0;
 
+  // Start every opening empty. The dialog stays mounted between targets, and
+  // the parent closes it after a successful mutation by flipping `open` back
+  // to false — which never reaches `close()`, because `onOpenChange` fires
+  // only for user-initiated closes. Without this the next suspension or
+  // cancellation would open already filled in with the previous target's
+  // reason, and that reason is what lands in the audit log.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setReason("");
+      setShowError(false);
+    }
+  }
+
   const close = () => {
     setReason("");
     setShowError(false);
