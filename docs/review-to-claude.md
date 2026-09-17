@@ -99,10 +99,165 @@ Be honest about this if asked again later, don't imply broader coverage than act
   connection-pool limits at scale (see CLAUDE.md's own "Workers-only failure modes" lesson —
   a clean local/test run has been wrong before in this exact codebase).
 
+## Additional flow gaps found (2026-09-18, second pass)
+
+The user asked to specifically go looking for more flow gaps beyond the atomicity issue
+above. Found by tracing 5 end-to-end journeys through the actual code (5 parallel research
+passes, then the two most severe claims independently re-verified by direct grep before
+writing them here — see git history for the exact commit if the citations below ever drift).
+None of this has been fixed — this is a findings list, not a changelog. Ranked by severity.
+
+### High severity — real dead ends / silent data-integrity gaps
+
+1. **A Gate-1 `CHANGES_REQUESTED` organizer application has no resubmission path — a
+   permanent dead end.** `mun-state-machine.ts:123` declares `CHANGES_REQUESTED: ['SUBMITTED', 'CANCELLED']`
+   as a legal transition ("Gate 1 loop"), but a repo-wide grep for every
+   `transitionMun(..., 'SUBMITTED', ...)` call site turns up exactly one
+   (`lib/actions/organizer-application.ts:127`), and it only fires inside
+   `submitOrganizerApplication` for a **brand-new** DRAFT mun. Nothing transitions an
+   *existing* `CHANGES_REQUESTED` mun back to `SUBMITTED`. The UI can't paper over this
+   either: `organizer-apply-page.tsx`'s "Update your MUN" link goes to `setup-page.tsx`,
+   whose `SUBMITTABLE_STATUSES` (line 39) is Gate-2-only and excludes
+   `CHANGES_REQUESTED`/`SUBMITTED`/`UNDER_REVIEW`, so no submit action renders there either.
+   Calling `submitOrganizerApplication` again doesn't help — it creates an unrelated *second*
+   MUN + application row, leaving the original stuck in `CHANGES_REQUESTED` forever. Net
+   effect: any organizer whose first-ever application gets "changes requested" instead of an
+   outright approve/reject can never get re-reviewed. Re-verified directly (not just trusting
+   the research agent): the grep above was re-run and confirms the single call site.
+2. **Delegation seats can permanently squat capacity.** `registration-group.ts`'s
+   `expireStaleInvitations` (line 68) only flips the *invitation* row PENDING→EXPIRED after
+   its 7-day TTL — it never touches the underlying `registrations` row. The placeholder seat
+   (`status='CONFIRMED'`, `userId=headUserId`, created in `registration.ts:840-852`) is never
+   released, and `CONFIRMED` is one of the `ACTIVE_REGISTRATION_STATUSES` (`registration.ts:44-49`)
+   that the capacity check counts against a product. Re-verified directly: confirmed
+   `expireStaleInvitations`'s `UPDATE` targets only `registrationGroupInvitations`, and
+   confirmed `CONFIRMED` is in `ACTIVE_REGISTRATION_STATUSES`. Net effect: a head delegate who
+   registers a team the size of (or larger than) the remaining capacity, and whose teammates
+   never accept, permanently occupies those seats — locking out real solo delegates — with no
+   job or action anywhere that reclaims them. The head's only lever is re-inviting a
+   *different* email into the same still-open slot, never surrendering it.
+3. **A `CONFIRMED`+`PAID` registration on a cancelled MUN leaves zero admin-facing trace.**
+   `runLifecycleAction('cancel', ...)` (`lib/lifecycle/registration-lifecycle.ts:449-461`)
+   deliberately leaves `CONFIRMED` registrations untouched (documented, correct, given "no
+   refunds"), and delegates on those rows do get a one-time cancellation email
+   (`notifyConferenceCancelled`, `lib/notifications/conference-events.ts:54-106`). But nothing
+   ever touches `payments.exceptionReason`/`exceptionRaisedAt` for those payments —
+   `PAYMENT_EXCEPTION_REASONS` (`lib/payments/exception-reasons.ts:7-14`) has no
+   cancellation-related reason, and `listPaymentExceptions`
+   (`lib/payments/exceptions.ts:81-158`) filters on `exceptionReason IS NOT NULL OR
+   status='REFUNDED'`, which a cancelled-mun payment never satisfies. So a delegate who paid
+   for a now-cancelled conference has a payment that looks completely normal (`PAID`,
+   registration `CONFIRMED`) anywhere an admin would look for problems — the only signal
+   anywhere is the mun's own `CANCELLED` status and the one email already sent. If the "no
+   refunds, but admin can resolve exceptions manually" model is supposed to apply to
+   cancellations too, there's currently no queue entry for an admin to act on.
+
+### Medium severity — real gaps, narrower blast radius
+
+4. **No organizer payout ledger of any kind.** `payments.organizerNetAmount` accrues per
+   payment (`lib/payments/webhook.ts`) but nothing ever reads it back to mark money "sent" —
+   grepped every action/job file for payout/disburse/settlement-as-a-verb, zero hits.
+   `getMunPaymentsSummary` (`lib/actions/payment-settlement.ts:289-324`) is a lifetime
+   cumulative total scoped to one MUN, not a real "currently owed, net of what's already been
+   wired" balance, and there's no cross-MUN per-organizer rollup anywhere in
+   `admin-reporting.ts`. This is a known, explicitly-deferred product area (CLAUDE.md: "real
+   payment gateway/settlement execution... nothing initiates a payout") — but it's worth
+   distinguishing "the gateway isn't built" from "there isn't even a manual tracking tool for
+   admin to know who to wire money to and how much," which is the actual current state.
+5. **Payment collection isn't blocked when the payout destination goes unverified mid-flight.**
+   `mun_payment_settings.verificationState` is only checked once, at the
+   `PUBLISHED`→`REGISTRATION_OPEN` transition (`lib/lifecycle/registration-lifecycle.ts:271-273`).
+   Once a mun is `REGISTRATION_OPEN`, a bank-detail change resets `verificationState` to
+   `PENDING` (`lib/lifecycle/reverification.ts`) but nothing re-checks it before accepting the
+   next delegate payment — grepped `lib/actions/registration.ts` and `lib/payments/webhook.ts`
+   for `verificationState`, zero matches in either. Money keeps flowing to a mun whose payout
+   destination is, at that moment, unverified.
+6. **No partial/per-seat cancellation on a paid registration group.** `cancelGroupInvitation`
+   (`registration-group.ts:391-408`) only works on a still-`PENDING` invitation and explicitly
+   doesn't touch the registration row; `lib/payments/webhook.ts`'s `memberScope()` always
+   resolves to the whole group, confirming/cancelling every seat together. Once a group is
+   paid, it's genuinely all-or-nothing — no way to drop one seat (a teammate backs out, was
+   invited by mistake, etc.) without cancelling the entire team.
+7. **A deleted head account orphans their registration group with no self-service recovery.**
+   `account-deletion.ts:198-202` only cancels the deleting user's own unpaid holds — a
+   `CONFIRMED` placeholder seat they still "own" as head is untouched, and
+   `registrationGroups.headUserId` is never reassigned. The head's session/password are wiped,
+   so only an ADMIN/SUPER_ADMIN can manage that group afterward; a teammate can still accept
+   an invite into a slot nominally "owned" by a deleted user, and any not-yet-sent invite would
+   show the inviter's name as "Deleted user."
+8. **Accepting a group invite is a one-way, irreversible ownership transfer with no override.**
+   Once a teammate accepts, the head keeps read-only roster visibility
+   (`getGroupRoster`, line 170-177) but has no function to cancel/replace/kick that seat —
+   `cancelGroupInvitation` only works pre-acceptance. There's no path for a head to fix a
+   mistake (wrong person accepted, teammate needs to be swapped) without going through
+   support/an admin.
+9. **Gate-1 organizer applications have no SLA or staleness tracking**, unlike Gate-2's
+   `mun_submissions` (which has `slaDeadline`/`slaState`, read by `lib/notifications/sla-job.ts`
+   — gated to `munStatus === 'VERIFICATION'`, i.e. Gate-2 only). The `organizerApplications`
+   table (`lib/db/schema.ts:946-964`) has no equivalent columns, and none of the 7 registered
+   cron jobs (`lib/jobs/registry.ts:130-138`) touch it. An application can sit in
+   `SUBMITTED`/`UNDER_REVIEW` indefinitely with no alert to anyone.
+10. **No nudge job for organizers stuck in Gate-2 `ACTION_REQUIRED`/`CHANGES_REQUESTED`.**
+    `reminder-job.ts` only emails delegates about an upcoming *confirmed* conference; SLA
+    notifications only fire while MUN Hub itself holds the review (`VERIFICATION` status). An
+    organizer blocked on their own fixes gets no automated reminder to go finish them.
+11. **`registration_group_invitations` expiry is a lazy, on-touch sweep, not a scheduled job.**
+    `expireStaleInvitations` only runs when something else reads the group (e.g.
+    `getGroupRoster`); no cron job in `registry.ts` calls it. An invitation nobody ever looks
+    at again (group page never revisited) stays `PENDING` past its own `expiresAt` until
+    someone happens to load that group.
+
+### Minor — narrow blast radius, worth knowing
+
+12. On a MUN cancellation, delegates whose registrations were `PENDING`/`PAYMENT_PENDING`
+    (silently flipped to `CANCELLED` by the same action) are **not** emailed —
+    `notifyConferenceCancelled`'s recipient query filters to `status = 'CONFIRMED'` only
+    (`conference-events.ts:74-78`). Only people who'd already paid get told; people who were
+    mid-checkout don't.
+13. Cancellation notifications have no delegation-awareness — every member of a paid group
+    gets the same individual email a solo delegate would, with no "your whole team" framing
+    and no group-level digest.
+14. `CLAUDE.md:235`'s claim that `organizer_applications.organizer_id` is unique was stale —
+    migration `0030_organizer_many_muns` dropped that constraint. Fixed directly in this pass
+    (see the CLAUDE.md diff in the same commit as this file). The actual current behavior
+    (`acceptOrganizerAgreement` checks via a plain `SELECT`, not a DB constraint) was already
+    correct in practice; only the stated reason was wrong.
+
+### Checked and NOT a gap (ruled out, so nobody re-investigates these)
+
+- `CONFIRMED` registrations surviving a MUN cancellation untouched is a **documented,
+  deliberate** design choice ("no refunds"), not an oversight — see
+  `registration-lifecycle.ts:55-60`'s own comment.
+- A rejected Gate-1 organizer **can** submit a fresh application (no unique constraint blocks
+  it) — the reapplication path itself works; only the `CHANGES_REQUESTED` loop (item 1 above)
+  is actually broken.
+- `password_reset_tokens`/`email_login_codes` purge, and abandoned pre-checkout `PENDING`
+  registrations, are both already covered by existing jobs (`purge-auth-artifacts.ts`,
+  `release-expired-holds.ts` respectively).
+- There is exactly one code path for MUN cancellation (organizer and admin both call
+  `runLifecycleAction('cancel', ...)`; behavior only branches on role for permission/email
+  wording) — not two divergent implementations.
+- Raw over-capacity team registration (e.g. requesting a team of 20 against capacity 5) is
+  correctly rejected at reservation time; the real risk is the *combination* of a
+  smaller/exact-fit team with unclaimed seats never being reclaimed (item 2 above), not a
+  missing capacity check itself.
+
 ## If picked up again
 
-Reasonable next things, roughly in priority order: fix the atomicity gap above if there's
-time and a full test pass to back it; do a fresh, scoped adversarial pass over just the 5
-newest features (delegation, R2, fees, analytics, load-test perf fix) since they've never
-had one; then move to whatever the user actually asks for — don't self-assign work they
-haven't requested.
+Highest-value items from the list above, if asked to act on any of them: #1 (Gate-1
+`CHANGES_REQUESTED` dead end) is the most clear-cut bug — the state machine already declares
+the transition legal, it just needs a real call site and a UI action button, so it's probably
+the cheapest fix relative to its impact. #2 (delegation capacity squatting) needs a product
+decision first (an expiry sweep that reclaims the seat, not just the invitation — but reclaim
+after how long, and does the head get notified?) before it's a pure coding task. #3 (cancelled
+paid registrations having no admin trace) needs a decision on whether cancellations should
+route into the existing payment-exception queue or a new one. Everything else in the medium/
+minor tiers is real but lower urgency — don't self-assign fixes for any of it without asking,
+since several (payout ledger, per-seat group cancellation, Gate-1 SLA tracking) are the kind
+of scoped-feature decisions CLAUDE.md says to ask about first, not build unprompted.
+
+Otherwise, unrelated to this pass: fix the reverification atomicity gap above if there's time
+and a full test pass to back it; do a fresh, scoped adversarial pass over the 5 newest
+features (delegation, R2, fees, analytics, load-test perf fix) since they've never had one;
+then move to whatever the user actually asks for — don't self-assign work they haven't
+requested.
