@@ -17,30 +17,15 @@ import type { PublicAccommodationOption } from "@/types/public-mun";
 import type { AccommodationOptionField } from "@/types/accommodation";
 import { listAccommodationOptionFields } from "@/api/accommodation";
 import { initiateRegistration } from "@/api/registration";
+import {
+  CORE_KEYS,
+  CORE_LABELS,
+  DynamicField,
+  controlClassName,
+  isFieldVisible,
+} from "@/components/registration/dynamic-field";
 
 const STEPS = ["Option", "Details", "Review"] as const;
-
-const controlClassName = cn(
-  "h-11 w-full rounded-sm border border-input bg-background px-md py-sm text-body-md text-ink outline-none",
-  "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25",
-  "aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20",
-);
-
-const textareaClassName = cn(controlClassName, "h-auto min-h-24 resize-y");
-
-/**
- * The account already knows the delegate's name and email, and the organizer's
- * own form never asks for them — so they're collected here rather than as
- * form fields, and everything else comes from the organizer's configuration.
- */
-const CORE_KEYS = ["fullName", "email", "phone"] as const;
-type CoreKey = (typeof CORE_KEYS)[number];
-
-const CORE_LABELS: Record<CoreKey, string> = {
-  fullName: "Full name",
-  email: "Email",
-  phone: "Phone",
-};
 
 interface RegistrationFormProps {
   slug: string;
@@ -57,111 +42,6 @@ interface RegistrationFormProps {
   /** Name/email off the account. */
   accountDefaults: { fullName: string; email: string; phone: string };
   preselectedProductId?: string;
-}
-
-/** Single-parent conditional visibility, matching the builder's model. */
-function isVisible(field: FormField, answers: Record<string, string>): boolean {
-  if (!field.conditionalOn) return true;
-  const parent = (answers[field.conditionalOn] ?? "").trim();
-  const expected = (field.conditionalValue ?? "").trim();
-  switch (field.conditionalOperator) {
-    case "NOT_EQUALS":
-      return parent !== expected;
-    case "CONTAINS":
-      return parent.toLowerCase().includes(expected.toLowerCase());
-    case "EQUALS":
-    default:
-      return parent === expected;
-  }
-}
-
-function DynamicField({
-  field,
-  value,
-  onChange,
-  showError,
-}: {
-  field: FormField;
-  value: string;
-  onChange: (next: string) => void;
-  showError: boolean;
-}) {
-  const invalid = showError && field.required && !value.trim();
-  const describedBy = field.helpText ? `${field.fieldKey}-help` : undefined;
-  const choices = field.choices ?? [];
-  const isChoice = choices.length > 0;
-  const isLong = field.fieldType === "LONG_TEXT" || field.fieldType === "MUN_EXPERIENCE";
-
-  const inputType =
-    field.fieldType === "EMAIL"
-      ? "email"
-      : field.fieldType === "PHONE"
-        ? "tel"
-        : field.fieldType === "NUMBER"
-          ? "number"
-          : field.fieldType === "DATE"
-            ? "date"
-            : "text";
-
-  return (
-    <div className={cn("flex flex-col gap-xs", (isLong || isChoice) && "sm:col-span-2")}>
-      <Label htmlFor={field.fieldKey}>
-        {field.label}
-        {field.required && (
-          <span className="text-destructive-text" aria-hidden>
-            *
-          </span>
-        )}
-      </Label>
-
-      {isChoice ? (
-        <select
-          id={field.fieldKey}
-          className={controlClassName}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          aria-invalid={invalid || undefined}
-          aria-describedby={describedBy}
-        >
-          <option value="">Select an option</option>
-          {choices.map((choice) => (
-            <option key={choice} value={choice}>
-              {choice}
-            </option>
-          ))}
-        </select>
-      ) : isLong ? (
-        <textarea
-          id={field.fieldKey}
-          className={textareaClassName}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          aria-invalid={invalid || undefined}
-          aria-describedby={describedBy}
-        />
-      ) : (
-        <Input
-          id={field.fieldKey}
-          type={inputType}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          aria-invalid={invalid || undefined}
-          aria-describedby={describedBy}
-        />
-      )}
-
-      {field.helpText && (
-        <p id={describedBy} className="text-body-md text-muted-foreground">
-          {field.helpText}
-        </p>
-      )}
-      {invalid && (
-        <p role="alert" className="text-body-md text-destructive-text">
-          {field.label} is required.
-        </p>
-      )}
-    </div>
-  );
 }
 
 export function RegistrationForm({
@@ -254,8 +134,15 @@ export function RegistrationForm({
     [stayFieldsQuery.data],
   );
 
-  const visibleFields = orderedFields.filter((f) => isVisible(f, answers));
+  const visibleFields = orderedFields.filter((f) => isFieldVisible(f, answers));
   const selected = products.find((e) => e.product.id === productId);
+  // Any pass that supports group registration and still has room for a
+  // minimal 2-person team — the group funnel (group-register-page.tsx) does
+  // its own, live-refreshed availability check; this only decides whether to
+  // show the entry point at all.
+  const groupEligibleProductId = products.find(
+    (entry) => entry.product.allowsDelegation && entry.available >= 2,
+  )?.product.id;
   const selectedCommittee = committees.find((c) => c.id === committeeId);
   const selectedPricing = selected ? currentPassPrice(selected.product) : null;
   const passPrice = selectedPricing?.price ?? 0;
@@ -357,6 +244,18 @@ export function RegistrationForm({
                   />
                 ))}
               </fieldset>
+              {groupEligibleProductId && (
+                <p className="text-body-md text-muted-foreground">
+                  Registering a whole team?{" "}
+                  <Link
+                    to={`/register/${slug}/group?product=${encodeURIComponent(groupEligibleProductId)}`}
+                    className="text-link underline-offset-4 hover:underline"
+                  >
+                    Register as a group
+                  </Link>{" "}
+                  and pay for everyone in one payment.
+                </p>
+              )}
               {committees.length > 0 && (
                 <div className="grid gap-sm border-t border-border pt-lg sm:grid-cols-2">
                   <div className="flex flex-col gap-xs">

@@ -314,6 +314,15 @@ export function OrganizerRegistrationsPage() {
                           {row.user.institution && (
                             <span className="text-caption text-muted-foreground">{row.user.institution}</span>
                           )}
+                          {row.registrationGroup && (
+                            <span
+                              className="mt-xxs inline-flex items-center gap-xxs rounded-sm bg-surface-soft px-1.5 py-0.5 text-caption text-muted-foreground"
+                              title={`One of ${row.registrationGroup.teamSize} seats paid for together by ${row.registrationGroup.headUser.name}`}
+                            >
+                              <UsersRound className="size-3" strokeWidth={1.75} aria-hidden />
+                              Group · paid by {row.registrationGroup.headUser.name}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-md py-sm text-body">{row.registrationProduct.name}</td>

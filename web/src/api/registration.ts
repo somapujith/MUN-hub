@@ -72,6 +72,9 @@ interface RawRegistrationDetail {
   portfolioId: string | null;
   userId: string;
   expiresAt: string | null;
+  registrationGroupId: string | null;
+  /** True only for the head delegate's own row in a group registration. */
+  isGroupHead: boolean;
   productName: string;
   productPrice: number;
   mun: {
@@ -98,6 +101,8 @@ function toRegistrationDetail(raw: RawRegistrationDetail): MockRegistrationDetai
     portfolioId: raw.portfolioId,
     userId: raw.userId,
     expiresAt: raw.expiresAt ? new Date(raw.expiresAt) : null,
+    registrationGroupId: raw.registrationGroupId,
+    isGroupHead: raw.isGroupHead,
     productName: raw.productName,
     productPrice: raw.productPrice,
     mun: {

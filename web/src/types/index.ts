@@ -70,6 +70,8 @@ export interface RegistrationProduct {
   /** Early-bird price, charged instead of `price` until `earlyBirdDeadline`. */
   earlyBirdPrice?: number | null;
   earlyBirdDeadline?: Date | null;
+  /** Group/delegation registration gate (2026-09-17) — see web/src/pages/register/group-register-page.tsx. */
+  allowsDelegation?: boolean;
 }
 
 /** Official, public contact channels of a MUN (never the organizer's contact person). */
@@ -157,6 +159,10 @@ export interface RegistrationWithMun {
   committee: { name: string } | null;
   portfolio: { name: string } | null;
   payment: Array<{ amount: number; currency?: string; status: import("@/types/enums").PaymentStatus }>;
+  /** Set only for a group/delegation registration's rows. Null for a solo registration. */
+  registrationGroupId?: string | null;
+  /** True only for the head delegate's own row in a group registration — gates "Manage your team" (registration-card.tsx). */
+  isGroupHead?: boolean;
 }
 
 export interface MockRegistrationDetail extends RegistrationWithMun {

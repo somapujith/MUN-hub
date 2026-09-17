@@ -46,6 +46,12 @@ interface RawRegistration {
   committee: { name: string } | null;
   portfolio: { name: string } | null;
   payment: Array<{ amount: number; status: PaymentStatus }>;
+  registrationGroupId: string | null;
+  // Present only for a group/delegation registration row — used to tell the
+  // head delegate's own row apart from an accepted teammate's, so "Manage
+  // your team" (registration-card.tsx) only ever shows to the actual head;
+  // a member seeing it would just hit a 403 from getGroupRoster.
+  registrationGroup: { headRegistrationId: string | null } | null;
 }
 
 function toRegistrationWithMun(raw: RawRegistration): RegistrationWithMun {
@@ -70,6 +76,8 @@ function toRegistrationWithMun(raw: RawRegistration): RegistrationWithMun {
     committee: raw.committee ? { name: raw.committee.name } : null,
     portfolio: raw.portfolio ? { name: raw.portfolio.name } : null,
     payment: raw.payment.map((p) => ({ amount: p.amount, status: p.status })),
+    registrationGroupId: raw.registrationGroupId,
+    isGroupHead: Boolean(raw.registrationGroup && raw.registrationGroup.headRegistrationId === raw.id),
   };
 }
 

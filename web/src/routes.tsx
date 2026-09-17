@@ -61,6 +61,9 @@ import { OrganizerTeamPage } from "@/pages/organizer/dashboard/sections/team-pag
 import { MunsPage } from "@/pages/muns-page";
 import { ProfilePage } from "@/pages/profile-page";
 import { RequireAuth } from "@/guards/require-auth";
+import { GroupRegisterPage } from "@/pages/register/group-register-page";
+import { GroupManagePage } from "@/pages/dashboard/group-manage-page";
+import { GroupInviteAcceptPage } from "@/pages/group-invite-accept-page";
 import { RegisterConfirmationPage } from "@/pages/register/register-confirmation-page";
 import { RegisterPage } from "@/pages/register/register-page";
 import { RegisterPayPage } from "@/pages/register/register-pay-page";
@@ -158,9 +161,22 @@ export const router = createBrowserRouter([
         element: <RegisterLayout />,
         children: [
           { index: true, element: <RegisterPage /> },
+          { path: "group", element: <GroupRegisterPage /> },
           { path: "pay", element: <RegisterPayPage /> },
           { path: "confirmation", element: <RegisterConfirmationPage /> },
         ],
+      },
+      {
+        path: "group-invite",
+        element: <GroupInviteAcceptPage />,
+      },
+      {
+        path: "dashboard/groups/:groupId",
+        element: (
+          <RequireAuth>
+            <GroupManagePage />
+          </RequireAuth>
+        ),
       },
       { path: "organizer/welcome", element: <OrganizerWelcomePage /> },
       { path: "organizer/onboarding", element: <OrganizerOnboardingPage /> },
