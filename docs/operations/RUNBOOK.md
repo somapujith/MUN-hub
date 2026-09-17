@@ -126,7 +126,10 @@ npx wrangler secret list --env=""
 | `HYPERDRIVE` | binding | yes | Database connection (`lib/db/hyperdrive-bridge.ts`). The Worker doesn't use `DATABASE_URL`. |
 | `APP_URL` | var | yes | Public site URL used in emails and links |
 | `COOKIE_DOMAIN` | var | yes (prod) | `.munhub.in`, so the session is shared across `app.`/`publish.`/`admin.`. Empty on staging (host-only cookie). |
-| `CORS_ORIGINS` | var | yes | Extra allowed browser origins, comma-separated, exact match (`ALLOWED_ORIGINS` is an older alias) |
+| `CORS_ORIGINS` | var | staging | Extra trusted browser origins, comma-separated, exact match (`ALLOWED_ORIGINS` is an older alias). The production web hosts are built in (`server/lib/origins.ts`), so production sets it empty. |
+| `ALLOW_LOCALHOST_ORIGINS` | var | no | `true` trusts any `http://localhost:<port>`. Local development only; never set it on a deployed Worker. |
+| `PUBLIC_API_URL` | var | yes (prod) | Origin used in uploaded-file URLs (`https://api.munhub.in`). Unset: the request origin is used. |
+| `UPLOADS_KV`, `UPLOADS_BUCKET` | binding | for real uploads | Upload storage (`lib/storage/select-adapter.ts`). Both are commented out in `wrangler.jsonc` until the KV namespace / R2 bucket exists; without either, uploads go to the mock store and each one logs an error. |
 | `ZEPTOMAIL_FROM_ADDRESS` | var | with email | Sender address on a domain verified in ZeptoMail |
 | `ZEPTOMAIL_TOKEN` | secret | for real email | ZeptoMail Send Mail token. Unset: emails (including sign-in codes and reset links) are only written to the log. |
 | `PAYMENT_FIELD_KEY` | secret | yes | AES-256-GCM key for payout details, base64 of 32 bytes. No default, and the code refuses to run without it. |
@@ -146,13 +149,13 @@ Added by other lanes of the 2026-09-17 autonomous run. Confirm the final names a
 | `MOCK_PAYMENTS_ENABLED` | var | Must be exactly `true` for the mock checkout to work. Leave it unset in production. |
 | `PLATFORM_FEE_BPS`, `PLATFORM_FEE_TAX_BPS` | var | Platform fee and GST on it, in basis points |
 | `SYSTEM_ACTOR_USER_ID` | var | Id of a dedicated staff user recorded as the actor of scheduled lifecycle transitions |
-| `ALLOW_LOCALHOST_ORIGINS` | var | `true` only for local development; never in production |
 | `COOKIE_SECURE` | var | Override for the session cookie's `Secure` flag (local http only) |
 | `TURNSTILE_SECRET_KEY` | secret | Cloudflare Turnstile verification for signup and sign-in |
 | `RATE_LIMIT_IP_MULTIPLIER` | var | Scales per-IP limits |
 | `CHECKIN_CODE_SECRET` | secret | Signs conference check-in codes |
+| `REQUIRE_EMAIL_VERIFICATION` | var | `true` blocks registration until the account email is verified |
 
-Other lanes may also add bindings (a KV namespace for uploads, rate-limit bindings). Each needs its resource created in Cloudflare and its id in `wrangler.jsonc` for both production and `env.staging`.
+Other lanes may also add bindings (rate-limit bindings, for example). Each needs its resource created in Cloudflare and its id in `wrangler.jsonc` for both production and `env.staging`.
 
 ### `munhub-web`
 

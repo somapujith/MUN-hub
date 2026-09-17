@@ -33,7 +33,7 @@ npm ci
 npx vite                      # http://localhost:5174, expects the API on :3001
 ```
 
-Start the API from `server/` first (see `server/README.md`) and make sure its `CORS_ORIGINS` includes `http://localhost:5174`.
+Start the API from `server/` first (see `server/README.md`) and make sure it trusts `http://localhost:5174`: `ALLOW_LOCALHOST_ORIGINS="true"` (as in `.env.example`) or an explicit `CORS_ORIGINS` entry.
 
 ## Check and build
 
