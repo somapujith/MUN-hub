@@ -188,6 +188,9 @@ registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
       portfolio: true,
       payment: true,
       registrationProduct: true,
+      // Just enough to tell the head delegate's own row apart from an
+      // accepted teammate's — see `isGroupHead` below.
+      registrationGroup: { columns: { headRegistrationId: true } },
     },
   })
 
@@ -203,6 +206,12 @@ registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
     portfolioId: detail.portfolioId,
     userId: detail.userId,
     expiresAt: detail.expiresAt,
+    registrationGroupId: detail.registrationGroupId,
+    // True only for the head delegate's own row — gates the confirmation
+    // page's "Invite your team" branch (a teammate viewing their OWN
+    // confirmation page for a group registration must see the normal
+    // solo-style confirmation, not a button that would 403 for them).
+    isGroupHead: Boolean(detail.registrationGroup && detail.registrationGroup.headRegistrationId === detail.id),
     productName: detail.registrationProduct.name,
     productPrice: detail.registrationProduct.price,
     mun: {
