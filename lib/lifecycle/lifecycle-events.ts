@@ -14,17 +14,7 @@
 // never happen in production. If delegate fan-out ever gets slow enough to
 // matter, move it onto a queue here rather than un-awaiting the call site.
 //
-// Owned by the notifications lane from here on: these are deliberately
-// no-ops until that lane wires real recipients and templates.
+// Owned by the notifications lane from here on.
 // -----------------------------------------------------------------------------
 
-/**
- * A MUN moved to CANCELLED (organizer or admin action — the reason is on the
- * latest `verification_logs` row for the mun with `action = 'CANCELLED'`).
- * Intended recipients: every delegate holding a CONFIRMED registration, and
- * the organizer when an admin cancelled. There are no refunds in MUN Hub —
- * the message must not promise one.
- */
-export async function notifyConferenceCancelled(munId: string): Promise<void> {
-  void munId
-}
+export { notifyConferenceCancelled } from '@/lib/notifications/conference-events'
