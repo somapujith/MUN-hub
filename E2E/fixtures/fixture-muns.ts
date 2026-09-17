@@ -43,8 +43,21 @@ export const FIXTURE_MUNS = {
     name: 'E2E Closed MUN',
     products: [{ name: 'E2E Closed Delegate Pass', price: 1200, capacity: 100, status: 'active', displayOrder: 0 }],
   },
+
+  /**
+   * PUBLISHED with a MUNHub-verified payment account and an open window, so
+   * registration can be opened. Reserved for specs/organizer/lifecycle.spec.ts,
+   * which walks it through open → close → cancel; reset to PUBLISHED (and its
+   * registrations wiped) every run.
+   */
+  lifecycle: {
+    slug: 'e2e-lifecycle-mun',
+    name: 'E2E Lifecycle MUN',
+    products: [{ name: 'E2E Lifecycle Pass', price: 800, capacity: 50, status: 'active', displayOrder: 0 }],
+  },
 } as const
 
 export const OPEN = FIXTURE_MUNS.open
+export const LIFECYCLE = FIXTURE_MUNS.lifecycle
 export const SANDBOX = FIXTURE_MUNS.sandbox
 export const CLOSED = FIXTURE_MUNS.closed

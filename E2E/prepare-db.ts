@@ -150,6 +150,37 @@ async function ensureProduct(
   }
 }
 
+/** A payout account MUNHub has already verified — opening registration for paid passes needs one. */
+async function ensureVerifiedPaymentAccount(tx: Tx, munId: string): Promise<void> {
+  const values = {
+    munId,
+    legalName: 'E2E Lifecycle Society',
+    orgType: 'SOCIETY',
+    addressLine1: '1 Test Street',
+    city: 'Hyderabad',
+    state: 'Telangana',
+    postalCode: '500001',
+    panLast4: '234F',
+    panCiphertext: 'e2e-not-real-ciphertext',
+    authorizedRepName: 'E2E Owner',
+    authorizedRepEmail: FIXTURE_MUNS.ownerEmail,
+    accountHolderName: 'E2E Lifecycle Society',
+    bankName: 'E2E Test Bank',
+    accountNumberLast4: '6789',
+    accountNumberCiphertext: 'e2e-not-real-ciphertext',
+    ifsc: 'E2EB0000001',
+    accountType: 'CURRENT',
+    gateway: 'RAZORPAY',
+    verificationState: 'VERIFIED' as const,
+    verifiedAt: new Date(),
+    updatedAt: new Date(),
+  }
+  await tx
+    .insert(schema.munPaymentSettings)
+    .values(values)
+    .onConflictDoUpdate({ target: schema.munPaymentSettings.munId, set: values })
+}
+
 /** Deletes every registration on a MUN, and everything that references those registrations. */
 async function wipeRegistrations(tx: Tx, munId: string): Promise<number> {
   const regs = await tx
@@ -199,9 +230,15 @@ async function main(): Promise<void> {
     for (const p of FIXTURE_MUNS.closed.products) await ensureProduct(tx, closedId, p)
     await wipeRegistrations(tx, closedId)
 
+    const lifecycleId = await upsertMun(tx, ownerId, FIXTURE_MUNS.lifecycle, 'PUBLISHED')
+    for (const p of FIXTURE_MUNS.lifecycle.products) await ensureProduct(tx, lifecycleId, p)
+    await wipeRegistrations(tx, lifecycleId)
+    await ensureVerifiedPaymentAccount(tx, lifecycleId)
+
     console.log(
       `[e2e] fixtures ready: ${FIXTURE_MUNS.open.slug} (open, ${wiped} old registrations wiped), ` +
-        `${FIXTURE_MUNS.sandbox.slug} (onboarding), ${FIXTURE_MUNS.closed.slug} (published, not open)`,
+        `${FIXTURE_MUNS.sandbox.slug} (onboarding), ${FIXTURE_MUNS.closed.slug} (published, not open), ` +
+        `${FIXTURE_MUNS.lifecycle.slug} (published, ready to open)`,
     )
   })
 }
