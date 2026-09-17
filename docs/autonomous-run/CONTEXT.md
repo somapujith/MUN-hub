@@ -117,3 +117,10 @@ payout execution.
   labels, toaster position, organization name (slot 0036 after 0035). QUEUED (lead): payout
   settings rework — UPI-first, optional bank, no PAN/GST, verificationState PENDING on save
   (needs slot 0037: pan/bank columns NOT NULL today, no UPI column).
+- ~11:00–14:36 Usage limit hit ("session limit, resets 11:30") — review fix agents, the followups
+  agent and the delegate UX agent stopped mid-work. 14:40 resumed: followups + UX agents continued
+  from their transcripts; review workflow resumed from `.claude/workflows/munhub-integrated-review.js`
+  with a SKIP filter so re-run fixers don't duplicate fixes already merged (edge `046649c`/`bc7d217`
+  pending merge; notifications `1cab522…67fc63f` merged; payments `7dd1c47` `bb65b07` `5014559`
+  merged). Review confirmed 43 findings (2 high: staff TOTP brute force; bank-detail change leaves
+  payout VERIFIED). Workflow scripts saved under `.claude/workflows/`.
