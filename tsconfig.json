@@ -1,8 +1,13 @@
 {
+  // Root project: the shared framework-agnostic lib/ (plus its Vitest tests),
+  // the Hono API's integration tests (server/integration — server/tsconfig.json
+  // doesn't cover them), and the root tooling configs. web/, the rest of
+  // server/ and E2E/ each have their own tsconfig; `npm run typecheck` runs all
+  // of them. `@/*` must stay mapped to the repo root: lib/, the server and the
+  // tests all import `@/lib/...` (Vitest mirrors it in vitest.config.ts).
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "ES2022",
     "lib": ["dom", "dom.iterable", "esnext"],
-    "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
@@ -11,24 +16,11 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "react-jsx",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "types": ["node"],
     "paths": {
       "@/*": ["./*"]
     }
   },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    "**/*.mts"
-  ],
-  "exclude": ["node_modules", "server", "web", "server/node_modules", "web/node_modules", "E2E"]
+  "include": ["lib/**/*.ts", "server/integration/**/*.ts", "*.ts"],
+  "exclude": ["node_modules", "**/node_modules", "web", "E2E", ".claude"]
 }
