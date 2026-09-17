@@ -107,11 +107,17 @@ function buildDelegateConditions(munId: string, filters?: DelegateFilters) {
   return conditions
 }
 
+/** The only user fields the organizer delegate roster exposes. */
+const DELEGATE_USER_COLUMNS = { id: true, name: true, email: true, institution: true } as const
+
 function queryDelegates(munId: string, filters?: DelegateFilters) {
   return db.query.registrations.findMany({
     where: and(...buildDelegateConditions(munId, filters)),
     with: {
-      user: true,
+      // Explicit column list — never `user: true`. The full users row carries
+      // passwordHash, suspension flags and other account internals, and this
+      // roster is returned verbatim by GET /organizer/muns/:id/delegates.
+      user: { columns: DELEGATE_USER_COLUMNS },
       committee: true,
       portfolio: true,
       payment: true,

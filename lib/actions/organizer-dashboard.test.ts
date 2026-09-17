@@ -189,6 +189,41 @@ describe('organizer dashboard queries', () => {
     expect(page1.total).toBe(3)
   })
 
+  it('exposes only id/name/email/institution for each delegate, never passwordHash', async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'Org', email: `org-leak-${suffix}@test.com`, role: 'ORGANIZER' })
+      .returning()
+    const [student] = await db
+      .insert(users)
+      .values({
+        name: 'Leaky',
+        email: `stu-leak-${suffix}@test.com`,
+        role: 'STUDENT',
+        phone: '9876543210',
+        institution: 'KLH',
+        passwordHash: 'scrypt$secret-hash',
+      })
+      .returning()
+    const [mun] = await db
+      .insert(muns)
+      .values({ organizerId: organizer.id, name: 'Leak Mun', slug: `leak-mun-${suffix}` })
+      .returning()
+    const [product] = await db
+      .insert(registrationProducts)
+      .values({ munId: mun.id, name: 'Delegate', price: 1000, capacity: 10 })
+      .returning()
+    await db
+      .insert(registrations)
+      .values({ userId: student.id, munId: mun.id, registrationProductId: product.id, status: 'CONFIRMED' })
+
+    const { results } = await getDelegateList(mun.id, undefined, sess(organizer))
+    expect(results).toHaveLength(1)
+    expect(results[0].user).toEqual({ id: student.id, name: 'Leaky', email: student.email, institution: 'KLH' })
+    expect(JSON.stringify(results)).not.toContain('secret-hash')
+  })
+
 
   it('throws Mun not found for a missing mun id (shared assertOwnsOrAdmin)', async () => {
     const [organizer] = await db
