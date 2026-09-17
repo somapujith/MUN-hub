@@ -52,7 +52,9 @@ export function SiteHeaderSearch({ city, className }: SiteHeaderSearchProps) {
         id="nav-search"
         type="search"
         name="q"
-        placeholder="Search conferences"
+        // Short enough to survive the phone nav, where "Search conferences" was
+        // cut mid-word.
+        placeholder="Search MUNs"
         autoComplete="off"
         className="peer h-9 pr-sm pl-[30px] md:text-body-md [&::-webkit-search-cancel-button]:appearance-none"
       />

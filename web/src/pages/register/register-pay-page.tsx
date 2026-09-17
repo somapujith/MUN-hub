@@ -80,7 +80,7 @@ export function RegisterPayPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <Helmet><title>Checkout</title></Helmet>
+      <Helmet><title>Checkout | MUN Hub</title></Helmet>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-xl px-lg py-xxl sm:px-xl">
         <header className="flex flex-col gap-xs">

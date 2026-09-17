@@ -9,11 +9,12 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
 import { RegistrationForm } from "@/components/registration/registration-form";
 import { RegistrationNotice } from "@/components/registration/registration-notice";
+import { EmailVerificationNotice } from "@/components/dashboard/email-verification-notice";
 import { hasPassed } from "@/components/registration/deadline";
 import type { ProductWithAvailability } from "@/components/registration/types";
 import { formatDateRange } from "@/components/shared/date-range";
 import { queryKeys } from "@/api/query-keys";
-import { getMunBySlug, getProductsAvailability } from "@/api/marketplace";
+import { getMunBySlug, getProductsAvailability, listPublicAccommodation } from "@/api/marketplace";
 import { getProfileCompletion, getProfileFormDefaults } from "@/api/student-profile";
 import { getAccountSettings } from "@/api/account";
 import { useSession } from "@/hooks/use-session";
@@ -104,6 +105,15 @@ export function RegisterPage() {
   });
 
   const productIds = mun?.registrationProducts.map((product) => product.id) ?? [];
+  // Accommodation the organizer sells with the pass — the MUN page tells
+  // delegates they can add a stay while registering, so the funnel has to
+  // offer it.
+  const accommodationQuery = useQuery({
+    queryKey: queryKeys.publicMunSection(mun?.id ?? "", "accommodation"),
+    queryFn: () => listPublicAccommodation(mun!.id),
+    enabled: Boolean(mun?.id) && mun?.status === "REGISTRATION_OPEN",
+  });
+
   const availabilityQuery = useQuery({
     queryKey: queryKeys.productAvailability(productIds),
     queryFn: () => getProductsAvailability(productIds),
@@ -129,7 +139,7 @@ export function RegisterPage() {
     return (
       <>
         <Helmet>
-          <title>{`Register — ${mun.name}`}</title>
+          <title>{`Register — ${mun.name} | MUN Hub`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <RegistrationNotice
@@ -155,7 +165,7 @@ export function RegisterPage() {
     return (
       <>
         <Helmet>
-          <title>{`Register — ${mun.name}`}</title>
+          <title>{`Register — ${mun.name} | MUN Hub`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <RegistrationNotice
@@ -176,6 +186,7 @@ export function RegisterPage() {
   // without this the form mounted instantly with empty, never-updated fields.
   if (
     availabilityQuery.isPending ||
+    accommodationQuery.isLoading ||
     profileDefaultsQuery.isLoading ||
     accountQuery.isLoading ||
     profileCompletionQuery.isLoading
@@ -183,7 +194,7 @@ export function RegisterPage() {
     return (
       <>
         <Helmet>
-          <title>{`Register — ${mun.name}`}</title>
+          <title>{`Register — ${mun.name} | MUN Hub`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <div aria-busy="true" className="py-xxl" />
@@ -196,7 +207,7 @@ export function RegisterPage() {
     return (
       <>
         <Helmet>
-          <title>{`Register — ${mun.name}`}</title>
+          <title>{`Register — ${mun.name} | MUN Hub`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <RegistrationNotice
@@ -211,11 +222,38 @@ export function RegisterPage() {
     );
   }
 
+  // The API refuses the registration outright when verification is required,
+  // so say it here rather than after the form is filled in.
+  if (accountQuery.data && accountQuery.data.emailVerificationRequired && !accountQuery.data.emailVerified) {
+    return (
+      <>
+        <Helmet>
+          <title>{`Register — ${mun.name} | MUN Hub`}</title>
+        </Helmet>
+        <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
+          <EmailVerificationNotice
+            email={accountQuery.data.email}
+            required
+            variant="block"
+          />
+          <div className="flex flex-wrap gap-sm">
+            <Button variant="outline" render={<Link to={`/mun/${slug}`} />}>
+              View conference
+            </Button>
+            <Button variant="outline" render={<Link to="/dashboard" />}>
+              Your dashboard
+            </Button>
+          </div>
+        </RegistrationShell>
+      </>
+    );
+  }
+
   if (profileCompletionQuery.data?.complete === false) {
     return (
       <>
         <Helmet>
-          <title>{`Register — ${mun.name}`}</title>
+          <title>{`Register — ${mun.name} | MUN Hub`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <RegistrationNotice
@@ -249,7 +287,7 @@ export function RegisterPage() {
     return (
       <>
         <Helmet>
-          <title>{`Register — ${mun.name}`}</title>
+          <title>{`Register — ${mun.name} | MUN Hub`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <RegistrationNotice
@@ -277,7 +315,7 @@ export function RegisterPage() {
   return (
     <>
       <Helmet>
-        <title>{`Register — ${mun.name}`}</title>
+        <title>{`Register — ${mun.name} | MUN Hub`}</title>
         <meta
           name="description"
           content={`Reserve your delegate seat at ${mun.name}.`}
@@ -291,6 +329,7 @@ export function RegisterPage() {
           products={availability}
           committees={mun.committees}
           formFields={mun.formFields ?? []}
+          accommodationOptions={accommodationQuery.data ?? []}
           profileDefaults={profileDefaultsQuery.data ?? {}}
           accountDefaults={{
             fullName: account?.name ?? "",

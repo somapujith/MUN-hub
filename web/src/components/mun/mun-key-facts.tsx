@@ -9,7 +9,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { formatDateRange } from "@/components/shared/date-range";
-import { formatDateTime, safeLinkUrl } from "@/components/mun/mun-format";
+import { formatDateMaybeTime, safeLinkUrl } from "@/components/mun/mun-format";
 import { humanizeToken } from "@/lib/mun-public-labels";
 import type { MunDetail } from "@/types";
 
@@ -36,7 +36,7 @@ function registrationSummary(mun: MunDetail, now: number): { headline: string; d
   const opensAt = mun.registrationOpensAt;
   const deadline = mun.registrationDeadline;
   const deadlineLine = deadline
-    ? `${deadline.getTime() < now ? "Closed" : "Closes"} ${formatDateTime(deadline)}`
+    ? `${deadline.getTime() < now ? "Closed" : "Closes"} ${formatDateMaybeTime(deadline)}`
     : null;
 
   switch (mun.status) {
@@ -45,11 +45,11 @@ function registrationSummary(mun: MunDetail, now: number): { headline: string; d
     case "PUBLISHED":
       return {
         headline:
-          opensAt && opensAt.getTime() > now ? `Opens ${formatDateTime(opensAt)}` : "Not open yet",
-        detail: deadline ? `Deadline ${formatDateTime(deadline)}` : null,
+          opensAt && opensAt.getTime() > now ? `Opens ${formatDateMaybeTime(opensAt)}` : "Not open yet",
+        detail: deadline ? `Deadline ${formatDateMaybeTime(deadline)}` : null,
       };
     case "REGISTRATION_CLOSED":
-      return { headline: "Closed", detail: deadline ? `Deadline was ${formatDateTime(deadline)}` : null };
+      return { headline: "Closed", detail: deadline ? `Deadline was ${formatDateMaybeTime(deadline)}` : null };
     default:
       return { headline: "Closed", detail: null };
   }

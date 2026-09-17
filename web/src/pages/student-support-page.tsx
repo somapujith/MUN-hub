@@ -20,7 +20,7 @@ export function StudentSupportPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Helmet>
-        <title>Support</title>
+        <title>Support | MUN Hub</title>
         <meta name="description" content="Chat with the MUN Hub support team." />
       </Helmet>
       <SiteHeader />

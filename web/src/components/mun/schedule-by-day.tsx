@@ -13,9 +13,20 @@ import type { PublicScheduleItem } from "@/types/public-mun";
 interface ScheduleByDayProps {
   items: PublicScheduleItem[];
   committees: { id: string; name: string }[];
+  /** Conference start, so "Day 2" means the second day OF THE CONFERENCE — not
+   * the second day that happens to have something scheduled. */
+  startDate?: Date | null;
 }
 
-export function ScheduleByDay({ items, committees }: ScheduleByDayProps) {
+/** Day N counted from the conference start date where we know it. */
+function dayNumber(day: Date, startDate: Date | null | undefined, index: number): number {
+  if (!startDate) return index + 1;
+  const startOfDay = (value: Date) => Date.UTC(value.getFullYear(), value.getMonth(), value.getDate());
+  const diff = Math.round((startOfDay(day) - startOfDay(startDate)) / 86_400_000);
+  return diff >= 0 ? diff + 1 : index + 1;
+}
+
+export function ScheduleByDay({ items, committees, startDate }: ScheduleByDayProps) {
   const committeeNames = new Map(committees.map((committee) => [committee.id, committee.name]));
 
   const sorted = [...items].sort(
@@ -38,7 +49,7 @@ export function ScheduleByDay({ items, committees }: ScheduleByDayProps) {
       {days.map((day, index) => (
         <li key={day.key}>
           <h3 className="font-display text-title-sm font-medium tracking-[-0.006em] text-ink">
-            Day {index + 1}
+            Day {dayNumber(day.date, startDate, index)}
             <span className="font-normal text-muted-foreground"> · {formatDayHeading(day.date)}</span>
           </h3>
           <ul className="mt-sm list-none divide-y divide-border overflow-hidden rounded-md border border-border bg-card p-0">

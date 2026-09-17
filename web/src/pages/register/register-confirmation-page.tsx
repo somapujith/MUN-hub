@@ -73,7 +73,7 @@ export function RegisterConfirmationPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <Helmet><title>Registration status</title></Helmet>
+      <Helmet><title>Registration status | MUN Hub</title></Helmet>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-xl px-lg py-xxl sm:px-xl">
         {renderStatus(registration.status, slug, receipt, registrationId, payment?.status)}
@@ -97,15 +97,24 @@ function renderStatus(
         <RegistrationNotice
           tone="success"
           title="You're registered"
-          message={paymentStatus ? "Payment went through and your seat is confirmed." : "Your seat is confirmed."}
+          message={
+            paymentStatus
+              ? "Payment went through and your seat is confirmed. Your pass carries the check-in code you show at the registration desk."
+              : "Your seat is confirmed. Your pass carries the check-in code you show at the registration desk."
+          }
           detail={receipt}
         >
-          <Button render={<Link to={`/mun/${slug}`} />}>Back to conference</Button>
+          <Button render={<Link to={`/dashboard/registrations/${encodeURIComponent(registrationId)}/pass`} />}>
+            View your pass
+          </Button>
           <Button
             variant="outline"
             render={<Link to={`/dashboard/registrations/${encodeURIComponent(registrationId)}/receipt`} />}
           >
             View receipt
+          </Button>
+          <Button variant="outline" render={<Link to="/dashboard" />}>
+            Your registrations
           </Button>
         </RegistrationNotice>
       );
@@ -130,8 +139,16 @@ function renderStatus(
       }
       if (paymentStatus === "FAILED") {
         return (
-          <RegistrationNotice tone="error" title="Payment didn't go through" message="No money was taken, and your seat has been released." detail={receipt}>
+          <RegistrationNotice
+            tone="error"
+            title="Payment didn't go through"
+            message="No money was taken, and your seat has been released. Registering again picks a fresh seat, subject to availability."
+            detail={receipt}
+          >
             <Button render={<Link to={`/register/${slug}`} />}>Try again</Button>
+            <Button variant="outline" render={<Link to="/support/new" />}>
+              Contact support
+            </Button>
           </RegistrationNotice>
         );
       }

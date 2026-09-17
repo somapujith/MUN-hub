@@ -9,6 +9,8 @@ interface RegistrationSummaryProps {
   munName: string;
   slug: string;
   selected?: ProductWithAvailability;
+  /** Price actually charged for the pass (early-bird aware). */
+  passPrice?: number;
   committeeName?: string;
   portfolioName?: string;
   /** Chosen accommodation, if any. Undefined on the skip path. */
@@ -34,6 +36,7 @@ export function RegistrationSummary({
   munName,
   slug,
   selected,
+  passPrice,
   committeeName,
   portfolioName,
   accommodation,
@@ -60,7 +63,7 @@ export function RegistrationSummary({
           above an identical total reads as a rendering bug. */}
       {selected && accommodation && (
         <dl className="flex flex-col gap-xs border-t border-border pt-md text-body-md">
-          <LineItem label={selected.product.name} amount={selected.product.price} />
+          <LineItem label={selected.product.name} amount={passPrice ?? selected.product.price} />
           <LineItem label={accommodation.name} amount={accommodation.price} />
         </dl>
       )}

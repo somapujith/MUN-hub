@@ -53,10 +53,25 @@ const ICONS: Record<StatusIcon, LucideIcon> = {
 interface MunStatusBadgeProps {
   status: MunStatus;
   className?: string;
+  /**
+   * Delegate-facing surfaces (marketplace cards, the public MUN page) say what
+   * a visitor can do, not where the MUN sits in our pipeline: a published MUN
+   * whose registration hasn't opened is "Not yet open", not "Live". The
+   * organizer and admin consoles keep the pipeline wording.
+   */
+  audience?: "internal" | "public";
 }
 
-export function MunStatusBadge({ status, className }: MunStatusBadgeProps) {
-  const { label, tone, icon } = getStatusMeta(status);
+/** Public overrides for statuses whose internal label would mislead a delegate. */
+const PUBLIC_LABELS: Partial<Record<MunStatus, { label: string; icon: StatusIcon }>> = {
+  PUBLISHED: { label: "Not yet open", icon: "hourglass" },
+};
+
+export function MunStatusBadge({ status, className, audience = "internal" }: MunStatusBadgeProps) {
+  const meta = getStatusMeta(status);
+  const override = audience === "public" ? PUBLIC_LABELS[status] : undefined;
+  const { label, icon } = { label: override?.label ?? meta.label, icon: override?.icon ?? meta.icon };
+  const tone = meta.tone;
   const Icon = ICONS[icon];
 
   return (

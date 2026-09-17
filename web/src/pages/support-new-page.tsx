@@ -16,7 +16,7 @@ export function SupportNewPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Helmet>
-        <title>Contact Support</title>
+        <title>Contact support | MUN Hub</title>
         <meta name="description" content="Open a support ticket with the MUN Hub team." />
       </Helmet>
       <SiteHeader />

@@ -18,6 +18,13 @@ const dateFormatter = new Intl.DateTimeFormat("en-IN", {
   year: "numeric",
 });
 
+const utcDateFormatter = new Intl.DateTimeFormat("en-IN", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
 const timeFormatter = new Intl.DateTimeFormat("en-IN", {
   hour: "numeric",
   minute: "2-digit",
@@ -31,6 +38,23 @@ const dayHeadingFormatter = new Intl.DateTimeFormat("en-IN", {
 
 export function formatDateTime(date: Date): string {
   return dateTimeFormatter.format(date);
+}
+
+/**
+ * Registration windows are entered as plain dates and stored at UTC midnight,
+ * so printing a time turned "3 Mar 2027" into "3 Mar 2027, 5:30 am" for an
+ * Indian reader — a deadline nobody set. Dates that carry a real time of day
+ * still show it.
+ */
+export function formatDateMaybeTime(date: Date): string {
+  const midnightUtc =
+    date.getUTCHours() === 0 &&
+    date.getUTCMinutes() === 0 &&
+    date.getUTCSeconds() === 0 &&
+    date.getUTCMilliseconds() === 0;
+  // Formatted in UTC: a date-only value read in a behind-UTC timezone would
+  // otherwise print the day before.
+  return midnightUtc ? utcDateFormatter.format(date) : dateTimeFormatter.format(date);
 }
 
 export function formatDate(date: Date): string {
@@ -111,7 +135,13 @@ export function galleryItems(
 
 /** Initials for an avatar fallback ("Aarav Mehta" → "AM"). */
 export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  // Only word-initial letters count: "Secretary-General (Demo)" used to come
+  // out as "S(" because a parenthesised suffix counted as a name part.
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.replace(/^[^\p{L}]+/u, ""))
+    .filter((part) => /^\p{L}/u.test(part));
   const letters = parts.length > 1 ? [parts[0][0], parts[parts.length - 1][0]] : [parts[0]?.[0] ?? "?"];
   return letters.join("").toUpperCase();
 }

@@ -334,6 +334,17 @@ export function FilterSidebar({ countries, resultCount }: FilterSidebarProps) {
         isPending && "opacity-60",
       )}
     >
+      <RailGroup heading="Sort by">
+        {SORT_OPTIONS.map((option) => (
+          <RailOption
+            key={option.value}
+            label={option.label}
+            active={selectedSort === option.value}
+            onSelect={() => setParam("sortBy", option.value)}
+          />
+        ))}
+      </RailGroup>
+
       <RailGroup heading="Registration">
         <RailOption
           label="Any status"
@@ -386,17 +397,6 @@ export function FilterSidebar({ countries, resultCount }: FilterSidebarProps) {
           city control on every browse surface; a second one in this rail
           would write the same `?city=` param. The active city still appears
           as a removable chip, read from the URL. */}
-
-      <RailGroup heading="Sort by">
-        {SORT_OPTIONS.map((option) => (
-          <RailOption
-            key={option.value}
-            label={option.label}
-            active={selectedSort === option.value}
-            onSelect={() => setParam("sortBy", option.value)}
-          />
-        ))}
-      </RailGroup>
 
       {hasFilters && (
         <div className="border-t border-border pt-md">

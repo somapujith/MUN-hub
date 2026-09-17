@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
 import { Link, useSearchParams } from "react-router";
 import { resendVerificationEmail, verifyEmail } from "@/api/email-verification";
+import { getAccountSettings } from "@/api/account";
+import { queryKeys } from "@/api/query-keys";
+import { useSession } from "@/hooks/use-session";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
@@ -25,8 +28,8 @@ function ErrorAlert({ message }: { message: string }) {
 }
 
 /** The resend form — shown whenever there's no token to consume, or the token turned out to be invalid/expired. */
-function ResendForm() {
-  const [email, setEmail] = useState("");
+function ResendForm({ defaultEmail = "" }: { defaultEmail?: string }) {
+  const [email, setEmail] = useState(defaultEmail);
   const resendMutation = useMutation({ mutationFn: () => resendVerificationEmail(email) });
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -36,8 +39,9 @@ function ResendForm() {
 
   if (resendMutation.isSuccess) {
     return (
-      <p className="text-body-md text-muted-foreground">
-        If an account exists for that email, we've sent a fresh verification link.
+      <p role="status" className="text-body-md text-muted-foreground">
+        If an account exists for that email, we've sent a fresh verification link. It expires in 24
+        hours — check your spam folder if it doesn't arrive.
       </p>
     );
   }
@@ -68,8 +72,22 @@ export function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") ?? "";
   const attempted = useRef(false);
+  const queryClient = useQueryClient();
 
-  const verifyMutation = useMutation({ mutationFn: () => verifyEmail(token) });
+  // A signed-in delegate shouldn't retype the address we already know, and
+  // an already-verified account shouldn't be told its link "failed".
+  const { data: session } = useSession();
+  const accountQuery = useQuery({
+    queryKey: queryKeys.account(),
+    queryFn: getAccountSettings,
+    enabled: Boolean(session?.userId),
+  });
+  const account = accountQuery.data;
+
+  const verifyMutation = useMutation({
+    mutationFn: () => verifyEmail(token),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.account() }),
+  });
 
   useEffect(() => {
     if (!token || attempted.current) return;
@@ -83,17 +101,36 @@ export function VerifyEmailPage() {
 
   let body: React.ReactNode;
 
-  if (!token) {
+  if (account?.emailVerified && !verifyMutation.isSuccess) {
+    // Reopening an old link after verifying (or landing here by mistake) is
+    // not a failure — say so instead of showing a red "invalid or expired".
+    body = (
+      <>
+        <header className="flex flex-col gap-xs">
+          <h1 className="font-display text-title-lg text-ink md:text-display-md">
+            Your email is already verified
+          </h1>
+          <p className="text-body-md text-muted-foreground">
+            {account.email} is confirmed — there&apos;s nothing left to do here.
+          </p>
+        </header>
+        <Button className="mt-xl w-full" render={<Link to="/dashboard" />}>
+          Continue to your dashboard
+        </Button>
+      </>
+    );
+  } else if (!token) {
     body = (
       <>
         <header className="flex flex-col gap-xs">
           <h1 className="font-display text-title-lg text-ink md:text-display-md">Verify your email</h1>
           <p className="text-body-md text-muted-foreground">
-            This link is missing its verification token. Enter your email to get a new one.
+            Verification links come by email and expire after 24 hours. Enter your address and
+            we&apos;ll send a fresh one.
           </p>
         </header>
         <div className="mt-xl">
-          <ResendForm />
+          <ResendForm defaultEmail={account?.email ?? ""} />
         </div>
       </>
     );
@@ -128,7 +165,10 @@ export function VerifyEmailPage() {
         </header>
         <div className="mt-md flex flex-col gap-md">
           <ErrorAlert message={message} />
-          <ResendForm />
+          <p className="text-body-md text-muted-foreground">
+            Links expire after 24 hours and work once. Enter your address for a fresh one.
+          </p>
+          <ResendForm defaultEmail={account?.email ?? ""} />
         </div>
       </>
     );

@@ -62,7 +62,7 @@ export function RegistrationReceiptPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Helmet>
-        <title>{`Receipt — ${mun.name}`}</title>
+        <title>{`Receipt — ${mun.name} | MUN Hub`}</title>
       </Helmet>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-xl px-lg py-xxl sm:px-xl">

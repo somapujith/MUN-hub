@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { changePassword, signIn, signOut, signUp } from '@/lib/actions/auth'
+import { sendVerificationEmail } from '@/lib/actions/email-verification'
 import { requestOrganizerLoginCode, verifyOrganizerLoginCode } from '@/lib/actions/organizer-otp'
 import {
   beginMfaEnrollment,
@@ -17,6 +18,7 @@ import { getRuntimeEnv } from '@/lib/runtime-env'
 import { TURNSTILE_ACTIONS, TURNSTILE_TOKEN_MAX_LENGTH, turnstileRejection } from '../lib/turnstile'
 import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
+import { resolveResetAppUrl } from './password-reset'
 
 // The cookie lives as long as a session possibly can (the absolute cap);
 // the server-side idle deadline in lib/auth/session.ts decides whether the
@@ -232,9 +234,15 @@ authRoutes.post('/users', async (c) => {
 
   setSessionCookie(c, token)
 
-  // The account already exists, so a failed welcome email is logged and never
-  // fails the signup. Awaited, not fire-and-forget: on Workers, work still
-  // pending after the response is sent can be dropped.
+  // The account already exists, so a failed email is logged and never fails
+  // the signup. Awaited, not fire-and-forget: on Workers, work still pending
+  // after the response is sent can be dropped. The verification link is built
+  // like a reset link — never from an untrusted Origin in production.
+  try {
+    await sendVerificationEmail(userId, resolveResetAppUrl(c.req.header('Origin')))
+  } catch (error) {
+    console.error('[signup] verification email failed', error)
+  }
   try {
     await notifyWelcome(userId)
   } catch (error) {

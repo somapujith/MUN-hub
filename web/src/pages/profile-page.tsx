@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
+import { Link, useLocation } from "react-router";
 import { toast } from "sonner";
 import { getAccountSettings, setEmailNotificationsEnabled } from "@/api/account";
 import { changePassword } from "@/api/auth";
 import { queryKeys } from "@/api/query-keys";
 import { completeStudentProfile, getStudentProfile } from "@/api/student-profile";
 import { PrivacyDataSection } from "@/components/account/privacy-data-section";
+import { EmailVerificationNotice } from "@/components/dashboard/email-verification-notice";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { Button } from "@/components/ui/button";
@@ -52,6 +54,11 @@ const textareaClassName = cn(
 
 export function ProfilePage() {
   const queryClient = useQueryClient();
+  // Set by the signup page (router state, so the URL stays /profile): the
+  // account was just created, and the copy says so instead of leaving the
+  // delegate wondering whether anything happened.
+  const location = useLocation();
+  const justSignedUp = (location.state as { justSignedUp?: boolean } | null)?.justSignedUp === true;
   const profileQuery = useQuery({
     queryKey: STUDENT_PROFILE_QUERY_KEY,
     queryFn: getStudentProfile,
@@ -95,6 +102,7 @@ export function ProfilePage() {
     queryKey: queryKeys.account(),
     queryFn: getAccountSettings,
   });
+  const account = accountQuery.data;
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   useEffect(() => {
@@ -149,7 +157,7 @@ export function ProfilePage() {
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Helmet>
-        <title>Your profile</title>
+        <title>Your profile | MUN Hub</title>
       </Helmet>
       <SiteHeader />
       <main className="content-container flex flex-1 flex-col gap-xl py-xxl">
@@ -158,10 +166,35 @@ export function ProfilePage() {
             {hasExistingProfile ? "Your profile" : "Complete your profile"}
           </h1>
           <p className="text-body-md text-muted-foreground">
+            {account ? (
+              <>
+                Signed in as {account.name} ({account.email}).{" "}
+              </>
+            ) : null}
             We ask for this once so it can pre-fill your MUN registrations — you can update it any
             time.
           </p>
         </header>
+        {justSignedUp && account?.emailVerified ? (
+          <p
+            role="status"
+            className="rounded-md border border-success/30 bg-success/8 px-md py-sm text-body-md text-success-text"
+          >
+            Your account is ready. Browse conferences whenever you are —{" "}
+            <Link to="/muns" className="underline underline-offset-2">
+              find a MUN
+            </Link>
+            .
+          </p>
+        ) : null}
+        {account && !account.emailVerified ? (
+          <EmailVerificationNotice
+            email={account.email}
+            required={account.emailVerificationRequired}
+            justSignedUp={justSignedUp}
+            className="max-w-3xl"
+          />
+        ) : null}
         <Separator />
         {profileQuery.isLoading ? (
           <Skeleton className="h-[400px] w-full max-w-lg rounded-md" />

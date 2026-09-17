@@ -39,7 +39,7 @@ export function RegistrationPassPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Helmet>
-        <title>{pass ? `Pass · ${pass.mun.name}` : "Your pass"}</title>
+        <title>{pass ? `Pass — ${pass.mun.name} | MUN Hub` : "Your pass | MUN Hub"}</title>
       </Helmet>
       <div className="print:hidden">
         <SiteHeader />

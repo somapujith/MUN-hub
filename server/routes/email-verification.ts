@@ -2,22 +2,18 @@ import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { resendVerificationEmail, verifyEmail } from '@/lib/actions/email-verification'
 import type { AppVariables } from '../src/types'
+import { resolveResetAppUrl } from './password-reset'
 
 const verifyBodySchema = z.object({ token: z.string().min(1) }).strict()
 const resendBodySchema = z.object({ email: z.string().trim().min(1).email() }).strict()
 
 /**
- * Same Origin/Host resolution as server/routes/password-reset.ts's
- * resolveAppUrl — duplicated rather than imported/shared since these are two
- * small, independent routers and neither depends on the other existing.
+ * Verification links carry a live token, so they're built exactly like
+ * password-reset links: APP_URL in production, a loopback Origin only in local
+ * development — never an arbitrary request Origin/Host.
  */
 function resolveAppUrl(c: Context<{ Variables: AppVariables }>): string {
-  const origin = c.req.header('Origin')
-  if (origin) return origin
-
-  const host = c.req.header('Host')
-  const protocol = c.req.header('X-Forwarded-Proto') ?? 'https'
-  return host ? `${protocol}://${host}` : 'http://localhost:3000'
+  return resolveResetAppUrl(c.req.header('Origin'))
 }
 
 export const emailVerificationRoutes = new Hono<{ Variables: AppVariables }>()

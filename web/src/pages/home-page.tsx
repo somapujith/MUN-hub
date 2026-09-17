@@ -230,7 +230,7 @@ export function HomePage() {
                       <Button
                         variant="on-dark"
                         size="sm"
-                        render={<Link to="/" />}
+                        render={<Link to={hasRailFilter || city ? "/" : "/muns"} />}
                       >
                         {hasRailFilter || city
                           ? "Clear all filters"
