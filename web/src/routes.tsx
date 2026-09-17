@@ -21,11 +21,10 @@ import { LoginPage } from "@/pages/login-page";
 import { OrganizerLoginPage } from "@/pages/organizer/organizer-login-page";
 import { MunDetailPage } from "@/pages/mun-detail-page";
 import { NotFoundPage } from "@/pages/not-found-page";
-import { OrganizerApplyPage } from "@/pages/organizer/apply-page";
 import { OrganizerApplySubmittedPage } from "@/pages/organizer/apply-submitted-page";
 import { OrganizerSignupPage } from "@/pages/organizer/organizer-signup-page";
 import { OrganizerWelcomePage } from "@/pages/organizer/organizer-welcome-page";
-import { OrganizerOnboardingPage } from "@/pages/organizer/organizer-onboarding-page";
+import { OrganizerApplyRedirect, OrganizerOnboardingPage } from "@/pages/organizer/organizer-onboarding-page";
 import { OrganizerSupportPage } from "@/pages/organizer/support-page";
 import { MunIndexRedirect } from "@/pages/organizer/dashboard/mun-index-redirect";
 import { OrganizerMunsPage } from "@/pages/organizer/dashboard/muns-page";
@@ -120,7 +119,8 @@ export const router = createBrowserRouter([
       },
       { path: "organizer/welcome", element: <OrganizerWelcomePage /> },
       { path: "organizer/onboarding", element: <OrganizerOnboardingPage /> },
-      { path: "organizer/apply", element: <OrganizerApplyPage /> },
+      // The host application is part of the onboarding wizard now.
+      { path: "organizer/apply", element: <OrganizerApplyRedirect /> },
       {
         path: "organizer/apply/submitted",
         element: <OrganizerApplySubmittedPage />,

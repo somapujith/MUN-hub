@@ -1,15 +1,17 @@
 import * as React from "react";
 import type { ReactNode } from "react";
 import { Helmet } from "react-helmet-async";
-import { Link, useNavigate } from "react-router";
+import { Link, Navigate, useLocation, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon } from "lucide-react";
 import {
+  MAX_EXPECTED_DELEGATES,
+  MIN_DESCRIPTION_LENGTH,
   ONBOARDING_STEPS,
   acceptAgreement,
   getOrganizerOnboarding,
-  saveGstStep,
-  savePanStep,
+  saveDetailsStep,
+  saveMunStep,
   savePaymentStep,
   saveProfileStep,
   type OnboardingStep,
@@ -26,18 +28,31 @@ const INPUT_CLASS =
 const PRIMARY_BUTTON_CLASS =
   "inline-flex h-12 items-center justify-center rounded-lg bg-[#121212] px-6 text-[15px] font-semibold text-white transition-colors hover:bg-[#2a2a2e] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#121212] disabled:cursor-not-allowed disabled:bg-[#d4d4d8] disabled:text-[#77777e]";
 
+const TEXTAREA_CLASS =
+  "min-h-32 w-full resize-y rounded-lg border border-[#d7d7de] bg-white px-4 py-3 text-[15px] text-[#121212] outline-none transition-colors placeholder:text-[#9a9aa2] focus:border-[#121212]";
+
 const STEP_LABELS: Record<OnboardingStep, string> = {
   PROFILE: "Create profile",
-  PAN: "PAN details",
-  GST: "GST details",
+  MUN: "Your MUN",
+  DETAILS: "Delegates & details",
   PAYMENT: "Payment details",
   AGREEMENT: "Agreement",
 };
 
 /**
- * Organizer onboarding (publish.munhub.in/organizer/onboarding): profile, PAN,
- * GST, payout UPI and the organizer agreement, one step at a time. Required
- * before applying to host; see lib/actions/organizer-onboarding.ts.
+ * `/organizer/apply` — the host application now lives inside the onboarding
+ * wizard, so old links land there instead.
+ */
+export function OrganizerApplyRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={`/organizer/onboarding${search}`} replace />;
+}
+
+/**
+ * Organizer onboarding (publish.munhub.in/organizer/onboarding): profile, the
+ * organizer's MUN, delegates & details, payout UPI and the organizer
+ * agreement, one step at a time. Accepting the agreement submits the MUN as
+ * the organizer's application; see lib/actions/organizer-onboarding.ts.
  */
 export function OrganizerOnboardingPage() {
   return (
@@ -80,10 +95,10 @@ function OnboardingWizard() {
   function saved(next: OrganizerOnboarding) {
     queryClient.setQueryData(queryKeys.organizerOnboarding(), next);
     setRevisiting(null);
-    if (next.completed) navigate("/organizer/apply", { replace: true });
+    if (next.completed) navigate("/organizer/apply/submitted", { replace: true });
   }
 
-  const stepProps = { data, onSaved: saved, onSkip: () => setRevisiting(null) };
+  const stepProps = { data, onSaved: saved };
 
   return (
     <main className="flex-1 px-lg pt-xl pb-28 md:pt-section">
@@ -95,8 +110,8 @@ function OnboardingWizard() {
         />
         <div className="lg:row-start-1 lg:col-start-2">
           {current === "PROFILE" ? <ProfileStep key="PROFILE" {...stepProps} /> : null}
-          {current === "PAN" ? <PanStep key="PAN" {...stepProps} /> : null}
-          {current === "GST" ? <GstStep key="GST" {...stepProps} /> : null}
+          {current === "MUN" ? <MunStep key="MUN" {...stepProps} /> : null}
+          {current === "DETAILS" ? <DetailsStep key="DETAILS" {...stepProps} /> : null}
           {current === "PAYMENT" ? <PaymentStep key="PAYMENT" {...stepProps} /> : null}
           {current === "AGREEMENT" ? <AgreementStep key="AGREEMENT" {...stepProps} /> : null}
         </div>
@@ -154,8 +169,6 @@ function Stepper({
 interface StepProps {
   data: OrganizerOnboarding;
   onSaved: (next: OrganizerOnboarding) => void;
-  /** Leave the step unchanged and return to the first unfinished one. */
-  onSkip: () => void;
 }
 
 function StepFrame({
@@ -305,110 +318,145 @@ function ProfileStep({ data, onSaved }: StepProps) {
   );
 }
 
-const PAN_FORMAT = /^[A-Z]{5}\d{4}[A-Z]$/;
+const DATE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
 
-function PanStep({ data, onSaved, onSkip }: StepProps) {
-  const [panNumber, setPanNumber] = React.useState("");
-  const [panName, setPanName] = React.useState(data.profile.panName ?? "");
-  const { mutation, error } = useStepMutation(savePanStep, onSaved);
-  const savedLast4 = data.profile.panLast4;
-  // A saved PAN is never sent back, so leaving it blank keeps the saved one.
-  const keepSaved = Boolean(savedLast4) && panNumber === "" && panName.trim() === (data.profile.panName ?? "");
+function MunStep({ data, onSaved }: StepProps) {
+  const [munName, setMunName] = React.useState(data.profile.munName ?? "");
+  const [munCity, setMunCity] = React.useState(data.profile.munCity ?? "");
+  const [munStartDate, setMunStartDate] = React.useState(data.profile.munStartDate ?? "");
+  const [today] = React.useState(() => new Date().toISOString().slice(0, 10));
+  const { mutation, error } = useStepMutation(saveMunStep, onSaved);
 
   return (
     <StepFrame
-      title="Add your PAN details"
-      description="Payouts for your MUNs are made against this PAN."
+      title="Tell us about your MUN"
+      description="This becomes your application to host on MUN Hub."
       error={error}
       submitLabel="Continue"
       submitting={mutation.isPending}
-      canSubmit={keepSaved || (PAN_FORMAT.test(panNumber) && Boolean(panName.trim()))}
-      onSubmit={() => (keepSaved ? onSkip() : mutation.mutate({ panNumber, panName }))}
+      canSubmit={Boolean(munName.trim() && munCity.trim() && DATE_FORMAT.test(munStartDate))}
+      onSubmit={() => mutation.mutate({ munName, munCity, munStartDate })}
     >
-      <Field
-        id="onboarding-pan"
-        label="PAN number"
-        hint={savedLast4 ? `PAN ending ${savedLast4} is saved. Enter it again only to change it.` : undefined}
-      >
+      <Field id="onboarding-mun-name" label="Title of your MUN">
         <input
-          id="onboarding-pan"
-          autoComplete="off"
-          spellCheck={false}
-          maxLength={10}
-          placeholder="e.g. ABCDE1234F"
-          value={panNumber}
-          onChange={(event) => setPanNumber(event.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase())}
-          className={cn(INPUT_CLASS, "max-w-[300px] font-mono tracking-[0.08em] uppercase")}
-        />
-      </Field>
-      <Field id="onboarding-pan-name" label="Name as on PAN">
-        <input
-          id="onboarding-pan-name"
-          placeholder="e.g. Rahul Sharma"
-          value={panName}
-          onChange={(event) => setPanName(event.target.value)}
+          id="onboarding-mun-name"
+          placeholder="e.g. Hyderabad MUN 2027"
+          value={munName}
+          onChange={(event) => setMunName(event.target.value)}
           className={INPUT_CLASS}
         />
       </Field>
+      <div className="grid gap-md sm:grid-cols-2">
+        <Field id="onboarding-mun-city" label="Host city">
+          <input
+            id="onboarding-mun-city"
+            autoComplete="address-level2"
+            placeholder="e.g. Hyderabad"
+            value={munCity}
+            onChange={(event) => setMunCity(event.target.value)}
+            className={INPUT_CLASS}
+          />
+        </Field>
+        <Field id="onboarding-mun-date" label="Expected start date">
+          <input
+            id="onboarding-mun-date"
+            type="date"
+            min={today}
+            value={munStartDate}
+            onChange={(event) => setMunStartDate(event.target.value)}
+            className={INPUT_CLASS}
+          />
+        </Field>
+      </div>
     </StepFrame>
   );
 }
 
-const GSTIN_FORMAT = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+const WEBSITE_FORMAT = /^https?:\/\/[^\s.]+\.\S+$/i;
 
-function GstStep({ data, onSaved }: StepProps) {
-  const [hasGstin, setHasGstin] = React.useState<boolean | null>(data.profile.hasGstin);
-  const [gstin, setGstin] = React.useState(data.profile.gstin ?? "");
-  const { mutation, error } = useStepMutation(saveGstStep, onSaved);
+function DetailsStep({ data, onSaved }: StepProps) {
+  const [count, setCount] = React.useState(data.profile.expectedDelegateCount?.toString() ?? "");
+  const [description, setDescription] = React.useState(data.profile.munDescription ?? "");
+  const [previousEditions, setPreviousEditions] = React.useState(data.profile.previousEditions ?? "");
+  const [websiteUrl, setWebsiteUrl] = React.useState(data.profile.websiteUrl ?? "");
+  const { mutation, error } = useStepMutation(saveDetailsStep, onSaved);
+
+  const delegates = Number(count);
+  const countValid = /^\d+$/.test(count) && delegates >= 1 && delegates <= MAX_EXPECTED_DELEGATES;
+  const descriptionLength = description.trim().length;
+  const website = websiteUrl.trim();
+  const websiteLooksWrong = website.length > 8 && !WEBSITE_FORMAT.test(website);
 
   return (
     <StepFrame
-      title="GST details"
-      description="Do you have a GSTIN for the person or organization on your PAN?"
-      error={error}
+      title="Delegates & details"
+      error={error ?? (websiteLooksWrong ? "Enter the full website address, including https://" : null)}
       submitLabel="Continue"
       submitting={mutation.isPending}
-      canSubmit={hasGstin === false || (hasGstin === true && GSTIN_FORMAT.test(gstin))}
-      onSubmit={() => mutation.mutate(hasGstin ? { hasGstin: true, gstin } : { hasGstin: false })}
+      canSubmit={
+        countValid &&
+        descriptionLength >= MIN_DESCRIPTION_LENGTH &&
+        (website === "" || WEBSITE_FORMAT.test(website))
+      }
+      onSubmit={() =>
+        mutation.mutate({
+          expectedDelegateCount: delegates,
+          munDescription: description,
+          previousEditions: previousEditions || undefined,
+          websiteUrl: website || undefined,
+        })
+      }
     >
-      <fieldset className="flex flex-wrap gap-md">
-        <legend className="sr-only">Do you have a GSTIN?</legend>
-        {[
-          { value: true, label: "Yes, I have a GSTIN" },
-          { value: false, label: "No, I don't have one" },
-        ].map((option) => (
-          <label
-            key={option.label}
-            className={cn(
-              "flex h-12 cursor-pointer items-center gap-3 rounded-lg border bg-white px-4 text-[15px] text-[#121212] transition-colors",
-              hasGstin === option.value ? "border-[#121212]" : "border-[#d7d7de] hover:border-[#9a9aa2]",
-            )}
-          >
-            <input
-              type="radio"
-              name="has-gstin"
-              checked={hasGstin === option.value}
-              onChange={() => setHasGstin(option.value)}
-              className="size-4 accent-[#121212]"
-            />
-            {option.label}
-          </label>
-        ))}
-      </fieldset>
-      {hasGstin ? (
-        <Field id="onboarding-gstin" label="GSTIN">
+      <Field id="onboarding-delegates" label="Maximum delegates you expect">
+        <input
+          id="onboarding-delegates"
+          inputMode="numeric"
+          placeholder="e.g. 300"
+          value={count}
+          onChange={(event) => setCount(event.target.value.replace(/\D/g, "").slice(0, 5))}
+          className={cn(INPUT_CLASS, "max-w-[200px]")}
+        />
+      </Field>
+      <Field
+        id="onboarding-description"
+        label="About your MUN"
+        hint={
+          descriptionLength < MIN_DESCRIPTION_LENGTH
+            ? `At least ${MIN_DESCRIPTION_LENGTH} characters (${descriptionLength} so far)`
+            : undefined
+        }
+      >
+        <textarea
+          id="onboarding-description"
+          placeholder="Committees, format, who it's for, what makes it different…"
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          className={TEXTAREA_CLASS}
+        />
+      </Field>
+      <div className="grid gap-md sm:grid-cols-2">
+        <Field id="onboarding-previous-editions" label="Previous editions (optional)">
           <input
-            id="onboarding-gstin"
-            autoComplete="off"
-            spellCheck={false}
-            maxLength={15}
-            placeholder="e.g. 27ABCDE1234F1Z5"
-            value={gstin}
-            onChange={(event) => setGstin(event.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase())}
-            className={cn(INPUT_CLASS, "max-w-[360px] font-mono tracking-[0.06em] uppercase")}
+            id="onboarding-previous-editions"
+            placeholder="e.g. 3 editions since 2022"
+            value={previousEditions}
+            onChange={(event) => setPreviousEditions(event.target.value)}
+            className={INPUT_CLASS}
           />
         </Field>
-      ) : null}
+        <Field id="onboarding-website" label="Website (optional)">
+          <input
+            id="onboarding-website"
+            type="url"
+            autoComplete="url"
+            placeholder="https://"
+            value={websiteUrl}
+            onChange={(event) => setWebsiteUrl(event.target.value)}
+            aria-invalid={websiteLooksWrong ? true : undefined}
+            className={INPUT_CLASS}
+          />
+        </Field>
+      </div>
     </StepFrame>
   );
 }
@@ -470,9 +518,9 @@ function AgreementStep({ data, onSaved }: StepProps) {
   return (
     <StepFrame
       title="Organizer agreement"
-      description={`Version ${data.agreementVersion}. Please read before submitting.`}
+      description={`Version ${data.agreementVersion}. Submitting sends your MUN to our team for review.`}
       error={error}
-      submitLabel="Submit and continue"
+      submitLabel="Submit application"
       submitting={mutation.isPending}
       canSubmit={accepted}
       onSubmit={() => mutation.mutate(undefined)}
@@ -510,10 +558,11 @@ function CompletedView() {
           You&apos;re registered as an organizer
         </h1>
         <p className="text-[15px] text-[#5b5b63]">
-          Your details are on file. To change them, contact support from the chat button.
+          Your MUN application is with our team — we review every application within 2 business days. To change
+          your details, contact support from the chat button.
         </p>
-        <Link to="/organizer/apply" className={PRIMARY_BUTTON_CLASS}>
-          Apply to host a MUN
+        <Link to="/organizer/dashboard" className={PRIMARY_BUTTON_CLASS}>
+          Go to your dashboard
         </Link>
       </div>
     </main>

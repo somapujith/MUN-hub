@@ -14,25 +14,34 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export const ONBOARDING_STEPS = ["PROFILE", "PAN", "GST", "PAYMENT", "AGREEMENT"] as const;
+export const ONBOARDING_STEPS = ["PROFILE", "MUN", "DETAILS", "PAYMENT", "AGREEMENT"] as const;
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
-/** Mirrors lib/actions/organizer-onboarding.ts's OrganizerOnboarding. The PAN only ever comes back as its last 4. */
+export const MIN_DESCRIPTION_LENGTH = 40;
+export const MAX_EXPECTED_DELEGATES = 10_000;
+
+/** Mirrors lib/actions/organizer-onboarding.ts's OrganizerOnboarding. */
 export interface OrganizerOnboarding {
   profile: {
     firstName: string | null;
     lastName: string | null;
     contactPhone: string | null;
-    panName: string | null;
-    panLast4: string | null;
-    hasGstin: boolean | null;
-    gstin: string | null;
+    munName: string | null;
+    munCity: string | null;
+    /** YYYY-MM-DD */
+    munStartDate: string | null;
+    expectedDelegateCount: number | null;
+    munDescription: string | null;
+    previousEditions: string | null;
+    websiteUrl: string | null;
     upiId: string | null;
     upiPhone: string | null;
   };
   completedSteps: OnboardingStep[];
   nextStep: OnboardingStep | null;
   completed: boolean;
+  /** The MUN created from the wizard's answers once the agreement is accepted. */
+  firstMunId: string | null;
   agreementVersion: string;
 }
 
@@ -50,12 +59,18 @@ function put<T>(path: string, body: T) {
 export const saveProfileStep = (input: { firstName: string; lastName: string; contactPhone: string }) =>
   put("profile", input);
 
-export const savePanStep = (input: { panNumber: string; panName: string }) => put("pan", input);
+export const saveMunStep = (input: { munName: string; munCity: string; munStartDate: string }) => put("mun", input);
 
-export const saveGstStep = (input: { hasGstin: boolean; gstin?: string }) => put("gst", input);
+export const saveDetailsStep = (input: {
+  expectedDelegateCount: number;
+  munDescription: string;
+  previousEditions?: string;
+  websiteUrl?: string;
+}) => put("details", input);
 
 export const savePaymentStep = (input: { upiId: string; upiPhone: string }) => put("payment", input);
 
+/** Accepts the organizer agreement, which also submits the MUN answers as the organizer's application. */
 export function acceptAgreement() {
   return request<OrganizerOnboarding>("/organizer/onboarding/agreement", {
     method: "POST",

@@ -3,8 +3,8 @@ import { z } from 'zod'
 import {
   acceptOrganizerAgreement,
   getOrganizerOnboarding,
-  saveOrganizerGstStep,
-  saveOrganizerPanStep,
+  saveOrganizerDetailsStep,
+  saveOrganizerMunStep,
   saveOrganizerPaymentStep,
   saveOrganizerProfileStep,
 } from '@/lib/actions/organizer-onboarding'
@@ -18,14 +18,24 @@ import type { AppVariables } from '../src/types'
 const profileBodySchema = z
   .object({ firstName: z.string(), lastName: z.string(), contactPhone: z.string() })
   .strict()
-const panBodySchema = z.object({ panNumber: z.string(), panName: z.string() }).strict()
-const gstBodySchema = z.object({ hasGstin: z.boolean(), gstin: z.string().optional() }).strict()
+const munBodySchema = z.object({ munName: z.string(), munCity: z.string(), munStartDate: z.string() }).strict()
+const detailsBodySchema = z
+  .object({
+    expectedDelegateCount: z.number(),
+    munDescription: z.string(),
+    previousEditions: z.string().optional(),
+    websiteUrl: z.string().optional(),
+  })
+  .strict()
 const paymentBodySchema = z.object({ upiId: z.string(), upiPhone: z.string() }).strict()
 const agreementBodySchema = z.object({ accepted: z.boolean() }).strict()
 
 const organizerOnly = [requireAuth, requireRole(['ORGANIZER'])] as const
 
-/** Organizer onboarding wizard (profile → PAN → GST → payout UPI → agreement). */
+/**
+ * Organizer onboarding wizard (profile → MUN → delegates & details → payout
+ * UPI → agreement, which submits the organizer application).
+ */
 export const organizerOnboardingRoutes = new Hono<{ Variables: AppVariables }>()
 
 organizerOnboardingRoutes.get('/organizer/onboarding', ...organizerOnly, async (c) => {
@@ -40,17 +50,17 @@ organizerOnboardingRoutes.put(
 )
 
 organizerOnboardingRoutes.put(
-  '/organizer/onboarding/pan',
+  '/organizer/onboarding/mun',
   ...organizerOnly,
-  zValidator('json', panBodySchema),
-  async (c) => c.json(await saveOrganizerPanStep(c.req.valid('json'), c.get('session')!)),
+  zValidator('json', munBodySchema),
+  async (c) => c.json(await saveOrganizerMunStep(c.req.valid('json'), c.get('session')!)),
 )
 
 organizerOnboardingRoutes.put(
-  '/organizer/onboarding/gst',
+  '/organizer/onboarding/details',
   ...organizerOnly,
-  zValidator('json', gstBodySchema),
-  async (c) => c.json(await saveOrganizerGstStep(c.req.valid('json'), c.get('session')!)),
+  zValidator('json', detailsBodySchema),
+  async (c) => c.json(await saveOrganizerDetailsStep(c.req.valid('json'), c.get('session')!)),
 )
 
 organizerOnboardingRoutes.put(

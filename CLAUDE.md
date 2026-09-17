@@ -214,31 +214,31 @@ Migration `0022_happy_marten_broadcloak.sql`. 45 new tests (`changePassword` cas
   - Returning organizers go to `/organizer/dashboard`.
   - An explicit `?redirectTo=` wins over both.
 
-## Organizer onboarding wizard (landed 2026-09-17, explicit user direction)
+## Organizer onboarding wizard (landed 2026-09-17, remade the same day, explicit user direction)
 
-After signup, an organizer must finish a five-step, District-style wizard at publish.munhub.in `/organizer/onboarding` before they can apply to host.
+After signup, an organizer completes a five-step, District-style wizard at publish.munhub.in `/organizer/onboarding`. **The wizard is the host application.** Accepting the agreement submits the MUN answers as the organizer's `organizer_applications` row (Gate 1) through `submitOrganizerApplication`.
 
 - **Steps:**
-  1. Profile: first name, last name and contact number.
-  2. PAN: the number, plus the name as on the PAN.
-  3. GST: a GSTIN, or an explicit "no GSTIN".
-  4. Payment: a **UPI ID plus the mobile number linked to it**. This is where payouts go.
-  5. Organizer agreement.
+  1. Create profile: first name, last name, contact number.
+  2. Your MUN: MUN title, host city, expected start date.
+  3. Delegates & details: maximum expected delegates (1–10,000), a description of at least 40 characters, and optional previous editions and website.
+  4. Payment details: a **UPI ID plus the mobile number linked to it**. This is where payouts go.
+  5. Organizer agreement: "Submit application".
+- **Removed steps:** the first version also had PAN and GST steps. The user removed them; migration `0028` drops those columns, so don't re-add them without asking.
 - **User decisions:**
   - Payout details are UPI only, with no bank-account step.
-  - The phone number is **not verified**, because there is no SMS provider yet. Add verification when one is chosen.
-  - Onboarding is **required** before applying.
-  - Details belong to the organizer account and apply to every MUN they host. They are separate from the older per-MUN `mun_payment_settings`, which still asks for bank details.
-- **Backend:** `lib/actions/organizer-onboarding.ts` and table `organizer_profiles` (1:1 with users, migration `0027`). The migration also adds `ORGANIZER_AGREEMENT` to `consent_type`.
+  - The phone number is **not verified**, because there is no SMS provider yet.
+  - The review time shown to organizers is **2 business days**.
+- **Backend:** `lib/actions/organizer-onboarding.ts` and table `organizer_profiles` (1:1 with users).
+  - Migrations: `0027` creates the table and adds `ORGANIZER_AGREEMENT` to `consent_type`, `0028` drops PAN/GST, and `0029` adds the first-MUN columns plus `first_mun_id`.
   - Steps must be saved in order.
-  - Accepting the agreement sets `completed_at`, records a consent row, and **locks** every step. Changing payout details afterwards goes through support. This stops someone swapping in a different UPI after approval.
-  - The PAN follows the payment write-only rule: `encryptField` ciphertext plus `pan_last4`, and never returned in full.
-  - The UPI ID is stored as entered and shown back to its owner, since it is a receiving address.
-- **Routes:** `GET /organizer/onboarding`, `PUT /organizer/onboarding/{profile,pan,gst,payment}` and `POST /organizer/onboarding/agreement`, all ORGANIZER only.
-- **Gate:** `POST /organizer/applications` returns 409 until onboarding is complete. It checks `isOrganizerOnboardingComplete`. Integration tests seed completion with `server/integration/helpers.ts#completeOrganizerOnboarding`.
+  - `acceptOrganizerAgreement` row-locks the profile. It submits the application unless the organizer already has one, since `organizer_applications.organizer_id` is unique. It then sets `completed_at` and `first_mun_id`, records the consent, and **locks** every step. Changing payout details afterwards goes through support.
+  - `submitOrganizerApplication` now refuses a second application up front with `ALREADY_APPLIED` (409). Previously it created the MUN first and then 500'd on the unique constraint, leaving an orphaned SUBMITTED mun behind.
+- **Routes:** `GET /organizer/onboarding`, `PUT /organizer/onboarding/{profile,mun,details,payment}` and `POST /organizer/onboarding/agreement`, all ORGANIZER only.
+- **Gate:** `POST /organizer/applications` still exists and still returns 409 until onboarding is complete. Integration and E2E tests use it after seeding a completed profile (`server/integration/helpers.ts#completeOrganizerOnboarding`).
 - **Web:**
-  - `organizer-onboarding-page.tsx` and `guards/require-organizer-onboarding.tsx`. The guard wraps `/organizer/apply` and redirects to the wizard.
-  - The welcome page's CTA reads "Start your journey" and opens the wizard, then reads "Apply to host a MUN" once onboarding is done.
+  - `/organizer/apply` redirects to the wizard (`OrganizerApplyRedirect`). The old standalone apply form page is deleted. Finishing the wizard lands on `/organizer/apply/submitted`.
+  - The welcome page's CTA reads "Start your journey" and opens the wizard, then reads "Go to your dashboard" once onboarding is done.
   - The welcome page and the wizard share `components/organizer/organizer-bright-shell.tsx`, which always renders the bright theme with fixed colors.
 
 ## Cloudflare Hyperdrive bridge for `lib/db/client.ts` (landed 2026-09-17)

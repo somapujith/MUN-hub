@@ -217,13 +217,12 @@ export const passwordResetTokensRelations = relations(passwordResetTokens, ({ on
 }))
 
 // ---------------------------------------------------------------------------
-// organizer_profiles — the one-time organizer onboarding (profile, PAN, GST,
-// payout UPI, agreement), 1:1 with an ORGANIZER user and shared by every MUN
-// they host. See lib/actions/organizer-onboarding.ts. The PAN follows the
-// payment write-only rule: ciphertext + last4, never returned in full. The
-// UPI ID is a receiving address, so it is stored as entered and shown back to
-// its owner. `completedAt` is set by the agreement step; a MUN application
-// requires it.
+// organizer_profiles — the one-time organizer onboarding wizard (profile, first
+// MUN, payout UPI, agreement), 1:1 with an ORGANIZER user. See
+// lib/actions/organizer-onboarding.ts. The UPI ID is a receiving address, so
+// it is stored as entered and shown back to its owner. `completedAt` is set by
+// the agreement step, which also submits the organizer application; a MUN
+// application requires it.
 // ---------------------------------------------------------------------------
 
 export const organizerProfiles = pgTable('organizer_profiles', {
@@ -233,12 +232,16 @@ export const organizerProfiles = pgTable('organizer_profiles', {
   firstName: text('first_name'),
   lastName: text('last_name'),
   contactPhone: text('contact_phone'),
-  panName: text('pan_name'),
-  panLast4: text('pan_last4'),
-  panCiphertext: text('pan_ciphertext'),
-  // null until the GST step is answered; false means "no GSTIN".
-  hasGstin: boolean('has_gstin'),
-  gstin: text('gstin'),
+  // The organizer's first MUN, answered in the wizard and submitted as their
+  // organizer application (organizer_applications) when the agreement is accepted.
+  munName: text('mun_name'),
+  munCity: text('mun_city'),
+  munStartDate: timestamp('mun_start_date', { withTimezone: true }),
+  expectedDelegateCount: integer('expected_delegate_count'),
+  munDescription: text('mun_description'),
+  previousEditions: text('previous_editions'),
+  websiteUrl: text('website_url'),
+  firstMunId: text('first_mun_id').references(() => muns.id, { onDelete: 'set null' }),
   upiId: text('upi_id'),
   upiPhone: text('upi_phone'),
   agreementVersion: text('agreement_version'),

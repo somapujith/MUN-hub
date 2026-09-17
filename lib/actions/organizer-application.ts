@@ -6,6 +6,8 @@ import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 
 export type OrganizerApplication = InferSelectModel<typeof organizerApplications>
 
+export const ALREADY_APPLIED = 'You have already submitted an application to host a MUN'
+
 export interface SubmitOrganizerApplicationInput {
   // IMPORTANT: `organizerId` is trusted as a plain parameter here — this is
   // NOT the general "never trust client userId" pattern being ignored. It is
@@ -76,6 +78,17 @@ async function generateUniqueSlug(name: string): Promise<string> {
 export async function submitOrganizerApplication(
   input: SubmitOrganizerApplicationInput,
 ): Promise<OrganizerApplication> {
+  // One application per organizer (unique organizer_id). Checked before
+  // anything is written; otherwise the unique violation only fires after the
+  // MUN row exists, leaving an orphaned SUBMITTED mun behind. The constraint
+  // still backstops a concurrent double submit.
+  const [existing] = await db
+    .select({ id: organizerApplications.id })
+    .from(organizerApplications)
+    .where(eq(organizerApplications.organizerId, input.organizerId))
+    .limit(1)
+  if (existing) throw new Error(ALREADY_APPLIED)
+
   const slug = await generateUniqueSlug(input.conferenceName)
 
   const [draftMun] = await db

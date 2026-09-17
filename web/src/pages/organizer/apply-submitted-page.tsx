@@ -22,7 +22,7 @@ export function OrganizerApplySubmittedPage() {
                 <h1 className="font-display text-display-md text-balance text-ink">Application submitted</h1>
                 <p className="text-title-md text-body text-pretty dark:text-muted-foreground">
                   Your conference is now in our review queue. We&apos;ll be in touch within
-                  5 business days — you can track its status from your dashboard at any time.
+                  2 business days — you can track its status from your dashboard at any time.
                 </p>
               </div>
               <div className="flex flex-col gap-sm sm:flex-row">

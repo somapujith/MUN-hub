@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
 import { ZodError } from 'zod'
+import { ALREADY_APPLIED } from '@/lib/actions/organizer-application'
 import { ONBOARDING_ERRORS } from '@/lib/actions/organizer-onboarding'
 import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
 import type { AppVariables } from '../src/types'
@@ -83,6 +84,10 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     return { status: 503, code: 'UNAVAILABLE', message }
   }
 
+  if (message === ALREADY_APPLIED) {
+    return { status: 409, code: 'CONFLICT_DUPLICATE', message }
+  }
+
   // lib/actions/organizer-onboarding.ts
   if (
     message === ONBOARDING_ERRORS.locked ||
@@ -92,8 +97,10 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
   if (
-    message === 'PAN must look like ABCDE1234F' ||
-    message === 'GSTIN must be a valid 15-character GST number' ||
+    message === 'Expected start date must be a valid date' ||
+    /^Maximum expected delegates must be a whole number from 1 to \d+$/.test(message) ||
+    /^Description must be at least \d+ characters$/.test(message) ||
+    message === 'Website must be a full URL, including https://' ||
     message === 'UPI ID must look like name@bank' ||
     message === 'You must accept the organizer agreement to continue' ||
     / must be a 10-digit Indian mobile number$/.test(message)
@@ -222,7 +229,10 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: ONBOARDING_ERRORS.locked, status: 409, code: 'CONFLICT_STATE' },
   { message: ONBOARDING_ERRORS.incomplete, status: 409, code: 'CONFLICT_STATE' },
   { message: ONBOARDING_ERRORS.outOfOrder, status: 409, code: 'CONFLICT_STATE' },
-  { message: 'PAN must look like ABCDE1234F', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'Maximum expected delegates must be a whole number from 1 to 10000', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'Description must be at least 40 characters', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'MUN title is required', status: 400, code: 'VALIDATION_FAILED' },
+  { message: ALREADY_APPLIED, status: 409, code: 'CONFLICT_DUPLICATE' },
   { message: 'UPI mobile number must be a 10-digit Indian mobile number', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Emergency contact name is required', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Mun not found', status: 404, code: 'NOT_FOUND' },

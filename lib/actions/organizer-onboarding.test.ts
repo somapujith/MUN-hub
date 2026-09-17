@@ -1,21 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { organizerProfiles, userConsents, users } from '@/lib/db/schema'
+import { muns, organizerApplications, organizerProfiles, userConsents, users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import {
   ONBOARDING_ERRORS,
   acceptOrganizerAgreement,
   getOrganizerOnboarding,
   isOrganizerOnboardingComplete,
-  saveOrganizerGstStep,
-  saveOrganizerPanStep,
+  saveOrganizerDetailsStep,
+  saveOrganizerMunStep,
   saveOrganizerPaymentStep,
   saveOrganizerProfileStep,
 } from './organizer-onboarding'
+import { submitOrganizerApplication } from './organizer-application'
 
 const PROFILE = { firstName: 'Asha', lastName: 'Rao', contactPhone: '98765 43210' }
-const PAN = { panNumber: 'abcde1234f', panName: 'Asha Rao' }
+const MUN = { munName: 'Deccan MUN 2027', munCity: 'Hyderabad', munStartDate: '2027-01-15' }
+const DETAILS = {
+  expectedDelegateCount: 350,
+  munDescription: 'A three-day conference with eight committees for college delegates.',
+  previousEditions: '2 editions',
+  websiteUrl: 'https://deccanmun.example',
+}
 const PAYMENT = { upiId: 'Asha.Rao@okhdfcbank', upiPhone: '+919876543210' }
 
 async function makeUser(role: 'ORGANIZER' | 'STUDENT', name = 'Signup Name Here'): Promise<Session> {
@@ -26,35 +33,33 @@ async function makeUser(role: 'ORGANIZER' | 'STUDENT', name = 'Signup Name Here'
   return { userId: user.id, role: user.role }
 }
 
-async function completeAll(session: Session) {
+async function fillAllButAgreement(session: Session) {
   await saveOrganizerProfileStep(PROFILE, session)
-  await saveOrganizerPanStep(PAN, session)
-  await saveOrganizerGstStep({ hasGstin: false }, session)
+  await saveOrganizerMunStep(MUN, session)
+  await saveOrganizerDetailsStep(DETAILS, session)
   await saveOrganizerPaymentStep(PAYMENT, session)
-  return acceptOrganizerAgreement({ accepted: true }, session)
 }
 
 describe('organizer onboarding', () => {
-  it('walks the five steps in order and unlocks hosting at the end', async () => {
+  it('walks the five steps and submits the MUN as the organizer application', async () => {
     const session = await makeUser('ORGANIZER', 'Asha Rao Kumar')
 
     const initial = await getOrganizerOnboarding(session)
-    expect(initial).toMatchObject({ completedSteps: [], nextStep: 'PROFILE', completed: false })
+    expect(initial).toMatchObject({ completedSteps: [], nextStep: 'PROFILE', completed: false, firstMunId: null })
     expect(initial.profile).toMatchObject({ firstName: 'Asha', lastName: 'Rao Kumar' })
 
     let state = await saveOrganizerProfileStep(PROFILE, session)
-    expect(state.nextStep).toBe('PAN')
-    expect(state.profile.contactPhone).toBe('9876543210')
+    expect(state.nextStep).toBe('MUN')
     const [user] = await db.select().from(users).where(eq(users.id, session.userId))
     expect(user).toMatchObject({ name: 'Asha Rao', phone: '9876543210' })
 
-    state = await saveOrganizerPanStep(PAN, session)
-    expect(state.nextStep).toBe('GST')
-    expect(state.profile.panLast4).toBe('234F')
+    state = await saveOrganizerMunStep(MUN, session)
+    expect(state.nextStep).toBe('DETAILS')
+    expect(state.profile).toMatchObject({ munName: 'Deccan MUN 2027', munCity: 'Hyderabad', munStartDate: '2027-01-15' })
 
-    state = await saveOrganizerGstStep({ hasGstin: true, gstin: '27abcde1234f1z5' }, session)
-    expect(state.profile.gstin).toBe('27ABCDE1234F1Z5')
+    state = await saveOrganizerDetailsStep(DETAILS, session)
     expect(state.nextStep).toBe('PAYMENT')
+    expect(state.profile).toMatchObject({ expectedDelegateCount: 350, websiteUrl: 'https://deccanmun.example' })
 
     state = await saveOrganizerPaymentStep(PAYMENT, session)
     expect(state.profile).toMatchObject({ upiId: 'asha.rao@okhdfcbank', upiPhone: '9876543210' })
@@ -63,8 +68,17 @@ describe('organizer onboarding', () => {
 
     state = await acceptOrganizerAgreement({ accepted: true }, session)
     expect(state).toMatchObject({ completed: true, nextStep: null })
-    expect(state.completedSteps).toEqual(['PROFILE', 'PAN', 'GST', 'PAYMENT', 'AGREEMENT'])
+    expect(state.completedSteps).toEqual(['PROFILE', 'MUN', 'DETAILS', 'PAYMENT', 'AGREEMENT'])
     expect(await isOrganizerOnboardingComplete(session.userId)).toBe(true)
+
+    const [application] = await db
+      .select()
+      .from(organizerApplications)
+      .where(eq(organizerApplications.organizerId, session.userId))
+    expect(application.status).toBe('SUBMITTED')
+    expect(state.firstMunId).toBe(application.munId)
+    const [mun] = await db.select().from(muns).where(eq(muns.id, application.munId!))
+    expect(mun).toMatchObject({ name: 'Deccan MUN 2027', city: 'Hyderabad', status: 'SUBMITTED', organizerId: session.userId })
 
     const consents = await db
       .select()
@@ -73,35 +87,26 @@ describe('organizer onboarding', () => {
     expect(consents).toHaveLength(1)
   })
 
-  it('stores the PAN encrypted and never returns it in full', async () => {
+  it("doesn't create a second application for an organizer who already has one", async () => {
     const session = await makeUser('ORGANIZER')
-    await saveOrganizerProfileStep(PROFILE, session)
-    const state = await saveOrganizerPanStep(PAN, session)
+    const existing = await submitOrganizerApplication({
+      organizerId: session.userId,
+      conferenceName: 'Earlier MUN',
+      location: 'Pune',
+      expectedDate: new Date('2027-03-01'),
+      expectedDelegateCount: 100,
+      description: 'Submitted before the wizard existed, through the old form.',
+    })
+    await fillAllButAgreement(session)
 
-    const [row] = await db.select().from(organizerProfiles).where(eq(organizerProfiles.userId, session.userId))
-    expect(row.panCiphertext).toBeTruthy()
-    expect(row.panCiphertext).not.toContain('ABCDE1234F')
-    expect(JSON.stringify(state)).not.toContain('ABCDE1234F')
-  })
-
-  it('accepts "no GSTIN" but requires a valid one when the organizer has it', async () => {
-    const session = await makeUser('ORGANIZER')
-    await saveOrganizerProfileStep(PROFILE, session)
-    await saveOrganizerPanStep(PAN, session)
-
-    await expect(saveOrganizerGstStep({ hasGstin: true, gstin: '12345' }, session)).rejects.toThrow(
-      'GSTIN must be a valid 15-character GST number',
-    )
-    const state = await saveOrganizerGstStep({ hasGstin: false, gstin: 'ignored' }, session)
-    expect(state.profile).toMatchObject({ hasGstin: false, gstin: null })
-    expect(state.completedSteps).toContain('GST')
-  })
-
-  it('rejects steps taken out of order', async () => {
-    const session = await makeUser('ORGANIZER')
-    await expect(saveOrganizerPanStep(PAN, session)).rejects.toThrow(ONBOARDING_ERRORS.outOfOrder)
-    await expect(saveOrganizerPaymentStep(PAYMENT, session)).rejects.toThrow(ONBOARDING_ERRORS.outOfOrder)
-    await expect(acceptOrganizerAgreement({ accepted: true }, session)).rejects.toThrow(ONBOARDING_ERRORS.outOfOrder)
+    const state = await acceptOrganizerAgreement({ accepted: true }, session)
+    expect(state.completed).toBe(true)
+    expect(state.firstMunId).toBe(existing.munId)
+    const applications = await db
+      .select()
+      .from(organizerApplications)
+      .where(eq(organizerApplications.organizerId, session.userId))
+    expect(applications).toHaveLength(1)
   })
 
   it('validates each field', async () => {
@@ -114,11 +119,26 @@ describe('organizer onboarding', () => {
     )
     await saveOrganizerProfileStep(PROFILE, session)
 
-    await expect(saveOrganizerPanStep({ ...PAN, panNumber: 'ABCD1234F' }, session)).rejects.toThrow(
-      'PAN must look like ABCDE1234F',
+    await expect(saveOrganizerMunStep({ ...MUN, munName: '' }, session)).rejects.toThrow('MUN title is required')
+    await expect(saveOrganizerMunStep({ ...MUN, munStartDate: '15/01/2027' }, session)).rejects.toThrow(
+      'Expected start date must be a valid date',
     )
-    await saveOrganizerPanStep(PAN, session)
-    await saveOrganizerGstStep({ hasGstin: false }, session)
+    await saveOrganizerMunStep(MUN, session)
+
+    await expect(saveOrganizerDetailsStep({ ...DETAILS, expectedDelegateCount: 0 }, session)).rejects.toThrow(
+      'Maximum expected delegates must be a whole number from 1 to 10000',
+    )
+    await expect(saveOrganizerDetailsStep({ ...DETAILS, expectedDelegateCount: 12.5 }, session)).rejects.toThrow(
+      'Maximum expected delegates',
+    )
+    await expect(saveOrganizerDetailsStep({ ...DETAILS, munDescription: 'Too short' }, session)).rejects.toThrow(
+      'Description must be at least 40 characters',
+    )
+    await expect(saveOrganizerDetailsStep({ ...DETAILS, websiteUrl: 'deccanmun.example' }, session)).rejects.toThrow(
+      'Website must be a full URL, including https://',
+    )
+    const state = await saveOrganizerDetailsStep({ ...DETAILS, previousEditions: ' ', websiteUrl: '' }, session)
+    expect(state.profile).toMatchObject({ previousEditions: null, websiteUrl: null })
 
     await expect(saveOrganizerPaymentStep({ ...PAYMENT, upiId: 'not-a-upi' }, session)).rejects.toThrow(
       'UPI ID must look like name@bank',
@@ -133,9 +153,17 @@ describe('organizer onboarding', () => {
     )
   })
 
-  it('locks every step once the agreement is accepted', async () => {
+  it('rejects steps taken out of order', async () => {
     const session = await makeUser('ORGANIZER')
-    await completeAll(session)
+    await expect(saveOrganizerMunStep(MUN, session)).rejects.toThrow(ONBOARDING_ERRORS.outOfOrder)
+    await expect(saveOrganizerPaymentStep(PAYMENT, session)).rejects.toThrow(ONBOARDING_ERRORS.outOfOrder)
+    await expect(acceptOrganizerAgreement({ accepted: true }, session)).rejects.toThrow(ONBOARDING_ERRORS.outOfOrder)
+  })
+
+  it('locks every step once the agreement is accepted, and never submits twice', async () => {
+    const session = await makeUser('ORGANIZER')
+    await fillAllButAgreement(session)
+    await acceptOrganizerAgreement({ accepted: true }, session)
 
     await expect(saveOrganizerProfileStep(PROFILE, session)).rejects.toThrow(ONBOARDING_ERRORS.locked)
     await expect(saveOrganizerPaymentStep({ ...PAYMENT, upiId: 'someone.else@ybl' }, session)).rejects.toThrow(
@@ -145,6 +173,22 @@ describe('organizer onboarding', () => {
 
     const [row] = await db.select().from(organizerProfiles).where(eq(organizerProfiles.userId, session.userId))
     expect(row.upiId).toBe('asha.rao@okhdfcbank')
+  })
+
+  it('handles a double submit of the agreement without a second application', async () => {
+    const session = await makeUser('ORGANIZER')
+    await fillAllButAgreement(session)
+
+    const results = await Promise.allSettled([
+      acceptOrganizerAgreement({ accepted: true }, session),
+      acceptOrganizerAgreement({ accepted: true }, session),
+    ])
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    const applications = await db
+      .select()
+      .from(organizerApplications)
+      .where(eq(organizerApplications.organizerId, session.userId))
+    expect(applications).toHaveLength(1)
   })
 
   it('is organizer-only', async () => {

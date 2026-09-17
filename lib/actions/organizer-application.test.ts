@@ -2,9 +2,31 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, users } from '@/lib/db/schema'
-import { submitOrganizerApplication } from './organizer-application'
+import { ALREADY_APPLIED, submitOrganizerApplication } from './organizer-application'
 
 describe('submitOrganizerApplication', () => {
+  it('refuses a second application without creating another mun', async () => {
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'Repeat Org', email: `repeatorg-${crypto.randomUUID()}@test.com`, role: 'ORGANIZER' })
+      .returning()
+    const input = {
+      organizerId: organizer.id,
+      conferenceName: 'Repeat MUN',
+      expectedDate: new Date('2027-08-01'),
+      location: 'Pune, India',
+      expectedDelegateCount: 100,
+      description: 'Applying twice should not leave an orphaned mun behind.',
+    }
+    await submitOrganizerApplication(input)
+
+    await expect(submitOrganizerApplication({ ...input, conferenceName: 'Repeat MUN Two' })).rejects.toThrow(
+      ALREADY_APPLIED,
+    )
+    const owned = await db.select({ id: muns.id }).from(muns).where(eq(muns.organizerId, organizer.id))
+    expect(owned).toHaveLength(1)
+  })
+
   it('creates an application and mun linked to each other, mun starts SUBMITTED', async () => {
     const [organizer] = await db
       .insert(users)

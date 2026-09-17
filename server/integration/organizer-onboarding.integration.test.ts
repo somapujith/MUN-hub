@@ -23,8 +23,12 @@ describe('organizer onboarding routes', () => {
 
     const steps: Array<[string, string, unknown]> = [
       ['PUT', '/profile', { firstName: 'Ravi', lastName: 'Menon', contactPhone: '9123456780' }],
-      ['PUT', '/pan', { panNumber: 'PQRSX6789K', panName: 'Ravi Menon' }],
-      ['PUT', '/gst', { hasGstin: false }],
+      ['PUT', '/mun', { munName: 'Coastal MUN', munCity: 'Kochi', munStartDate: '2027-02-10' }],
+      [
+        'PUT',
+        '/details',
+        { expectedDelegateCount: 200, munDescription: 'Two days, six committees, open to school and college delegates.' },
+      ],
       ['PUT', '/payment', { upiId: 'ravi@ybl', upiPhone: '9123456780' }],
       ['POST', '/agreement', { accepted: true }],
     ]
@@ -35,7 +39,21 @@ describe('organizer onboarding routes', () => {
 
     const done = await (await call('GET', '', headers)).json()
     expect(done).toMatchObject({ completed: true, nextStep: null })
-    expect(JSON.stringify(done)).not.toContain('PQRSX6789K')
+    expect(done.firstMunId).toEqual(expect.any(String))
+
+    // The wizard already filed the application, and it's one per organizer.
+    const again = await app.request('/api/v1/organizer/applications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({
+        conferenceName: 'Second MUN',
+        expectedDate: '2027-05-01T00:00:00.000Z',
+        location: 'Kochi',
+        expectedDelegateCount: 50,
+        description: 'Trying to file a second application after the wizard did.',
+      }),
+    })
+    expect(again.status).toBe(409)
 
     const locked = await call('PUT', '/payment', headers, { upiId: 'other@ybl', upiPhone: '9123456780' })
     expect(locked.status).toBe(409)

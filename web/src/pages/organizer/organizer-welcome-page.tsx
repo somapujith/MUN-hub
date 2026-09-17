@@ -10,11 +10,11 @@ import { RequireOrganizer } from "@/guards/require-organizer";
 const STEPS = [
   {
     title: "Register as an organizer",
-    description: "Add your profile, PAN, GST and UPI payout details once. It takes a few minutes.",
+    description: "Tell us about you and your MUN, and where payouts should go. It takes a few minutes.",
   },
   {
     title: "Build your MUN",
-    description: "Tell us about your conference, then set up committees, portfolios, registration tiers and pricing.",
+    description: "Once we approve your application, set up committees, portfolios, registration tiers and pricing.",
   },
   {
     title: "Go live on MUN Hub",
@@ -25,7 +25,8 @@ const STEPS = [
 /**
  * Where a newly created organizer account lands (publish.munhub.in): a
  * three-step outline of hosting on MUN Hub and one call to action — the
- * onboarding wizard, or the host application once onboarding is done.
+ * onboarding wizard (which submits the host application), or the dashboard
+ * once that's done.
  */
 export function OrganizerWelcomePage() {
   return (
@@ -42,7 +43,7 @@ export function OrganizerWelcomePage() {
 
 function WelcomeContent() {
   const onboarding = useQuery({ queryKey: queryKeys.organizerOnboarding(), queryFn: getOrganizerOnboarding });
-  const nextHref = onboarding.data?.completed ? "/organizer/apply" : "/organizer/onboarding";
+  const nextHref = onboarding.data?.completed ? "/organizer/dashboard" : "/organizer/onboarding";
 
   return (
     <main className="flex flex-1 items-center justify-center px-lg pt-section pb-28 lg:pb-section">
@@ -79,7 +80,7 @@ function WelcomeContent() {
             to={nextHref}
             className="mt-xl ml-[100px] inline-flex h-11 items-center gap-1 rounded-lg bg-[#121212] pr-3 pl-4 text-[14px] font-medium text-white transition-colors hover:bg-[#2a2a2e] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#121212] md:ml-[112px]"
           >
-            {onboarding.data?.completed ? "Apply to host a MUN" : "Start your journey"}
+            {onboarding.data?.completed ? "Go to your dashboard" : "Start your journey"}
             <ChevronRightIcon aria-hidden className="size-4" strokeWidth={2.5} />
           </Link>
         </div>

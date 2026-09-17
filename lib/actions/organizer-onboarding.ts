@@ -1,27 +1,27 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { organizerProfiles, userConsents, users } from '@/lib/db/schema'
-import { encryptField } from '@/lib/crypto/field-encryption'
+import { organizerApplications, organizerProfiles, userConsents, users } from '@/lib/db/schema'
+import { submitOrganizerApplication } from '@/lib/actions/organizer-application'
 import type { Session } from '@/lib/auth/adapter'
 
 /**
- * One-time organizer onboarding, done in order after signup and required
- * before applying to host a MUN:
+ * One-time organizer onboarding, done in order after signup:
  *
  *   1. PROFILE    first name, last name, contact number
- *   2. PAN        PAN number (encrypted, write-only) and the name on it
- *   3. GST        GSTIN, or an explicit "no GSTIN"
+ *   2. MUN        the MUN's title, host city and expected start date
+ *   3. DETAILS    maximum expected delegates, a description, previous
+ *                 editions and website (optional)
  *   4. PAYMENT    the UPI ID payouts go to, and the mobile number linked to it
- *   5. AGREEMENT  the organizer agreement, recorded as a consent row
+ *   5. AGREEMENT  the organizer agreement — accepting it submits the MUN
+ *                 answers as the organizer's application (Gate 1)
  *
- * The details belong to the organizer account and apply to every MUN they
- * host. Once the agreement is accepted the details are locked: changing
- * where money goes after onboarding has to go through support.
+ * Accepting the agreement also locks the details: changing where money goes
+ * after onboarding has to go through support.
  */
 
 export const ORGANIZER_AGREEMENT_VERSION = '2026-09-17'
 
-export const ONBOARDING_STEPS = ['PROFILE', 'PAN', 'GST', 'PAYMENT', 'AGREEMENT'] as const
+export const ONBOARDING_STEPS = ['PROFILE', 'MUN', 'DETAILS', 'PAYMENT', 'AGREEMENT'] as const
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number]
 
 export const ONBOARDING_ERRORS = {
@@ -31,9 +31,10 @@ export const ONBOARDING_ERRORS = {
   notOrganizer: 'Forbidden',
 } as const
 
+export const MIN_DESCRIPTION_LENGTH = 40
+export const MAX_EXPECTED_DELEGATES = 10_000
+
 const PHONE_PATTERN = /^[6-9]\d{9}$/
-const PAN_PATTERN = /^[A-Z]{5}\d{4}[A-Z]$/
-const GSTIN_PATTERN = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/
 const UPI_PATTERN = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,63}$/
 
 export interface OrganizerOnboarding {
@@ -41,10 +42,14 @@ export interface OrganizerOnboarding {
     firstName: string | null
     lastName: string | null
     contactPhone: string | null
-    panName: string | null
-    panLast4: string | null
-    hasGstin: boolean | null
-    gstin: string | null
+    munName: string | null
+    munCity: string | null
+    /** ISO date (YYYY-MM-DD) */
+    munStartDate: string | null
+    expectedDelegateCount: number | null
+    munDescription: string | null
+    previousEditions: string | null
+    websiteUrl: string | null
     upiId: string | null
     upiPhone: string | null
   }
@@ -52,6 +57,8 @@ export interface OrganizerOnboarding {
   /** The first step not yet done, or null when onboarding is complete. */
   nextStep: OnboardingStep | null
   completed: boolean
+  /** The MUN created from the wizard's answers, once submitted. */
+  firstMunId: string | null
   agreementVersion: string
 }
 
@@ -65,8 +72,8 @@ function stepsDone(row: ProfileRow | undefined): OnboardingStep[] {
   if (!row) return []
   const done: OnboardingStep[] = []
   if (row.firstName && row.lastName && row.contactPhone) done.push('PROFILE')
-  if (row.panCiphertext && row.panName) done.push('PAN')
-  if (row.hasGstin === false || (row.hasGstin === true && row.gstin)) done.push('GST')
+  if (row.munName && row.munCity && row.munStartDate) done.push('MUN')
+  if (row.expectedDelegateCount && row.munDescription) done.push('DETAILS')
   if (row.upiId && row.upiPhone) done.push('PAYMENT')
   if (row.completedAt) done.push('AGREEMENT')
   return done
@@ -81,16 +88,20 @@ function toOnboarding(row: ProfileRow | undefined, fallbackName: string | null):
       firstName: row?.firstName ?? (first || null),
       lastName: row?.lastName ?? (rest.join(' ') || null),
       contactPhone: row?.contactPhone ?? null,
-      panName: row?.panName ?? null,
-      panLast4: row?.panLast4 ?? null,
-      hasGstin: row?.hasGstin ?? null,
-      gstin: row?.gstin ?? null,
+      munName: row?.munName ?? null,
+      munCity: row?.munCity ?? null,
+      munStartDate: row?.munStartDate ? row.munStartDate.toISOString().slice(0, 10) : null,
+      expectedDelegateCount: row?.expectedDelegateCount ?? null,
+      munDescription: row?.munDescription ?? null,
+      previousEditions: row?.previousEditions ?? null,
+      websiteUrl: row?.websiteUrl ?? null,
       upiId: row?.upiId ?? null,
       upiPhone: row?.upiPhone ?? null,
     },
     completedSteps,
     nextStep: ONBOARDING_STEPS.find((step) => !completedSteps.includes(step)) ?? null,
     completed: Boolean(row?.completedAt),
+    firstMunId: row?.firstMunId ?? null,
     agreementVersion: ORGANIZER_AGREEMENT_VERSION,
   }
 }
@@ -139,6 +150,10 @@ function requiredText(value: string | undefined, label: string): string {
   return trimmed
 }
 
+function optionalText(value: string | undefined): string | null {
+  return value?.trim() || null
+}
+
 function normalizePhone(value: string, label: string): string {
   const digits = value.replace(/[\s-]/g, '').replace(/^\+?91(?=\d{10}$)/, '')
   if (!PHONE_PATTERN.test(digits)) throw new Error(`${label} must be a 10-digit Indian mobile number`)
@@ -173,37 +188,57 @@ export async function saveOrganizerProfileStep(
   return getOrganizerOnboarding(session)
 }
 
-export async function saveOrganizerPanStep(
-  input: { panNumber: string; panName: string },
+export async function saveOrganizerMunStep(
+  input: { munName: string; munCity: string; munStartDate: string },
   session: Session | null,
 ): Promise<OrganizerOnboarding> {
   assertOrganizer(session)
-  await rowForStep(session, 'PAN')
-  const panNumber = input.panNumber.replace(/\s/g, '').toUpperCase()
-  if (!PAN_PATTERN.test(panNumber)) throw new Error('PAN must look like ABCDE1234F')
-  const panName = requiredText(input.panName, 'Name as on PAN')
+  await rowForStep(session, 'MUN')
+  const munName = requiredText(input.munName, 'MUN title')
+  const munCity = requiredText(input.munCity, 'Host city')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.munStartDate.trim())) {
+    throw new Error('Expected start date must be a valid date')
+  }
+  const munStartDate = new Date(`${input.munStartDate.trim()}T00:00:00.000Z`)
+  if (Number.isNaN(munStartDate.getTime())) throw new Error('Expected start date must be a valid date')
 
-  await saveRow(session.userId, {
-    panName,
-    panLast4: panNumber.slice(-4),
-    panCiphertext: encryptField(panNumber),
-  })
+  await saveRow(session.userId, { munName, munCity, munStartDate })
   return getOrganizerOnboarding(session)
 }
 
-export async function saveOrganizerGstStep(
-  input: { hasGstin: boolean; gstin?: string },
+export async function saveOrganizerDetailsStep(
+  input: { expectedDelegateCount: number; munDescription: string; previousEditions?: string; websiteUrl?: string },
   session: Session | null,
 ): Promise<OrganizerOnboarding> {
   assertOrganizer(session)
-  await rowForStep(session, 'GST')
-  let gstin: string | null = null
-  if (input.hasGstin) {
-    gstin = (input.gstin ?? '').replace(/\s/g, '').toUpperCase()
-    if (!GSTIN_PATTERN.test(gstin)) throw new Error('GSTIN must be a valid 15-character GST number')
+  await rowForStep(session, 'DETAILS')
+  const count = input.expectedDelegateCount
+  if (!Number.isInteger(count) || count < 1 || count > MAX_EXPECTED_DELEGATES) {
+    throw new Error(`Maximum expected delegates must be a whole number from 1 to ${MAX_EXPECTED_DELEGATES}`)
+  }
+  const munDescription = requiredText(input.munDescription, 'Description')
+  if (munDescription.length < MIN_DESCRIPTION_LENGTH) {
+    throw new Error(`Description must be at least ${MIN_DESCRIPTION_LENGTH} characters`)
+  }
+  const websiteUrl = optionalText(input.websiteUrl)
+  if (websiteUrl) {
+    let protocol = ''
+    try {
+      protocol = new URL(websiteUrl).protocol
+    } catch {
+      // handled below
+    }
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      throw new Error('Website must be a full URL, including https://')
+    }
   }
 
-  await saveRow(session.userId, { hasGstin: input.hasGstin, gstin })
+  await saveRow(session.userId, {
+    expectedDelegateCount: count,
+    munDescription,
+    previousEditions: optionalText(input.previousEditions),
+    websiteUrl,
+  })
   return getOrganizerOnboarding(session)
 }
 
@@ -222,8 +257,9 @@ export async function saveOrganizerPaymentStep(
 }
 
 /**
- * Final step: records the organizer agreement and completes onboarding, which
- * locks the details above and unlocks the host application.
+ * Final step: records the organizer agreement, submits the wizard's MUN
+ * answers as the organizer's application (unless they already have one), and
+ * completes onboarding, which locks the details above.
  */
 export async function acceptOrganizerAgreement(
   input: { accepted: boolean },
@@ -233,13 +269,41 @@ export async function acceptOrganizerAgreement(
   await rowForStep(session, 'AGREEMENT')
   if (!input.accepted) throw new Error('You must accept the organizer agreement to continue')
 
-  const now = new Date()
   await db.transaction(async (tx) => {
-    // Conditional on "not yet completed" so a double submit can't record the
-    // agreement twice.
+    // Row lock: a double submit waits here, then finds onboarding completed,
+    // so it can't create a second application.
+    const [row] = await tx
+      .select()
+      .from(organizerProfiles)
+      .where(eq(organizerProfiles.userId, session.userId))
+      .for('update')
+    if (!row || row.completedAt) throw new Error(ONBOARDING_ERRORS.locked)
+
+    const [existing] = await db
+      .select({ munId: organizerApplications.munId })
+      .from(organizerApplications)
+      .where(eq(organizerApplications.organizerId, session.userId))
+      .limit(1)
+
+    let firstMunId = existing?.munId ?? null
+    if (!existing) {
+      const application = await submitOrganizerApplication({
+        organizerId: session.userId,
+        conferenceName: row.munName!,
+        location: row.munCity!,
+        expectedDate: row.munStartDate!,
+        expectedDelegateCount: row.expectedDelegateCount!,
+        description: row.munDescription!,
+        previousEditions: row.previousEditions ?? undefined,
+        websiteUrl: row.websiteUrl ?? undefined,
+      })
+      firstMunId = application.munId
+    }
+
+    const now = new Date()
     const updated = await tx
       .update(organizerProfiles)
-      .set({ completedAt: now, agreementVersion: ORGANIZER_AGREEMENT_VERSION, updatedAt: now })
+      .set({ completedAt: now, agreementVersion: ORGANIZER_AGREEMENT_VERSION, firstMunId, updatedAt: now })
       .where(and(eq(organizerProfiles.userId, session.userId), isNull(organizerProfiles.completedAt)))
       .returning({ userId: organizerProfiles.userId })
     if (updated.length === 0) throw new Error(ONBOARDING_ERRORS.locked)
