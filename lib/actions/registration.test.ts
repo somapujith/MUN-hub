@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
 import {
   accommodationOptions,
@@ -11,12 +11,16 @@ import {
   users,
 } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
+import { mockPaymentsAdapter, simulatePaymentOutcome } from '@/lib/payments/mock-adapter'
+import { processPaymentWebhook } from '@/lib/payments/webhook'
 
 import {
   REGISTRATION_ERRORS,
+  REGISTRATION_ERROR_STATUS,
   initiateRegistration,
   releaseExpiredReservations,
   getRegistrationById,
+  getRegistrationReceipt,
   getProductAvailability,
   getProductsAvailability,
 } from './registration'
@@ -711,6 +715,301 @@ describe('getRegistrationById', () => {
 
   it('throws Forbidden for an unauthenticated caller', async () => {
     await expect(getRegistrationById('00000000-0000-0000-0000-000000000000', null)).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('initiateRegistration — payments', () => {
+  const ENV_KEYS = ['MOCK_PAYMENTS_ENABLED', 'PLATFORM_FEE_BPS', 'PLATFORM_FEE_TAX_BPS'] as const
+  const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]))
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (savedEnv[key] === undefined) delete process.env[key]
+      else process.env[key] = savedEnv[key]
+    }
+    vi.restoreAllMocks()
+  })
+
+  async function setup(productOverrides: Partial<typeof registrationProducts.$inferInsert> = {}) {
+    const organizer = await createUser('ORGANIZER')
+    const student = await createUser('STUDENT')
+    const mun = await createMun(organizer.id)
+    const [product] = await db
+      .insert(registrationProducts)
+      .values({ munId: mun.id, name: 'Delegate', price: 1499, capacity: 10, ...productOverrides })
+      .returning()
+    return { organizer, student, mun, product, session: studentSessionFor(student.id) }
+  }
+
+  async function paymentFor(registrationId: string) {
+    const [payment] = await db.select().from(payments).where(eq(payments.registrationId, registrationId))
+    return payment
+  }
+
+  it('stores the provider, currency and platform-fee split on the payment', async () => {
+    process.env.PLATFORM_FEE_BPS = '250'
+    process.env.PLATFORM_FEE_TAX_BPS = '1800'
+    const { mun, product, session } = await setup()
+
+    const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session)
+    expect(result).toMatchObject({ status: 'PAYMENT_PENDING', replayed: false })
+
+    expect(await paymentFor(result.registrationId)).toMatchObject({
+      provider: 'mock_razorpay',
+      providerOrderId: result.orderId,
+      amount: 1499,
+      currency: 'INR',
+      platformFeeAmount: 37,
+      platformFeeTaxAmount: 7,
+      organizerNetAmount: 1455,
+      status: 'PENDING',
+    })
+  })
+
+  it('charges the early-bird price before its deadline, decided server-side', async () => {
+    const { mun, product, session } = await setup({
+      price: 2000,
+      earlyBirdPrice: 1500,
+      earlyBirdDeadline: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    })
+    const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session)
+    expect((await paymentFor(result.registrationId)).amount).toBe(1500)
+  })
+
+  it('charges the regular price once the early-bird deadline has passed', async () => {
+    const { mun, product, session } = await setup({
+      price: 2000,
+      earlyBirdPrice: 1500,
+      earlyBirdDeadline: new Date(Date.now() - 60_000),
+    })
+    const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session)
+    expect((await paymentFor(result.registrationId)).amount).toBe(2000)
+  })
+
+  it('adds accommodation to the early-bird pass price', async () => {
+    const { mun, product, session } = await setup({
+      price: 2000,
+      earlyBirdPrice: 1500,
+      earlyBirdDeadline: new Date(Date.now() + 60 * 60 * 1000),
+    })
+    const accommodation = await createAccommodation(mun.id, 5, 700)
+    const result = await initiateRegistration(
+      { munId: mun.id, registrationProductId: product.id, accommodationOptionId: accommodation.id },
+      session,
+    )
+    expect((await paymentFor(result.registrationId)).amount).toBe(2200)
+  })
+
+  it('confirms a free pass immediately, with no order and no payment row', async () => {
+    const { mun, product, session } = await setup({ price: 0 })
+    const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session)
+
+    expect(result).toEqual({ registrationId: result.registrationId, orderId: null, status: 'CONFIRMED', replayed: false })
+    const [registration] = await db.select().from(registrations).where(eq(registrations.id, result.registrationId))
+    expect(registration.status).toBe('CONFIRMED')
+    expect(registration.expiresAt).toBeNull()
+    expect(await paymentFor(result.registrationId)).toBeUndefined()
+  })
+
+  it('refuses a paid pass when online payments are unavailable, without holding a seat', async () => {
+    process.env.MOCK_PAYMENTS_ENABLED = 'false'
+    const { mun, product, session, student } = await setup()
+
+    await expect(
+      initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session),
+    ).rejects.toThrow(REGISTRATION_ERRORS.paymentsUnavailable)
+    expect(REGISTRATION_ERROR_STATUS[REGISTRATION_ERRORS.paymentsUnavailable]).toBe(503)
+
+    const held = await db.select().from(registrations).where(eq(registrations.userId, student.id))
+    expect(held).toHaveLength(0)
+  })
+
+  it('still confirms a free pass when online payments are unavailable', async () => {
+    process.env.MOCK_PAYMENTS_ENABLED = 'false'
+    const { mun, product, session } = await setup({ price: 0 })
+    const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session)
+    expect(result.status).toBe('CONFIRMED')
+  })
+
+  it('fails before reserving when the platform fee is misconfigured', async () => {
+    process.env.PLATFORM_FEE_BPS = 'lots'
+    const { mun, product, session, student } = await setup()
+    await expect(
+      initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session),
+    ).rejects.toThrow(/PLATFORM_FEE_BPS/)
+    expect(await db.select().from(registrations).where(eq(registrations.userId, student.id))).toHaveLength(0)
+  })
+
+  it('releases the seat at once when the provider cannot create an order, and lets the same key retry', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const createOrder = vi.spyOn(mockPaymentsAdapter, 'createOrder').mockRejectedValueOnce(new Error('gateway down'))
+    const { mun, product, session, student } = await setup({ capacity: 1 })
+    const idempotencyKey = crypto.randomUUID()
+
+    await expect(
+      initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session, { idempotencyKey }),
+    ).rejects.toThrow(REGISTRATION_ERRORS.paymentStartFailed)
+
+    const [failed] = await db.select().from(registrations).where(eq(registrations.userId, student.id))
+    expect(failed.status).toBe('CANCELLED')
+    expect(failed.idempotencyKey).toBeNull()
+
+    // The single seat is free again, and the same key starts a fresh attempt.
+    const retry = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session, { idempotencyKey })
+    expect(retry).toMatchObject({ status: 'PAYMENT_PENDING', replayed: false })
+    expect(retry.registrationId).not.toBe(failed.id)
+    expect(createOrder).toHaveBeenCalledTimes(2)
+  })
+
+  describe('idempotency', () => {
+    it('returns the original registration for a repeated key', async () => {
+      const { mun, product, session, student } = await setup()
+      const idempotencyKey = crypto.randomUUID()
+      const input = { munId: mun.id, registrationProductId: product.id }
+
+      const first = await initiateRegistration(input, session, { idempotencyKey })
+      const second = await initiateRegistration(input, session, { idempotencyKey })
+
+      expect(second).toEqual({ ...first, replayed: true })
+      expect(await db.select().from(registrations).where(eq(registrations.userId, student.id))).toHaveLength(1)
+    })
+
+    it('returns one registration to concurrent calls with the same key', async () => {
+      const { mun, product, session, student } = await setup()
+      const idempotencyKey = crypto.randomUUID()
+      const input = { munId: mun.id, registrationProductId: product.id }
+
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () => initiateRegistration(input, session, { idempotencyKey })),
+      )
+      expect(new Set(results.map((r) => r.registrationId)).size).toBe(1)
+      expect(results.filter((r) => !r.replayed)).toHaveLength(1)
+      expect(await db.select().from(registrations).where(eq(registrations.userId, student.id))).toHaveLength(1)
+    })
+
+    it('refuses a reused key for a different pass', async () => {
+      const { mun, product, session } = await setup()
+      const [otherProduct] = await db
+        .insert(registrationProducts)
+        .values({ munId: mun.id, name: 'Observer', price: 999, capacity: 10 })
+        .returning()
+      const idempotencyKey = crypto.randomUUID()
+
+      await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session, { idempotencyKey })
+      await expect(
+        initiateRegistration({ munId: mun.id, registrationProductId: otherProduct.id }, session, { idempotencyKey }),
+      ).rejects.toThrow(REGISTRATION_ERRORS.idempotencyKeyReused)
+    })
+
+    it('refuses concurrent calls that reuse one key across different passes', async () => {
+      const { mun, product, session, student } = await setup()
+      const [otherProduct] = await db
+        .insert(registrationProducts)
+        .values({ munId: mun.id, name: 'Observer', price: 999, capacity: 10 })
+        .returning()
+      const idempotencyKey = crypto.randomUUID()
+
+      const results = await Promise.allSettled([
+        initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session, { idempotencyKey }),
+        initiateRegistration({ munId: mun.id, registrationProductId: otherProduct.id }, session, { idempotencyKey }),
+      ])
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+      const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult
+      expect(String(rejected.reason)).toContain(REGISTRATION_ERRORS.idempotencyKeyReused)
+      expect(await db.select().from(registrations).where(eq(registrations.userId, student.id))).toHaveLength(1)
+    })
+
+    it('scopes keys to the user', async () => {
+      const { mun, product, session } = await setup()
+      const otherStudent = await createUser('STUDENT')
+      const idempotencyKey = crypto.randomUUID()
+      const input = { munId: mun.id, registrationProductId: product.id }
+
+      const mine = await initiateRegistration(input, session, { idempotencyKey })
+      const theirs = await initiateRegistration(input, studentSessionFor(otherStudent.id), { idempotencyKey })
+      expect(theirs.replayed).toBe(false)
+      expect(theirs.registrationId).not.toBe(mine.registrationId)
+    })
+
+    it('without a key, still rejects a second active registration', async () => {
+      const { mun, product, session } = await setup()
+      const input = { munId: mun.id, registrationProductId: product.id }
+      await initiateRegistration(input, session)
+      await expect(initiateRegistration(input, session)).rejects.toThrow(
+        'You already have an active registration for this product',
+      )
+    })
+  })
+})
+
+describe('getRegistrationReceipt', () => {
+  async function paidRegistration() {
+    const organizer = await createUser('ORGANIZER')
+    const student = await createUser('STUDENT')
+    const mun = await createMun(organizer.id)
+    const product = await createProduct(mun.id, 10)
+    const session = studentSessionFor(student.id)
+    const { registrationId } = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session)
+    const [payment] = await db.select().from(payments).where(eq(payments.registrationId, registrationId))
+    const webhook = simulatePaymentOutcome(
+      { orderId: payment.providerOrderId, amount: payment.amount, currency: payment.currency },
+      'success',
+      { providerPaymentId: `pay_${registrationId}` },
+    )
+    await processPaymentWebhook(mockPaymentsAdapter, webhook.rawBody, webhook.headers)
+    return { organizer, student, mun, product, session, registrationId, payment }
+  }
+
+  it('gives the delegate their receipt with the payment reference and paid date', async () => {
+    const { session, registrationId, mun, payment } = await paidRegistration()
+    const receipt = await getRegistrationReceipt(registrationId, session)
+
+    expect(receipt).toMatchObject({
+      registrationId,
+      status: 'CONFIRMED',
+      passName: 'Delegate',
+      mun: { name: mun.name, slug: mun.slug },
+      payment: {
+        amount: 2500,
+        currency: 'INR',
+        status: 'PAID',
+        reference: `pay_${registrationId}`,
+        orderId: payment.providerOrderId,
+      },
+    })
+    expect(receipt?.payment?.paidAt).toBeInstanceOf(Date)
+    expect(receipt?.payment).not.toHaveProperty('platformFeeAmount')
+  })
+
+  it('is owner-only: the organizer, an admin and a stranger all get null', async () => {
+    const { organizer, registrationId } = await paidRegistration()
+    const admin = await createUser('ADMIN')
+    const stranger = await createUser('STUDENT')
+
+    expect(await getRegistrationReceipt(registrationId, { userId: organizer.id, role: 'ORGANIZER' })).toBeNull()
+    expect(await getRegistrationReceipt(registrationId, { userId: admin.id, role: 'ADMIN' })).toBeNull()
+    expect(await getRegistrationReceipt(registrationId, studentSessionFor(stranger.id))).toBeNull()
+    await expect(getRegistrationReceipt(registrationId, null)).rejects.toThrow('Forbidden')
+  })
+
+  it('has no payment and no paid date before payment, and no payment at all for a free pass', async () => {
+    const organizer = await createUser('ORGANIZER')
+    const student = await createUser('STUDENT')
+    const mun = await createMun(organizer.id)
+    const paid = await createProduct(mun.id, 10)
+    const [free] = await db
+      .insert(registrationProducts)
+      .values({ munId: mun.id, name: 'Faculty', price: 0, capacity: 10 })
+      .returning()
+    const session = studentSessionFor(student.id)
+
+    const pending = await initiateRegistration({ munId: mun.id, registrationProductId: paid.id }, session)
+    const pendingReceipt = await getRegistrationReceipt(pending.registrationId, session)
+    expect(pendingReceipt?.payment).toMatchObject({ status: 'PENDING', reference: null, paidAt: null })
+
+    const confirmed = await initiateRegistration({ munId: mun.id, registrationProductId: free.id }, session)
+    const freeReceipt = await getRegistrationReceipt(confirmed.registrationId, session)
+    expect(freeReceipt).toMatchObject({ status: 'CONFIRMED', passName: 'Faculty', payment: null })
   })
 })
 

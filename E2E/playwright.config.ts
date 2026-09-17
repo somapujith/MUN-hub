@@ -109,6 +109,9 @@ export default defineConfig({
         // is raised; the login and organizer-code limits stay as in prod.
         RATE_LIMIT_GLOBAL_PER_MINUTE: '100000',
         TRUST_PROXY_HEADERS: '',
+        // The suite pays through the mock checkout, which only exists when
+        // explicitly enabled (lib/payments/registry.ts).
+        MOCK_PAYMENTS_ENABLED: 'true',
       },
     },
     {
