@@ -13,8 +13,12 @@
   ],
   "vars": {
     // Non-secret config only. Secrets (DATABASE_URL, PAYMENT_FIELD_KEY,
-    // MOCK_PAYMENT_WEBHOOK_SECRET, etc. — see .dev.vars.example) must be set
-    // via `wrangler secret put <NAME>`, never committed here.
+    // TOTP_FIELD_KEY, MOCK_PAYMENT_WEBHOOK_SECRET, etc. — see
+    // .dev.vars.example) must be set via `wrangler secret put <NAME>`, never
+    // committed here. REQUIRE_STAFF_2FA (lib/actions/staff-mfa.ts) is a plain
+    // var, not a secret, but is deliberately left out of this file — staff
+    // sign-in stays 2FA-optional until every staff account has enrolled and
+    // it's turned on here explicitly.
     "COOKIE_DOMAIN": ".munhub.in",
     // Extra exact origins only. The production web hosts are built in
     // (server/lib/origins.ts); localhost is trusted only with
@@ -46,7 +50,9 @@
     { "name": "RL_ORGANIZER_VERIFY_IP_EMAIL", "namespace_id": "1011", "simple": { "limit": 10, "period": 60 } },
     { "name": "RL_REGISTRATIONS_USER", "namespace_id": "1012", "simple": { "limit": 10, "period": 60 } },
     { "name": "RL_AVAILABILITY_IP", "namespace_id": "1013", "simple": { "limit": 60, "period": 60 } },
-    { "name": "RL_MUNS_LIST_IP", "namespace_id": "1014", "simple": { "limit": 120, "period": 60 } }
+    { "name": "RL_MUNS_LIST_IP", "namespace_id": "1014", "simple": { "limit": 120, "period": 60 } },
+    { "name": "RL_MFA_VERIFY_IP", "namespace_id": "1015", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RL_MFA_VERIFY_TOKEN", "namespace_id": "1016", "simple": { "limit": 10, "period": 60 } }
   ],
   // Hyperdrive config "munhub-db", created 2026-09-17 against the production
   // Neon instance. Pools/terminates Postgres connections at Cloudflare's edge

@@ -4,6 +4,7 @@ import { APPLICATION_PENDING } from '@/lib/actions/organizer-application'
 import { ONBOARDING_ERRORS } from '@/lib/actions/organizer-onboarding'
 import { ORGANIZER_OPS_ERROR_STATUS } from '@/lib/actions/organizer-ops-errors'
 import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
+import { MFA_ERRORS } from '@/lib/actions/staff-mfa'
 import type { AppVariables } from '../src/types'
 
 export type ErrorCode =
@@ -88,6 +89,23 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   // lib/actions/{organizer-dashboard,check-in,organizer-communications,results}.ts
   if (Object.hasOwn(ORGANIZER_OPS_ERROR_STATUS, message)) {
     return { ...ORGANIZER_OPS_ERROR_STATUS[message], message }
+  }
+
+  // lib/actions/staff-mfa.ts — staff TOTP enrollment + sign-in challenge.
+  if (message === MFA_ERRORS.staffOnly) {
+    return { status: 403, code: 'FORBIDDEN', message }
+  }
+  if (message === MFA_ERRORS.alreadyEnrolled || message === MFA_ERRORS.notEnrolled) {
+    return { status: 409, code: 'CONFLICT_STATE', message }
+  }
+  if (message === MFA_ERRORS.invalidCode) {
+    return { status: 401, code: 'UNAUTHORIZED', message }
+  }
+  if (message === MFA_ERRORS.expired) {
+    return { status: 400, code: 'VALIDATION_FAILED', message }
+  }
+  if (message === MFA_ERRORS.tooManyAttempts) {
+    return { status: 429, code: 'RATE_LIMITED', message }
   }
 
   if (message === APPLICATION_PENDING) {
@@ -344,4 +362,10 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'Cannot submit results while the MUN is ONBOARDING', status: 409, code: 'CONFLICT_STATE' },
   { message: 'No confirmed registration for this MUN matches that code', status: 404, code: 'NOT_FOUND' },
   { message: 'This MUN has reached its limit of 5 delegate messages per hour — try again later', status: 429, code: 'RATE_LIMITED' },
+  { message: MFA_ERRORS.staffOnly, status: 403, code: 'FORBIDDEN' },
+  { message: MFA_ERRORS.alreadyEnrolled, status: 409, code: 'CONFLICT_STATE' },
+  { message: MFA_ERRORS.notEnrolled, status: 409, code: 'CONFLICT_STATE' },
+  { message: MFA_ERRORS.invalidCode, status: 401, code: 'UNAUTHORIZED' },
+  { message: MFA_ERRORS.expired, status: 400, code: 'VALIDATION_FAILED' },
+  { message: MFA_ERRORS.tooManyAttempts, status: 429, code: 'RATE_LIMITED' },
 ]

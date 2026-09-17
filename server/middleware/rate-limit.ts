@@ -37,6 +37,12 @@ export const LIMITERS = {
   resetRequestEmail: { binding: 'RL_RESET_REQUEST_EMAIL', limit: 3, periodSeconds: 60, perIp: false },
   resetConfirmIp: { binding: 'RL_RESET_CONFIRM_IP', limit: 10, periodSeconds: 60, perIp: true },
   changePasswordUser: { binding: 'RL_CHANGE_PASSWORD_USER', limit: 5, periodSeconds: 60, perIp: false },
+  // Staff TOTP sign-in challenge (lib/actions/staff-mfa.ts). The pending
+  // token itself is single-use and already caps guesses per attempt
+  // (MFA_MAX_ATTEMPTS in staff-mfa.ts); these bound spraying across many
+  // different tokens from one IP, and hammering one token's endpoint fast.
+  mfaVerifyIp: { binding: 'RL_MFA_VERIFY_IP', limit: 20, periodSeconds: 60, perIp: true },
+  mfaVerifyToken: { binding: 'RL_MFA_VERIFY_TOKEN', limit: 10, periodSeconds: 60, perIp: false },
   // Organizer email-code sign-in. lib/actions/organizer-otp.ts also enforces a
   // per-address resend cooldown and hourly cap, and a per-code attempt limit.
   // The per-IP cap bounds how many different addresses one IP can send codes to.
@@ -53,6 +59,8 @@ type RequestFacts = {
   sessionUserId: string | null
   /** Lower-cased `email` from the JSON body, for rules that set `readsEmail`. */
   email?: string
+  /** `pendingToken` from the JSON body, for rules that set `readsPendingToken`. */
+  pendingToken?: string
 }
 
 type Check = { limiter: LimiterSpec; key: string }
@@ -61,6 +69,7 @@ type LimitRule = {
   method: string
   path: string
   readsEmail?: boolean
+  readsPendingToken?: boolean
   checks: (facts: RequestFacts) => Check[]
 }
 
@@ -99,6 +108,15 @@ const RULES: LimitRule[] = [
     method: 'POST',
     path: '/password-reset/confirm',
     checks: ({ ip }) => [{ limiter: LIMITERS.resetConfirmIp, key: `ip:${ip}` }],
+  },
+  {
+    method: 'POST',
+    path: '/auth/session/mfa',
+    readsPendingToken: true,
+    checks: ({ ip, pendingToken }) => [
+      { limiter: LIMITERS.mfaVerifyIp, key: `ip:${ip}` },
+      ...(pendingToken ? [{ limiter: LIMITERS.mfaVerifyToken, key: `token:${pendingToken}` }] : []),
+    ],
   },
   {
     method: 'POST',
@@ -146,6 +164,15 @@ async function readBodyEmail(c: Context): Promise<string | undefined> {
   }
 }
 
+async function readBodyPendingToken(c: Context): Promise<string | undefined> {
+  try {
+    const body = (await c.req.raw.clone().json()) as { pendingToken?: unknown }
+    return typeof body.pendingToken === 'string' ? body.pendingToken.trim() || undefined : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Rate limits per spec Section 4.6, mounted on /api/v1 (webhook routes are
  * mounted outside it). Every request counts against the global per-IP cap;
@@ -164,6 +191,9 @@ export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }>
   }
   if (matched.some((rule) => rule.readsEmail)) {
     facts.email = await readBodyEmail(c)
+  }
+  if (matched.some((rule) => rule.readsPendingToken)) {
+    facts.pendingToken = await readBodyPendingToken(c)
   }
 
   const checks: Check[] = [

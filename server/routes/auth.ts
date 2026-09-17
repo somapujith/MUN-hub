@@ -3,6 +3,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { changePassword, signIn, signOut, signUp } from '@/lib/actions/auth'
 import { requestOrganizerLoginCode, verifyOrganizerLoginCode } from '@/lib/actions/organizer-otp'
+import { beginMfaEnrollment, completeMfaChallenge, confirmMfaEnrollment, getMfaEnrollmentStatus } from '@/lib/actions/staff-mfa'
 import { SESSION_COOKIE_NAME, SESSION_MAX_LIFETIME_MS } from '@/lib/auth/session'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import { TURNSTILE_ACTIONS, TURNSTILE_TOKEN_MAX_LENGTH, turnstileRejection } from '../lib/turnstile'
@@ -132,6 +133,15 @@ const changePasswordBodySchema = z
   })
   .strict()
 
+const mfaChallengeBodySchema = z
+  .object({
+    pendingToken: z.string().trim().min(1).max(256),
+    code: z.string().trim().min(1).max(32),
+  })
+  .strict()
+
+const mfaConfirmBodySchema = z.object({ code: z.string().trim().min(1).max(32) }).strict()
+
 export const authRoutes = new Hono<{ Variables: AppVariables }>()
 
 function setSessionCookie(c: Context<{ Variables: AppVariables }>, token: string) {
@@ -147,11 +157,45 @@ function setSessionCookie(c: Context<{ Variables: AppVariables }>, token: string
 
 authRoutes.post('/session', async (c) => {
   const body = signInBodySchema.parse(await c.req.json())
-  const { userId, role, token } = await signIn(body.email, body.password)
+  const result = await signIn(body.email, body.password)
+
+  if (result.status === 'MFA_REQUIRED') {
+    return c.json({ status: result.status, pendingToken: result.pendingToken })
+  }
+
+  setSessionCookie(c, result.token)
+
+  return c.json({ status: result.status, userId: result.userId, role: result.role })
+})
+
+// Step 2 of staff sign-in when the account has confirmed TOTP enrollment
+// (lib/actions/staff-mfa.ts). `pendingToken` is the one POST /session just
+// returned; `code` is either a 6-digit TOTP or an XXXXX-XXXXX recovery code.
+authRoutes.post('/session/mfa', async (c) => {
+  const body = mfaChallengeBodySchema.parse(await c.req.json())
+  const { userId, role, token } = await completeMfaChallenge(body.pendingToken, body.code)
 
   setSessionCookie(c, token)
 
-  return c.json({ userId, role })
+  return c.json({ status: 'SIGNED_IN', userId, role })
+})
+
+// Staff TOTP enrollment (lib/actions/staff-mfa.ts). requireAuth only, not
+// requireRole([...STAFF_ROLES]): a staff account with REQUIRE_STAFF_2FA
+// enforced but not yet enrolled would otherwise never be able to reach the
+// one flow that lets it enroll. The action itself still rejects a non-staff
+// caller (MFA_ERRORS.staffOnly).
+authRoutes.get('/mfa/status', requireAuth, async (c) => {
+  return c.json(await getMfaEnrollmentStatus(c.get('session')!))
+})
+
+authRoutes.post('/mfa/setup', requireAuth, async (c) => {
+  return c.json(await beginMfaEnrollment(c.get('session')!))
+})
+
+authRoutes.post('/mfa/confirm', requireAuth, async (c) => {
+  const body = mfaConfirmBodySchema.parse(await c.req.json())
+  return c.json(await confirmMfaEnrollment(body.code, c.get('session')!))
 })
 
 // Delegate self-signup. Behind Turnstile when TURNSTILE_SECRET_KEY is set

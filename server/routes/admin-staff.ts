@@ -10,6 +10,7 @@ import {
   STAFF_ROLES,
   suspendStaff,
 } from '@/lib/actions/admin-staff'
+import { resetStaffMfa } from '@/lib/actions/staff-mfa'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
@@ -133,3 +134,10 @@ adminStaffRoutes.post('/admin/staff/:userId/set-password-link', requireAuth, req
     return c.json(link)
   }),
 )
+
+// Clears a staff member's TOTP enrollment (lib/actions/staff-mfa.ts) so they
+// can re-enroll after losing their device — SUPER_ADMIN only, audit-logged.
+adminStaffRoutes.post('/admin/staff/:userId/mfa/reset', requireAuth, requireRole([...MANAGE_ROLES]), async (c) => {
+  await resetStaffMfa(c.req.param('userId'), c.get('session')!)
+  return c.body(null, 204)
+})
