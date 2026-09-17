@@ -297,27 +297,47 @@ describe('server/wrangler.jsonc ratelimits', () => {
     return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1'))
   }
 
+  type RateLimitEntry = { name: string; namespace_id: string; simple: { limit: number; period: number } }
   const config = parseJsonc(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8')) as {
-    ratelimits?: Array<{ name: string; namespace_id: string; simple: { limit: number; period: number } }>
+    ratelimits?: RateLimitEntry[]
+    env?: { staging?: { ratelimits?: RateLimitEntry[]; vars?: Record<string, string> } }
   }
   const declared = config.ratelimits ?? []
+  // Bindings aren't inherited by named environments, so staging lists its own.
+  const staging = config.env?.staging?.ratelimits ?? []
 
-  it('declares a binding with the same limit and period for every limiter', () => {
-    for (const spec of Object.values(LIMITERS)) {
-      const binding = declared.find((entry) => entry.name === spec.binding)
-      expect(binding, spec.binding).toBeDefined()
-      expect(binding!.simple, spec.binding).toEqual({ limit: spec.limit, period: spec.periodSeconds })
-    }
-    expect(declared).toHaveLength(Object.keys(LIMITERS).length)
+  for (const [environment, entries] of [
+    ['top level', declared],
+    ['env.staging', staging],
+  ] as const) {
+    describe(environment, () => {
+      it('declares a binding with the same limit and period for every limiter', () => {
+        for (const spec of Object.values(LIMITERS)) {
+          const binding = entries.find((entry) => entry.name === spec.binding)
+          expect(binding, spec.binding).toBeDefined()
+          expect(binding!.simple, spec.binding).toEqual({ limit: spec.limit, period: spec.periodSeconds })
+        }
+        expect(entries).toHaveLength(Object.keys(LIMITERS).length)
+      })
+
+      it('uses unique, positive-integer namespace ids', () => {
+        const ids = entries.map((entry) => entry.namespace_id)
+        expect(new Set(ids).size).toBe(ids.length)
+        for (const id of ids) expect(id).toMatch(/^[1-9]\d*$/)
+      })
+
+      it('only uses periods Workers supports', () => {
+        for (const entry of entries) expect([10, 60]).toContain(entry.simple.period)
+      })
+    })
+  }
+
+  it('gives staging namespace ids of its own, so its traffic never counts against production', () => {
+    const productionIds = new Set(declared.map((entry) => entry.namespace_id))
+    expect(staging.filter((entry) => productionIds.has(entry.namespace_id))).toEqual([])
   })
 
-  it('uses unique, positive-integer namespace ids', () => {
-    const ids = declared.map((entry) => entry.namespace_id)
-    expect(new Set(ids).size).toBe(ids.length)
-    for (const id of ids) expect(id).toMatch(/^[1-9]\d*$/)
-  })
-
-  it('only uses periods Workers supports', () => {
-    for (const entry of declared) expect([10, 60]).toContain(entry.simple.period)
+  it('sets COOKIE_SECURE on staging too (vars are not inherited)', () => {
+    expect(config.env?.staging?.vars?.COOKIE_SECURE).toBe('true')
   })
 })
