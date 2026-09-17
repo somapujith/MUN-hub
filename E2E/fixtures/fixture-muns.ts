@@ -77,6 +77,14 @@ export const FIXTURE_MUNS = {
     products: [{ name: 'E2E Confirm Pass', price: 950, capacity: 90, status: 'active', displayOrder: 0 }],
   },
 
+  /** Same as review, for the admin console UI specs (specs/admin/muns-console.spec.ts). Reset with recreateReadyMun(). */
+  adminConsole: {
+    slug: 'e2e-admin-console-mun',
+    name: 'E2E Admin Console MUN',
+    committees: [{ name: 'E2E Console Committee', capacity: 60, portfolios: ['Norway'] }],
+    products: [{ name: 'E2E Console Pass', price: 700, capacity: 60, status: 'active', displayOrder: 0 }],
+  },
+
   /** Same as review, for the suspend/reinstate path (a reinstated MUN goes back to verification). */
   suspend: {
     slug: 'e2e-suspend-mun',
@@ -90,6 +98,7 @@ export const OPEN = FIXTURE_MUNS.open
 export const REVIEW = FIXTURE_MUNS.review
 export const SUSPEND = FIXTURE_MUNS.suspend
 export const CONFIRM = FIXTURE_MUNS.confirm
+export const ADMIN_CONSOLE = FIXTURE_MUNS.adminConsole
 export const LIFECYCLE = FIXTURE_MUNS.lifecycle
 export const SANDBOX = FIXTURE_MUNS.sandbox
 export const CLOSED = FIXTURE_MUNS.closed

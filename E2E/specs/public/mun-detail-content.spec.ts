@@ -65,6 +65,8 @@ test('the sections carry the conference’s real content', async ({ page }) => {
   for (const href of await downloads.evaluateAll((links) => links.map((a) => a.getAttribute('href')))) {
     expect(href).toMatch(/\.pdf$/)
   }
+  // No refunds anywhere in the product, so no refund policy to download.
+  await expect(documents.getByRole('link', { name: /refund/i })).toHaveCount(0)
 
   const contact = page.locator('section#contact')
   await expect(contact.getByRole('link', { name: /@/ })).toHaveAttribute('href', /^mailto:/)
