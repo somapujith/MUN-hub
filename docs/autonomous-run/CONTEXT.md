@@ -97,3 +97,8 @@ payout execution.
   POST-MERGE TODO (lead): admin UI "Queue again" button for UNPUBLISHED MUNs → same enqueue
   endpoint; register 4b's cron jobs; wire assertEmailVerifiedIfRequired + payments/notification
   hooks + notifyWelcome; seed.ts resets demo hashes that don't verify (local only).
+  POST-MERGE TODO (lead): data migration deleting seeded REFUND_POLICY mun_documents (storage_key like 'seed/%') — take a slot after 4b's 0034.
+- 09:40 All lanes merged: admin `84442fa`, sec-auth `1fabca7`, org-ops `9291296`, payments
+  `57b7629`, support `6cce29a` (23 defects fixed; support-form conflict resolved to the support
+  version). f1 finished all 7 items (preview `aa85127`) and is on the organizer UX walkthrough.
+  Workflow now in wire & verify.
