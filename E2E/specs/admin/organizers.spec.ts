@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
-import { TEST_LOGIN_CODE, newApiContext, seedOrganizerLoginCode } from '../../fixtures/api'
+import { TEST_LOGIN_CODE, newApiContext, seedOrganizerLoginCode, signUpViaApi } from '../../fixtures/api'
+import { ACCOUNTS } from '../../fixtures/accounts'
+import { retireStaffUsers, userRole } from '../../fixtures/fixture-db'
 import { watchForCrashes } from '../../fixtures/ui'
-import { adminApi, createOrganizer, heading, main, tableRow } from './_helpers'
+import { adminApi, createOrganizer, createStaffSession, heading, main, tableRow } from './_helpers'
 
 /**
  * Organizer account management. Only ever suspends organizers this test
@@ -118,5 +120,78 @@ test.describe('admin organizers', () => {
       expect(response.status()).toBe(400)
     }
     expect((await signInStatus(organizer.email)).status).toBe(200)
+  })
+})
+
+test.describe('organizer suspension only ever touches organizer accounts', () => {
+  test('suspending or reinstating a delegate is refused as not found', async () => {
+    const student = await signUpViaApi()
+    const admin = await adminApi()
+    const suspend = await admin.post(`admin/organizers/${student.userId}/suspend`, { data: { reason: 'not an organizer' } })
+    expect(suspend.status()).toBe(404)
+    expect((await suspend.json()).error.message).toBe('Organizer not found')
+    expect((await admin.post(`admin/organizers/${student.userId}/reinstate`)).status()).toBe(404)
+    expect(await userRole(student.userId)).toEqual({ role: 'STUDENT', suspended: false })
+    // The delegate's session still works.
+    expect((await student.api.get('auth/session')).ok()).toBe(true)
+    expect(await (await student.api.get('auth/session')).json()).toMatchObject({ userId: student.userId })
+    await student.api.dispose()
+    await admin.dispose()
+  })
+
+  test('staff accounts cannot be suspended through the organizer endpoint', async () => {
+    const operations = await createStaffSession('OPERATIONS')
+    const target = await createStaffSession('SUPER_ADMIN')
+    const admin = await adminApi()
+    try {
+      const adminSession = (await (await admin.get('auth/session')).json()) as { userId: string; role: string }
+      expect(adminSession.role).toBe(ACCOUNTS.admin.role)
+      // Before the fix, OPERATIONS could suspend an ADMIN or SUPER_ADMIN this way.
+      for (const id of [adminSession.userId, target.userId]) {
+        const response = await operations.api.post(`admin/organizers/${id}/suspend`, { data: { reason: 'ops overreach' } })
+        expect(response.status()).toBe(404)
+        expect((await operations.api.post(`admin/organizers/${id}/reinstate`)).status()).toBe(404)
+      }
+      expect((await admin.post(`admin/organizers/${target.userId}/suspend`, { data: { reason: 'x' } })).status()).toBe(404)
+      expect((await admin.post(`admin/organizers/${operations.userId}/suspend`, { data: { reason: 'x' } })).status()).toBe(404)
+      expect(await userRole(adminSession.userId)).toEqual({ role: 'ADMIN', suspended: false })
+      expect(await userRole(target.userId)).toEqual({ role: 'SUPER_ADMIN', suspended: false })
+      expect(await userRole(operations.userId)).toEqual({ role: 'OPERATIONS', suspended: false })
+      // Everyone involved is still signed in.
+      expect((await admin.get('admin/overview')).status()).toBe(200)
+      expect((await target.api.get('admin/overview')).status()).toBe(200)
+    } finally {
+      await admin.dispose()
+      await operations.api.dispose()
+      await target.api.dispose()
+      await retireStaffUsers([operations.email, target.email])
+    }
+  })
+
+  test('operations staff can still suspend and reinstate a real organizer', async () => {
+    const operations = await createStaffSession('OPERATIONS')
+    const organizer = await createOrganizer()
+    try {
+      const suspended = await operations.api.post(`admin/organizers/${organizer.userId}/suspend`, {
+        data: { reason: 'E2E ops suspension' },
+      })
+      expect(suspended.status()).toBe(204)
+      expect(await userRole(organizer.userId)).toEqual({ role: 'ORGANIZER', suspended: true })
+      expect((await signInStatus(organizer.email)).status).toBe(403)
+      expect((await operations.api.post(`admin/organizers/${organizer.userId}/reinstate`)).status()).toBe(204)
+      expect(await userRole(organizer.userId)).toEqual({ role: 'ORGANIZER', suspended: false })
+    } finally {
+      await operations.api.dispose()
+      await organizer.api.dispose()
+      await retireStaffUsers([operations.email])
+    }
+  })
+
+  test('an unknown id is refused as not found', async () => {
+    const admin = await adminApi()
+    const id = crypto.randomUUID()
+    expect((await admin.post(`admin/organizers/${id}/suspend`, { data: { reason: 'x' } })).status()).toBe(404)
+    expect((await admin.post(`admin/organizers/${id}/reinstate`)).status()).toBe(404)
+    await admin.dispose()
   })
 })

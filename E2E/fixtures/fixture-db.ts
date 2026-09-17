@@ -19,6 +19,10 @@ const DAY = 24 * 60 * 60 * 1000
 
 function connect() {
   assertLocalDatabase(DATABASE_URL)
+  // seedFullGoLiveModules runs the seed guard against this process's
+  // DATABASE_URL. prepare-db has it set; a Playwright worker doesn't. Point it
+  // at the same (already verified local) database the connection uses.
+  process.env.DATABASE_URL ??= DATABASE_URL
   const client = postgres(DATABASE_URL, { max: 1, prepare: false, onnotice: () => {} })
   return { client, db: drizzle(client, { schema }) }
 }
@@ -263,6 +267,60 @@ export async function wipeRegistrations(tx: Tx, munId: string): Promise<number> 
     .where(inArray(schema.supportTickets.relatedRegistrationId, ids))
   await tx.delete(schema.registrations).where(inArray(schema.registrations.id, ids))
   return ids.length
+}
+
+export type StaffRole = 'OPERATIONS' | 'ADMIN' | 'SUPER_ADMIN'
+
+/**
+ * Inserts a brand-new staff account with a known password, straight into the
+ * local database. The seed has no SUPER_ADMIN or OPERATIONS account, and only
+ * a super admin can create staff through the API, so this is the only way a
+ * spec gets one. Sign it in with `signInViaApi(email, password)`.
+ */
+export async function createStaffUser(
+  role: StaffRole,
+  { email, name, password = 'e2e-staff-password' }: { email: string; name: string; password?: string },
+): Promise<{ userId: string; email: string; name: string; password: string }> {
+  return withFixtureDb(async (db) => {
+    const [row] = await db
+      .insert(schema.users)
+      .values({ name, email, role, passwordHash: await hashPassword(password), emailVerifiedAt: new Date() })
+      .returning({ id: schema.users.id })
+    return { userId: row.id, email, name, password }
+  })
+}
+
+/**
+ * Takes test-created staff accounts out of the staff directory afterwards
+ * (demoted to a suspended STUDENT, sessions dropped), so the local database
+ * doesn't accumulate live super admins with a known password.
+ */
+export async function retireStaffUsers(emails: string[]): Promise<void> {
+  if (!emails.length) return
+  await withFixtureDb(async (db) => {
+    const rows = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(inArray(schema.users.email, emails))
+    const ids = rows.map((r) => r.id)
+    if (!ids.length) return
+    await db.delete(schema.sessions).where(inArray(schema.sessions.userId, ids))
+    await db
+      .update(schema.users)
+      .set({ role: 'STUDENT', suspended: true, suspendedReason: 'E2E staff account retired', suspendedAt: new Date() })
+      .where(inArray(schema.users.id, ids))
+  })
+}
+
+/** A user's current role and suspension flag, read straight from the database. */
+export async function userRole(userId: string): Promise<{ role: string; suspended: boolean } | undefined> {
+  return withFixtureDb(async (db) => {
+    const [row] = await db
+      .select({ role: schema.users.role, suspended: schema.users.suspended })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+    return row
+  })
 }
 
 /**
