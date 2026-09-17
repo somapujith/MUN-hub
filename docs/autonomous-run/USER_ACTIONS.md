@@ -88,3 +88,41 @@ git show 6e41475:.github/workflows/deploy.yml > .github/workflows/deploy.yml
 git add .github/workflows/ && git commit -m "chore(ci): restore CI and deploy workflows"
 git push origin main
 ```
+
+## 9. DEPLOY STATUS — resume here after the usage limit resets
+
+**Current production state (verified 15:xx IST):** unchanged from this morning, consistent.
+`app.munhub.in`/`api.munhub.in` both 200. `main` on GitHub is far ahead (commit `537604d`+) but
+NONE of it is deployed. This is safe and correct — production is not broken, just old.
+
+**What happened:** a deploy attempt failed partway (my `DATABASE_URL` env-injection for the
+migration script errored, so the migration did NOT run against Neon; the API `wrangler deploy`
+then failed to build because `server/src/app.ts` had unresolved merge-conflict markers on disk
+at that exact moment; the WEB `wrangler deploy` for `munhub-web` succeeded and went live with
+new frontend code while the old API was still running). **This was rolled back immediately**
+via `npx wrangler rollback` in `web/` to Worker Version `9a4c0edb-761d-4b37-9b71-6d92715160a5`
+(the pre-session baseline) — confirmed both hosts healthy and consistent afterward.
+
+`server/src/app.ts`'s conflict markers are now fixed and committed (someone else fixed them
+between my attempt and now) — confirmed clean at HEAD.
+
+**To deploy for real, in order, each step verified before the next:**
+1. `cd A:\Coding\Projects\Mun-hub\MUN-hub && server\.dev.vars` has the real Neon
+   `DATABASE_URL` — read it directly (don't inline-eval dotenv in a one-liner, that failed).
+   Run: `DATABASE_URL="<that value>" npx tsx lib/db/migrate.ts` from the repo root. Confirm
+   it prints "Migrations complete." with no error, applying 0030 through whatever is latest
+   (0035+ by now — check `ls drizzle/*.sql | tail -5`).
+2. `cd server && npx wrangler deploy --env=""` — confirm it says "Build failed" nowhere, and
+   ends with "Deployed munhub-api". If it fails, STOP — do not deploy web next.
+3. `curl https://api.munhub.in/api/v1/health` — confirm 200 before proceeding.
+4. `cd web && npm run cf:deploy` (builds + deploys `munhub-web`) — confirm success.
+5. `curl` all 5 hosts (www/app/admin/publish/api) for 200.
+6. Check Vercel (`www.munhub.in`) separately — unclear if it auto-deploys from GitHub push or
+   needs a manual trigger; not attempted this run.
+7. Set new secrets/vars per lane change logs before or right after deploy: `SYSTEM_ACTOR_USER_ID`,
+   `TOTP_FIELD_KEY` (2FA), rate-limit KV bindings (see `server/wrangler.jsonc`), `.github/workflows`
+   restore (see item 8 above) once the token has `workflow` scope.
+
+**Lesson for next time:** never chain migrate→deploy→deploy with `&&` through `| tail`, which
+masks real exit codes and lets failures silently continue. Run each step separately, check its
+own exit code explicitly, and confirm each host with `curl` before touching the next one.
