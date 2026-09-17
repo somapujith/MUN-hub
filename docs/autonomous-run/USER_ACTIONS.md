@@ -187,3 +187,19 @@ All 8 review-fix lanes + the delegate/visitor UX pass are now merged, tested, an
 Everything else outstanding is still tracked in items #1-#7 above (demo password rotation,
 `.github/workflows` restore, `SYSTEM_ACTOR_USER_ID`, KV uploads namespace, business
 confirmations, the re-check-takes-a-MUN-offline decision, and team access).
+
+## 12. Admin analytics + load testing — DEPLOYED
+
+Both landed, verified, and deployed:
+- **Admin analytics** (`4ec80d8`, migration 0036 applied to Neon): new /admin/reporting page —
+  registration/revenue/signup trends, conversion funnel, top conferences, organizer
+  leaderboard, geography breakdown, platform fee summary. 48/48 tests passing.
+- **Load testing** (`bc807ff`, no migration): local-only load test suite under `load-testing/`.
+  **Headline result: the registration capacity lock has zero oversell under real concurrent
+  load** — proven at the HTTP + database level (20 concurrent callers vs capacity 5 and vs
+  capacity 3, both exact). Also found and fixed a real performance bug: the marketplace search
+  ran two duplicate JOIN queries per request; folding them into one gave +43-67% throughput and
+  -17-41% p50 latency. Full report: `docs/autonomous-run/changes/lane-load-testing.md`.
+
+Deployed: migration 0036 applied to Neon, `munhub-api` and `munhub-web` both redeployed and
+verified (all 5 hosts 200, marketplace still returns correct data).
