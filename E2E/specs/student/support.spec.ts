@@ -90,10 +90,6 @@ test.describe('support tickets', () => {
 
 test.describe('support widget', () => {
   test('the open panel is wide enough to use on a desktop screen', async ({ browser }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: support sheet is ~12px wide at >=640px — sheet.tsx:54 `sm:max-w-sm` resolves to --spacing-sm (12px), so the chat panel renders off-screen',
-    )
     const { context, page } = await freshStudentPage(browser)
     await page.goto('/muns')
     await page.getByRole('button', { name: 'Open support chat' }).click()
@@ -106,8 +102,7 @@ test.describe('support widget', () => {
 
   test('opens and closes, and starting a conversation opens its thread', async ({ browser }) => {
     const { context, page } = await freshStudentPage(browser)
-    // Below the `sm` breakpoint the sheet is full-width, which sidesteps the
-    // desktop width bug above so the widget's behaviour can still be covered.
+    // Below the `sm` breakpoint the sheet is full-width.
     await page.setViewportSize({ width: 600, height: 800 })
     const unread = page.waitForResponse((r) => r.url().includes('/support/conversations/unread-count'))
     await page.goto('/muns')

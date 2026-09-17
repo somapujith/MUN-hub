@@ -304,10 +304,6 @@ test.describe('successful signup', () => {
   })
 
   test('the profile page shows the phone and institution captured at signup (PRD §34)', async ({ page }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: profile-page.tsx never pre-fills phone/institution (they live on users and GET /profile omits them), so /profile shows them blank after signup',
-    )
     const v = values()
     await page.goto('/signup')
     await fillSignup(page, v)

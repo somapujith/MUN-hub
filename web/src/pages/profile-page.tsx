@@ -58,9 +58,8 @@ export function ProfilePage() {
   const [form, setForm] = useState<StudentProfileInput>(EMPTY_FORM);
 
   // Seeds the form once the existing profile loads. `phone`/`institution`
-  // live on `users`, not `student_profiles` — GET /profile doesn't return
-  // them, so they aren't pre-filled here (see the report for why that's
-  // out of this task's scope).
+  // live on `users`, not `student_profiles`, so they're seeded separately
+  // from GET /account below.
   useEffect(() => {
     const profile = profileQuery.data;
     if (!profile) return;
@@ -98,7 +97,16 @@ export function ProfilePage() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   useEffect(() => {
-    if (accountQuery.data) setNotificationsEnabled(accountQuery.data.emailNotificationsEnabled);
+    const account = accountQuery.data;
+    if (!account) return;
+    setNotificationsEnabled(account.emailNotificationsEnabled);
+    // Pre-fill phone/institution (captured at signup, stored on `users`)
+    // without overwriting anything the student has already typed.
+    setForm((prev) => ({
+      ...prev,
+      phone: prev.phone || account.phone || "",
+      institution: prev.institution || account.institution || "",
+    }));
   }, [accountQuery.data]);
 
   const notificationsMutation = useMutation({

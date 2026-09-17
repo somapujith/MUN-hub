@@ -129,7 +129,7 @@ export function RegisterPage() {
     return (
       <>
         <Helmet>
-          <title>Register — {mun.name}</title>
+          <title>{`Register — ${mun.name}`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <RegistrationNotice
@@ -155,7 +155,7 @@ export function RegisterPage() {
     return (
       <>
         <Helmet>
-          <title>Register — {mun.name}</title>
+          <title>{`Register — ${mun.name}`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <RegistrationNotice
@@ -183,7 +183,7 @@ export function RegisterPage() {
     return (
       <>
         <Helmet>
-          <title>Register — {mun.name}</title>
+          <title>{`Register — ${mun.name}`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <div aria-busy="true" className="py-xxl" />
@@ -196,7 +196,7 @@ export function RegisterPage() {
     return (
       <>
         <Helmet>
-          <title>Register — {mun.name}</title>
+          <title>{`Register — ${mun.name}`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <RegistrationNotice
@@ -249,7 +249,7 @@ export function RegisterPage() {
     return (
       <>
         <Helmet>
-          <title>Register — {mun.name}</title>
+          <title>{`Register — ${mun.name}`}</title>
         </Helmet>
         <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
           <RegistrationNotice
@@ -277,7 +277,7 @@ export function RegisterPage() {
   return (
     <>
       <Helmet>
-        <title>Register — {mun.name}</title>
+        <title>{`Register — ${mun.name}`}</title>
         <meta
           name="description"
           content={`Reserve your delegate seat at ${mun.name}.`}

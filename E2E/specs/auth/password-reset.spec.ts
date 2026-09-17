@@ -148,10 +148,6 @@ test.describe('full reset', () => {
   })
 
   test('after a successful reset the login page confirms it', async ({ page }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: reset-password-page.tsx navigates to /login?reset=success but login-page.tsx never reads ?reset= — the retired Next /login showed a success banner, the SPA shows nothing',
-    )
     const student = await signUpViaApi()
     const api = await newApiContext()
     await api.post('password-reset/request', { data: { email: student.email } })

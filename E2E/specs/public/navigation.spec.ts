@@ -177,10 +177,6 @@ test.describe('document titles', () => {
   }
 
   test('a MUN page is titled after the MUN', async ({ page }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: mun-detail-page.tsx <title>{mun.name} | MUN Hub</title> has array children; the document title renders empty',
-    )
     await page.goto(`/mun/${OPEN.slug}`)
     await expect(pageHeading(page)).toHaveText(OPEN.name)
     await expect(page).toHaveTitle(`${OPEN.name} | MUN Hub`)

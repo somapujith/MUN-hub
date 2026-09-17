@@ -10,8 +10,7 @@ import { RegistrationCard } from "@/components/dashboard/registration-card";
 import { DashboardEmptyState } from "@/components/dashboard/dashboard-empty-state";
 import { queryKeys } from "@/api/query-keys";
 import { fetchPastRegistrations, fetchUpcomingRegistrations } from "@/api/student-dashboard";
-import { fetchMockUserProfile } from "@/mocks/session";
-import { useSession } from "@/hooks/use-session";
+import { getAccountSettings } from "@/api/account";
 
 function firstName(fullName: string): string {
   return fullName.trim().split(/\s+/)[0] || fullName;
@@ -27,11 +26,10 @@ function DashboardSkeleton() {
 }
 
 export function StudentDashboardPage() {
-  const { data: session } = useSession();
+  // The signed-in account (name + institution live on `users`).
   const profileQuery = useQuery({
-    queryKey: queryKeys.userProfile(session?.userId ?? ""),
-    queryFn: () => fetchMockUserProfile(session!.userId),
-    enabled: Boolean(session),
+    queryKey: queryKeys.account(),
+    queryFn: getAccountSettings,
   });
   const upcomingQuery = useQuery({
     queryKey: queryKeys.dashboardUpcoming(),

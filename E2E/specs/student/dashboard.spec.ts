@@ -39,7 +39,6 @@ test.describe('student dashboard — empty', () => {
   })
 
   test('the greeting uses the signed-in student\'s own name and institution', async ({ browser }) => {
-    test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: dashboard greets every student as "Hello, Alex" / "VIT Vellore" (mock profile, student-dashboard-page.tsx:31)')
     const { context, page } = await freshStudentPage(browser, { name: 'Priyanka Rao', institution: 'E2E Greeting College' })
     await page.goto('/dashboard')
     await expect(pageHeading(page)).toHaveText('Hello, Priyanka')

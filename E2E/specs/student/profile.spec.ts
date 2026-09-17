@@ -57,7 +57,6 @@ test.describe('profile — viewing and editing', () => {
   })
 
   test('the profile page also shows the saved phone number and institution', async ({ browser }) => {
-    test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: /profile never pre-fills phone/institution (profile-page.tsx:74 — GET /profile omits users.phone/institution), so every save forces re-entry')
     const { context, page } = await freshStudentPage(browser)
     await openProfile(page)
     await expect(page.locator(field.phone)).toHaveValue('9876501234')

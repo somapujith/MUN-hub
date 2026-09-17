@@ -20,15 +20,16 @@ describe('getAccountSettings', () => {
       name: user.name,
       email: user.email,
       phone: null,
+      institution: null,
       emailNotificationsEnabled: true,
     })
   })
 
-  it('returns the saved phone, so registration can pre-fill it', async () => {
+  it('returns the saved phone and institution, so registration can pre-fill it', async () => {
     const { user, session } = await createTestUser()
-    await db.update(users).set({ phone: '9876500000' }).where(eq(users.id, user.id))
+    await db.update(users).set({ phone: '9876500000', institution: 'E2E College' }).where(eq(users.id, user.id))
 
-    await expect(getAccountSettings(session)).resolves.toMatchObject({ phone: '9876500000' })
+    await expect(getAccountSettings(session)).resolves.toMatchObject({ phone: '9876500000', institution: 'E2E College' })
   })
 
   it('throws "Account not found" for a session whose userId does not exist', async () => {

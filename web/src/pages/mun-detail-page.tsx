@@ -89,7 +89,9 @@ export function MunDetailPage({ slugOverride }: { slugOverride?: string } = {}) 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
       <Helmet>
-        <title>{mun.name} | MUN Hub</title>
+        {/* One string child: `{mun.name} | MUN Hub` is an array of children,
+            which React renders as an empty document title. */}
+        <title>{`${mun.name} | MUN Hub`}</title>
         <meta
           name="description"
           content={mun.description ?? `${mun.name} — register on MUN Hub.`}

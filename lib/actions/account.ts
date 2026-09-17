@@ -7,6 +7,7 @@ export interface AccountSettings {
   name: string
   email: string
   phone: string | null
+  institution: string | null
   emailNotificationsEnabled: boolean
 }
 
@@ -17,6 +18,7 @@ export async function getAccountSettings(session: Session): Promise<AccountSetti
       name: users.name,
       email: users.email,
       phone: users.phone,
+      institution: users.institution,
       emailNotificationsEnabled: users.emailNotificationsEnabled,
     })
     .from(users)

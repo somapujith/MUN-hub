@@ -23,11 +23,7 @@ const PUBLIC_PAGES = ['/', '/muns', `/mun/${OPEN.slug}`, '/login', '/signup', '/
 
 // Pages with a confirmed sideways-scroll bug. Delete an entry once fixed —
 // its test will otherwise start "unexpectedly passing".
-const KNOWN_OVERFLOW: Record<string, string> = {
-  '/':
-    'BUG: once content loads, the home page pans ~1,700px sideways on a 412px phone (document scrollWidth 3385); ' +
-    'the horizontal card rails ("Opening soon" etc.) are the likely source',
-}
+const KNOWN_OVERFLOW: Record<string, string> = {}
 
 for (const path of PUBLIC_PAGES) {
   test(`${path} fits the phone screen without sideways scrolling`, async ({ page }) => {

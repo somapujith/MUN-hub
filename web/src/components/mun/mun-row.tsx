@@ -145,7 +145,13 @@ export function MunRow({
           window.scrollX reached 305). Negative margins escape the container
           and nothing upstream clips them, so the bleed is not worth the bug —
           the partially-visible next card is already sufficient scroll
-          affordance. */}
+          affordance.
+
+          `relative` is load-bearing: it makes the scroller the containing
+          block for absolutely-positioned descendants (the cards' `sr-only`
+          text). Without it those resolve against the viewport, escape the
+          scroller's overflow clipping, and gave a 412px phone a ~3,400px-wide
+          document once a row held a dozen cards. */}
       <ul
         ref={scrollerRef}
         onScroll={syncArrows}
@@ -155,7 +161,7 @@ export function MunRow({
         tabIndex={0}
         aria-label={title}
         className={cn(
-          "flex snap-x snap-mandatory gap-lg overflow-x-auto pb-xs",
+          "relative flex snap-x snap-mandatory gap-lg overflow-x-auto pb-xs",
           "scroll-smooth motion-reduce:scroll-auto",
           "rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
           "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
