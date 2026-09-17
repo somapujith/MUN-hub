@@ -1,12 +1,16 @@
-import { eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import type { InferSelectModel } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, organizerApplications } from '@/lib/db/schema'
+import type { ApplicationStatus, MunStatus } from '@/lib/db/schema-enums'
+import type { Session } from '@/lib/auth/adapter'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 
 export type OrganizerApplication = InferSelectModel<typeof organizerApplications>
 
-export const ALREADY_APPLIED = 'You have already submitted an application to host a MUN'
+/** Thrown while an earlier application of the same organizer is still waiting for Gate-1 review. */
+export const APPLICATION_PENDING =
+  'Your previous application is still being reviewed. You can apply for another MUN once it has been reviewed.'
 
 export interface SubmitOrganizerApplicationInput {
   // IMPORTANT: `organizerId` is trusted as a plain parameter here — this is
@@ -78,16 +82,15 @@ async function generateUniqueSlug(name: string): Promise<string> {
 export async function submitOrganizerApplication(
   input: SubmitOrganizerApplicationInput,
 ): Promise<OrganizerApplication> {
-  // One application per organizer (unique organizer_id). Checked before
-  // anything is written; otherwise the unique violation only fires after the
-  // MUN row exists, leaving an orphaned SUBMITTED mun behind. The constraint
-  // still backstops a concurrent double submit.
-  const [existing] = await db
+  // An organizer may host several MUNs (one application per MUN), but only
+  // one application can wait for review at a time. Checked before anything is
+  // written, so a refused application never leaves a stray mun behind.
+  const [pending] = await db
     .select({ id: organizerApplications.id })
     .from(organizerApplications)
-    .where(eq(organizerApplications.organizerId, input.organizerId))
+    .where(and(eq(organizerApplications.organizerId, input.organizerId), eq(organizerApplications.status, 'SUBMITTED')))
     .limit(1)
-  if (existing) throw new Error(ALREADY_APPLIED)
+  if (pending) throw new Error(APPLICATION_PENDING)
 
   const slug = await generateUniqueSlug(input.conferenceName)
 
@@ -112,8 +115,43 @@ export async function submitOrganizerApplication(
       organizerId: input.organizerId,
       munId: draftMun.id,
       status: 'SUBMITTED',
+      expectedDelegateCount: input.expectedDelegateCount,
+      previousEditions: input.previousEditions?.trim() || null,
+      websiteUrl: input.websiteUrl?.trim() || null,
     })
     .returning()
 
   return application
+}
+
+export interface OrganizerApplicationSummary {
+  id: string
+  munId: string | null
+  munName: string | null
+  munSlug: string | null
+  munStatus: MunStatus | null
+  status: ApplicationStatus
+  /** The Gate-1 reviewer's note to the organizer, if any. */
+  reviewNotes: string | null
+  submittedAt: Date
+}
+
+/** The signed-in organizer's own host applications, newest first. */
+export async function listMyOrganizerApplications(session: Session | null): Promise<OrganizerApplicationSummary[]> {
+  if (!session || session.role !== 'ORGANIZER') throw new Error('Forbidden')
+  return db
+    .select({
+      id: organizerApplications.id,
+      munId: organizerApplications.munId,
+      munName: muns.name,
+      munSlug: muns.slug,
+      munStatus: muns.status,
+      status: organizerApplications.status,
+      reviewNotes: organizerApplications.reviewNotes,
+      submittedAt: organizerApplications.submittedAt,
+    })
+    .from(organizerApplications)
+    .leftJoin(muns, eq(muns.id, organizerApplications.munId))
+    .where(eq(organizerApplications.organizerId, session.userId))
+    .orderBy(desc(organizerApplications.submittedAt))
 }

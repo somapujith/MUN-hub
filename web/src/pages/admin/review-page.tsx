@@ -223,6 +223,43 @@ export function AdminReviewPage() {
                     ? formatDate(detailQuery.data.organizerApplication.submittedAt)
                     : "—"}
                 </p>
+                {detailQuery.data.startDate && (
+                  <p>
+                    <span className="text-muted-foreground">Expected start:</span>{" "}
+                    {formatDate(detailQuery.data.startDate)}
+                    {detailQuery.data.city ? ` · ${detailQuery.data.city}` : ""}
+                  </p>
+                )}
+                {detailQuery.data.organizerApplication?.expectedDelegateCount != null && (
+                  <p>
+                    <span className="text-muted-foreground">Maximum expected delegates:</span>{" "}
+                    {detailQuery.data.organizerApplication.expectedDelegateCount}
+                  </p>
+                )}
+                {detailQuery.data.organizerApplication?.previousEditions && (
+                  <p>
+                    <span className="text-muted-foreground">Previous editions:</span>{" "}
+                    {detailQuery.data.organizerApplication.previousEditions}
+                  </p>
+                )}
+                {detailQuery.data.organizerApplication?.websiteUrl && (
+                  <p>
+                    <span className="text-muted-foreground">Website:</span>{" "}
+                    <a
+                      href={detailQuery.data.organizerApplication.websiteUrl}
+                      target="_blank"
+                      rel="noopener noreferrer nofollow"
+                      className="text-link underline underline-offset-2"
+                    >
+                      {detailQuery.data.organizerApplication.websiteUrl}
+                    </a>
+                  </p>
+                )}
+                {detailQuery.data.description && (
+                  <p className="whitespace-pre-wrap">
+                    <span className="text-muted-foreground">About:</span> {detailQuery.data.description}
+                  </p>
+                )}
                 {detailQuery.data.organizerApplication?.reviewNotes && (
                   <p>
                     <span className="text-muted-foreground">Previous notes:</span>{" "}

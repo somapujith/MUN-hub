@@ -34,10 +34,32 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-/** Wraps lib/actions/organizer-application.ts#submitOrganizerApplication. Any signed-in user may call this — it's how a STUDENT becomes an ORGANIZER's applicant. */
+/** Mirrors lib/actions/organizer-application.ts's OrganizerApplicationSummary. */
+export interface MyOrganizerApplication {
+  id: string;
+  munId: string | null;
+  munName: string | null;
+  munSlug: string | null;
+  munStatus: string | null;
+  status: "SUBMITTED" | "APPROVED" | "REJECTED" | "CHANGES_REQUESTED";
+  /** The Gate-1 reviewer's note to the organizer, if any. */
+  reviewNotes: string | null;
+  submittedAt: string;
+}
+
+/**
+ * POST /organizer/applications — applies to host one more MUN. ORGANIZER
+ * accounts with finished onboarding only; refused (409) while an earlier
+ * application still awaits review.
+ */
 export function submitOrganizerApplication(input: SubmitOrganizerApplicationInput) {
   return request<OrganizerApplication>("/organizer/applications", {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+/** GET /organizer/applications: the signed-in organizer's applications, newest first. */
+export function listMyOrganizerApplications() {
+  return request<MyOrganizerApplication[]>("/organizer/applications");
 }

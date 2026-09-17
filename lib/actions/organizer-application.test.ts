@@ -1,30 +1,55 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, users } from '@/lib/db/schema'
-import { ALREADY_APPLIED, submitOrganizerApplication } from './organizer-application'
+import { muns, organizerApplications, users } from '@/lib/db/schema'
+import { APPLICATION_PENDING, listMyOrganizerApplications, submitOrganizerApplication } from './organizer-application'
 
 describe('submitOrganizerApplication', () => {
-  it('refuses a second application without creating another mun', async () => {
+  async function makeOrganizer() {
     const [organizer] = await db
       .insert(users)
       .values({ name: 'Repeat Org', email: `repeatorg-${crypto.randomUUID()}@test.com`, role: 'ORGANIZER' })
       .returning()
-    const input = {
-      organizerId: organizer.id,
-      conferenceName: 'Repeat MUN',
-      expectedDate: new Date('2027-08-01'),
-      location: 'Pune, India',
-      expectedDelegateCount: 100,
-      description: 'Applying twice should not leave an orphaned mun behind.',
-    }
-    await submitOrganizerApplication(input)
+    return organizer
+  }
+  const inputFor = (organizerId: string, conferenceName: string) => ({
+    organizerId,
+    conferenceName,
+    expectedDate: new Date('2027-08-01'),
+    location: 'Pune, India',
+    expectedDelegateCount: 100,
+    description: 'An organizer can host more than one conference on MUN Hub.',
+  })
 
-    await expect(submitOrganizerApplication({ ...input, conferenceName: 'Repeat MUN Two' })).rejects.toThrow(
-      ALREADY_APPLIED,
-    )
+  it('refuses a new application while an earlier one awaits review, without creating a mun', async () => {
+    const organizer = await makeOrganizer()
+    await submitOrganizerApplication(inputFor(organizer.id, 'First MUN'))
+
+    await expect(submitOrganizerApplication(inputFor(organizer.id, 'Second MUN'))).rejects.toThrow(APPLICATION_PENDING)
     const owned = await db.select({ id: muns.id }).from(muns).where(eq(muns.organizerId, organizer.id))
     expect(owned).toHaveLength(1)
+  })
+
+  it('lets an organizer apply for another MUN once the earlier application is reviewed', async () => {
+    const organizer = await makeOrganizer()
+    const first = await submitOrganizerApplication(inputFor(organizer.id, 'First MUN'))
+    await db.update(organizerApplications).set({ status: 'APPROVED', reviewNotes: 'Welcome aboard' }).where(eq(organizerApplications.id, first.id))
+
+    const second = await submitOrganizerApplication(inputFor(organizer.id, 'Second MUN'))
+    expect(second.munId).not.toBe(first.munId)
+
+    const mine = await listMyOrganizerApplications({ userId: organizer.id, role: 'ORGANIZER' })
+    expect(mine.map((a) => a.munName)).toEqual(['Second MUN', 'First MUN'])
+    expect(mine[1]).toMatchObject({ status: 'APPROVED', reviewNotes: 'Welcome aboard' })
+  })
+
+  it("only lists the organizer's own applications, and only for organizers", async () => {
+    const organizer = await makeOrganizer()
+    const other = await makeOrganizer()
+    await submitOrganizerApplication(inputFor(other.id, 'Someone Else MUN'))
+
+    await expect(listMyOrganizerApplications({ userId: organizer.id, role: 'ORGANIZER' })).resolves.toEqual([])
+    await expect(listMyOrganizerApplications({ userId: organizer.id, role: 'STUDENT' })).rejects.toThrow('Forbidden')
   })
 
   it('creates an application and mun linked to each other, mun starts SUBMITTED', async () => {

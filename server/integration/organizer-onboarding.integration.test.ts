@@ -41,7 +41,11 @@ describe('organizer onboarding routes', () => {
     expect(done).toMatchObject({ completed: true, nextStep: null })
     expect(done.firstMunId).toEqual(expect.any(String))
 
-    // The wizard already filed the application, and it's one per organizer.
+    // The wizard filed the first application; a second one waits until that's reviewed.
+    const mine = await app.request('/api/v1/organizer/applications', { headers })
+    expect(mine.status).toBe(200)
+    expect((await mine.json()).map((a: { munName: string }) => a.munName)).toEqual(['Coastal MUN'])
+
     const again = await app.request('/api/v1/organizer/applications', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },

@@ -35,6 +35,10 @@ export interface OrganizerApplicationSummary {
   status: string;
   reviewNotes: string | null;
   submittedAt: string;
+  /** The organizer's application answers (migration 0032); null on older applications. */
+  expectedDelegateCount: number | null;
+  previousEditions: string | null;
+  websiteUrl: string | null;
 }
 
 export interface VerificationLogEntry {
@@ -58,6 +62,8 @@ export interface MunReviewDetail {
   status: MunStatus;
   city: string | null;
   country: string | null;
+  description: string | null;
+  startDate: string | null;
   createdAt: string;
   organizerApplication: OrganizerApplicationSummary | null;
   verificationLogs: VerificationLogEntry[];

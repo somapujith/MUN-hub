@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { ReactNode } from "react";
 import { Helmet } from "react-helmet-async";
-import { Link, Navigate, useLocation, useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon } from "lucide-react";
 import {
@@ -18,18 +18,17 @@ import {
   type OrganizerOnboarding,
 } from "@/api/organizer-onboarding";
 import { queryKeys } from "@/api/query-keys";
+import {
+  BRIGHT_INPUT_CLASS,
+  BRIGHT_PRIMARY_BUTTON_CLASS,
+  BRIGHT_TEXTAREA_CLASS,
+  BrightField,
+  DATE_INPUT_FORMAT,
+  WEBSITE_FORMAT,
+} from "@/components/organizer/bright-form";
 import { OrganizerBrightShell } from "@/components/organizer/organizer-bright-shell";
 import { RequireOrganizer } from "@/guards/require-organizer";
 import { cn } from "cn";
-
-// Bright theme only (see OrganizerBrightShell): fixed colors, no theme tokens.
-const INPUT_CLASS =
-  "h-12 w-full rounded-lg border border-[#d7d7de] bg-white px-4 text-[15px] text-[#121212] outline-none transition-colors placeholder:text-[#9a9aa2] focus:border-[#121212] aria-invalid:border-[#c4320a]";
-const PRIMARY_BUTTON_CLASS =
-  "inline-flex h-12 items-center justify-center rounded-lg bg-[#121212] px-6 text-[15px] font-semibold text-white transition-colors hover:bg-[#2a2a2e] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#121212] disabled:cursor-not-allowed disabled:bg-[#d4d4d8] disabled:text-[#77777e]";
-
-const TEXTAREA_CLASS =
-  "min-h-32 w-full resize-y rounded-lg border border-[#d7d7de] bg-white px-4 py-3 text-[15px] text-[#121212] outline-none transition-colors placeholder:text-[#9a9aa2] focus:border-[#121212]";
 
 const STEP_LABELS: Record<OnboardingStep, string> = {
   PROFILE: "Create profile",
@@ -38,15 +37,6 @@ const STEP_LABELS: Record<OnboardingStep, string> = {
   PAYMENT: "Payment details",
   AGREEMENT: "Agreement",
 };
-
-/**
- * `/organizer/apply` — the host application now lives inside the onboarding
- * wizard, so old links land there instead.
- */
-export function OrganizerApplyRedirect() {
-  const { search } = useLocation();
-  return <Navigate to={`/organizer/onboarding${search}`} replace />;
-}
 
 /**
  * Organizer onboarding (publish.munhub.in/organizer/onboarding): profile, the
@@ -210,23 +200,11 @@ function StepFrame({
         </p>
       ) : null}
       <div>
-        <button type="submit" className={PRIMARY_BUTTON_CLASS} disabled={submitting || !canSubmit}>
+        <button type="submit" className={BRIGHT_PRIMARY_BUTTON_CLASS} disabled={submitting || !canSubmit}>
           {submitting ? "Saving…" : submitLabel}
         </button>
       </div>
     </form>
-  );
-}
-
-function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <label htmlFor={id} className="text-[14px] text-[#5b5b63]">
-        {label}
-      </label>
-      {children}
-      {hint ? <p className="text-[13px] text-[#8a8a92]">{hint}</p> : null}
-    </div>
   );
 }
 
@@ -290,35 +268,33 @@ function ProfileStep({ data, onSaved }: StepProps) {
       onSubmit={() => mutation.mutate({ firstName, lastName, contactPhone: phone })}
     >
       <div className="grid gap-md sm:grid-cols-2">
-        <Field id="onboarding-first-name" label="First name">
+        <BrightField id="onboarding-first-name" label="First name">
           <input
             id="onboarding-first-name"
             autoComplete="given-name"
             placeholder="e.g. Rahul"
             value={firstName}
             onChange={(event) => setFirstName(event.target.value)}
-            className={INPUT_CLASS}
+            className={BRIGHT_INPUT_CLASS}
           />
-        </Field>
-        <Field id="onboarding-last-name" label="Last name">
+        </BrightField>
+        <BrightField id="onboarding-last-name" label="Last name">
           <input
             id="onboarding-last-name"
             autoComplete="family-name"
             placeholder="e.g. Sharma"
             value={lastName}
             onChange={(event) => setLastName(event.target.value)}
-            className={INPUT_CLASS}
+            className={BRIGHT_INPUT_CLASS}
           />
-        </Field>
+        </BrightField>
       </div>
-      <Field id="onboarding-phone" label="Contact number">
+      <BrightField id="onboarding-phone" label="Contact number">
         <PhoneInput id="onboarding-phone" value={phone} onChange={setPhone} invalid={phoneLooksWrong} />
-      </Field>
+      </BrightField>
     </StepFrame>
   );
 }
-
-const DATE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
 
 function MunStep({ data, onSaved }: StepProps) {
   const [munName, setMunName] = React.useState(data.profile.munName ?? "");
@@ -334,45 +310,43 @@ function MunStep({ data, onSaved }: StepProps) {
       error={error}
       submitLabel="Continue"
       submitting={mutation.isPending}
-      canSubmit={Boolean(munName.trim() && munCity.trim() && DATE_FORMAT.test(munStartDate))}
+      canSubmit={Boolean(munName.trim() && munCity.trim() && DATE_INPUT_FORMAT.test(munStartDate))}
       onSubmit={() => mutation.mutate({ munName, munCity, munStartDate })}
     >
-      <Field id="onboarding-mun-name" label="Title of your MUN">
+      <BrightField id="onboarding-mun-name" label="Title of your MUN">
         <input
           id="onboarding-mun-name"
           placeholder="e.g. Hyderabad MUN 2027"
           value={munName}
           onChange={(event) => setMunName(event.target.value)}
-          className={INPUT_CLASS}
+          className={BRIGHT_INPUT_CLASS}
         />
-      </Field>
+      </BrightField>
       <div className="grid gap-md sm:grid-cols-2">
-        <Field id="onboarding-mun-city" label="Host city">
+        <BrightField id="onboarding-mun-city" label="Host city">
           <input
             id="onboarding-mun-city"
             autoComplete="address-level2"
             placeholder="e.g. Hyderabad"
             value={munCity}
             onChange={(event) => setMunCity(event.target.value)}
-            className={INPUT_CLASS}
+            className={BRIGHT_INPUT_CLASS}
           />
-        </Field>
-        <Field id="onboarding-mun-date" label="Expected start date">
+        </BrightField>
+        <BrightField id="onboarding-mun-date" label="Expected start date">
           <input
             id="onboarding-mun-date"
             type="date"
             min={today}
             value={munStartDate}
             onChange={(event) => setMunStartDate(event.target.value)}
-            className={INPUT_CLASS}
+            className={BRIGHT_INPUT_CLASS}
           />
-        </Field>
+        </BrightField>
       </div>
     </StepFrame>
   );
 }
-
-const WEBSITE_FORMAT = /^https?:\/\/[^\s.]+\.\S+$/i;
 
 function DetailsStep({ data, onSaved }: StepProps) {
   const [count, setCount] = React.useState(data.profile.expectedDelegateCount?.toString() ?? "");
@@ -407,17 +381,17 @@ function DetailsStep({ data, onSaved }: StepProps) {
         })
       }
     >
-      <Field id="onboarding-delegates" label="Maximum delegates you expect">
+      <BrightField id="onboarding-delegates" label="Maximum delegates you expect">
         <input
           id="onboarding-delegates"
           inputMode="numeric"
           placeholder="e.g. 300"
           value={count}
           onChange={(event) => setCount(event.target.value.replace(/\D/g, "").slice(0, 5))}
-          className={cn(INPUT_CLASS, "max-w-[200px]")}
+          className={cn(BRIGHT_INPUT_CLASS, "max-w-[200px]")}
         />
-      </Field>
-      <Field
+      </BrightField>
+      <BrightField
         id="onboarding-description"
         label="About your MUN"
         hint={
@@ -431,20 +405,20 @@ function DetailsStep({ data, onSaved }: StepProps) {
           placeholder="Committees, format, who it's for, what makes it different…"
           value={description}
           onChange={(event) => setDescription(event.target.value)}
-          className={TEXTAREA_CLASS}
+          className={BRIGHT_TEXTAREA_CLASS}
         />
-      </Field>
+      </BrightField>
       <div className="grid gap-md sm:grid-cols-2">
-        <Field id="onboarding-previous-editions" label="Previous editions (optional)">
+        <BrightField id="onboarding-previous-editions" label="Previous editions (optional)">
           <input
             id="onboarding-previous-editions"
             placeholder="e.g. 3 editions since 2022"
             value={previousEditions}
             onChange={(event) => setPreviousEditions(event.target.value)}
-            className={INPUT_CLASS}
+            className={BRIGHT_INPUT_CLASS}
           />
-        </Field>
-        <Field id="onboarding-website" label="Website (optional)">
+        </BrightField>
+        <BrightField id="onboarding-website" label="Website (optional)">
           <input
             id="onboarding-website"
             type="url"
@@ -453,9 +427,9 @@ function DetailsStep({ data, onSaved }: StepProps) {
             value={websiteUrl}
             onChange={(event) => setWebsiteUrl(event.target.value)}
             aria-invalid={websiteLooksWrong ? true : undefined}
-            className={INPUT_CLASS}
+            className={BRIGHT_INPUT_CLASS}
           />
-        </Field>
+        </BrightField>
       </div>
     </StepFrame>
   );
@@ -479,7 +453,7 @@ function PaymentStep({ data, onSaved }: StepProps) {
       canSubmit={UPI_FORMAT.test(upiId.trim()) && TEN_DIGITS.test(upiPhone)}
       onSubmit={() => mutation.mutate({ upiId, upiPhone })}
     >
-      <Field id="onboarding-upi" label="UPI ID">
+      <BrightField id="onboarding-upi" label="UPI ID">
         <input
           id="onboarding-upi"
           autoComplete="off"
@@ -489,16 +463,16 @@ function PaymentStep({ data, onSaved }: StepProps) {
           value={upiId}
           onChange={(event) => setUpiId(event.target.value.trim())}
           aria-invalid={upiLooksWrong ? true : undefined}
-          className={cn(INPUT_CLASS, "max-w-[420px]")}
+          className={cn(BRIGHT_INPUT_CLASS, "max-w-[420px]")}
         />
-      </Field>
-      <Field
+      </BrightField>
+      <BrightField
         id="onboarding-upi-phone"
         label="Mobile number linked to this UPI ID"
         hint="Payouts are sent to this UPI ID. Double-check it — it can't be changed here once you submit."
       >
         <PhoneInput id="onboarding-upi-phone" value={upiPhone} onChange={setUpiPhone} />
-      </Field>
+      </BrightField>
     </StepFrame>
   );
 }
@@ -561,9 +535,14 @@ function CompletedView() {
           Your MUN application is with our team — we review every application within 2 business days. To change
           your details, contact support from the chat button.
         </p>
-        <Link to="/organizer/dashboard" className={PRIMARY_BUTTON_CLASS}>
-          Go to your dashboard
-        </Link>
+        <div className="flex flex-wrap items-center gap-md">
+          <Link to="/organizer/dashboard" className={BRIGHT_PRIMARY_BUTTON_CLASS}>
+            Go to your dashboard
+          </Link>
+          <Link to="/organizer/apply" className="text-[15px] font-medium text-[#121212] underline underline-offset-2">
+            Host another MUN
+          </Link>
+        </div>
       </div>
     </main>
   );

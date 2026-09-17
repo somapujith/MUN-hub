@@ -1,7 +1,7 @@
 import { zValidator } from '../lib/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { submitOrganizerApplication } from '@/lib/actions/organizer-application'
+import { listMyOrganizerApplications, submitOrganizerApplication } from '@/lib/actions/organizer-application'
 import { ONBOARDING_ERRORS, isOrganizerOnboardingComplete } from '@/lib/actions/organizer-onboarding'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
@@ -20,6 +20,11 @@ const submitApplicationBodySchema = z
   .strict()
 
 export const organizerApplicationRoutes = new Hono<{ Variables: AppVariables }>()
+
+// The signed-in organizer's own applications (one per MUN), with Gate-1 reviewer notes.
+organizerApplicationRoutes.get('/organizer/applications', requireAuth, requireRole(['ORGANIZER']), async (c) => {
+  return c.json(await listMyOrganizerApplications(c.get('session')))
+})
 
 // ORGANIZER only. Organizer accounts are created separately
 // (POST /auth/organizers); a delegate account can't apply to host, and nothing

@@ -23,6 +23,17 @@ Lane: organizer workspace pages (not settings, finance, communications, registra
   - `accommodationProvided` is a high-impact field for ACCOMMODATION, so changing the answer after verification triggers re-verification.
 - Item 1 (backend): `updateMunDetails` and `PATCH /muns/:munId` accept `addressLine1`, `addressState`, `postalCode`, `mapUrl`, `registrationOpensAt` and `registrationDeadline`. `MunSetupDetails` exposes them, plus `accommodationProvided`.
 
+- `f523604`: migration 0032 adds `expected_delegate_count`, `previous_editions` and `website_url` to `organizer_applications`. Applied locally only.
+- Item 7 (multi-MUN organizers):
+  - `submitOrganizerApplication` stores those three answers.
+  - It now refuses a new application only while an earlier one still awaits review (`APPLICATION_PENDING`, 409), replacing the old one-application limit (`ALREADY_APPLIED`).
+  - New `listMyOrganizerApplications` and `GET /organizer/applications` return the organizer's applications with Gate-1 reviewer notes.
+  - `/organizer/apply` is now a real "Host another MUN" page with a "Your applications" list (status and reviewer note). It shows a "being reviewed" notice while an application is pending, and sends non-onboarded organizers to the wizard.
+  - The wizard's completed screen links to it.
+  - The admin review dialog shows expected start date and city, maximum expected delegates, previous editions, website and description.
+- Error mapping: the module-lock message and "Cannot confirm — …" now return 409 instead of 500.
+- Shared bright-form primitives moved to `web/src/components/organizer/bright-form.tsx`.
+
 ### Bugs found while mapping (to fix in this lane)
 
 - `assertModuleNotLocked`'s message and `submitFinalConfirmation`'s "Cannot confirm — validation now fails" are unmapped, so both surface as 500s.

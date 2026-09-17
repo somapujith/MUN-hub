@@ -31,7 +31,8 @@ import { NotFoundPage } from "@/pages/not-found-page";
 import { OrganizerApplySubmittedPage } from "@/pages/organizer/apply-submitted-page";
 import { OrganizerSignupPage } from "@/pages/organizer/organizer-signup-page";
 import { OrganizerWelcomePage } from "@/pages/organizer/organizer-welcome-page";
-import { OrganizerApplyRedirect, OrganizerOnboardingPage } from "@/pages/organizer/organizer-onboarding-page";
+import { OrganizerOnboardingPage } from "@/pages/organizer/organizer-onboarding-page";
+import { OrganizerApplyPage } from "@/pages/organizer/organizer-apply-page";
 import { OrganizerSupportPage } from "@/pages/organizer/support-page";
 import { MunIndexRedirect } from "@/pages/organizer/dashboard/mun-index-redirect";
 import { OrganizerMunsPage } from "@/pages/organizer/dashboard/muns-page";
@@ -138,8 +139,8 @@ export const router = createBrowserRouter([
       },
       { path: "organizer/welcome", element: <OrganizerWelcomePage /> },
       { path: "organizer/onboarding", element: <OrganizerOnboardingPage /> },
-      // The host application is part of the onboarding wizard now.
-      { path: "organizer/apply", element: <OrganizerApplyRedirect /> },
+      // The first MUN is applied for in the onboarding wizard; this page is for the ones after it.
+      { path: "organizer/apply", element: <OrganizerApplyPage /> },
       {
         path: "organizer/apply/submitted",
         element: <OrganizerApplySubmittedPage />,

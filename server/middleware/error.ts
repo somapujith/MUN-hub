@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import { ZodError } from 'zod'
-import { ALREADY_APPLIED } from '@/lib/actions/organizer-application'
+import { APPLICATION_PENDING } from '@/lib/actions/organizer-application'
 import { ONBOARDING_ERRORS } from '@/lib/actions/organizer-onboarding'
 import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
 import type { AppVariables } from '../src/types'
@@ -84,7 +84,7 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     return { status: 503, code: 'UNAVAILABLE', message }
   }
 
-  if (message === ALREADY_APPLIED) {
+  if (message === APPLICATION_PENDING) {
     return { status: 409, code: 'CONFLICT_DUPLICATE', message }
   }
 
@@ -169,7 +169,13 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     return { status: 409, code: 'CONFLICT_ACTIVE_SUBMISSION', message }
   }
 
-  if (/^Cannot (submit|publish|transition)/.test(message)) {
+  // lib/lifecycle/module-completion.ts#assertModuleNotLocked and
+  // organizer-confirmation.ts#submitFinalConfirmation — previously 500s.
+  if (/^The ".+" module is locked while this mun is under MUNHub review/.test(message)) {
+    return { status: 409, code: 'CONFLICT_STATE', message }
+  }
+
+  if (/^Cannot (submit|publish|transition|confirm)/.test(message)) {
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
 
@@ -261,7 +267,14 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'Maximum expected delegates must be a whole number from 1 to 10000', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Description must be at least 40 characters', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'MUN title is required', status: 400, code: 'VALIDATION_FAILED' },
-  { message: ALREADY_APPLIED, status: 409, code: 'CONFLICT_DUPLICATE' },
+  { message: APPLICATION_PENDING, status: 409, code: 'CONFLICT_DUPLICATE' },
+  {
+    message:
+      'The "PORTFOLIOS" module is locked while this mun is under MUNHub review (current status: VERIFICATION) — changes to this module are blocked until review completes. Contact MUNHub support if this is urgent.',
+    status: 409,
+    code: 'CONFLICT_STATE',
+  },
+  { message: 'Cannot confirm — validation now fails: Venue is set', status: 409, code: 'CONFLICT_STATE' },
   { message: 'UPI mobile number must be a 10-digit Indian mobile number', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Emergency contact name is required', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Mun not found', status: 404, code: 'NOT_FOUND' },
