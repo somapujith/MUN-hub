@@ -37,10 +37,13 @@ export function validateBasicInfo(ctx: MunValidationContext): ModuleValidationRe
       message: nameNonEmpty ? undefined : 'Conference name is required.',
     },
     {
+      // Non-blocking as of the minimum-required-fields cut: name, dates,
+      // location and payment are the required set — a longer description can
+      // be filled in any time after publishing.
       key: 'description_length',
       label: `Description is at least ${MIN_DESCRIPTION_LENGTH} characters`,
       passed: descriptionLongEnough,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: descriptionLongEnough
         ? undefined
         : `Description must be at least ${MIN_DESCRIPTION_LENGTH} characters long.`,
@@ -49,7 +52,7 @@ export function validateBasicInfo(ctx: MunValidationContext): ModuleValidationRe
       key: 'edition_present',
       label: 'Edition is set',
       passed: editionPresent,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: editionPresent ? undefined : 'Edition (e.g. "2026") is required.',
     },
     {
@@ -149,18 +152,20 @@ export function validateDatesVenue(ctx: MunValidationContext): ModuleValidationR
             : 'Registration open date must be before the registration deadline.',
     },
     {
+      // Non-blocking as of the minimum-required-fields cut — city is the
+      // required location field; venue/address are detail that can follow.
       key: 'venue_present',
       label: 'Venue is set',
       passed: venuePresent,
-      severity: 'BLOCKER',
-      message: venuePresent ? undefined : 'Venue is required.',
+      severity: 'MEDIUM',
+      message: venuePresent ? undefined : 'Venue is recommended.',
     },
     {
       key: 'address_present',
       label: 'Address is set',
       passed: addressPresent,
-      severity: 'BLOCKER',
-      message: addressPresent ? undefined : 'Address is required.',
+      severity: 'MEDIUM',
+      message: addressPresent ? undefined : 'Address is recommended.',
     },
     {
       key: 'city_present',
@@ -173,8 +178,8 @@ export function validateDatesVenue(ctx: MunValidationContext): ModuleValidationR
       key: 'country_present',
       label: 'Country is set',
       passed: countryPresent,
-      severity: 'BLOCKER',
-      message: countryPresent ? undefined : 'Country is required.',
+      severity: 'MEDIUM',
+      message: countryPresent ? undefined : 'Country is recommended.',
     },
   ]
 
@@ -201,14 +206,16 @@ function imageCheck(
   const stored = rows.some((m) => !isDiscardedUploadUrl(m.url))
   return {
     key,
+    // Non-blocking as of the minimum-required-fields cut — branding can be
+    // added any time after publishing.
     label,
     passed: stored,
-    severity: 'BLOCKER',
+    severity: 'MEDIUM',
     message: stored
       ? undefined
       : rows.length > 0
         ? `Upload your ${noun} again — the earlier upload was not stored.`
-        : `A ${noun} is required.`,
+        : `A ${noun} is recommended.`,
   }
 }
 
@@ -228,27 +235,28 @@ export function validateContact(ctx: MunValidationContext): ModuleValidationResu
   const phonePresent = (contact?.phone ?? '').trim().length > 0
   const contactPersonPresent = (contact?.contactPersonName ?? '').trim().length > 0
 
+  // Non-blocking as of the minimum-required-fields cut.
   const checks: ValidationCheck[] = [
     {
       key: 'official_email_present',
       label: 'Official email is set',
       passed: emailPresent,
-      severity: 'BLOCKER',
-      message: emailPresent ? undefined : 'Official email is required.',
+      severity: 'MEDIUM',
+      message: emailPresent ? undefined : 'Official email is recommended.',
     },
     {
       key: 'phone_present',
       label: 'Phone number is set',
       passed: phonePresent,
-      severity: 'BLOCKER',
-      message: phonePresent ? undefined : 'Phone number is required.',
+      severity: 'MEDIUM',
+      message: phonePresent ? undefined : 'Phone number is recommended.',
     },
     {
       key: 'contact_person_name_present',
       label: 'Contact person name is set',
       passed: contactPersonPresent,
-      severity: 'BLOCKER',
-      message: contactPersonPresent ? undefined : 'Contact person name is required.',
+      severity: 'MEDIUM',
+      message: contactPersonPresent ? undefined : 'Contact person name is recommended.',
     },
   ]
 

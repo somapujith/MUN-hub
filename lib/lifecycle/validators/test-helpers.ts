@@ -61,6 +61,7 @@ export function makeContext(overrides: Partial<Omit<MunValidationContext, 'mun'>
     ebMembers: [],
     formFields: [],
     paymentSettings: null,
+    organizerPaymentLinked: true,
     documents: [],
     scheduleItems: [],
     contact: null,

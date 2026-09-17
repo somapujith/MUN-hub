@@ -200,7 +200,8 @@ describe('getAdminMunDetail', () => {
     expect(detail.modules.find((m) => m.moduleName === 'SCHEDULE')).toMatchObject({
       state: 'NOT_SUBMITTED',
       completionStatus: 'NOT_STARTED',
-      isRequired: true,
+      // SCHEDULE is defaultRequired: false as of the minimum-required-fields cut.
+      isRequired: false,
     })
 
     expect(detail.submission).toMatchObject({

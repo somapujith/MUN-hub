@@ -11,6 +11,7 @@ import {
   LayoutDashboardIcon,
   ListChecksIcon,
   MegaphoneIcon,
+  RocketIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
   TagIcon,
@@ -37,6 +38,7 @@ export const MUN_NAV_GROUP_ORDER: readonly MunNavGroup[] = [
 ];
 
 export const MUN_NAV_SECTIONS: readonly MunNavSection[] = [
+  { segment: "quick-setup", label: "Quick Setup", icon: RocketIcon, group: "Conference" },
   { segment: "setup", label: "MUN Setup", icon: SlidersHorizontalIcon, group: "Conference" },
   { segment: "committees", label: "Committees & Portfolios", icon: LayersIcon, group: "Conference", title: "Committees & portfolios" },
   { segment: "executive-board", label: "Executive Board", icon: UsersRoundIcon, group: "Conference" },

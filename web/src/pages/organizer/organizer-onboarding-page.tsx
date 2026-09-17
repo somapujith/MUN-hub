@@ -452,7 +452,9 @@ function DetailsStep({ data, onSaved }: StepProps) {
   );
 }
 
-const UPI_FORMAT = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,63}$/;
+// MUN Hub only accepts payouts to a FreeCharge UPI handle (@freecharge) —
+// user-directed restriction, mirrors lib/actions/organizer-onboarding.ts's UPI_PATTERN.
+const UPI_FORMAT = /^[a-zA-Z0-9._-]{2,256}@freecharge$/;
 
 function PaymentStep({ data, onSaved }: StepProps) {
   const [upiId, setUpiId] = React.useState(data.profile.upiId ?? "");
@@ -463,20 +465,20 @@ function PaymentStep({ data, onSaved }: StepProps) {
   return (
     <StepFrame
       title="Payment details"
-      description="Delegate payments for your MUNs will be sent to this UPI ID."
-      error={error ?? (upiLooksWrong ? "UPI IDs look like name@bank." : null)}
+      description="We only accept a FreeCharge UPI ID for payouts. Create a FreeCharge UPI account, link your bank account to it, then submit that UPI ID below."
+      error={error ?? (upiLooksWrong ? "Only a FreeCharge UPI ID is accepted — it must look like name@freecharge." : null)}
       submitLabel="Continue"
       submitting={mutation.isPending}
       canSubmit={UPI_FORMAT.test(upiId.trim()) && TEN_DIGITS.test(upiPhone)}
       onSubmit={() => mutation.mutate({ upiId, upiPhone })}
     >
-      <BrightField id="onboarding-upi" label="UPI ID">
+      <BrightField id="onboarding-upi" label="FreeCharge UPI ID">
         <input
           id="onboarding-upi"
           autoComplete="off"
           spellCheck={false}
           autoCapitalize="none"
-          placeholder="e.g. rahulsharma@okhdfcbank"
+          placeholder="e.g. rahulsharma@freecharge"
           value={upiId}
           onChange={(event) => setUpiId(event.target.value.trim())}
           aria-invalid={upiLooksWrong ? true : undefined}

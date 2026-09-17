@@ -27,12 +27,14 @@ export function validateRulesDocuments(ctx: MunValidationContext): ModuleValidat
   const allPresent = missing.length === 0
   const someDiscarded = missing.some((doc) => rowKinds.has(doc.kind))
 
+  // Non-blocking as of the minimum-required-fields cut — documents can be
+  // uploaded any time after publishing.
   const checks: ValidationCheck[] = [
     {
       key: 'required_documents_present',
       label: 'Rules of procedure and code of conduct are uploaded',
       passed: allPresent,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: allPresent
         ? undefined
         : `Upload your ${missing.map((doc) => doc.label.toLowerCase()).join(' and ')}${
@@ -51,13 +53,15 @@ export function validateRulesDocuments(ctx: MunValidationContext): ModuleValidat
 export function validateSchedule(ctx: MunValidationContext): ModuleValidationResult {
   const hasAtLeastOneItem = ctx.scheduleItems.length > 0
 
+  // Non-blocking as of the minimum-required-fields cut — the schedule can be
+  // built any time after publishing.
   const checks: ValidationCheck[] = [
     {
       key: 'at_least_one_schedule_item',
       label: 'At least one schedule item exists',
       passed: hasAtLeastOneItem,
-      severity: 'BLOCKER',
-      message: hasAtLeastOneItem ? undefined : 'At least one schedule item is required.',
+      severity: 'MEDIUM',
+      message: hasAtLeastOneItem ? undefined : 'At least one schedule item is recommended.',
     },
   ]
 
@@ -92,28 +96,30 @@ export function validateAccommodation(ctx: MunValidationContext): ModuleValidati
   const allPriced = optionsMissingPrice.length === 0
   const allCapacitySet = optionsMissingCapacity.length === 0
 
+  // Non-blocking as of the minimum-required-fields cut — accommodation can
+  // be configured any time after publishing.
   const checks: ValidationCheck[] = [
     {
       key: 'at_least_one_active_option',
       label: 'At least one active accommodation option exists',
       passed: hasActiveOption,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: hasActiveOption
         ? undefined
-        : 'At least one active accommodation option is required (or mark accommodation as not provided).',
+        : 'At least one active accommodation option is recommended (or mark accommodation as not provided).',
     },
     {
       key: 'every_option_has_price',
       label: 'Every active accommodation option has a price',
       passed: allPriced,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: allPriced ? undefined : `Missing price on: ${optionsMissingPrice.map((o) => o.name).join(', ')}.`,
     },
     {
       key: 'every_option_has_capacity',
       label: 'Every active accommodation option has a capacity',
       passed: allCapacitySet,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: allCapacitySet
         ? undefined
         : `Missing capacity on: ${optionsMissingCapacity.map((o) => o.name).join(', ')}.`,

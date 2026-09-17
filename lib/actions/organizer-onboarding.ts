@@ -11,7 +11,8 @@ import type { Session } from '@/lib/auth/adapter'
  *   2. MUN        the MUN's title, host city and expected start date
  *   3. DETAILS    maximum expected delegates, a description, previous
  *                 editions and website (optional)
- *   4. PAYMENT    the UPI ID payouts go to, and the mobile number linked to it
+ *   4. PAYMENT    a FreeCharge UPI ID payouts go to (no other provider is
+ *                 accepted), and the mobile number linked to it
  *   5. AGREEMENT  the organizer agreement — accepting it submits the MUN
  *                 answers as the organizer's application (Gate 1)
  *
@@ -35,7 +36,9 @@ export const MIN_DESCRIPTION_LENGTH = 40
 export const MAX_EXPECTED_DELEGATES = 10_000
 
 const PHONE_PATTERN = /^[6-9]\d{9}$/
-const UPI_PATTERN = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,63}$/
+// MUN Hub only accepts payouts to a FreeCharge UPI handle (@freecharge),
+// user-directed restriction — every other UPI provider's handle is rejected.
+const UPI_PATTERN = /^[a-zA-Z0-9._-]{2,256}@freecharge$/
 
 export interface OrganizerOnboarding {
   profile: {
@@ -306,7 +309,7 @@ export async function saveOrganizerPaymentStep(
   assertOrganizer(session)
   await rowForStep(session, 'PAYMENT')
   const upiId = input.upiId.trim()
-  if (!UPI_PATTERN.test(upiId)) throw new Error('UPI ID must look like name@bank')
+  if (!UPI_PATTERN.test(upiId)) throw new Error('Only a FreeCharge UPI ID is accepted — it must look like name@freecharge')
   const upiPhone = normalizePhone(input.upiPhone, 'UPI mobile number')
 
   await saveRow(session.userId, { upiId: upiId.toLowerCase(), upiPhone })

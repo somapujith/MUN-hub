@@ -24,7 +24,7 @@ const DETAILS = {
   previousEditions: '2 editions',
   websiteUrl: 'https://deccanmun.example',
 }
-const PAYMENT = { upiId: 'Asha.Rao@okhdfcbank', upiPhone: '+919876543210' }
+const PAYMENT = { upiId: 'Asha.Rao@freecharge', upiPhone: '+919876543210' }
 
 async function makeUser(role: 'ORGANIZER' | 'STUDENT', name = 'Signup Name Here'): Promise<Session> {
   const [user] = await db
@@ -104,7 +104,7 @@ describe('organizer onboarding', () => {
     expect(state.profile).toMatchObject({ expectedDelegateCount: 350, websiteUrl: 'https://deccanmun.example' })
 
     state = await saveOrganizerPaymentStep(PAYMENT, session)
-    expect(state.profile).toMatchObject({ upiId: 'asha.rao@okhdfcbank', upiPhone: '9876543210' })
+    expect(state.profile).toMatchObject({ upiId: 'asha.rao@freecharge', upiPhone: '9876543210' })
     expect(state.nextStep).toBe('AGREEMENT')
     expect(await isOrganizerOnboardingComplete(session.userId)).toBe(false)
 
@@ -183,7 +183,10 @@ describe('organizer onboarding', () => {
     expect(state.profile).toMatchObject({ previousEditions: null, websiteUrl: null })
 
     await expect(saveOrganizerPaymentStep({ ...PAYMENT, upiId: 'not-a-upi' }, session)).rejects.toThrow(
-      'UPI ID must look like name@bank',
+      'Only a FreeCharge UPI ID is accepted — it must look like name@freecharge',
+    )
+    await expect(saveOrganizerPaymentStep({ ...PAYMENT, upiId: 'rahul@okhdfcbank' }, session)).rejects.toThrow(
+      'Only a FreeCharge UPI ID is accepted — it must look like name@freecharge',
     )
     await expect(saveOrganizerPaymentStep({ ...PAYMENT, upiPhone: '5123456789' }, session)).rejects.toThrow(
       'UPI mobile number must be a 10-digit Indian mobile number',
@@ -214,7 +217,7 @@ describe('organizer onboarding', () => {
     await expect(acceptOrganizerAgreement({ accepted: true }, session)).rejects.toThrow(ONBOARDING_ERRORS.locked)
 
     const [row] = await db.select().from(organizerProfiles).where(eq(organizerProfiles.userId, session.userId))
-    expect(row.upiId).toBe('asha.rao@okhdfcbank')
+    expect(row.upiId).toBe('asha.rao@freecharge')
   })
 
   it('handles a double submit of the agreement without a second application', async () => {

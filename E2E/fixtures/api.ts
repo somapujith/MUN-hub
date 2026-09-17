@@ -96,7 +96,7 @@ export async function completeOrganizerOnboarding(userId: string): Promise<void>
     await sql`
       insert into organizer_profiles (user_id, first_name, last_name, contact_phone,
         upi_id, upi_phone, agreement_version, completed_at)
-      values (${userId}, 'E2E', 'Organizer', '9876543210', 'e2e@ybl', '9876543210', 'e2e', now())
+      values (${userId}, 'E2E', 'Organizer', '9876543210', 'e2e@freecharge', '9876543210', 'e2e', now())
       on conflict (user_id) do nothing`
   } finally {
     await sql.end()

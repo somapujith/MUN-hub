@@ -72,26 +72,28 @@ describe('validateRulesDocuments', () => {
     expect(result.passed).toBe(true)
   })
 
-  it('fails when RULES is missing, and says which document to upload', () => {
+  it('flags (but does not block on) a missing RULES document, and says which one to upload', () => {
     const ctx = makeContext({ documents: [document('CODE_OF_CONDUCT')] })
     const result = validateRulesDocuments(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
+    expect(result.checks[0].severity).toBe('MEDIUM')
     expect(result.checks[0].message).toBe('Upload your rules of procedure.')
   })
 
-  it('fails when CODE_OF_CONDUCT is missing', () => {
+  it('flags (but does not block on) a missing CODE_OF_CONDUCT', () => {
     const ctx = makeContext({ documents: [document('RULES')] })
     const result = validateRulesDocuments(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
+    expect(result.checks[0].passed).toBe(false)
   })
 
   // Rows written while no storage backend was configured point at the mock
   // store, which kept no bytes — the row exists but the PDF does not.
-  it('fails when a required document only points at the discarding mock store', () => {
+  it('flags (but does not block on) a required document that only points at the discarding mock store', () => {
     const discarded = { ...(document('RULES') as object), url: '/mock-storage/muns/mun-1/documents/a' } as never
     const ctx = makeContext({ documents: [discarded, document('CODE_OF_CONDUCT')] })
     const result = validateRulesDocuments(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
     expect(result.checks[0].message).toBe(
       'Upload your rules of procedure again — the earlier upload was not stored.',
     )
@@ -102,10 +104,11 @@ describe('validateRulesDocuments', () => {
     expect(validateRulesDocuments(ctx).checks.map((check) => check.label).join(' ')).not.toMatch(/refund/i)
   })
 
-  it('fails when no documents exist at all', () => {
+  it('still passes (non-blocking) when no documents exist at all', () => {
     const ctx = makeContext({ documents: [] })
     const result = validateRulesDocuments(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
+    expect(result.checks[0].passed).toBe(false)
   })
 
   it('extra document kinds (e.g. BROCHURE) do not affect the outcome', () => {
@@ -120,7 +123,7 @@ describe('validateRulesDocuments', () => {
     const lostRules = { ...(document('RULES') as object), url: '/mock-storage/muns/mun-1/documents/x' } as never
     const ctx = makeContext({ documents: [lostRules, document('CODE_OF_CONDUCT')] })
     const result = validateRulesDocuments(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
     expect(result.checks[0].message).toBe(
       'Upload your rules of procedure again — the earlier upload was not stored.',
     )
@@ -135,10 +138,11 @@ describe('validateSchedule', () => {
     expect(result.passed).toBe(true)
   })
 
-  it('fails when there are zero schedule items', () => {
+  it('still passes (non-blocking) when there are zero schedule items', () => {
     const ctx = makeContext({ scheduleItems: [] })
     const result = validateSchedule(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
+    expect(result.checks[0].passed).toBe(false)
   })
 })
 
@@ -156,40 +160,40 @@ describe('validateAccommodation', () => {
     expect(result.passed).toBe(true)
   })
 
-  it('fails when PROVIDED but there are zero active options', () => {
+  it('flags (but does not block on) PROVIDED with zero active options', () => {
     const ctx = makeContext({
       mun: { accommodationProvided: 'PROVIDED' },
       accommodationOptions: [accommodationOption({ status: 'inactive' })],
     })
     const result = validateAccommodation(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
     expect(result.checks.find((c) => c.key === 'at_least_one_active_option')?.passed).toBe(false)
   })
 
-  it('fails when an active option is missing a price', () => {
+  it('flags (but does not block on) an active option missing a price', () => {
     const ctx = makeContext({
       mun: { accommodationProvided: 'PROVIDED' },
       accommodationOptions: [accommodationOption({ price: null })],
     })
     const result = validateAccommodation(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
     expect(result.checks.find((c) => c.key === 'every_option_has_price')?.passed).toBe(false)
   })
 
-  it('fails when an active option is missing a capacity', () => {
+  it('flags (but does not block on) an active option missing a capacity', () => {
     const ctx = makeContext({
       mun: { accommodationProvided: 'PROVIDED' },
       accommodationOptions: [accommodationOption({ capacity: null })],
     })
     const result = validateAccommodation(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
     expect(result.checks.find((c) => c.key === 'every_option_has_capacity')?.passed).toBe(false)
   })
 
-  it('fails when accommodationProvided is null (organizer has not answered yet)', () => {
+  it('flags (but does not block on) accommodationProvided being null (organizer has not answered yet)', () => {
     const ctx = makeContext({ mun: { accommodationProvided: null }, accommodationOptions: [] })
     const result = validateAccommodation(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
   })
 })
 

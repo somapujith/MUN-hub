@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import {
   muns,
   organizerApplications,
+  organizerProfiles,
   committees,
   portfolios,
   registrationProducts,
@@ -92,6 +93,15 @@ export interface MunValidationContext {
   ebMembers: EbMemberRow[]
   formFields: FormFieldRow[]
   paymentSettings: MaskedPaymentSettingsRow | null
+  /**
+   * Whether the mun's organizer has completed the account-level UPI payout
+   * step (lib/actions/organizer-onboarding.ts#saveOrganizerPaymentStep) —
+   * the real "payment is required" gate as of the minimum-fields cut. The
+   * per-mun `mun_payment_settings` PAN/bank-account row above is legacy and
+   * no longer required for submission (see validators/commerce.ts's
+   * validatePaymentSettlement).
+   */
+  organizerPaymentLinked: boolean
   documents: MunDocumentRow[]
   scheduleItems: ScheduleItemRow[]
   contact: MunContactRow | null
@@ -189,6 +199,12 @@ export async function loadValidationContext(munId: string, client: ValidationRea
       .where(and(eq(verificationIssues.munId, munId), eq(verificationIssues.resolved, false))),
   ])
 
+  const [organizerProfileRow] = await client
+    .select({ upiId: organizerProfiles.upiId })
+    .from(organizerProfiles)
+    .where(eq(organizerProfiles.userId, mun.organizerId))
+    .limit(1)
+
   // Portfolios and accommodation-option fields both hang off a parent row
   // fetched above, not off munId directly — batch these with `inArray` over
   // the parent ids rather than looping, per design doc Section 4 / the task
@@ -219,6 +235,7 @@ export async function loadValidationContext(munId: string, client: ValidationRea
     ebMembers: ebMemberRows,
     formFields: formFieldRows,
     paymentSettings: paymentSettingsRow ?? null,
+    organizerPaymentLinked: Boolean(organizerProfileRow?.upiId),
     documents: documentRows,
     scheduleItems: scheduleItemRows,
     contact: contactRow ?? null,

@@ -14,6 +14,7 @@ import {
   munScheduleItems,
   munPaymentSettings,
   organizerApplications,
+  organizerProfiles,
   munModuleVerifications,
   verificationIssues,
 } from '@/lib/db/schema'
@@ -74,6 +75,10 @@ async function makeCompleteMun(organizerId: string, status: 'CONTENT_SUBMITTED' 
     .returning()
 
   await db.insert(organizerApplications).values({ organizerId, munId: mun.id, status: 'APPROVED' })
+  await db
+    .insert(organizerProfiles)
+    .values({ userId: organizerId, upiId: 'organizer@upi', upiPhone: '9000000000' })
+    .onConflictDoUpdate({ target: organizerProfiles.userId, set: { upiId: 'organizer@upi' } })
 
   const [committee] = await db
     .insert(committees)

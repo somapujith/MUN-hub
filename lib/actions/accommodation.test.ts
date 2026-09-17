@@ -47,12 +47,15 @@ describe('setAccommodationProvided', () => {
       .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'ACCOMMODATION')))
     expect(module.completionStatus).toBe('COMPLETE')
 
+    // ACCOMMODATION's checks are all non-blocking as of the
+    // minimum-required-fields cut, so the module still shows COMPLETE even
+    // with zero options — there's no BLOCKER left to fail on.
     await setAccommodationProvided(mun.id, 'PROVIDED', session)
     const [provided] = await db
       .select()
       .from(munModuleVerifications)
       .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'ACCOMMODATION')))
-    expect(provided.completionStatus).not.toBe('COMPLETE')
+    expect(provided.completionStatus).toBe('COMPLETE')
   })
 
   it('sends a verified mun back for re-verification when the answer changes', async () => {

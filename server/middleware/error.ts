@@ -152,7 +152,7 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     /^Description must be at least \d+ characters$/.test(message) ||
     /^Organization must be at most \d+ characters$/.test(message) ||
     message === 'Website must be a full URL, including https://' ||
-    message === 'UPI ID must look like name@bank' ||
+    message === 'Only a FreeCharge UPI ID is accepted — it must look like name@freecharge' ||
     message === 'You must accept the organizer agreement to continue' ||
     message === 'You must confirm the submission is accurate and complete' ||
     message === 'Registration deadline must be after registration opens' ||

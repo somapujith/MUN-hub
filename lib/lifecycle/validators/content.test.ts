@@ -25,25 +25,29 @@ describe('validateBasicInfo', () => {
     expect(check?.severity).toBe('BLOCKER')
   })
 
-  it('fails (BLOCKER) when description is under the minimum length', () => {
+  it('flags (but does not block on) a description under the minimum length', () => {
     const ctx = makeContext({ mun: { name: 'Test MUN', description: 'too short', edition: '2027' } })
     const result = validateBasicInfo(ctx)
-    expect(result.passed).toBe(false)
-    expect(result.checks.find((c) => c.key === 'description_length')?.passed).toBe(false)
+    const check = result.checks.find((c) => c.key === 'description_length')
+    expect(check?.passed).toBe(false)
+    expect(check?.severity).toBe('MEDIUM')
+    expect(result.passed).toBe(true)
   })
 
-  it('fails (BLOCKER) when description is null', () => {
+  it('flags (but does not block on) a null description', () => {
     const ctx = makeContext({ mun: { name: 'Test MUN', description: null, edition: '2027' } })
     const result = validateBasicInfo(ctx)
-    expect(result.passed).toBe(false)
     expect(result.checks.find((c) => c.key === 'description_length')?.passed).toBe(false)
+    expect(result.passed).toBe(true)
   })
 
-  it('fails (BLOCKER) when edition is empty', () => {
+  it('flags (but does not block on) an empty edition', () => {
     const ctx = makeContext({ mun: { name: 'Test MUN', description: 'A'.repeat(25), edition: '' } })
     const result = validateBasicInfo(ctx)
-    expect(result.passed).toBe(false)
-    expect(result.checks.find((c) => c.key === 'edition_present')?.passed).toBe(false)
+    const check = result.checks.find((c) => c.key === 'edition_present')
+    expect(check?.passed).toBe(false)
+    expect(check?.severity).toBe('MEDIUM')
+    expect(result.passed).toBe(true)
   })
 
   it('organizer-not-approved is HIGH severity, not BLOCKER — does not fail the module', () => {
@@ -128,14 +132,20 @@ describe('validateDatesVenue', () => {
     expect(result.checks.find((c) => c.key === 'opens_before_deadline')?.passed).toBe(false)
   })
 
-  it('fails when venue, address, city, or country are missing', () => {
+  it('fails (BLOCKER on city only) when venue, address, city, or country are missing', () => {
     const ctx = makeContext({ mun: { ...validDates, venue: null, addressLine1: null, city: null, country: null } })
     const result = validateDatesVenue(ctx)
+    // city is the only one of these four still BLOCKER — venue/address/country
+    // are non-blocking as of the minimum-required-fields cut.
     expect(result.passed).toBe(false)
     expect(result.checks.find((c) => c.key === 'venue_present')?.passed).toBe(false)
+    expect(result.checks.find((c) => c.key === 'venue_present')?.severity).toBe('MEDIUM')
     expect(result.checks.find((c) => c.key === 'address_present')?.passed).toBe(false)
+    expect(result.checks.find((c) => c.key === 'address_present')?.severity).toBe('MEDIUM')
     expect(result.checks.find((c) => c.key === 'city_present')?.passed).toBe(false)
+    expect(result.checks.find((c) => c.key === 'city_present')?.severity).toBe('BLOCKER')
     expect(result.checks.find((c) => c.key === 'country_present')?.passed).toBe(false)
+    expect(result.checks.find((c) => c.key === 'country_present')?.severity).toBe('MEDIUM')
   })
 
   it('fails all date checks when dates are null', () => {
@@ -159,29 +169,33 @@ describe('validateBranding', () => {
     expect(result.moduleKey).toBe('BRANDING')
   })
 
-  it('fails when no LOGO exists', () => {
+  it('flags (but does not block on) a missing LOGO', () => {
     const ctx = makeContext({ media: [{ kind: 'COVER' } as never] })
     const result = validateBranding(ctx)
-    expect(result.passed).toBe(false)
-    expect(result.checks.find((c) => c.key === 'logo_present')?.passed).toBe(false)
+    const check = result.checks.find((c) => c.key === 'logo_present')
+    expect(check?.passed).toBe(false)
+    expect(check?.severity).toBe('MEDIUM')
+    expect(result.passed).toBe(true)
   })
 
-  it('fails when no COVER exists', () => {
+  it('flags (but does not block on) a missing COVER', () => {
     const ctx = makeContext({ media: [{ kind: 'LOGO' } as never] })
     const result = validateBranding(ctx)
-    expect(result.passed).toBe(false)
-    expect(result.checks.find((c) => c.key === 'cover_present')?.passed).toBe(false)
+    const check = result.checks.find((c) => c.key === 'cover_present')
+    expect(check?.passed).toBe(false)
+    expect(check?.severity).toBe('MEDIUM')
+    expect(result.passed).toBe(true)
   })
 
-  it('fails when media is empty', () => {
+  it('still passes (non-blocking) when media is empty', () => {
     const ctx = makeContext({ media: [] })
     const result = validateBranding(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
   })
 
   // Rows written while no storage backend was configured point at the mock
   // store, which kept no bytes — the row exists but the image does not.
-  it('fails when the rows only point at the discarding mock store', () => {
+  it('flags (but does not block on) rows that only point at the discarding mock store', () => {
     const ctx = makeContext({
       media: [
         { kind: 'LOGO', url: '/mock-storage/muns/mun-1/branding/a' } as never,
@@ -189,7 +203,7 @@ describe('validateBranding', () => {
       ],
     })
     const result = validateBranding(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
     const logo = result.checks.find((c) => c.key === 'logo_present')
     expect(logo?.passed).toBe(false)
     expect(logo?.message).toContain('again')
@@ -228,10 +242,10 @@ describe('validateContact', () => {
     expect(result.moduleKey).toBe('CONTACT')
   })
 
-  it('fails when contact is null (nothing submitted)', () => {
+  it('flags (but does not block on) a null contact (nothing submitted)', () => {
     const ctx = makeContext({ contact: null })
     const result = validateContact(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.passed).toBe(true)
     expect(result.checks.find((c) => c.key === 'official_email_present')?.passed).toBe(false)
     expect(result.checks.find((c) => c.key === 'phone_present')?.passed).toBe(false)
     expect(result.checks.find((c) => c.key === 'contact_person_name_present')?.passed).toBe(false)

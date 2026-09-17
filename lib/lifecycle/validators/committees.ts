@@ -27,10 +27,12 @@ export function validateCommittees(ctx: MunValidationContext): ModuleValidationR
       message: hasAtLeastOne ? undefined : 'At least one committee is required.',
     },
     {
+      // Non-blocking as of the minimum-required-fields cut — agenda can be
+      // added any time after publishing.
       key: 'every_committee_has_agenda',
       label: 'Every committee has a non-empty agenda',
       passed: everyAgendaSet,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: everyAgendaSet ? undefined : `Missing agenda for: ${missingAgendaNames.join(', ')}.`,
     },
     {
@@ -72,12 +74,14 @@ export function validatePortfolios(ctx: MunValidationContext): ModuleValidationR
   const hasAvailablePerCommittee = committeesMissingAvailablePortfolio.length === 0
   const noDuplicateNames = duplicateNameCommittees.length === 0
 
+  // Non-blocking as of the minimum-required-fields cut — portfolios can be
+  // added any time after publishing.
   const checks: ValidationCheck[] = [
     {
       key: 'available_portfolio_per_committee',
       label: 'Every active committee has at least one available portfolio',
       passed: hasAvailablePerCommittee,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: hasAvailablePerCommittee
         ? undefined
         : `No available portfolio for: ${committeesMissingAvailablePortfolio.map((c) => c.name).join(', ')}.`,
@@ -86,7 +90,7 @@ export function validatePortfolios(ctx: MunValidationContext): ModuleValidationR
       key: 'no_duplicate_portfolio_names',
       label: 'No duplicate portfolio name within the same committee',
       passed: noDuplicateNames,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: noDuplicateNames
         ? undefined
         : `Duplicate portfolio names in: ${duplicateNameCommittees.map((c) => c.name).join(', ')}.`,
@@ -104,12 +108,14 @@ export function validateExecutiveBoard(ctx: MunValidationContext): ModuleValidat
   const committeesMissingChair = committees.filter((c) => !chairCommitteeIds.has(c.id))
   const everyCommitteeHasChair = committeesMissingChair.length === 0
 
+  // Non-blocking as of the minimum-required-fields cut — the executive board
+  // can be filled in any time after publishing.
   const checks: ValidationCheck[] = [
     {
       key: 'every_committee_has_chair',
       label: 'Every active committee has at least one Chair',
       passed: everyCommitteeHasChair,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: everyCommitteeHasChair
         ? undefined
         : `Missing a Chair for: ${committeesMissingChair.map((c) => c.name).join(', ')}.`,

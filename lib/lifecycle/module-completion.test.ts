@@ -16,10 +16,14 @@ import {
   munScheduleItems,
   munPaymentSettings,
   organizerApplications,
+  organizerProfiles,
 } from '@/lib/db/schema'
 import { computeModuleCompletion, recomputeMunProgress, onModuleDataChanged } from './module-completion'
 import { setModuleRequirement } from './module-verification'
-import { TRACKED_MODULES } from './module-registry'
+import { MODULE_REGISTRY, TRACKED_MODULES } from './module-registry'
+
+/** Modules that are `defaultRequired: true` — the minimum-required-fields cut's real set. */
+const DEFAULT_REQUIRED_COUNT = MODULE_REGISTRY.filter((m) => m.defaultRequired).length
 
 async function makeUser(role: 'ORGANIZER' | 'ADMIN' = 'ORGANIZER') {
   const [user] = await db
@@ -82,6 +86,10 @@ async function makeFullySeededMun(organizerId: string, status: (typeof muns.$inf
     munId: mun.id,
     status: 'APPROVED',
   })
+  await db
+    .insert(organizerProfiles)
+    .values({ userId: organizerId, upiId: 'organizer@upi', upiPhone: '9000000000' })
+    .onConflictDoUpdate({ target: organizerProfiles.userId, set: { upiId: 'organizer@upi' } })
 
   const [committee] = await db
     .insert(committees)
@@ -191,32 +199,29 @@ describe('computeModuleCompletion', () => {
 })
 
 describe('recomputeMunProgress — percentage arithmetic', () => {
-  it('is module-count based: required-complete / required-total, all 15 modules genuinely COMPLETE on a fully seeded mun', async () => {
+  it('is module-count based: required-complete / required-total, every default-required module genuinely COMPLETE on a fully seeded mun', async () => {
     const organizer = await makeUser()
     const mun = await makeFullySeededMun(organizer.id)
 
     const progress = await recomputeMunProgress(mun.id)
-    expect(progress.requiredTotal).toBe(TRACKED_MODULES.length)
-    expect(progress.requiredComplete).toBe(TRACKED_MODULES.length)
+    expect(progress.requiredTotal).toBe(DEFAULT_REQUIRED_COUNT)
+    expect(progress.requiredComplete).toBe(DEFAULT_REQUIRED_COUNT)
     expect(progress.overallPercentage).toBe(100)
   })
 
-  it('a bare mun leaves most required modules incomplete (every real validator with a required field fails on empty data)', async () => {
+  it('a bare mun leaves required modules incomplete (every real validator with a required field fails on empty data)', async () => {
     const organizer = await makeUser()
     const mun = await makeMun(organizer.id)
 
     const progress = await recomputeMunProgress(mun.id)
-    expect(progress.requiredTotal).toBe(TRACKED_MODULES.length)
-    // Not every module fails on a bare mun: REGISTRATION_FORM and
-    // FINAL_REVIEW pass trivially with no data (see their validators'
-    // docstrings), and PORTFOLIOS passes trivially when there are zero
-    // committees (that failure belongs to COMMITTEES instead). The
-    // meaningful assertion is that most — not all — required modules are
-    // incomplete, matching real validator behavior rather than a stub.
-    expect(progress.requiredComplete).toBeLessThan(TRACKED_MODULES.length)
+    expect(progress.requiredTotal).toBe(DEFAULT_REQUIRED_COUNT)
+    expect(progress.requiredComplete).toBeLessThan(DEFAULT_REQUIRED_COUNT)
     expect(progress.overallPercentage).toBeLessThan(100)
     expect(progress.modules.find((m) => m.key === 'COMMITTEES')?.completionStatus).toBe('ACTION_REQUIRED')
-    expect(progress.modules.find((m) => m.key === 'BASIC_INFO')?.completionStatus).toBe('ACTION_REQUIRED')
+    // BASIC_INFO's only remaining BLOCKER is name_present, which `makeMun`
+    // sets — DATES_VENUE (dates + city are BLOCKER there) is the one that
+    // genuinely stays incomplete on this bare fixture.
+    expect(progress.modules.find((m) => m.key === 'DATES_VENUE')?.completionStatus).toBe('ACTION_REQUIRED')
   })
 
   it('module-count based formula gives a different answer than averaging when completion is uneven', () => {
@@ -268,12 +273,15 @@ describe('recomputeMunProgress — percentage arithmetic', () => {
     const mun = await makeFullySeededMun(organizer.id)
 
     await recomputeMunProgress(mun.id)
-    await setModuleRequirement(mun.id, 'BRANDING', false, { userId: admin.id, role: 'ADMIN' })
+    // COMMITTEES is defaultRequired: true — flipping it to false via the
+    // admin override is what actually moves requiredTotal, proving the
+    // override mechanism (not just the static registry default) works.
+    await setModuleRequirement(mun.id, 'COMMITTEES', false, { userId: admin.id, role: 'ADMIN' })
 
     const progress = await recomputeMunProgress(mun.id)
-    expect(progress.requiredTotal).toBe(TRACKED_MODULES.length - 1)
-    expect(progress.modules.find((m) => m.key === 'BRANDING')?.isRequired).toBe(false)
-    expect(progress.requiredComplete).toBe(TRACKED_MODULES.length - 1)
+    expect(progress.requiredTotal).toBe(DEFAULT_REQUIRED_COUNT - 1)
+    expect(progress.modules.find((m) => m.key === 'COMMITTEES')?.isRequired).toBe(false)
+    expect(progress.requiredComplete).toBe(DEFAULT_REQUIRED_COUNT - 1)
   })
 })
 

@@ -415,7 +415,7 @@ test.describe('onboarding is locked once submitted', () => {
       ['profile', 'put', { firstName: 'Changed', lastName: 'Name', contactPhone: '9000000000' }],
       ['mun', 'put', { munName: 'Renamed MUN', munCity: 'Delhi', munStartDate: answers.munStartDate }],
       ['details', 'put', { expectedDelegateCount: 5, munDescription: answers.munDescription }],
-      ['payment', 'put', { upiId: 'attacker@okaxis', upiPhone: '9000000000' }],
+      ['payment', 'put', { upiId: 'attacker@freecharge', upiPhone: '9000000000' }],
       ['agreement', 'post', { accepted: true }],
     ] as const) {
       await expectError(await org.api[method](`organizer/onboarding/${path}`, { data }), 409, LOCKED)

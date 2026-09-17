@@ -92,10 +92,13 @@ export function validatePricingCapacity(ctx: MunValidationContext): ModuleValida
         : `Capacity not positive on: ${nonPositiveCapacity.map((p) => p.name).join(', ')}.`,
     },
     {
+      // Non-blocking detail, not core "pass cost" — a deadline on/after the
+      // conference start is a mistake worth flagging, but not worth blocking
+      // submission over (per the minimum-required-fields cut).
       key: 'deadline_before_start',
       label: 'Every registration product deadline (if set) is before the conference start date',
       passed: allDeadlinesValid,
-      severity: 'BLOCKER',
+      severity: 'MEDIUM',
       message: allDeadlinesValid
         ? undefined
         : `Deadline on/after conference start for: ${invalidDeadline.map((p) => p.name).join(', ')}.`,
@@ -105,52 +108,28 @@ export function validatePricingCapacity(ctx: MunValidationContext): ModuleValida
   return { moduleKey: 'PRICING_CAPACITY', checks, passed: modulePassed(checks) }
 }
 
+/**
+ * As of the minimum-required-fields cut, "payment is set up" means the
+ * organizer's account-level UPI payout (lib/actions/organizer-onboarding.ts
+ * #saveOrganizerPaymentStep, set once for the whole account during
+ * onboarding) — not the legacy per-mun `mun_payment_settings` PAN/bank-account
+ * form, which is no longer required to submit or publish. An organizer who
+ * completed onboarding always has this set, since PAYMENT is a mandatory
+ * onboarding step; this check exists mainly to catch a pre-onboarding-lock
+ * legacy account.
+ */
 export function validatePaymentSettlement(ctx: MunValidationContext): ModuleValidationResult {
-  const { paymentSettings, stage } = ctx
-
-  const detailsSubmitted = paymentSettings != null
-  const isVerified = paymentSettings?.verificationState === 'VERIFIED'
+  const { organizerPaymentLinked } = ctx
 
   const checks: ValidationCheck[] = [
     {
-      key: 'payment_details_submitted',
-      label: 'Payment/settlement details have been submitted',
-      passed: detailsSubmitted,
+      key: 'organizer_payment_linked',
+      label: "Organizer's FreeCharge UPI payout details are set",
+      passed: organizerPaymentLinked,
       severity: 'BLOCKER',
-      message: detailsSubmitted ? undefined : 'Payment settlement details are required.',
-    },
-    {
-      // STAGE-DEPENDENT SEVERITY — READ BEFORE CHANGING.
-      //
-      // At SUBMIT stage this is HIGH, not BLOCKER: payment verification is
-      // performed by a MUNHub admin, not the organizer (see
-      // mun_payment_settings.verificationState — set only by an admin
-      // action, never by the organizer's own form submission). If this were
-      // BLOCKER at submit time, an organizer who has correctly filled in
-      // every field would be permanently stuck unable to submit until an
-      // admin manually intervenes outside the product — a deadlock the
-      // organizer cannot resolve themselves. PRD §19's example UI explicitly
-      // shows "🟡 Account verification pending" as a normal, expected
-      // in-flight state at this point in the pipeline, not an error.
-      //
-      // At PUBLISH stage it becomes BLOCKER: PRD §33 requires payment
-      // verification to be complete before a mun can go live, because from
-      // here on real money moves through this account. This is the ONE
-      // place in the whole validation engine where SUBMIT and PUBLISH
-      // deliberately disagree — see design doc Section 4's closing
-      // paragraph. Do NOT "fix" this into a single severity; that would
-      // either deadlock every organizer at submission (if hardcoded
-      // BLOCKER) or let an unverified payment account reach a published,
-      // registration-accepting mun (if hardcoded HIGH). Both are bugs.
-      key: 'payment_verification_state',
-      label: 'Payment account has been verified by MUNHub',
-      passed: isVerified,
-      severity: stage === 'PUBLISH' ? 'BLOCKER' : 'HIGH',
-      message: isVerified
+      message: organizerPaymentLinked
         ? undefined
-        : stage === 'PUBLISH'
-          ? 'Payment account must be verified by MUNHub before this mun can be published.'
-          : 'Payment account verification is pending MUNHub review. This does not block submission.',
+        : 'Add your FreeCharge UPI payout details from your account Settings before submitting.',
     },
   ]
 

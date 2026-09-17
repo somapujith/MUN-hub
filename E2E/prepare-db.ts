@@ -63,7 +63,7 @@ async function main(db: FixtureDb): Promise<void> {
       firstName: 'E2E',
       lastName: 'Owner',
       contactPhone: '9876543210',
-      upiId: 'e2e-owner@ybl',
+      upiId: 'e2e-owner@freecharge',
       upiPhone: '9876543210',
       agreementVersion: 'e2e',
       completedAt: new Date(),

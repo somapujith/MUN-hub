@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
   muns,
@@ -13,6 +14,7 @@ import {
   munScheduleItems,
   munPaymentSettings,
   organizerApplications,
+  organizerProfiles,
 } from '@/lib/db/schema'
 import { loadValidationContext, validateMunForSubmission } from './validation'
 import { TRACKED_MODULES } from './module-registry'
@@ -33,8 +35,13 @@ async function makeBareMun(organizerId: string) {
   return mun
 }
 
-/** A mun with every module's backing data seeded EXCEPT payment settlement — used by the SUBMIT/PUBLISH asymmetry test. */
-async function makeMunPendingPaymentOnly(organizerId: string) {
+/**
+ * A mun with every module's backing data seeded to pass SUBMIT-stage
+ * validation, including the organizer's account-level UPI payout link
+ * (PAYMENT_SETTLEMENT's real requirement as of the minimum-required-fields
+ * cut — see validators/commerce.ts#validatePaymentSettlement).
+ */
+async function makeCompleteMun(organizerId: string) {
   const now = new Date()
   const start = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
   const end = new Date(start.getTime() + 2 * 24 * 60 * 60 * 1000)
@@ -63,6 +70,10 @@ async function makeMunPendingPaymentOnly(organizerId: string) {
     .returning()
 
   await db.insert(organizerApplications).values({ organizerId, munId: mun.id, status: 'APPROVED' })
+  await db
+    .insert(organizerProfiles)
+    .values({ userId: organizerId, upiId: 'organizer@upi', upiPhone: '9000000000' })
+    .onConflictDoUpdate({ target: organizerProfiles.userId, set: { upiId: 'organizer@upi' } })
 
   const [committee] = await db
     .insert(committees)
@@ -96,9 +107,11 @@ async function makeMunPendingPaymentOnly(organizerId: string) {
     endsAt: new Date(start.getTime() + 60 * 60 * 1000),
   })
 
-  // Payment settings row EXISTS (details submitted — clears that BLOCKER)
-  // but verificationState is PENDING, not VERIFIED — this is exactly the
-  // "everything else complete" state the stage-asymmetry test needs.
+  // The legacy per-mun payment-settings row is no longer what gates
+  // PAYMENT_SETTLEMENT (the organizer's account-level UPI link above is),
+  // but it's still inserted here so any test exercising the PUBLISH-stage
+  // payment-verification path (lib/lifecycle/go-live.test.ts) has a row to
+  // flip verificationState on.
   await db.insert(munPaymentSettings).values({
     munId: mun.id,
     legalName: 'Test Org',
@@ -184,9 +197,9 @@ describe('validateMunForSubmission', () => {
     expect(result.blockers.every((b) => b.severity === 'BLOCKER' && !b.passed)).toBe(true)
   })
 
-  it('passes a fully seeded mun (all required modules genuinely satisfied) at SUBMIT stage even with payment PENDING', async () => {
+  it('passes a fully seeded mun (all required modules genuinely satisfied) at SUBMIT stage', async () => {
     const organizer = await makeUser()
-    const mun = await makeMunPendingPaymentOnly(organizer.id)
+    const mun = await makeCompleteMun(organizer.id)
 
     const result = await validateMunForSubmission(mun.id)
 
@@ -194,39 +207,33 @@ describe('validateMunForSubmission', () => {
     expect(result.blockers).toEqual([])
   })
 
-  it('the SUBMIT vs PUBLISH payment-verification severity genuinely differs for identical underlying data', async () => {
+  it('passes at PUBLISH stage too — PAYMENT_SETTLEMENT no longer has a stage-dependent severity', async () => {
     const organizer = await makeUser()
-    const mun = await makeMunPendingPaymentOnly(organizer.id)
+    const mun = await makeCompleteMun(organizer.id)
+
+    const result = await validateMunForSubmission(mun.id, { stage: 'PUBLISH' })
+
+    expect(result.passed).toBe(true)
+    expect(result.blockers).toEqual([])
+  })
+
+  it('BLOCKER at both stages when the organizer has not linked a UPI payout', async () => {
+    const organizer = await makeUser()
+    const mun = await makeCompleteMun(organizer.id)
+    await db.delete(organizerProfiles).where(eq(organizerProfiles.userId, organizer.id))
 
     const submitResult = await validateMunForSubmission(mun.id, { stage: 'SUBMIT' })
     const publishResult = await validateMunForSubmission(mun.id, { stage: 'PUBLISH' })
 
-    const submitPaymentModule = submitResult.modules.find((m) => m.moduleKey === 'PAYMENT_SETTLEMENT')
-    const publishPaymentModule = publishResult.modules.find((m) => m.moduleKey === 'PAYMENT_SETTLEMENT')
-    const submitCheck = submitPaymentModule?.checks.find((c) => c.key === 'payment_verification_state')
-    const publishCheck = publishPaymentModule?.checks.find((c) => c.key === 'payment_verification_state')
-
-    // Identical underlying data (verificationState still PENDING on both
-    // calls — same mun, same payment row) genuinely produces different
-    // severities and, downstream, a different overall passed/blockers
-    // outcome. This is the single most important assertion in this task:
-    // if `stage` ever stopped threading through to the PAYMENT_SETTLEMENT
-    // validator, both sides of this comparison would silently collapse to
-    // the same answer and this test would catch it.
-    expect(submitCheck?.severity).toBe('HIGH')
-    expect(publishCheck?.severity).toBe('BLOCKER')
-    expect(submitCheck?.passed).toBe(false)
-    expect(publishCheck?.passed).toBe(false)
-
-    expect(submitResult.passed).toBe(true)
+    expect(submitResult.passed).toBe(false)
     expect(publishResult.passed).toBe(false)
-    expect(submitResult.blockers.find((b) => b.key === 'payment_verification_state')).toBeUndefined()
-    expect(publishResult.blockers.find((b) => b.key === 'payment_verification_state')).toBeDefined()
+    expect(submitResult.blockers.find((b) => b.key === 'organizer_payment_linked')).toBeDefined()
+    expect(publishResult.blockers.find((b) => b.key === 'organizer_payment_linked')).toBeDefined()
   })
 
   it('defaults to SUBMIT stage when opts is omitted', async () => {
     const organizer = await makeUser()
-    const mun = await makeMunPendingPaymentOnly(organizer.id)
+    const mun = await makeCompleteMun(organizer.id)
 
     const defaultResult = await validateMunForSubmission(mun.id)
     const explicitSubmitResult = await validateMunForSubmission(mun.id, { stage: 'SUBMIT' })

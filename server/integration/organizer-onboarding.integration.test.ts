@@ -29,7 +29,7 @@ describe('organizer onboarding routes', () => {
         '/details',
         { expectedDelegateCount: 200, munDescription: 'Two days, six committees, open to school and college delegates.' },
       ],
-      ['PUT', '/payment', { upiId: 'ravi@ybl', upiPhone: '9123456780' }],
+      ['PUT', '/payment', { upiId: 'ravi@freecharge', upiPhone: '9123456780' }],
       ['POST', '/agreement', { accepted: true }],
     ]
     for (const [method, path, body] of steps) {
@@ -59,7 +59,7 @@ describe('organizer onboarding routes', () => {
     })
     expect(again.status).toBe(409)
 
-    const locked = await call('PUT', '/payment', headers, { upiId: 'other@ybl', upiPhone: '9123456780' })
+    const locked = await call('PUT', '/payment', headers, { upiId: 'other@freecharge', upiPhone: '9123456780' })
     expect(locked.status).toBe(409)
   })
 
@@ -67,7 +67,7 @@ describe('organizer onboarding routes', () => {
     const organizer = await makeUser('ORGANIZER')
     const headers = await authHeaders(organizer.id)
 
-    const outOfOrder = await call('PUT', '/payment', headers, { upiId: 'ravi@ybl', upiPhone: '9123456780' })
+    const outOfOrder = await call('PUT', '/payment', headers, { upiId: 'ravi@freecharge', upiPhone: '9123456780' })
     expect(outOfOrder.status).toBe(409)
 
     const badPhone = await call('PUT', '/profile', headers, { firstName: 'A', lastName: 'B', contactPhone: '123' })

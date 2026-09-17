@@ -9,6 +9,7 @@ import {
   munScheduleItems,
   muns,
   organizerApplications,
+  organizerProfiles,
   portfolios,
   registrationProducts,
 } from '@/lib/db/schema'
@@ -43,6 +44,10 @@ export async function makeCompleteMun(organizerId: string) {
     .returning()
 
   await db.insert(organizerApplications).values({ organizerId, munId: mun.id, status: 'APPROVED' })
+  await db
+    .insert(organizerProfiles)
+    .values({ userId: organizerId, upiId: 'organizer@upi', upiPhone: '9000000000' })
+    .onConflictDoUpdate({ target: organizerProfiles.userId, set: { upiId: 'organizer@upi' } })
 
   const [committee] = await db
     .insert(committees)

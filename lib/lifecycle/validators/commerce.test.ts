@@ -44,38 +44,6 @@ function formField(overrides: Partial<{ fieldKey: string; conditionalOn: string 
   } as never
 }
 
-function paymentSettings(overrides: Partial<{ verificationState: string }> = {}) {
-  return {
-    id: 'payment-1',
-    munId: 'mun-1',
-    legalName: 'Test Org',
-    orgType: 'NGO',
-    addressLine1: 'Addr',
-    addressLine2: null,
-    city: 'Hyderabad',
-    state: 'Telangana',
-    postalCode: '500001',
-    panLast4: '1234',
-    gstin: null,
-    authorizedRepName: 'Rep',
-    authorizedRepEmail: 'rep@test.com',
-    accountHolderName: 'Test Org',
-    bankName: 'Test Bank',
-    accountNumberLast4: '5678',
-    ifsc: 'TEST0001234',
-    accountType: 'current',
-    gateway: 'razorpay',
-    currency: 'INR',
-    refundPolicy: null,
-    settlementNotes: null,
-    verificationState: overrides.verificationState ?? 'VERIFIED',
-    verifiedAt: null,
-    verifiedBy: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  } as never
-}
-
 describe('validateRegistrationTypes', () => {
   it('passes when at least one active registration product exists', () => {
     const ctx = makeContext({ registrationProducts: [registrationProduct()] })
@@ -156,14 +124,16 @@ describe('validatePricingCapacity', () => {
     expect(result.checks.find((c) => c.key === 'positive_capacity')?.passed).toBe(false)
   })
 
-  it('fails when a deadline is on/after the conference start date', () => {
+  it('flags (but does not block on) a deadline on/after the conference start date', () => {
     const ctx = makeContext({
       mun: { startDate: start },
       registrationProducts: [registrationProduct({ deadline: new Date('2027-06-15T00:00:00Z') })],
     })
     const result = validatePricingCapacity(ctx)
-    expect(result.passed).toBe(false)
-    expect(result.checks.find((c) => c.key === 'deadline_before_start')?.passed).toBe(false)
+    const check = result.checks.find((c) => c.key === 'deadline_before_start')
+    expect(check?.passed).toBe(false)
+    expect(check?.severity).toBe('MEDIUM')
+    expect(result.passed).toBe(true)
   })
 
   it('passes when deadline is null (optional per spec)', () => {
@@ -173,47 +143,22 @@ describe('validatePricingCapacity', () => {
   })
 })
 
-describe('validatePaymentSettlement — the SUBMIT vs PUBLISH severity asymmetry', () => {
-  it('BLOCKER when payment details have not been submitted at all, regardless of stage', () => {
-    const submitCtx = makeContext({ paymentSettings: null, stage: 'SUBMIT' })
-    const publishCtx = makeContext({ paymentSettings: null, stage: 'PUBLISH' })
+describe('validatePaymentSettlement', () => {
+  it('passes when the organizer has linked their account-level UPI payout', () => {
+    const ctx = makeContext({ organizerPaymentLinked: true })
+    const result = validatePaymentSettlement(ctx)
+    expect(result.moduleKey).toBe('PAYMENT_SETTLEMENT')
+    expect(result.passed).toBe(true)
+  })
+
+  it('BLOCKER when the organizer has not linked a UPI payout, at either stage', () => {
+    const submitCtx = makeContext({ organizerPaymentLinked: false, stage: 'SUBMIT' })
+    const publishCtx = makeContext({ organizerPaymentLinked: false, stage: 'PUBLISH' })
 
     expect(validatePaymentSettlement(submitCtx).passed).toBe(false)
     expect(validatePaymentSettlement(publishCtx).passed).toBe(false)
     expect(
-      validatePaymentSettlement(submitCtx).checks.find((c) => c.key === 'payment_details_submitted')?.severity,
+      validatePaymentSettlement(submitCtx).checks.find((c) => c.key === 'organizer_payment_linked')?.severity,
     ).toBe('BLOCKER')
-  })
-
-  it('at SUBMIT stage, an unverified (but submitted) payment account is HIGH severity and does NOT fail the module', () => {
-    const ctx = makeContext({ paymentSettings: paymentSettings({ verificationState: 'PENDING' }), stage: 'SUBMIT' })
-    const result = validatePaymentSettlement(ctx)
-    const check = result.checks.find((c) => c.key === 'payment_verification_state')
-    expect(check?.passed).toBe(false)
-    expect(check?.severity).toBe('HIGH')
-    expect(result.passed).toBe(true)
-  })
-
-  it('at PUBLISH stage, the identical unverified payment account is BLOCKER and DOES fail the module', () => {
-    const ctx = makeContext({ paymentSettings: paymentSettings({ verificationState: 'PENDING' }), stage: 'PUBLISH' })
-    const result = validatePaymentSettlement(ctx)
-    const check = result.checks.find((c) => c.key === 'payment_verification_state')
-    expect(check?.passed).toBe(false)
-    expect(check?.severity).toBe('BLOCKER')
-    expect(result.passed).toBe(false)
-  })
-
-  it('passes at both stages when verificationState is VERIFIED', () => {
-    const submitCtx = makeContext({ paymentSettings: paymentSettings({ verificationState: 'VERIFIED' }), stage: 'SUBMIT' })
-    const publishCtx = makeContext({ paymentSettings: paymentSettings({ verificationState: 'VERIFIED' }), stage: 'PUBLISH' })
-
-    expect(validatePaymentSettlement(submitCtx).passed).toBe(true)
-    expect(validatePaymentSettlement(publishCtx).passed).toBe(true)
-  })
-
-  it('defaults to SUBMIT-stage severity (HIGH) when stage is not PUBLISH', () => {
-    const ctx = makeContext({ paymentSettings: paymentSettings({ verificationState: 'FAILED' }), stage: 'SUBMIT' })
-    const result = validatePaymentSettlement(ctx)
-    expect(result.checks.find((c) => c.key === 'payment_verification_state')?.severity).toBe('HIGH')
   })
 })

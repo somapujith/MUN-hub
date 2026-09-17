@@ -138,7 +138,7 @@ export function onboardingAnswers(conferenceName = `E2E Wizard MUN ${uid()}`) {
     munDescription: 'Three committees, a crisis cabinet, and a press corps. Our first edition on MUN Hub.',
     previousEditions: '2nd edition, 120 delegates last year',
     websiteUrl: 'https://example.com/e2e-wizard',
-    upiId: 'e2e.organizer@okhdfcbank',
+    upiId: 'e2e.organizer@freecharge',
     upiPhone: '9123456780',
   }
 }

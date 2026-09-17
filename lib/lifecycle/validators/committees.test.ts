@@ -59,11 +59,13 @@ describe('validateCommittees', () => {
     expect(result.checks.find((c) => c.key === 'at_least_one_committee')?.passed).toBe(false)
   })
 
-  it('fails when a committee has an empty agenda', () => {
+  it('flags (but does not block on) an empty agenda', () => {
     const ctx = makeContext({ committees: [committee({ agenda: '' })] })
     const result = validateCommittees(ctx)
-    expect(result.passed).toBe(false)
-    expect(result.checks.find((c) => c.key === 'every_committee_has_agenda')?.passed).toBe(false)
+    const check = result.checks.find((c) => c.key === 'every_committee_has_agenda')
+    expect(check?.passed).toBe(false)
+    expect(check?.severity).toBe('MEDIUM')
+    expect(result.passed).toBe(true)
   })
 
   it('fails when a committee has a null agenda', () => {
@@ -97,11 +99,13 @@ describe('validatePortfolios', () => {
     expect(result.passed).toBe(true)
   })
 
-  it('fails when a committee has zero portfolios', () => {
+  it('flags (but does not block on) a committee with zero portfolios', () => {
     const ctx = makeContext({ committees: [committee()], portfolios: [] })
     const result = validatePortfolios(ctx)
-    expect(result.passed).toBe(false)
-    expect(result.checks.find((c) => c.key === 'available_portfolio_per_committee')?.passed).toBe(false)
+    const check = result.checks.find((c) => c.key === 'available_portfolio_per_committee')
+    expect(check?.passed).toBe(false)
+    expect(check?.severity).toBe('MEDIUM')
+    expect(result.passed).toBe(true)
   })
 
   it('fails when a committee has portfolios but none are available (availability 0)', () => {
@@ -113,7 +117,7 @@ describe('validatePortfolios', () => {
     expect(result.checks.find((c) => c.key === 'available_portfolio_per_committee')?.passed).toBe(false)
   })
 
-  it('fails when two portfolios in the same committee share a name (case-insensitive)', () => {
+  it('flags (but does not block on) two portfolios in the same committee sharing a name (case-insensitive)', () => {
     const ctx = makeContext({
       committees: [committee()],
       portfolios: [
@@ -122,8 +126,10 @@ describe('validatePortfolios', () => {
       ],
     })
     const result = validatePortfolios(ctx)
-    expect(result.passed).toBe(false)
-    expect(result.checks.find((c) => c.key === 'no_duplicate_portfolio_names')?.passed).toBe(false)
+    const check = result.checks.find((c) => c.key === 'no_duplicate_portfolio_names')
+    expect(check?.passed).toBe(false)
+    expect(check?.severity).toBe('MEDIUM')
+    expect(result.passed).toBe(true)
   })
 
   it('allows the same portfolio name across different committees', () => {
@@ -147,20 +153,23 @@ describe('validateExecutiveBoard', () => {
     expect(result.passed).toBe(true)
   })
 
-  it('fails when a committee has zero EB members', () => {
+  it('flags (but does not block on) a committee with zero EB members', () => {
     const ctx = makeContext({ committees: [committee()], ebMembers: [] })
     const result = validateExecutiveBoard(ctx)
-    expect(result.passed).toBe(false)
-    expect(result.checks.find((c) => c.key === 'every_committee_has_chair')?.passed).toBe(false)
+    const check = result.checks.find((c) => c.key === 'every_committee_has_chair')
+    expect(check?.passed).toBe(false)
+    expect(check?.severity).toBe('MEDIUM')
+    expect(result.passed).toBe(true)
   })
 
-  it('fails when a committee has EB members but none with role CHAIR', () => {
+  it('flags (but does not block on) a committee whose EB members have no CHAIR', () => {
     const ctx = makeContext({
       committees: [committee()],
       ebMembers: [ebMember({ role: 'VICE_CHAIR' })],
     })
     const result = validateExecutiveBoard(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.checks.find((c) => c.key === 'every_committee_has_chair')?.passed).toBe(false)
+    expect(result.passed).toBe(true)
   })
 
   it('a mun-level Secretary-General (committeeId null) does not satisfy a committee-level CHAIR requirement', () => {
@@ -169,6 +178,6 @@ describe('validateExecutiveBoard', () => {
       ebMembers: [ebMember({ committeeId: null })],
     })
     const result = validateExecutiveBoard(ctx)
-    expect(result.passed).toBe(false)
+    expect(result.checks.find((c) => c.key === 'every_committee_has_chair')?.passed).toBe(false)
   })
 })

@@ -14,6 +14,7 @@ import {
   munScheduleItems,
   munPaymentSettings,
   organizerApplications,
+  organizerProfiles,
   munSubmissions,
   munVersions,
   verificationIssues,
@@ -93,6 +94,10 @@ async function makeCompleteMun(organizerId: string) {
     .returning()
 
   await db.insert(organizerApplications).values({ organizerId, munId: mun.id, status: 'APPROVED' })
+  await db
+    .insert(organizerProfiles)
+    .values({ userId: organizerId, upiId: 'organizer@upi', upiPhone: '9000000000' })
+    .onConflictDoUpdate({ target: organizerProfiles.userId, set: { upiId: 'organizer@upi' } })
 
   const [committee] = await db
     .insert(committees)
@@ -249,13 +254,13 @@ describe('submitMunForReview', () => {
     const organizer = await makeUser()
     const session = { userId: organizer.id, role: 'ORGANIZER' as const }
     const mun = await makeCompleteMun(organizer.id)
-    await db.update(muns).set({ venue: null }).where(eq(muns.id, mun.id))
+    await db.update(muns).set({ city: null }).where(eq(muns.id, mun.id))
 
     const first = await submitMunForReview(mun.id, session)
     expect(first.passed).toBe(false)
-    expect(first.blockers.map((b) => b.key)).toEqual(['venue_present'])
+    expect(first.blockers.map((b) => b.key)).toEqual(['city_present'])
 
-    await db.update(muns).set({ venue: 'Convention Centre' }).where(eq(muns.id, mun.id))
+    await db.update(muns).set({ city: 'Hyderabad' }).where(eq(muns.id, mun.id))
     const second = await submitMunForReview(mun.id, session)
     expect(second).toMatchObject({ passed: true, blockers: [] })
   })
@@ -263,16 +268,16 @@ describe('submitMunForReview', () => {
   it('fixing a failed check resolves its automated issue on the next progress recompute', async () => {
     const organizer = await makeUser()
     const mun = await makeCompleteMun(organizer.id)
-    await db.update(muns).set({ venue: null }).where(eq(muns.id, mun.id))
+    await db.update(muns).set({ city: null }).where(eq(muns.id, mun.id))
     await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
 
-    await updateMunDetails(mun.id, { venue: 'Convention Centre' }, { userId: organizer.id, role: 'ORGANIZER' })
+    await updateMunDetails(mun.id, { city: 'Hyderabad' }, { userId: organizer.id, role: 'ORGANIZER' })
 
     const open = await db
       .select()
       .from(verificationIssues)
       .where(and(eq(verificationIssues.munId, mun.id), eq(verificationIssues.resolved, false)))
-    expect(open.filter((issue) => issue.code === 'venue_present')).toHaveLength(0)
+    expect(open.filter((issue) => issue.code === 'city_present')).toHaveLength(0)
   })
 
   it('after Gate-2 changes are requested, the organizer can resubmit and the old round is closed', async () => {
@@ -894,18 +899,19 @@ describe('publishFromQueue', () => {
     expect(submissions[0].status).toBe('PUBLISHED')
   })
 
-  it('blocks publish with a specific message when payment verification regressed to PENDING', async () => {
+  it('blocks publish with a specific message when the organizer payment link was removed after approval', async () => {
     const organizer = await makeUser()
     const admin = await makeUser('ADMIN')
     const { mun } = await makeQueuedSubmission(organizer, admin)
 
-    // Payment verification was never advanced past PENDING (makeCompleteMun's
-    // default) — this proves PUBLISH-stage re-validation is real, not
-    // decorative: the mun passed SUBMIT (HIGH there) and was approved, but
-    // publish must re-check live data and block on the same field now being
-    // a BLOCKER at PUBLISH stage.
+    // The organizer's UPI link (set by makeCompleteMun) is removed after
+    // SUBMIT-stage validation passed and the submission was approved — this
+    // proves PUBLISH-stage re-validation is real, not decorative: publish
+    // must re-check live data and block on the same field now failing.
+    await db.delete(organizerProfiles).where(eq(organizerProfiles.userId, organizer.id))
+
     await expect(publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })).rejects.toThrow(
-      /Payment account has been verified by MUNHub/i,
+      /Organizer's FreeCharge UPI payout details are set/i,
     )
 
     const [munRow] = await db.select().from(muns).where(eq(muns.id, mun.id)).limit(1)

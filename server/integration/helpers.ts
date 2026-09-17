@@ -17,7 +17,7 @@ export async function completeOrganizerOnboarding(userId: string) {
     firstName: 'Test',
     lastName: 'Organizer',
     contactPhone: '9876543210',
-    upiId: 'test@ybl',
+    upiId: 'test@freecharge',
     upiPhone: '9876543210',
     agreementVersion: 'test',
     completedAt: new Date(),

@@ -478,7 +478,9 @@ function LifecycleCard({ munId }: { munId: string }) {
   );
 }
 
-const UPI_PATTERN = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,63}$/;
+// MUN Hub only accepts payouts to a FreeCharge UPI handle (@freecharge) —
+// user-directed restriction, mirrors lib/actions/organizer-onboarding.ts's UPI_PATTERN.
+const UPI_PATTERN = /^[a-zA-Z0-9._-]{2,256}@freecharge$/;
 
 /**
  * Payout details for this organizer account (not per-MUN): a UPI ID plus the
@@ -508,7 +510,7 @@ function PaymentDetailsCard() {
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!UPI_PATTERN.test(upiId.trim())) {
-      toast.error("UPI ID must look like name@bank");
+      toast.error("Only a FreeCharge UPI ID is accepted — it must look like name@freecharge");
       return;
     }
     if (!upiPhone.trim()) {
@@ -524,7 +526,10 @@ function PaymentDetailsCard() {
     <Card className="max-w-2xl">
       <CardHeader>
         <CardTitle>Payments</CardTitle>
-        <CardDescription>Where MUNHub sends your payout once the conference is settled.</CardDescription>
+        <CardDescription>
+          Where MUNHub sends your payout once the conference is settled. We only accept a FreeCharge UPI ID — create
+          a FreeCharge UPI account, link your bank account to it, then submit that UPI ID below.
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-md">
         {onboardingQuery.isLoading ? (
@@ -545,10 +550,10 @@ function PaymentDetailsCard() {
           <form className="flex flex-col gap-md" onSubmit={handleSubmit}>
             <div className="grid gap-md sm:grid-cols-2">
               <div className="flex flex-col gap-xs">
-                <Label htmlFor="payment-upi-id">UPI ID</Label>
+                <Label htmlFor="payment-upi-id">FreeCharge UPI ID</Label>
                 <Input
                   id="payment-upi-id"
-                  placeholder="name@bank"
+                  placeholder="name@freecharge"
                   value={upiId}
                   onChange={(event) => setUpiId(event.target.value)}
                   required

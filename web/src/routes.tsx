@@ -56,6 +56,7 @@ import { OrganizerProductsPage } from "@/pages/organizer/dashboard/sections/prod
 import { OrganizerRegistrationsPage } from "@/pages/organizer/dashboard/sections/registrations-page";
 import { OrganizerResultsPage } from "@/pages/organizer/dashboard/sections/results-page";
 import { OrganizerSettingsPage } from "@/pages/organizer/dashboard/sections/settings-page";
+import { OrganizerQuickSetupPage } from "@/pages/organizer/dashboard/sections/quick-setup-page";
 import { OrganizerSetupPage } from "@/pages/organizer/dashboard/sections/setup-page";
 import { OrganizerTeamPage } from "@/pages/organizer/dashboard/sections/team-page";
 import { MunsPage } from "@/pages/muns-page";
@@ -203,6 +204,7 @@ export const router = createBrowserRouter([
             element: <MunWorkspaceLayout />,
             children: [
               { index: true, element: <MunIndexRedirect /> },
+              { path: "quick-setup", element: <OrganizerQuickSetupPage /> },
               { path: "setup", element: <OrganizerSetupPage /> },
               { path: "committees", element: <OrganizerCommitteesPage /> },
               { path: "executive-board", element: <OrganizerExecutiveBoardPage /> },

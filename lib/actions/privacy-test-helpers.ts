@@ -191,7 +191,7 @@ export async function makeDelegateWithHistory() {
     firstName: 'Privacy',
     lastName: 'Organizer',
     contactPhone: '9876500003',
-    upiId: 'privacy@ybl',
+    upiId: 'privacy@freecharge',
     upiPhone: '9876500003',
     agreementVersion: 'test',
     completedAt: new Date(now),

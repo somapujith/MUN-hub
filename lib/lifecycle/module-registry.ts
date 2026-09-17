@@ -33,20 +33,31 @@ export interface ModuleDefinition {
   validate: (ctx: MunValidationContext) => ModuleValidationResult
 }
 
+// Minimum-required-fields cut (per user direction): only BASIC_INFO (name),
+// DATES_VENUE (dates + city), COMMITTEES (at least one), REGISTRATION_TYPES
+// and PRICING_CAPACITY (at least one priced pass), and PAYMENT_SETTLEMENT
+// (organizer's account-level UPI payout) are `defaultRequired: true` — every
+// BLOCKER check within those modules' validators is genuinely required to
+// submit. Every other module is `defaultRequired: false` and its checks have
+// been demoted off BLOCKER severity (see validators/*.ts) so they cannot
+// block submission or publish either — `defaultRequired` alone only affects
+// the UI's "required" grouping/progress math (go-live-checklist.tsx), NOT
+// the actual gate in validation.ts#validateMunForSubmission, which always
+// runs every module's validate() regardless of this flag.
 export const MODULE_REGISTRY: ModuleDefinition[] = [
   { key: 'BASIC_INFO', label: 'Basic Info', defaultRequired: true, phase: 'CONTENT', validate: validateBasicInfo },
   { key: 'DATES_VENUE', label: 'Dates & Venue', defaultRequired: true, phase: 'CONTENT', validate: validateDatesVenue },
-  { key: 'BRANDING', label: 'Branding', defaultRequired: true, phase: 'CONTENT', validate: validateBranding },
+  { key: 'BRANDING', label: 'Branding', defaultRequired: false, phase: 'CONTENT', validate: validateBranding },
   { key: 'COMMITTEES', label: 'Committees', defaultRequired: true, phase: 'CONTENT', validate: validateCommittees },
-  { key: 'PORTFOLIOS', label: 'Portfolios', defaultRequired: true, phase: 'CONTENT', validate: validatePortfolios },
+  { key: 'PORTFOLIOS', label: 'Portfolios', defaultRequired: false, phase: 'CONTENT', validate: validatePortfolios },
   {
     key: 'EXECUTIVE_BOARD',
     label: 'Executive Board',
-    defaultRequired: true,
+    defaultRequired: false,
     phase: 'CONTENT',
     validate: validateExecutiveBoard,
   },
-  { key: 'CONTACT', label: 'Contact', defaultRequired: true, phase: 'CONTENT', validate: validateContact },
+  { key: 'CONTACT', label: 'Contact', defaultRequired: false, phase: 'CONTENT', validate: validateContact },
 
   {
     key: 'REGISTRATION_TYPES',
@@ -58,7 +69,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   {
     key: 'REGISTRATION_FORM',
     label: 'Registration Form',
-    defaultRequired: true,
+    defaultRequired: false,
     phase: 'COMMERCE',
     validate: validateRegistrationForm,
   },
@@ -80,15 +91,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
   {
     key: 'RULES_DOCUMENTS',
     label: 'Rules & Documents',
-    defaultRequired: true,
+    defaultRequired: false,
     phase: 'OPERATIONS',
     validate: validateRulesDocuments,
   },
-  { key: 'SCHEDULE', label: 'Schedule', defaultRequired: true, phase: 'OPERATIONS', validate: validateSchedule },
+  { key: 'SCHEDULE', label: 'Schedule', defaultRequired: false, phase: 'OPERATIONS', validate: validateSchedule },
   {
     key: 'ACCOMMODATION',
     label: 'Accommodation',
-    defaultRequired: true,
+    defaultRequired: false,
     phase: 'OPERATIONS',
     validate: validateAccommodation,
   },
