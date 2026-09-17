@@ -3,7 +3,14 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { changePassword, signIn, signOut, signUp } from '@/lib/actions/auth'
 import { requestOrganizerLoginCode, verifyOrganizerLoginCode } from '@/lib/actions/organizer-otp'
-import { beginMfaEnrollment, completeMfaChallenge, confirmMfaEnrollment, getMfaEnrollmentStatus } from '@/lib/actions/staff-mfa'
+import {
+  beginMfaEnrollment,
+  completeMfaChallenge,
+  confirmMfaEnrollment,
+  disableMfa,
+  getMfaEnrollmentStatus,
+  regenerateMfaRecoveryCodes,
+} from '@/lib/actions/staff-mfa'
 import { SESSION_COOKIE_NAME, SESSION_MAX_LIFETIME_MS } from '@/lib/auth/session'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import { TURNSTILE_ACTIONS, TURNSTILE_TOKEN_MAX_LENGTH, turnstileRejection } from '../lib/turnstile'
@@ -141,6 +148,7 @@ const mfaChallengeBodySchema = z
   .strict()
 
 const mfaConfirmBodySchema = z.object({ code: z.string().trim().min(1).max(32) }).strict()
+const mfaCodeBodySchema = z.object({ code: z.string().trim().min(1).max(32) }).strict()
 
 export const authRoutes = new Hono<{ Variables: AppVariables }>()
 
@@ -196,6 +204,20 @@ authRoutes.post('/mfa/setup', requireAuth, async (c) => {
 authRoutes.post('/mfa/confirm', requireAuth, async (c) => {
   const body = mfaConfirmBodySchema.parse(await c.req.json())
   return c.json(await confirmMfaEnrollment(body.code, c.get('session')!))
+})
+
+// Self-service — both require a fresh code (TOTP for regenerate; TOTP or
+// recovery code for disable) to prove it's really the account holder, not
+// just whoever currently has the session cookie.
+authRoutes.post('/mfa/recovery-codes', requireAuth, async (c) => {
+  const body = mfaCodeBodySchema.parse(await c.req.json())
+  return c.json(await regenerateMfaRecoveryCodes(body.code, c.get('session')!))
+})
+
+authRoutes.post('/mfa/disable', requireAuth, async (c) => {
+  const body = mfaCodeBodySchema.parse(await c.req.json())
+  await disableMfa(body.code, c.get('session')!)
+  return c.body(null, 204)
 })
 
 // Delegate self-signup. Behind Turnstile when TURNSTILE_SECRET_KEY is set
