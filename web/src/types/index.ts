@@ -151,6 +151,8 @@ export interface RegistrationWithMun {
     country: string | null;
     startDate: Date | null;
     endDate: Date | null;
+    /** The conference's lifecycle status, where the source provides it (the dashboard lists do). */
+    status?: MunStatus;
   };
   committee: { name: string } | null;
   portfolio: { name: string } | null;

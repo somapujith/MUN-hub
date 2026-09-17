@@ -117,6 +117,54 @@ describe('student dashboard queries', () => {
     expect(past[0].mun.name).toBe('Past Mun')
   })
 
+  it('lists every registration for a cancelled conference under past, never upcoming', async () => {
+    const suffix = crypto.randomUUID()
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'Org', email: `org-cancel-${suffix}@test.com`, role: 'ORGANIZER' })
+      .returning()
+    const [delegate] = await db
+      .insert(users)
+      .values({ name: 'Delegate', email: `stu-cancel-${suffix}@test.com`, role: 'STUDENT' })
+      .returning()
+    const [cancelledSoon, cancelledUndated] = await db
+      .insert(muns)
+      .values([
+        {
+          organizerId: organizer.id,
+          name: 'Cancelled Future Mun',
+          slug: `cancelled-future-${suffix}`,
+          status: 'CANCELLED',
+          startDate: new Date(Date.now() + 7 * 86_400_000),
+        },
+        { organizerId: organizer.id, name: 'Cancelled Undated Mun', slug: `cancelled-undated-${suffix}`, status: 'CANCELLED' },
+      ])
+      .returning()
+    const [soonPass, undatedPass] = await db
+      .insert(registrationProducts)
+      .values([
+        { munId: cancelledSoon.id, name: 'Delegate', price: 1000, capacity: 10 },
+        { munId: cancelledUndated.id, name: 'Delegate', price: 1000, capacity: 10 },
+      ])
+      .returning()
+    const [confirmed, releasedHold, undated] = await db
+      .insert(registrations)
+      .values([
+        { userId: delegate.id, munId: cancelledSoon.id, registrationProductId: soonPass.id, status: 'CONFIRMED' },
+        // An unpaid hold the cancellation released.
+        { userId: delegate.id, munId: cancelledSoon.id, registrationProductId: soonPass.id, status: 'CANCELLED' },
+        { userId: delegate.id, munId: cancelledUndated.id, registrationProductId: undatedPass.id, status: 'CONFIRMED' },
+      ])
+      .returning()
+    const session: Session = { userId: delegate.id, role: 'STUDENT' }
+
+    expect(await getUpcomingRegistrations(session)).toEqual([])
+
+    const past = await getPastRegistrations(session)
+    expect(past.map((row) => row.id).sort()).toEqual([confirmed.id, releasedHold.id, undated.id].sort())
+    expect(past.every((row) => row.mun.status === 'CANCELLED')).toBe(true)
+  })
+
   it('never returns another user\'s registrations', async () => {
     const session: Session = { userId: studentId, role: 'STUDENT' }
 

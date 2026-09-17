@@ -1,4 +1,4 @@
-import type { PaymentStatus, RegistrationStatus, RegistrationWithMun } from "@/types";
+import type { MunStatus, PaymentStatus, RegistrationStatus, RegistrationWithMun } from "@/types";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -41,6 +41,7 @@ interface RawRegistration {
     country: string | null;
     startDate: string | null;
     endDate: string | null;
+    status: MunStatus;
   };
   committee: { name: string } | null;
   portfolio: { name: string } | null;
@@ -64,6 +65,7 @@ function toRegistrationWithMun(raw: RawRegistration): RegistrationWithMun {
       country: raw.mun.country,
       startDate: raw.mun.startDate ? new Date(raw.mun.startDate) : null,
       endDate: raw.mun.endDate ? new Date(raw.mun.endDate) : null,
+      status: raw.mun.status,
     },
     committee: raw.committee ? { name: raw.committee.name } : null,
     portfolio: raw.portfolio ? { name: raw.portfolio.name } : null,

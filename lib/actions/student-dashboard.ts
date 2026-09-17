@@ -27,10 +27,15 @@ function fetchRegistrationsForUser(userId: string) {
   })
 }
 
+/** A cancelled conference is over whatever its dates say; its registrations belong under Past. */
+function isConferenceCancelled(row: RegistrationWithMun): boolean {
+  return row.mun.status === 'CANCELLED'
+}
+
 /**
  * Registrations for the current session's user that are still "upcoming":
  * status in (PENDING, PAYMENT_PENDING, CONFIRMED) AND the mun's startDate is
- * in the future.
+ * in the future AND the conference hasn't been cancelled.
  *
  * IDOR: the acting user is derived from the caller-supplied `session` —
  * never accept a `userId` parameter from the caller. Throws `Forbidden` if
@@ -43,13 +48,21 @@ export async function getUpcomingRegistrations(session: Session | null): Promise
   const rows = await fetchRegistrationsForUser(session.userId)
 
   return rows.filter(
-    (row) => UPCOMING_STATUSES.includes(row.status) && row.mun.startDate !== null && row.mun.startDate > now,
+    (row) =>
+      !isConferenceCancelled(row) &&
+      UPCOMING_STATUSES.includes(row.status) &&
+      row.mun.startDate !== null &&
+      row.mun.startDate > now,
   )
 }
 
 /**
  * Registrations for the current session's user that are "past": status in
- * (ATTENDED, NO_SHOW) OR the mun's startDate is in the past.
+ * (ATTENDED, NO_SHOW) OR the mun's startDate is in the past OR the
+ * conference was cancelled (every registration for it, including ones with
+ * no dates or dates still ahead — cancelling keeps CONFIRMED seats as they
+ * are and releases unpaid holds, and none of them should vanish from the
+ * dashboard). The mun row carries `status`, so the client can mark them.
  *
  * IDOR: the acting user is derived from the caller-supplied `session` —
  * never accept a `userId` parameter from the caller. Throws `Forbidden` if
@@ -62,6 +75,9 @@ export async function getPastRegistrations(session: Session | null): Promise<Reg
   const rows = await fetchRegistrationsForUser(session.userId)
 
   return rows.filter(
-    (row) => PAST_STATUSES.includes(row.status) || (row.mun.startDate !== null && row.mun.startDate < now),
+    (row) =>
+      isConferenceCancelled(row) ||
+      PAST_STATUSES.includes(row.status) ||
+      (row.mun.startDate !== null && row.mun.startDate < now),
   )
 }
