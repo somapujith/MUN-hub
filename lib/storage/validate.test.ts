@@ -5,10 +5,43 @@ import {
   detectContentType,
   largestUploadBytes,
   maxBase64Length,
+  readImageDimensions,
   UPLOAD_RULES,
   UploadValidationError,
   validateUpload,
 } from './validate'
+
+/**
+ * Real, minimal PNGs at exact pixel dimensions (valid IHDR + a tiny deflated
+ * IDAT + IEND, generated once and pinned as base64 — not decodable as a real
+ * photo, but a real PNG a header parser reads correctly). Unlike
+ * SAMPLE_FILES.png (a genuine 1x1 pixel image, used only for content-type
+ * detection), these exist to exercise readImageDimensions/the cover aspect
+ * ratio check at the exact boundary values Slice: banner-dimensions cares
+ * about.
+ */
+const DIMENSION_PNGS = {
+  // Exactly the required 2000x480, 25:6.
+  cover2000x480: Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAB9AAAAHgCAIAAABy8GG5AAAAHUlEQVR4nO3BMQEAAADCoPVPbQhfoAAAAAAAgNsAF3EAAW1SnXoAAAAASUVORK5CYII=',
+    'base64',
+  ),
+  // A 2x multiple of the same ratio: 4000x960.
+  cover4000x960: Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAD6AAAAPACAIAAACuSRF7AAAAI0lEQVR4nO3BMQEAAADCoPVPbQ0PoAAAAAAAAAAAAAAA4MAALuEAAc/gZwAAAAAASUVORK5CYII=',
+    'base64',
+  ),
+  // 16:9, not 25:6 — the ratio the old (wrong) preview assumed.
+  wrongRatio1600x900: Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAABkAAAAOECAIAAAB2L2r1AAAAHElEQVR4nO3BMQEAAADCoPVPbQ0PoAAAAADg2AASwQABIlV0XAAAAABJRU5ErkJggg==',
+    'base64',
+  ),
+  // Correct 25:6 ratio, but under the 2000x480 floor.
+  tooSmall1000x240: Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAA+gAAADwCAIAAAAcrNnYAAAAGklEQVR4nO3BMQEAAADCoPVPbQ0PoAAAgHsDC7kAAfTKO28AAAAASUVORK5CYII=',
+    'base64',
+  ),
+} as const
 
 const MB = 1024 * 1024
 
@@ -51,12 +84,20 @@ describe('detectContentType', () => {
 })
 
 describe('validateUpload', () => {
-  it('accepts each image type for logos, covers and gallery images', () => {
-    for (const purpose of ['LOGO', 'COVER', 'IMAGE'] as const) {
+  it('accepts each image type for logos and gallery images (no aspect ratio requirement)', () => {
+    for (const purpose of ['LOGO', 'IMAGE'] as const) {
       expect(() => validateUpload(SAMPLE_FILES.png, 'image/png', purpose)).not.toThrow()
       expect(() => validateUpload(SAMPLE_FILES.jpeg, 'image/jpeg', purpose)).not.toThrow()
       expect(() => validateUpload(SAMPLE_FILES.webp, 'image/webp', purpose)).not.toThrow()
     }
+  })
+
+  it('accepts a cover image that is a real PNG at the required 25:6 ratio', () => {
+    // COVER additionally requires a readable, correctly-proportioned image
+    // (see the dedicated aspect-ratio describe block below) — SAMPLE_FILES'
+    // jpeg/webp fixtures are truncated headers with no real dimensions and
+    // are intentionally not asserted against COVER here.
+    expect(() => validateUpload(DIMENSION_PNGS.cover2000x480, 'image/png', 'COVER')).not.toThrow()
   })
 
   it('accepts a PDF document', () => {
@@ -107,7 +148,11 @@ describe('validateUpload', () => {
 
     const cases = [
       { purpose: 'LOGO', header: SAMPLE_FILES.png, type: 'image/png', max: 2 * MB, label: '2MB' },
-      { purpose: 'COVER', header: SAMPLE_FILES.jpeg, type: 'image/jpeg', max: 5 * MB, label: '5MB' },
+      // COVER needs a real, correctly-proportioned PNG here (not the jpeg
+      // fixture used elsewhere) since padding now runs the aspect-ratio
+      // check too — padding after a valid IHDR is harmless, the IDAT stream
+      // just becomes invalid, which readImageDimensions never inspects.
+      { purpose: 'COVER', header: DIMENSION_PNGS.cover2000x480, type: 'image/png', max: 5 * MB, label: '5MB' },
       { purpose: 'IMAGE', header: SAMPLE_FILES.webp, type: 'image/webp', max: 5 * MB, label: '5MB' },
       { purpose: 'DOCUMENT', header: SAMPLE_FILES.pdf, type: 'application/pdf', max: 10 * MB, label: '10MB' },
     ] as const
@@ -143,6 +188,50 @@ describe('validateUpload', () => {
       const mapped = mapThrownError(error)
       expect(mapped, error.message).toMatchObject({ status: 400, code: 'VALIDATION_FAILED', message: error.message })
     }
+  })
+})
+
+describe('readImageDimensions', () => {
+  it('reads PNG dimensions from the IHDR chunk', () => {
+    expect(readImageDimensions(DIMENSION_PNGS.cover2000x480, 'image/png')).toEqual({ width: 2000, height: 480 })
+    expect(readImageDimensions(DIMENSION_PNGS.cover4000x960, 'image/png')).toEqual({ width: 4000, height: 960 })
+  })
+
+  it('returns null for a content type it does not know how to read', () => {
+    expect(readImageDimensions(SAMPLE_FILES.pdf, 'application/pdf')).toBeNull()
+  })
+
+  it('returns null for bytes too short to contain a header', () => {
+    expect(readImageDimensions(Buffer.alloc(4), 'image/png')).toBeNull()
+  })
+})
+
+describe('validateUpload — cover aspect ratio (25:6, minimum 2000x480)', () => {
+  it('accepts exactly 2000x480', () => {
+    expect(() => validateUpload(DIMENSION_PNGS.cover2000x480, 'image/png', 'COVER')).not.toThrow()
+  })
+
+  it('accepts a higher-resolution multiple of the same ratio (4000x960)', () => {
+    expect(() => validateUpload(DIMENSION_PNGS.cover4000x960, 'image/png', 'COVER')).not.toThrow()
+  })
+
+  it('rejects a 16:9 image even if it is otherwise a valid PNG', () => {
+    expect(() => validateUpload(DIMENSION_PNGS.wrongRatio1600x900, 'image/png', 'COVER')).toThrow(
+      'Image is 1600x900 — this image must be 25:6 (e.g. 2000x480)',
+    )
+  })
+
+  it('rejects a correctly-proportioned image below the size floor', () => {
+    expect(() => validateUpload(DIMENSION_PNGS.tooSmall1000x240, 'image/png', 'COVER')).toThrow(
+      'Image is 1000x240 — minimum size is 2000x480',
+    )
+  })
+
+  it('does not apply the aspect ratio check to LOGO or IMAGE purposes', () => {
+    // wrongRatio1600x900 would fail COVER's ratio check but LOGO has no such
+    // rule — it should only be judged on type/size/contents like before.
+    expect(() => validateUpload(DIMENSION_PNGS.wrongRatio1600x900, 'image/png', 'LOGO')).not.toThrow()
+    expect(() => validateUpload(DIMENSION_PNGS.wrongRatio1600x900, 'image/png', 'IMAGE')).not.toThrow()
   })
 })
 

@@ -404,6 +404,83 @@ function useSecondsUntil(target: number): number {
   return Math.max(0, Math.ceil((target - now) / 1000));
 }
 
+/** Segmented one-time-code input: one bordered box per digit, per the reference design. */
+function OtpDigitInput({
+  value,
+  onChange,
+  onComplete,
+  error,
+  disabled,
+}: {
+  value: string;
+  onChange: (digits: string) => void;
+  onComplete: (digits: string) => void;
+  error: string | null;
+  disabled: boolean;
+}) {
+  const inputRefs = React.useRef<(HTMLInputElement | null)[]>([]);
+
+  function setDigit(index: number, raw: string) {
+    const digit = raw.replace(/\D/g, "").slice(-1);
+    const next = value.split("");
+    next[index] = digit;
+    const joined = next.join("").slice(0, CODE_LENGTH);
+    onChange(joined);
+    if (digit && index < CODE_LENGTH - 1) inputRefs.current[index + 1]?.focus();
+    if (joined.length === CODE_LENGTH && joined.replace(/\D/g, "").length === CODE_LENGTH) onComplete(joined);
+  }
+
+  function handleKeyDown(index: number, event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Backspace" && !value[index] && index > 0) {
+      inputRefs.current[index - 1]?.focus();
+    } else if (event.key === "ArrowLeft" && index > 0) {
+      inputRefs.current[index - 1]?.focus();
+    } else if (event.key === "ArrowRight" && index < CODE_LENGTH - 1) {
+      inputRefs.current[index + 1]?.focus();
+    }
+  }
+
+  function handlePaste(event: React.ClipboardEvent<HTMLInputElement>) {
+    const digits = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, CODE_LENGTH);
+    if (!digits) return;
+    event.preventDefault();
+    onChange(digits);
+    if (digits.length === CODE_LENGTH) onComplete(digits);
+    else inputRefs.current[digits.length]?.focus();
+  }
+
+  return (
+    <div className="flex justify-center gap-sm" onPaste={handlePaste}>
+      {Array.from({ length: CODE_LENGTH }, (_, index) => (
+        <input
+          key={index}
+          ref={(el) => {
+            inputRefs.current[index] = el;
+          }}
+          inputMode="numeric"
+          autoComplete={index === 0 ? "one-time-code" : "off"}
+          pattern="[0-9]*"
+          maxLength={1}
+          autoFocus={index === 0}
+          required
+          disabled={disabled}
+          value={value[index] ?? ""}
+          onChange={(event) => setDigit(index, event.target.value)}
+          onKeyDown={(event) => handleKeyDown(index, event)}
+          aria-label={`Digit ${index + 1} of ${CODE_LENGTH}`}
+          aria-invalid={error ? true : undefined}
+          className={cn(
+            "h-14 w-11 rounded-xl border bg-card text-center font-mono text-title-lg text-ink shadow-[0_2px_12px_rgba(24,29,38,0.08)] transition-colors",
+            "focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30",
+            error ? "border-destructive/60" : "border-border",
+            disabled && "opacity-60",
+          )}
+        />
+      ))}
+    </div>
+  );
+}
+
 function CodeStep({
   email,
   profile,
@@ -470,29 +547,15 @@ function CodeStep({
           submit(code);
         }}
       >
-        <Label htmlFor="organizer-code" className="sr-only">
+        <span className="sr-only" id="organizer-code-label">
           {CODE_LENGTH}-digit code
-        </Label>
-        <Input
-          id="organizer-code"
-          name="code"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          pattern="[0-9]*"
-          maxLength={CODE_LENGTH}
-          autoFocus
-          required
-          placeholder={"•".repeat(CODE_LENGTH)}
+        </span>
+        <OtpDigitInput
           value={code}
-          onChange={(event) => {
-            const digits = event.target.value.replace(/\D/g, "").slice(0, CODE_LENGTH);
-            setCode(digits);
-            // Submit as soon as the last digit lands (typed, pasted or autofilled).
-            if (digits.length === CODE_LENGTH) submit(digits);
-          }}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? "organizer-code-error" : undefined}
-          className={cn(FIELD_CLASS, "text-center font-mono text-title-lg tracking-[0.5em] md:text-title-lg")}
+          onChange={setCode}
+          onComplete={submit}
+          error={error}
+          disabled={verify.isPending}
         />
         <ErrorMessage id="organizer-code-error" message={error} />
         <Button type="submit" className={BUTTON_CLASS} disabled={code.length < CODE_LENGTH || verify.isPending}>

@@ -4,6 +4,7 @@ import { Helmet } from "react-helmet-async";
 import { Edit3, Layers, Plus, Trash2 } from "lucide-react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
+import { cn } from "cn";
 import {
   createCommittee,
   deleteCommittee,
@@ -75,6 +76,15 @@ export function OrganizerCommitteesPage() {
   });
 
   const committees = committeesQuery.data ?? [];
+  // The empty state renders its own "Add first committee" CTA, and the open
+  // form is itself the add surface — in both cases the header button would be
+  // a second, redundant entry point to the same action. Matches the
+  // `{!isFormOpen && <Button…>}` suppression used on the accommodation page.
+  const showHeaderAddButton =
+    isFormOpen === false && (committeesQuery.isLoading || committees.length > 0);
+  // Anything rendering in the left column: the list, or a loading/error line.
+  const hasListContent =
+    committees.length > 0 || committeesQuery.isLoading || committeesQuery.isError;
 
   const openCreate = () => {
     setEditing(null);
@@ -108,12 +118,22 @@ export function OrganizerCommitteesPage() {
         title="Committees & Portfolios"
         description="Committees delegates can apply to, and the portfolios (countries, people or organizations) they can represent in each."
         actions={
-          <Button size="sm" onClick={openCreate}>
-            <Plus aria-hidden /> Add committee
-          </Button>
+          showHeaderAddButton ? (
+            <Button size="sm" onClick={openCreate}>
+              <Plus aria-hidden /> Add committee
+            </Button>
+          ) : null
         }
       >
-        <div className="grid gap-lg xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div
+          className={cn(
+            "grid gap-lg",
+            // Only split into list + form columns once there's a list to sit
+            // beside. With no committees yet the form would otherwise be a
+            // cramped 22rem rail next to an empty column.
+            hasListContent && "xl:grid-cols-[minmax(0,1fr)_22rem]",
+          )}
+        >
           <section aria-label="Committees" className="flex min-w-0 flex-col gap-md">
             {committeesQuery.isLoading && (
               <p className="text-body-md text-muted-foreground">Loading committees...</p>
@@ -125,7 +145,7 @@ export function OrganizerCommitteesPage() {
                   : "Unable to load committees."}
               </p>
             )}
-            {!committeesQuery.isLoading && committees.length === 0 && (
+            {!committeesQuery.isLoading && committees.length === 0 && !isFormOpen && (
               <div className="rounded-md border border-dashed border-border px-lg py-xl text-center">
                 <Layers className="mx-auto size-8 text-muted-foreground" aria-hidden />
                 <h2 className="mt-md font-display text-title-sm text-ink">No committees yet</h2>
@@ -186,7 +206,10 @@ export function OrganizerCommitteesPage() {
             ))}
           </section>
           {isFormOpen && (
-            <Card className="h-fit">
+            // `h-fit` keeps the card sized to its fields instead of stretching
+            // to the grid row. Without a list beside it the card owns the full
+            // width, so cap it at the same 22rem the side rail uses.
+            <Card className={cn("h-fit", !hasListContent && "w-full max-w-[22rem]")}>
               <CardHeader>
                 <CardTitle>{editing ? "Edit committee" : "Add committee"}</CardTitle>
               </CardHeader>

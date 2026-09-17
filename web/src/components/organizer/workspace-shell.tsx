@@ -18,7 +18,7 @@ export function WorkspaceShell({ muns, currentMun, role, children }: WorkspaceSh
       <aside className="hidden w-[17.5rem] shrink-0 border-r border-sidebar-border lg:block">
         <WorkspaceSidebar muns={muns} currentMun={currentMun} />
       </aside>
-      <div className="flex min-w-0 flex-1 flex-col lg:h-dvh lg:overflow-y-auto">
+      <div className="flex min-w-0 flex-1 flex-col lg:h-dvh lg:overflow-y-auto lg:[scrollbar-gutter:stable]">
         <WorkspaceTopbar muns={muns} currentMun={currentMun} role={role} />
         <main className="flex flex-1 flex-col">{children}</main>
       </div>

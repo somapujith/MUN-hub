@@ -104,12 +104,16 @@ describe('uploads served by /api/v1/files', () => {
   it('uses PUBLIC_API_URL for the returned URL when it is configured', async () => {
     const { mun, headers, env } = await setup()
 
+    // LOGO, not COVER: this test is about PUBLIC_API_URL affecting the
+    // returned URL, not about upload content — COVER additionally requires a
+    // 25:6 image (lib/storage/validate.ts), which SAMPLE_FILES.webp's fake
+    // header has no real dimensions for.
     const upload = await app.request(
       `/api/v1/muns/${mun.id}/media`,
       {
         method: 'POST',
         headers,
-        body: JSON.stringify({ kind: 'COVER', contentType: 'image/webp', fileBase64: SAMPLE_FILES.webp.toString('base64') }),
+        body: JSON.stringify({ kind: 'LOGO', contentType: 'image/png', fileBase64: SAMPLE_FILES.png.toString('base64') }),
       },
       { ...env, PUBLIC_API_URL: 'https://api.munhub.in' },
     )

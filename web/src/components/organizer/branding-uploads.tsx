@@ -7,6 +7,7 @@ import { queryKeys } from "@/api/query-keys";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { checkCoverDimensions, readImageDimensions } from "@/lib/image-dimensions";
 import { readFileAsBase64 } from "@/lib/read-file-as-base64";
 import type { MunImageContentType, MunMediaItem } from "@/types/mun-branding";
 import { cn } from "cn";
@@ -25,15 +26,17 @@ const SLOTS = [
     maxBytes: 2 * MB,
     maxLabel: "2MB",
     previewClass: "aspect-square w-28",
+    checkDimensions: false,
   },
   {
     kind: "COVER",
     title: "Cover image",
-    hint: "Shown at the top of your MUN page. Landscape, at least 1600px wide. PNG, JPEG or WebP, max 5MB.",
-    inputLabel: "Cover image (max 5MB)",
+    hint: "Shown at the top of your MUN page. Must be exactly 2000×480px (or a larger multiple of that 25:6 ratio, e.g. 4000×960px). PNG, JPEG or WebP, max 5MB.",
+    inputLabel: "Cover image (max 5MB, 2000×480px or larger at the same 25:6 ratio)",
     maxBytes: 5 * MB,
     maxLabel: "5MB",
-    previewClass: "aspect-[16/9] w-full max-w-sm",
+    previewClass: "aspect-[25/6] w-full max-w-2xl",
+    checkDimensions: true,
   },
 ] as const;
 
@@ -123,18 +126,34 @@ function BrandingSlot({
     onError: (error) => toast.error(error instanceof Error ? error.message : `Unable to remove ${slot.title.toLowerCase()}`),
   });
 
-  const handleFile = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.target;
+    const file = input.files?.[0];
     if (!file) return;
     if (!IMAGE_TYPES.includes(file.type as MunImageContentType)) {
       toast.error("Use a PNG, JPEG or WebP image");
-      event.target.value = "";
+      input.value = "";
       return;
     }
     if (file.size > slot.maxBytes) {
       toast.error(`${slot.title} must be ${slot.maxLabel} or smaller`);
-      event.target.value = "";
+      input.value = "";
       return;
+    }
+    if (slot.checkDimensions) {
+      let dimensionError: string | null;
+      try {
+        dimensionError = checkCoverDimensions(await readImageDimensions(file));
+      } catch {
+        toast.error("Couldn't read this image — try a different file");
+        input.value = "";
+        return;
+      }
+      if (dimensionError) {
+        toast.error(dimensionError);
+        input.value = "";
+        return;
+      }
     }
     uploadMutation.mutate(file);
   };

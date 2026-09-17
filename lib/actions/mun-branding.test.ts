@@ -37,6 +37,18 @@ function sessionFor(user: { id: string; role: Role }): Session {
 
 const PNG_BUFFER = SAMPLE_FILES.png
 
+/**
+ * A real, minimal PNG at exactly 2000x480 — the cover slot's required 25:6
+ * ratio (lib/storage/validate.ts's UPLOAD_RULES.COVER). SAMPLE_FILES.png is a
+ * genuine but arbitrarily-sized 1x1 image, which no longer passes COVER's
+ * aspect-ratio check; this fixture is shared with lib/storage/validate.test.ts's
+ * DIMENSION_PNGS.cover2000x480 — keep both in sync if it ever changes.
+ */
+const COVER_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAB9AAAAHgCAIAAABy8GG5AAAAHUlEQVR4nO3BMQEAAADCoPVPbQhfoAAAAAAAgNsAF3EAAW1SnXoAAAAASUVORK5CYII=',
+  'base64',
+)
+
 describe('mun-branding actions', () => {
   describe('uploadMunMedia', () => {
     it('lets the owning organizer upload a gallery image', async () => {
@@ -156,13 +168,16 @@ describe('mun-branding actions', () => {
       const organizer = await makeUser('ORGANIZER')
       const mun = await makeMun(organizer.id)
       const session = sessionFor(organizer)
-      const threeMb = paddedFile(SAMPLE_FILES.png, 3 * 1024 * 1024)
+      const threeMbLogo = paddedFile(SAMPLE_FILES.png, 3 * 1024 * 1024)
+      // Padding after COVER_PNG's valid IHDR is harmless — it only makes the
+      // IDAT stream garbage, which the aspect-ratio check never reads.
+      const threeMbCover = paddedFile(COVER_PNG, 3 * 1024 * 1024)
 
       await expect(
-        uploadMunMedia({ munId: mun.id, kind: 'LOGO', file: threeMb, contentType: 'image/png' }, session),
+        uploadMunMedia({ munId: mun.id, kind: 'LOGO', file: threeMbLogo, contentType: 'image/png' }, session),
       ).rejects.toThrow('maximum allowed size is 2MB')
       await expect(
-        uploadMunMedia({ munId: mun.id, kind: 'COVER', file: threeMb, contentType: 'image/png' }, session),
+        uploadMunMedia({ munId: mun.id, kind: 'COVER', file: threeMbCover, contentType: 'image/png' }, session),
       ).resolves.toMatchObject({ kind: 'COVER' })
     })
 
@@ -173,13 +188,13 @@ describe('mun-branding actions', () => {
 
       const media = await runWithStorageBindings({ kv, requestOrigin: 'http://localhost:3001' }, () =>
         uploadMunMedia(
-          { munId: mun.id, kind: 'COVER', file: SAMPLE_FILES.jpeg, contentType: 'image/jpeg' },
+          { munId: mun.id, kind: 'COVER', file: COVER_PNG, contentType: 'image/png' },
           sessionFor(organizer),
         ),
       )
 
       expect(media.url).toBe(`http://localhost:3001/api/v1/files/${media.storageKey}`)
-      expect(Buffer.from(kv.entries.get(media.storageKey)!.value).equals(SAMPLE_FILES.jpeg)).toBe(true)
+      expect(Buffer.from(kv.entries.get(media.storageKey)!.value).equals(COVER_PNG)).toBe(true)
     })
 
     it('deletes the replaced logo object after the new logo is saved', async () => {
