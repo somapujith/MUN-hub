@@ -25,11 +25,51 @@ const signInBodySchema = z
   })
   .strict()
 
+// Mirrors lib/actions/auth.ts's SignUpInput — required fields match
+// completeStudentProfile's requirements plus gender + consent (PRD §9-16);
+// everything else is optional, same as profile editing later.
 const signUpBodySchema = z
   .object({
     name: z.string().trim().min(1),
     email: z.string().trim().min(1).email(),
     password: z.string().min(8),
+    gender: z.string().trim().min(1),
+    phone: z.string().trim().min(1),
+    institution: z.string().trim().min(1),
+    dateOfBirth: z.string().trim().min(1),
+    gradeOrYear: z.string().trim().min(1),
+    residentialAddress: z.string().trim().min(1),
+    requiresTransportation: z.boolean().optional(),
+    emergencyContactName: z.string().trim().min(1),
+    emergencyContactPhone: z.string().trim().min(1),
+    emergencyContactRelation: z.string().trim().min(1),
+    acceptedTermsOfService: z.boolean(),
+    acceptedPrivacyPolicy: z.boolean(),
+    acceptedGuardianAcknowledgement: z.boolean().optional(),
+    munExperience: z.string().optional(),
+    referralCode: z.string().optional(),
+    preferredName: z.string().optional(),
+    nationality: z.string().optional(),
+    addressCity: z.string().optional(),
+    addressState: z.string().optional(),
+    addressCountry: z.string().optional(),
+    postalCode: z.string().optional(),
+    alternateMobile: z.string().optional(),
+    courseOrProgram: z.string().optional(),
+    graduationYear: z.number().int().optional(),
+    department: z.string().optional(),
+    studentId: z.string().optional(),
+    academicEmail: z.string().optional(),
+    alternateEmergencyContactName: z.string().optional(),
+    alternateEmergencyContactNumber: z.string().optional(),
+    alternateEmergencyContactRelation: z.string().optional(),
+    hasPriorMunExperience: z.boolean().optional(),
+    munsAttendedCount: z.number().int().optional(),
+    previousAchievements: z.string().optional(),
+    bio: z.string().optional(),
+    areasOfInterest: z.array(z.string()).optional(),
+    languages: z.array(z.string()).optional(),
+    isPublicProfileVisible: z.boolean().optional(),
   })
   .strict()
 
@@ -65,7 +105,7 @@ authRoutes.post('/session', async (c) => {
 
 authRoutes.post('/users', async (c) => {
   const body = signUpBodySchema.parse(await c.req.json())
-  const { userId, role, token, expiresAt } = await signUp(body.name, body.email, body.password)
+  const { userId, role, token, expiresAt } = await signUp(body)
 
   setSessionCookie(c, token, expiresAt)
 

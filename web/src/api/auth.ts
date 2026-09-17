@@ -31,10 +31,53 @@ export interface SignInInput {
   password: string;
 }
 
+/**
+ * Mirrors server/routes/auth.ts's signUpBodySchema. Required fields match
+ * lib/actions/student-profile.ts's completeStudentProfile requirements plus
+ * gender + consent (docs/prd/MUNHub_User_Workflow_PRD.md §9-16); everything
+ * else is optional, same set a student can fill in later on their profile.
+ */
 export interface SignUpInput {
   name: string;
   email: string;
   password: string;
+  gender: string;
+  phone: string;
+  institution: string;
+  dateOfBirth: string;
+  gradeOrYear: string;
+  residentialAddress: string;
+  requiresTransportation?: boolean;
+  emergencyContactName: string;
+  emergencyContactPhone: string;
+  emergencyContactRelation: string;
+  acceptedTermsOfService: boolean;
+  acceptedPrivacyPolicy: boolean;
+  acceptedGuardianAcknowledgement?: boolean;
+  munExperience?: string;
+  referralCode?: string;
+  preferredName?: string;
+  nationality?: string;
+  addressCity?: string;
+  addressState?: string;
+  addressCountry?: string;
+  postalCode?: string;
+  alternateMobile?: string;
+  courseOrProgram?: string;
+  graduationYear?: number;
+  department?: string;
+  studentId?: string;
+  academicEmail?: string;
+  alternateEmergencyContactName?: string;
+  alternateEmergencyContactNumber?: string;
+  alternateEmergencyContactRelation?: string;
+  hasPriorMunExperience?: boolean;
+  munsAttendedCount?: number;
+  previousAchievements?: string;
+  bio?: string;
+  areasOfInterest?: string[];
+  languages?: string[];
+  isPublicProfileVisible?: boolean;
 }
 
 /**

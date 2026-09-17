@@ -1,11 +1,36 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { sessions, users } from '@/lib/db/schema'
+import { sessions, studentProfiles, userConsents, users } from '@/lib/db/schema'
 import { hashPassword } from '@/lib/auth/password'
 import { changePassword, signIn, signOut, signUp } from './auth'
+import type { SignUpInput } from './auth'
 
 const DEFAULT_TEST_PASSWORD = 'test-password-123'
+
+/**
+ * Every field `signUp` requires (PRD §9-16), so individual tests only have
+ * to spell out the one field they're actually exercising.
+ */
+function signUpInput(overrides: Partial<SignUpInput> = {}): SignUpInput {
+  return {
+    name: 'New Student',
+    email: `signup-${Date.now()}-${Math.random()}@test.com`,
+    password: 'a-good-password',
+    gender: 'Prefer not to say',
+    phone: '9990001111',
+    institution: 'Test University',
+    dateOfBirth: '2006-04-01',
+    gradeOrYear: '2nd year',
+    residentialAddress: '1 Test Street, Test City',
+    emergencyContactName: 'Test Guardian',
+    emergencyContactPhone: '9990002222',
+    emergencyContactRelation: 'Parent',
+    acceptedTermsOfService: true,
+    acceptedPrivacyPolicy: true,
+    ...overrides,
+  }
+}
 
 async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'ADMIN', password: string | null = DEFAULT_TEST_PASSWORD) {
   const email = `signin-${role.toLowerCase()}-${Date.now()}-${Math.random()}@test.com`
@@ -16,9 +41,7 @@ async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'ADMIN', password: strin
 
 describe('signUp', () => {
   it('creates a STUDENT-role user, returns a valid session, and a matching sessions row exists', async () => {
-    const email = `signup-${Date.now()}-${Math.random()}@test.com`
-
-    const result = await signUp('New Student', email, 'a-good-password')
+    const result = await signUp(signUpInput())
 
     expect(result.role).toBe('STUDENT')
     expect(typeof result.token).toBe('string')
@@ -30,33 +53,101 @@ describe('signUp', () => {
     expect(rows[0].userId).toBe(result.userId)
   })
 
+  it('creates the student_profiles row and required consent rows in the same transaction', async () => {
+    const { userId } = await signUp(
+      signUpInput({ gender: 'Female', previousAchievements: 'Best Delegate, 2025' }),
+    )
+
+    const [profile] = await db
+      .select()
+      .from(studentProfiles)
+      .where(eq(studentProfiles.userId, userId))
+    expect(profile).toBeDefined()
+    expect(profile.gender).toBe('Female')
+    expect(profile.previousAchievements).toBe('Best Delegate, 2025')
+    // Opt-in only (PRD §14) — never defaults to visible.
+    expect(profile.isPublicProfileVisible).toBe(false)
+
+    const consents = await db.select().from(userConsents).where(eq(userConsents.userId, userId))
+    expect(consents.map((row) => row.consentType).sort()).toEqual([
+      'PRIVACY_POLICY',
+      'TERMS_OF_SERVICE',
+    ])
+    expect(consents.every((row) => row.policyVersion.length > 0)).toBe(true)
+  })
+
+  it('sets phone/institution on the user row so isProfileComplete passes immediately', async () => {
+    const { userId } = await signUp(signUpInput({ phone: '9876543210', institution: 'KLH University' }))
+
+    const [user] = await db
+      .select({ phone: users.phone, institution: users.institution })
+      .from(users)
+      .where(eq(users.id, userId))
+    expect(user.phone).toBe('9876543210')
+    expect(user.institution).toBe('KLH University')
+  })
+
+  it('records a guardian acknowledgement only when it was actually given', async () => {
+    const withAck = await signUp(signUpInput({ acceptedGuardianAcknowledgement: true }))
+    const withoutAck = await signUp(signUpInput({ acceptedGuardianAcknowledgement: false }))
+
+    const ackRows = await db.select().from(userConsents).where(eq(userConsents.userId, withAck.userId))
+    expect(ackRows.some((row) => row.consentType === 'GUARDIAN_ACKNOWLEDGEMENT')).toBe(true)
+
+    const noAckRows = await db
+      .select()
+      .from(userConsents)
+      .where(eq(userConsents.userId, withoutAck.userId))
+    expect(noAckRows.some((row) => row.consentType === 'GUARDIAN_ACKNOWLEDGEMENT')).toBe(false)
+  })
+
   it('rejects a duplicate email with "An account with that email already exists"', async () => {
     const existing = await makeUser('STUDENT')
 
-    await expect(signUp('Another Name', existing.email, 'a-good-password')).rejects.toThrow(
+    await expect(signUp(signUpInput({ email: existing.email }))).rejects.toThrow(
       'An account with that email already exists',
     )
   })
 
   it('rejects a password shorter than 8 characters', async () => {
-    const email = `signup-shortpw-${Date.now()}-${Math.random()}@test.com`
-
-    await expect(signUp('Short Password', email, 'short')).rejects.toThrow(
+    await expect(signUp(signUpInput({ password: 'short' }))).rejects.toThrow(
       'Password must be at least 8 characters',
     )
   })
 
   it('rejects a blank/whitespace-only name', async () => {
-    const email = `signup-blankname-${Date.now()}-${Math.random()}@test.com`
+    await expect(signUp(signUpInput({ name: '   ' }))).rejects.toThrow('Name is required')
+  })
 
-    await expect(signUp('   ', email, 'a-good-password')).rejects.toThrow('Name is required')
+  it('rejects missing consent, and creates no user at all when it does', async () => {
+    const email = `signup-noconsent-${Date.now()}-${Math.random()}@test.com`
+
+    await expect(signUp(signUpInput({ email, acceptedTermsOfService: false }))).rejects.toThrow(
+      'You must accept the Terms of Service',
+    )
+    await expect(signUp(signUpInput({ email, acceptedPrivacyPolicy: false }))).rejects.toThrow(
+      'You must accept the Privacy Policy',
+    )
+
+    // PRD §16: no misleading half-created account left behind.
+    const rows = await db.select({ id: users.id }).from(users).where(eq(users.email, email))
+    expect(rows.length).toBe(0)
+  })
+
+  it('rejects a missing required profile field (gender) without creating a user', async () => {
+    const email = `signup-nogender-${Date.now()}-${Math.random()}@test.com`
+
+    await expect(signUp(signUpInput({ email, gender: '' }))).rejects.toThrow('Gender is required')
+
+    const rows = await db.select({ id: users.id }).from(users).where(eq(users.email, email))
+    expect(rows.length).toBe(0)
   })
 })
 
 describe('signIn', () => {
   it('succeeds with the correct password, returns a valid session, and a new sessions row exists', async () => {
     const email = `signin-ok-${Date.now()}-${Math.random()}@test.com`
-    const { userId } = await signUp('Sign In User', email, 'a-good-password')
+    const { userId } = await signUp(signUpInput({ name: 'Sign In User', email }))
 
     const result = await signIn(email, 'a-good-password')
 

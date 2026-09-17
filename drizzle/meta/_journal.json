@@ -176,6 +176,13 @@
       "when": 1789596095429,
       "tag": "0024_wooden_freak",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789603410395,
+      "tag": "0025_foamy_talon",
+      "breakpoints": true
     }
   ]
 }

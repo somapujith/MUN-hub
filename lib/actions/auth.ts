@@ -1,10 +1,40 @@
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { users } from '@/lib/db/schema'
+import { studentProfiles, userConsents, users } from '@/lib/db/schema'
 import { createSession, destroySession } from '@/lib/auth/session'
 import { hashPassword, verifyPassword } from '@/lib/auth/password'
+import { buildOptionalProfileFields, required } from '@/lib/actions/student-profile'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
+import type { StudentProfileInput } from '@/lib/types/student-profile'
+
+/**
+ * The current policy versions consent is recorded against
+ * (docs/prd/MUNHub_User_Workflow_PRD.md §15: "stored with timestamp and
+ * policy/version information"). Bump these when the actual ToS/Privacy
+ * Policy text changes — existing users' consent rows stay as historical
+ * record of what they agreed to; nothing re-prompts them retroactively.
+ */
+export const CURRENT_TERMS_OF_SERVICE_VERSION = '2026-09-17'
+export const CURRENT_PRIVACY_POLICY_VERSION = '2026-09-17'
+
+/**
+ * Everything `signUp` needs: account credentials, the profile fields
+ * `completeStudentProfile` requires (collected up front instead of at the
+ * registration-gate, per PRD §7-17), plus required consent. `gender` is
+ * required here specifically (PRD §9), even though it's optional on the
+ * shared `StudentProfileInput` type used for later profile editing.
+ */
+export interface SignUpInput extends StudentProfileInput {
+  name: string
+  email: string
+  password: string
+  gender: string
+  acceptedTermsOfService: boolean
+  acceptedPrivacyPolicy: boolean
+  /** Only meaningful (and only ever recorded) when true — no row is written for a declined/absent guardian ack. */
+  acceptedGuardianAcknowledgement?: boolean
+}
 
 const MIN_PASSWORD_LENGTH = 8
 
@@ -49,31 +79,62 @@ export async function signIn(
 }
 
 /**
- * Creates a new STUDENT account with a hashed password and signs them in
- * immediately (same return shape as `signIn`, same cookie-setting
- * responsibility left to the caller).
+ * Creates a new STUDENT account with a hashed password, its participant
+ * profile, and required consent records — all in one transaction, per
+ * docs/prd/MUNHub_User_Workflow_PRD.md §16 ("Account/profile creation must
+ * be transactional enough to avoid misleading half-created accounts") — and
+ * signs them in immediately (same return shape as `signIn`, same
+ * cookie-setting responsibility left to the caller).
+ *
+ * Required-field validation mirrors `completeStudentProfile`'s exactly
+ * (same `required()` helper), plus `gender` and both consent checkboxes,
+ * which are new requirements this PRD adds specifically to signup. Every
+ * other `StudentProfileInput` field is optional, same as profile editing
+ * later.
  *
  * Self-serve signup only ever creates STUDENT accounts — organizer accounts
  * are provisioned through the separate organizer-application flow
  * (`lib/actions/organizer-application.ts`), not this path.
  *
  * Throws `Error('An account with that email already exists')` on a
- * duplicate email, and `Error('Password must be at least 8 characters')` for
- * a too-short password.
+ * duplicate email, `Error('Password must be at least 8 characters')` for a
+ * too-short password, and a plain `Error` naming the first missing required
+ * profile/consent field otherwise.
  */
 export async function signUp(
-  name: string,
-  email: string,
-  password: string,
+  input: SignUpInput,
 ): Promise<{ userId: string; role: Role; token: string; expiresAt: Date }> {
-  const trimmedName = name.trim()
-  const normalizedEmail = email.trim().toLowerCase()
-
-  if (!trimmedName) {
-    throw new Error('Name is required')
-  }
-  if (password.length < MIN_PASSWORD_LENGTH) {
+  const trimmedName = required(input.name, 'Name')
+  const normalizedEmail = input.email.trim().toLowerCase()
+  if (input.password.length < MIN_PASSWORD_LENGTH) {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+  }
+
+  const gender = required(input.gender, 'Gender')
+  const phone = required(input.phone, 'Phone number')
+  const institution = required(input.institution, 'School or institution')
+  const gradeOrYear = required(input.gradeOrYear, 'Grade / year')
+  const residentialAddress = required(input.residentialAddress, 'Residential address')
+  const emergencyContactName = required(input.emergencyContactName, 'Emergency contact name')
+  const emergencyContactPhone = required(input.emergencyContactPhone, 'Emergency contact phone')
+  const emergencyContactRelation = required(
+    input.emergencyContactRelation,
+    'Emergency contact relation',
+  )
+
+  if (!input.dateOfBirth.trim()) {
+    throw new Error('Date of birth is required')
+  }
+  const dateOfBirth = new Date(input.dateOfBirth)
+  if (Number.isNaN(dateOfBirth.getTime())) {
+    throw new Error('Date of birth is invalid')
+  }
+
+  if (!input.acceptedTermsOfService) {
+    throw new Error('You must accept the Terms of Service to create an account')
+  }
+  if (!input.acceptedPrivacyPolicy) {
+    throw new Error('You must accept the Privacy Policy to create an account')
   }
 
   const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, normalizedEmail)).limit(1)
@@ -81,11 +142,47 @@ export async function signUp(
     throw new Error('An account with that email already exists')
   }
 
-  const passwordHash = await hashPassword(password)
-  const [user] = await db
-    .insert(users)
-    .values({ name: trimmedName, email: normalizedEmail, passwordHash, role: 'STUDENT' })
-    .returning()
+  const passwordHash = await hashPassword(input.password)
+  const optionalFields = buildOptionalProfileFields(input)
+  const now = new Date()
+
+  const user = await db.transaction(async (tx) => {
+    const [createdUser] = await tx
+      .insert(users)
+      .values({ name: trimmedName, email: normalizedEmail, phone, institution, passwordHash, role: 'STUDENT' })
+      .returning()
+
+    await tx.insert(studentProfiles).values({
+      userId: createdUser.id,
+      dateOfBirth,
+      gradeOrYear,
+      residentialAddress,
+      requiresTransportation: input.requiresTransportation ?? false,
+      emergencyContactName,
+      emergencyContactPhone,
+      emergencyContactRelation,
+      munExperience: input.munExperience?.trim() || null,
+      referralCode: input.referralCode?.trim() || null,
+      ...optionalFields,
+      gender,
+    })
+
+    const consentRows: (typeof userConsents.$inferInsert)[] = [
+      { userId: createdUser.id, consentType: 'TERMS_OF_SERVICE', policyVersion: CURRENT_TERMS_OF_SERVICE_VERSION, acceptedAt: now },
+      { userId: createdUser.id, consentType: 'PRIVACY_POLICY', policyVersion: CURRENT_PRIVACY_POLICY_VERSION, acceptedAt: now },
+    ]
+    if (input.acceptedGuardianAcknowledgement) {
+      consentRows.push({
+        userId: createdUser.id,
+        consentType: 'GUARDIAN_ACKNOWLEDGEMENT' as const,
+        policyVersion: CURRENT_TERMS_OF_SERVICE_VERSION,
+        acceptedAt: now,
+      })
+    }
+    await tx.insert(userConsents).values(consentRows)
+
+    return createdUser
+  })
 
   const { token, expiresAt } = await createSession(user.id)
 

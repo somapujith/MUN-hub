@@ -108,13 +108,16 @@ describe('getProfileFormDefaults', () => {
     await expect(getProfileFormDefaults(session)).resolves.toEqual({})
   })
 
-  it('returns the 8 expected keys with values matching the input after completeStudentProfile', async () => {
+  it('returns the 9 expected keys with values matching the input after completeStudentProfile', async () => {
     const { session } = await createTestUser()
 
     await completeStudentProfile(validInput, session)
     const defaults = await getProfileFormDefaults(session)
 
     expect(defaults).toEqual({
+      // `institution_name` comes from `users.institution`, not
+      // `student_profiles` — see getProfileFormDefaults' own comment.
+      institution_name: validInput.institution,
       grade_class: validInput.gradeOrYear,
       residential_address: validInput.residentialAddress,
       transportation: 'Yes',

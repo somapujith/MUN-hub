@@ -44,7 +44,8 @@ export async function isProfileComplete(userId: string): Promise<boolean> {
   return Boolean(profile)
 }
 
-function required(value: string, label: string): string {
+/** Exported for reuse by `lib/actions/auth.ts#signUp`, which validates the same required-field shape during account creation. */
+export function required(value: string, label: string): string {
   const trimmed = value.trim()
   if (!trimmed) {
     throw new Error(`${label} is required`)
@@ -93,6 +94,10 @@ export async function completeStudentProfile(
   const munExperience = input.munExperience?.trim() || null
   const referralCode = input.referralCode?.trim() || null
 
+  // Everything below is optional (PRD §9-14) — normalize blanks to null
+  // rather than storing empty strings, but never require them.
+  const optionalFields = buildOptionalProfileFields(input)
+
   const [profile] = await db.transaction(async (tx) => {
     await tx
       .update(users)
@@ -112,6 +117,7 @@ export async function completeStudentProfile(
         emergencyContactRelation,
         munExperience,
         referralCode,
+        ...optionalFields,
       })
       .onConflictDoUpdate({
         target: studentProfiles.userId,
@@ -126,12 +132,48 @@ export async function completeStudentProfile(
           munExperience,
           referralCode,
           updatedAt: new Date(),
+          ...optionalFields,
         },
       })
       .returning()
   })
 
   return profile
+}
+
+/**
+ * Normalizes every optional PRD field (blank strings -> null, arrays kept
+ * as-is) into the shape `studentProfiles`' insert/update `set` expects.
+ * Shared by `completeStudentProfile` (profile creation/editing) and
+ * `signUp` (`lib/actions/auth.ts`, which collects the same optional fields
+ * during account creation) so the normalization logic exists in one place.
+ */
+export function buildOptionalProfileFields(input: StudentProfileInput) {
+  return {
+    gender: input.gender?.trim() || null,
+    preferredName: input.preferredName?.trim() || null,
+    nationality: input.nationality?.trim() || null,
+    addressCity: input.addressCity?.trim() || null,
+    addressState: input.addressState?.trim() || null,
+    addressCountry: input.addressCountry?.trim() || null,
+    postalCode: input.postalCode?.trim() || null,
+    alternateMobile: input.alternateMobile?.trim() || null,
+    courseOrProgram: input.courseOrProgram?.trim() || null,
+    graduationYear: input.graduationYear ?? null,
+    department: input.department?.trim() || null,
+    studentId: input.studentId?.trim() || null,
+    academicEmail: input.academicEmail?.trim() || null,
+    alternateEmergencyContactName: input.alternateEmergencyContactName?.trim() || null,
+    alternateEmergencyContactNumber: input.alternateEmergencyContactNumber?.trim() || null,
+    alternateEmergencyContactRelation: input.alternateEmergencyContactRelation?.trim() || null,
+    hasPriorMunExperience: input.hasPriorMunExperience ?? null,
+    munsAttendedCount: input.munsAttendedCount ?? null,
+    previousAchievements: input.previousAchievements?.trim() || null,
+    bio: input.bio?.trim() || null,
+    areasOfInterest: input.areasOfInterest?.length ? input.areasOfInterest : null,
+    languages: input.languages?.length ? input.languages : null,
+    isPublicProfileVisible: input.isPublicProfileVisible ?? false,
+  }
 }
 
 /**
@@ -149,7 +191,18 @@ export async function getProfileFormDefaults(session: Session): Promise<Record<s
   const profile = await getStudentProfile(session)
   if (!profile) return {}
 
+  // `institution_name` lives on `users`, not `student_profiles`, but it's one
+  // of the per-mun form's default fields — without it here, the one piece of
+  // profile data students most obviously expect to be remembered is the one
+  // they'd retype every time.
+  const [user] = await db
+    .select({ institution: users.institution })
+    .from(users)
+    .where(eq(users.id, session.userId))
+    .limit(1)
+
   return {
+    institution_name: user?.institution ?? '',
     grade_class: profile.gradeOrYear,
     residential_address: profile.residentialAddress,
     transportation: profile.requiresTransportation ? 'Yes' : 'No',

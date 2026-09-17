@@ -5,6 +5,7 @@ import {
   accommodationFieldTypeEnum,
   adminActionEnum,
   applicationStatusEnum,
+  consentTypeEnum,
   ebRoleEnum,
   formFieldTypeEnum,
   moduleCompletionEnum,
@@ -76,6 +77,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
     fields: [users.id],
     references: [studentProfiles.userId],
   }),
+  consents: many(userConsents),
 }))
 
 // ---------------------------------------------------------------------------
@@ -112,6 +114,43 @@ export const studentProfiles = pgTable(
     emergencyContactRelation: text('emergency_contact_relation').notNull(),
     munExperience: text('mun_experience'),
     referralCode: text('referral_code'),
+    // --- MUNHub_User_Workflow_PRD.md fields (2026-09-17) ---
+    // All nullable/optional (except isPublicProfileVisible, which the PRD
+    // requires to default off): deliberately NOT added to
+    // lib/actions/student-profile.ts's `isProfileComplete` gate, so no
+    // existing profile is retroactively marked incomplete.
+    gender: text('gender'),
+    preferredName: text('preferred_name'),
+    nationality: text('nationality'),
+    // One structured location, reused for both "Personal" (§9) and
+    // "Contact" (§10) — the PRD lists City/State/Country under both
+    // sections, which reads as the PRD's own duplication, not two
+    // independent addresses.
+    addressCity: text('address_city'),
+    addressState: text('address_state'),
+    addressCountry: text('address_country'),
+    postalCode: text('postal_code'),
+    alternateMobile: text('alternate_mobile'),
+    courseOrProgram: text('course_or_program'),
+    graduationYear: integer('graduation_year'),
+    department: text('department'),
+    studentId: text('student_id'),
+    academicEmail: text('academic_email'),
+    alternateEmergencyContactName: text('alternate_emergency_contact_name'),
+    alternateEmergencyContactNumber: text('alternate_emergency_contact_number'),
+    alternateEmergencyContactRelation: text('alternate_emergency_contact_relation'),
+    hasPriorMunExperience: boolean('has_prior_mun_experience'),
+    munsAttendedCount: integer('muns_attended_count'),
+    // §13: "a structured free-text field is sufficient for the initial
+    // implementation" — deliberately not the platform-native `achievements`
+    // table below, which is a different concept (MUNHub-verified per-MUN
+    // awards, Phase 2+ deferred). This is the participant's own self-reported
+    // history from before/outside MUNHub.
+    previousAchievements: text('previous_achievements'),
+    bio: text('bio'),
+    areasOfInterest: text('areas_of_interest').array(),
+    languages: text('languages').array(),
+    isPublicProfileVisible: boolean('is_public_profile_visible').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -120,6 +159,33 @@ export const studentProfiles = pgTable(
 
 export const studentProfilesRelations = relations(studentProfiles, ({ one }) => ({
   user: one(users, { fields: [studentProfiles.userId], references: [users.id] }),
+}))
+
+// ---------------------------------------------------------------------------
+// user_consents — append-only record of ToS/Privacy/guardian consent
+// (docs/prd/MUNHub_User_Workflow_PRD.md §15). A re-acceptance of a new
+// policy version writes a NEW row rather than overwriting one, so the full
+// consent history is preserved — same append-only convention as
+// `verification_issues`/audit logs elsewhere in this schema. Never updated
+// or deleted.
+// ---------------------------------------------------------------------------
+
+export const userConsents = pgTable(
+  'user_consents',
+  {
+    id: id(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    consentType: consentTypeEnum('consent_type').notNull(),
+    policyVersion: text('policy_version').notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('user_consents_user_id_idx').on(table.userId)],
+)
+
+export const userConsentsRelations = relations(userConsents, ({ one }) => ({
+  user: one(users, { fields: [userConsents.userId], references: [users.id] }),
 }))
 
 // ---------------------------------------------------------------------------

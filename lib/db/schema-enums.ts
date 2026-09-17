@@ -265,6 +265,14 @@ export const paymentVerificationEnum = pgEnum('payment_verification_state', [
   'FAILED',
 ])
 
+// docs/prd/MUNHub_User_Workflow_PRD.md §15 — required consent at signup
+// (Terms/Privacy), plus an optional guardian acknowledgement for minors.
+export const consentTypeEnum = pgEnum('consent_type', [
+  'TERMS_OF_SERVICE',
+  'PRIVACY_POLICY',
+  'GUARDIAN_ACKNOWLEDGEMENT',
+])
+
 // ---------------------------------------------------------------------------
 // Onboarding go-live pipeline — Task 10 mun_submissions enums. See
 // docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
