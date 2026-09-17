@@ -2,11 +2,9 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from '@
 import {
   acceptNextConfirm,
   cardFor,
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
   toast,
   uid,
@@ -69,7 +67,6 @@ async function createField(data: Record<string, unknown>): Promise<FormField> {
 }
 
 async function openForm(page: Page) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, 'form', 'Registration Form')
 }
 
@@ -96,7 +93,6 @@ async function addField(
 
 test.describe('form builder UI', () => {
   test('the default delegate questions are present', async ({ page }) => {
-    expectWorkspaceBug()
     await openForm(page)
     for (const field of DEFAULT_FIELDS) {
       const card = cardFor(page, REGION, field.label)
@@ -109,7 +105,6 @@ test.describe('form builder UI', () => {
   })
 
   test('add fields of several types, including a dropdown with choices and a required field', async ({ page }) => {
-    expectWorkspaceBug()
     const tag = uid()
     await openForm(page)
 
@@ -141,7 +136,6 @@ test.describe('form builder UI', () => {
   })
 
   test('toggle required on an existing field', async ({ page }) => {
-    expectWorkspaceBug()
     const field = await createField({ fieldKey: `e2e_toggle_${uid()}`, fieldType: 'EMAIL', label: `E2E Guardian email ${uid()}` })
     await openForm(page)
     const card = cardFor(page, REGION, field.label)
@@ -158,7 +152,6 @@ test.describe('form builder UI', () => {
   })
 
   test('a conditional field is shown only when another answer matches', async ({ page }) => {
-    expectWorkspaceBug()
     const tag = uid()
     const parent = await createField({
       fieldKey: `e2e_needs_room_${tag}`,
@@ -190,7 +183,6 @@ test.describe('form builder UI', () => {
   })
 
   test('reorder fields with the move buttons', async ({ page }) => {
-    expectWorkspaceBug()
     const tag = uid()
     const first = await createField({ fieldKey: `e2e_first_${tag}`, fieldType: 'SHORT_TEXT', label: `E2E First ${tag}`, displayOrder: 900 })
     const second = await createField({ fieldKey: `e2e_second_${tag}`, fieldType: 'SHORT_TEXT', label: `E2E Second ${tag}`, displayOrder: 901 })
@@ -207,7 +199,6 @@ test.describe('form builder UI', () => {
   })
 
   test('a duplicate field key is refused', async ({ page }) => {
-    expectWorkspaceBug()
     await openForm(page)
     const before = (await listFields()).length
     const form = await addField(page, { label: `E2E Duplicate ${uid()}`, key: 'grade_class', type: 'Short text' })
@@ -217,7 +208,6 @@ test.describe('form builder UI', () => {
   })
 
   test('client-side checks: key format, missing choices, self-reference', async ({ page }) => {
-    expectWorkspaceBug()
     await openForm(page)
     const form = await addField(page, { label: 'E2E Bad key', key: 'Bad Key!', type: 'Short text' })
     await expect(toast(page, /Field key must start with a lowercase letter/)).toBeVisible()
@@ -231,7 +221,6 @@ test.describe('form builder UI', () => {
   })
 
   test('delete a field', async ({ page }) => {
-    expectWorkspaceBug()
     const field = await createField({ fieldKey: `e2e_delete_${uid()}`, fieldType: 'DATE', label: `E2E Arrival ${uid()}` })
     await openForm(page)
     await expect(cardFor(page, REGION, field.label)).toContainText('Date')

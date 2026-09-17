@@ -1,13 +1,10 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { API_URL } from '../../env'
 import { signInViaApi, type ApiSession } from '../../fixtures/api'
-import { pageHeading, watchForCrashes } from '../../fixtures/ui'
+import { pageHeading } from '../../fixtures/ui'
 import {
   createFreshOrganizer,
-  expectWorkspaceBug,
-  installWorkspaceShim,
   main,
-  signUpOrganizerThroughUi,
   submitApplicationViaApi,
   uid,
   type OwnedMun,
@@ -15,11 +12,15 @@ import {
 
 /**
  * Organizer onboarding (Onboarding & Go-Live PRD, Gate 1): a brand-new host
- * creates an organizer account, applies to host, and — once an admin
- * approves — gets a MUN to build out.
+ * creates an organizer account, completes the onboarding wizard (details in
+ * onboarding.spec.ts), applies to host, and — once an admin approves — gets a
+ * MUN to build out. The UI signup-to-application walk-through waits on the
+ * wizard rebuild; the approval steps start from an API-created application.
  */
 
 test.use({ storageState: { cookies: [], origins: [] } })
+
+const APPLY_FORM_MOVING = 'Apply form moves into the onboarding wizard (mun-hub-f1 rebuild); rewrite against the wizard'
 
 let admin: ApiSession
 
@@ -49,66 +50,42 @@ function munCard(page: Page, name: string) {
   return main(page).getByRole('link', { name: new RegExp(name) })
 }
 
-test.describe.serial('new organizer: sign up, apply, get approved', () => {
+test.describe('new organizer: sign up and apply through the UI', () => {
+  // To cover once rebuilt: /organizer/signup -> welcome -> "Start your journey"
+  // -> onboarding wizard (which now also submits the host application) -> an
+  // empty-then-SUBMITTED workspace in Overview and My MUNs.
+  test('signs up at /organizer/signup, onboards, and lands on an empty organizer workspace', () => {
+    test.fixme(true, APPLY_FORM_MOVING)
+  })
+
+  test('submits the host application and sees it in their workspace', () => {
+    test.fixme(true, APPLY_FORM_MOVING)
+  })
+})
+
+test.describe.serial('new organizer: application approved', () => {
   const conferenceName = `E2E Journey MUN ${uid()}`
   let page: Page
+  let api: APIRequestContext
   let munId = ''
 
   test.beforeAll(async ({ browser }) => {
-    page = await (await browser.newContext()).newPage()
+    const organizer = await createFreshOrganizer('E2E Journey Organizer')
+    api = organizer.api
+    munId = (await submitApplicationViaApi(api, conferenceName)).munId
+    page = await (await browser.newContext({ storageState: await api.storageState() })).newPage()
   })
 
   test.afterAll(async () => {
     await page?.context().close()
+    await api?.dispose()
   })
 
-  test('signs up at /organizer/signup and lands on an empty organizer workspace', async () => {
-    const crashes = watchForCrashes(page)
-    await signUpOrganizerThroughUi(page)
-
-    // A new organizer lands on the welcome page (covered in detail by specs/auth), then heads to the application.
-    await expect(page).toHaveURL(/\/organizer\/welcome$/)
-    const start = page.getByRole('link', { name: /start your journey/i }).or(page.getByRole('button', { name: /start your journey/i }))
-    await start.first().click()
-    await expect(page).toHaveURL(/\/organizer\/apply$/)
-    await expect(pageHeading(page)).toHaveText('Host your MUN on MUN Hub')
-    await expect(page.getByRole('button', { name: /account menu \(organizer\)/i })).toBeVisible()
-
+  test('a submitted application shows in the organizer workspace', async () => {
     await page.goto('/organizer/dashboard')
-    await expect(pageHeading(page)).toHaveText('Overview')
-    await expect(main(page).getByRole('heading', { name: 'No conferences yet' })).toBeVisible()
-    await page.goto('/organizer/dashboard/muns')
-    await expect(pageHeading(page)).toHaveText('My MUNs')
-    await expect(main(page).getByRole('heading', { name: 'No conferences yet' })).toBeVisible()
-    await main(page).getByRole('button', { name: /apply to host a mun/i }).click()
-    await expect(page).toHaveURL(/\/organizer\/apply$/)
-    crashes.assertNone()
-  })
-
-  test('submits the host application and sees it in their workspace', async () => {
-    await page.goto('/organizer/apply')
-    await main(page).getByLabel('Conference name').fill(conferenceName)
-    await main(page).getByLabel('Host city').fill('Hyderabad')
-    const start = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    await main(page).getByLabel('Expected start date').fill(start)
-    await main(page).getByLabel('Expected delegate count').fill('180')
-    await main(page)
-      .getByLabel('Tell us about your conference')
-      .fill('Three committees, a crisis cabinet, and a press corps. Our first edition on MUN Hub.')
-    await main(page).getByLabel('Previous editions (optional)').fill('2nd edition, 120 delegates last year')
-    await main(page).getByLabel('Website (optional)').fill('https://example.com/e2e-journey')
-    await main(page).getByRole('button', { name: /submit application/i }).click()
-
-    await expect(page).toHaveURL(/\/organizer\/apply\/submitted$/)
-    await expect(pageHeading(page)).toHaveText('Application submitted')
-    await main(page).getByRole('button', { name: /go to dashboard/i }).click()
-    await expect(page).toHaveURL(/\/organizer\/dashboard$/)
     await expect(main(page).getByText(conferenceName)).toBeVisible()
-
-    const mine = (await workspaceOf(page)).find((m) => m.name === conferenceName)
+    const mine = (await workspaceOf(page)).find((m) => m.id === munId)
     expect(mine?.status).toBe('SUBMITTED')
-    munId = mine!.id
-
     await page.goto('/organizer/dashboard/muns')
     await expect(munCard(page, conferenceName)).toContainText('Submitted')
   })
@@ -125,11 +102,9 @@ test.describe.serial('new organizer: sign up, apply, get approved', () => {
   })
 
   test('the approved MUN appears in My MUNs and its workspace opens', async () => {
-    expectWorkspaceBug()
     await page.goto('/organizer/dashboard/muns')
     const card = munCard(page, conferenceName)
     await expect(card).toHaveAttribute('href', `/organizer/dashboard/${munId}/setup`)
-    await installWorkspaceShim(page, await workspaceOf(page))
     await page.goto(`/organizer/dashboard/${munId}/setup`)
     await expect(page).toHaveURL(new RegExp(`/organizer/dashboard/${munId}/setup$`))
     await expect(pageHeading(page)).toHaveText('MUN Setup')
@@ -189,6 +164,7 @@ test.describe('application review outcomes reach the organizer', () => {
 
 test.describe('host application form', () => {
   test('validates required fields before submitting', async ({ browser }) => {
+    test.fixme(true, APPLY_FORM_MOVING)
     const organizer = await createFreshOrganizer()
     const context = await browser.newContext({ storageState: await organizer.api.storageState() })
     const page = await context.newPage()

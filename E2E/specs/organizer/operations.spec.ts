@@ -1,10 +1,8 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import {
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
 } from './_helpers'
 
@@ -28,16 +26,14 @@ test.afterAll(async () => {
 })
 
 async function open(page: Page, segment: string, heading: string) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, segment, heading)
 }
 
 test.describe('Team & Permissions', () => {
   test('renders its placeholder', async ({ page }) => {
-    expectWorkspaceBug()
     await open(page, 'team', 'Team & Permissions')
     await expect(main(page)).toContainText('Co-organizers and role-based permissions.')
-    await expect(main(page)).toContainText('Presentational shell')
+    await expect(main(page)).toContainText("This section isn't available yet")
   })
 
   test.fixme('invite co-organizers and assign roles', async () => {
@@ -48,7 +44,6 @@ test.describe('Team & Permissions', () => {
 
 test.describe('Communications', () => {
   test('shows the delegate directory filters and an empty state for a MUN with no delegates', async ({ page }) => {
-    expectWorkspaceBug()
     await open(page, 'communications', 'Communications')
     await expect(main(page).getByLabel('Committee')).toBeVisible()
     await expect(main(page).getByLabel('Committee').getByRole('option', { name: 'E2E Sandbox Committee' })).toHaveCount(1)
@@ -66,7 +61,6 @@ test.describe('Communications', () => {
 
 test.describe('Results & Awards', () => {
   test('shows the empty state and the award form', async ({ page }) => {
-    expectWorkspaceBug()
     await open(page, 'results', 'Results & Awards')
     await expect(main(page).getByRole('heading', { name: 'No awards recorded yet' })).toBeVisible()
     await main(page).getByRole('button', { name: 'Add award' }).first().click()
@@ -90,7 +84,6 @@ test.describe('Results & Awards', () => {
 
 test.describe('Certificates', () => {
   test('is a read-only list with an empty state', async ({ page }) => {
-    expectWorkspaceBug()
     await open(page, 'certificates', 'Certificates')
     await expect(main(page).getByRole('heading', { name: 'No certificates yet' })).toBeVisible()
     await expect(main(page).getByRole('button')).toHaveCount(0)

@@ -4,11 +4,9 @@ import {
   acceptNextConfirm,
   anonApi,
   cardFor,
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
   toast,
   uid,
@@ -57,13 +55,11 @@ async function createMember(data: Record<string, unknown>): Promise<Member> {
 }
 
 async function openBoard(page: Page) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, 'executive-board', 'Executive Board')
 }
 
 test.describe('executive board UI', () => {
   test('add a committee chair, edit them, hide them, then delete them', async ({ page }) => {
-    expectWorkspaceBug()
     const name = `E2E Chair ${uid()}`
     await openBoard(page)
 
@@ -112,7 +108,6 @@ test.describe('executive board UI', () => {
   })
 
   test('a custom role needs its title', async ({ page }) => {
-    expectWorkspaceBug()
     const name = `E2E Custom ${uid()}`
     await openBoard(page)
     await main(page).getByRole('button', { name: 'Add member' }).first().click()
@@ -129,7 +124,6 @@ test.describe('executive board UI', () => {
   })
 
   test('reorder members with the move buttons', async ({ page }) => {
-    expectWorkspaceBug()
     const tag = uid()
     const a = await createMember({ name: `E2E Order A ${tag}`, role: 'CHAIR', displayOrder: 800 })
     const b = await createMember({ name: `E2E Order B ${tag}`, role: 'RAPPORTEUR', displayOrder: 801 })

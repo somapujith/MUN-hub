@@ -3,11 +3,9 @@ import {
   acceptNextConfirm,
   anonApi,
   cardFor,
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
   toast,
   uid,
@@ -50,13 +48,11 @@ async function listDocuments(): Promise<MunDocument[]> {
 }
 
 async function openDocuments(page: Page) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, 'documents', 'Documents')
 }
 
 test.describe('documents UI', () => {
   test('upload a PDF, see it listed with a download link, then delete it', async ({ page }) => {
-    expectWorkspaceBug()
     const title = `E2E Handbook ${uid()}`
     await openDocuments(page)
 
@@ -84,7 +80,6 @@ test.describe('documents UI', () => {
   })
 
   test('only PDFs are accepted, and a title is required', async ({ page }) => {
-    expectWorkspaceBug()
     await openDocuments(page)
     const form = main(page).locator('form')
     await form.evaluate((el) => el.setAttribute('novalidate', ''))

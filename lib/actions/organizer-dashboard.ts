@@ -123,6 +123,8 @@ function queryDelegates(munId: string, filters?: DelegateFilters) {
       payment: true,
       registrationProduct: true,
     },
+    // A stable order, or limit/offset pages can repeat or skip rows. Newest first.
+    orderBy: (registration, { desc }) => [desc(registration.createdAt), desc(registration.id)],
     limit: filters?.limit ?? 50,
     offset: filters?.offset ?? 0,
   })

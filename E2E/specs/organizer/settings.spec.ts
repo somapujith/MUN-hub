@@ -1,11 +1,9 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import {
   anonApi,
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
   toast,
   uid,
@@ -43,13 +41,11 @@ async function contact(): Promise<Contact | null> {
 }
 
 async function openSettings(page: Page) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, 'settings', 'Settings')
 }
 
 test.describe('contact settings UI', () => {
   test('save the official contact details and see them again after reload', async ({ page }) => {
-    expectWorkspaceBug()
     const tag = uid()
     await openSettings(page)
     const form = main(page).locator('form')
@@ -82,7 +78,6 @@ test.describe('contact settings UI', () => {
   })
 
   test('official email, contact name and contact email are required', async ({ page }) => {
-    expectWorkspaceBug()
     await openSettings(page)
     const form = main(page).locator('form')
     await form.evaluate((el) => el.setAttribute('novalidate', ''))

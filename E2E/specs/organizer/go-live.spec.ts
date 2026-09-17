@@ -1,11 +1,9 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import {
   anonApi,
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
   toast,
 } from './_helpers'
@@ -85,9 +83,7 @@ test.describe('go-live progress', () => {
   })
 
   test('the setup page shows progress and each incomplete module', async ({ page }) => {
-    expectWorkspaceBug()
     const p = await progress()
-    await prepareWorkspace(page, api)
     await openSection(page, munId, 'setup', 'MUN Setup')
     const panel = main(page).getByRole('complementary')
     await expect(panel).toContainText('Go-live progress')
@@ -153,8 +149,6 @@ test.describe('submitting an incomplete MUN', () => {
   })
 
   test('the setup page shows the blockers when submission is refused', async ({ page }) => {
-    expectWorkspaceBug()
-    await prepareWorkspace(page, api)
     await openSection(page, munId, 'setup', 'MUN Setup')
     const submitButton = main(page).getByRole('button', { name: 'Submit for review' })
     await expect(submitButton).toBeEnabled()

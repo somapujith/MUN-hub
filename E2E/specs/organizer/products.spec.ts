@@ -8,23 +8,18 @@ import {
   openSection,
   organizerApi,
   ownedMunBySlug,
-  prepareWorkspace,
-  PRODUCTS_LIST_BUG,
   sandboxId,
   toast,
   uid,
-  WORKSPACE_BUG,
-  WORKSPACE_SHIM,
-  expectWorkspaceBug,
 } from './_helpers'
 
 /**
  * Registration Products — passes, pricing, capacity, deadlines (Onboarding
  * PRD §15/§19). Writes happen on the sandbox only.
  *
- * The owner's product list endpoint is broken (PRODUCTS_LIST_BUG), so API
- * checks read products back through the owner's analytics endpoint, which
- * lists every pass in display order.
+ * API checks read products back through the owner's by-id list
+ * (GET /muns/:munId/products) or the analytics endpoint, which lists every
+ * pass in display order.
  */
 
 let api: APIRequestContext
@@ -60,13 +55,7 @@ interface AnalyticsProduct {
   capacity: number
 }
 
-/** Needs the products list, which fails for every MUN (and the workspace itself without the shim). */
-function expectProductsListBug(): void {
-  test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, WORKSPACE_SHIM ? PRODUCTS_LIST_BUG : `${WORKSPACE_BUG}; ${PRODUCTS_LIST_BUG}`)
-}
-
 async function openProducts(page: Page) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, 'products', 'Registration Products')
 }
 
@@ -84,6 +73,13 @@ async function patchProduct(id: string, data: Record<string, unknown>): Promise<
   return res.json()
 }
 
+/** Every pass on the sandbox, including retired ones, through the owner's by-id list. */
+async function allProducts(): Promise<Product[]> {
+  const res = await api.get(`muns/${munId}/products?includeInactive=true`)
+  expect(res.status(), await res.text()).toBe(200)
+  return res.json()
+}
+
 async function productsInOrder(): Promise<AnalyticsProduct[]> {
   const res = await api.get(`organizer/muns/${munId}/analytics`)
   expect(res.status()).toBe(200)
@@ -92,7 +88,6 @@ async function productsInOrder(): Promise<AnalyticsProduct[]> {
 
 test.describe('registration products UI', () => {
   test('the owner sees the MUN\'s passes, including retired ones', async ({ page }) => {
-    expectProductsListBug()
     const product = await createProduct({ name: `E2E Listed Pass ${uid()}`, price: 750, capacity: 25, displayOrder: 700 })
     await patchProduct(product.id, { status: 'inactive' })
     await openProducts(page)
@@ -104,7 +99,6 @@ test.describe('registration products UI', () => {
   })
 
   test('create a pass with price, capacity and deadline, then edit it', async ({ page }) => {
-    expectProductsListBug()
     const name = `E2E Pass ${uid()}`
     await openProducts(page)
 
@@ -146,7 +140,6 @@ test.describe('registration products UI', () => {
   })
 
   test('deactivate and reactivate a pass', async ({ page }) => {
-    expectProductsListBug()
     const product = await createProduct({ name: `E2E Toggle Pass ${uid()}`, price: 999, capacity: 10, displayOrder: 600 })
     await openProducts(page)
     const card = cardFor(page, REGION, product.name)
@@ -161,10 +154,11 @@ test.describe('registration products UI', () => {
   })
 
   test('reorder passes with the move buttons', async ({ page }) => {
-    expectProductsListBug()
     const tag = uid()
-    const first = await createProduct({ name: `E2E Order A ${tag}`, price: 1, capacity: 1, displayOrder: 9000 })
-    const second = await createProduct({ name: `E2E Order B ${tag}`, price: 1, capacity: 1, displayOrder: 9001 })
+    // Retired passes from earlier runs stay listed, so put the pair after everything else to keep them adjacent.
+    const last = Math.max(0, ...(await allProducts()).map((p) => p.displayOrder))
+    const first = await createProduct({ name: `E2E Order A ${tag}`, price: 1, capacity: 1, displayOrder: last + 1 })
+    const second = await createProduct({ name: `E2E Order B ${tag}`, price: 1, capacity: 1, displayOrder: last + 2 })
     await openProducts(page)
 
     const names = main(page).getByRole('region', { name: REGION }).getByRole('heading', { level: 2 })
@@ -175,8 +169,24 @@ test.describe('registration products UI', () => {
     expect(order).toEqual([second.name, first.name])
   })
 
+  test('reorder works when passes share a display order', async ({ page }) => {
+    const tag = uid()
+    const last = Math.max(0, ...(await allProducts()).map((p) => p.displayOrder))
+    // Same displayOrder: the list falls back to name order (A, B).
+    const first = await createProduct({ name: `E2E Tie A ${tag}`, price: 1, capacity: 1, displayOrder: last + 1 })
+    const second = await createProduct({ name: `E2E Tie B ${tag}`, price: 1, capacity: 1, displayOrder: last + 1 })
+    await openProducts(page)
+
+    const names = main(page).getByRole('region', { name: REGION }).getByRole('heading', { level: 2 })
+    await expect(names.filter({ hasText: tag })).toHaveText([first.name, second.name])
+    await cardFor(page, REGION, second.name).getByRole('button', { name: 'Move product up' }).click()
+    await expect(names.filter({ hasText: tag })).toHaveText([second.name, first.name])
+    const saved = (await allProducts()).filter((p) => p.name.includes(tag))
+    const orderOf = (name: string) => saved.find((p) => p.name === name)!.displayOrder
+    expect(orderOf(second.name)).toBeLessThan(orderOf(first.name))
+  })
+
   test('invalid price, capacity and mode are refused before saving', async ({ page }) => {
-    expectWorkspaceBug()
     await openProducts(page)
     await main(page).getByRole('button', { name: 'Add product' }).first().click()
     const form = main(page).locator('form')
@@ -206,7 +216,6 @@ test.describe('registration products UI', () => {
 
 test.describe('registration products API', () => {
   test('the owner can list a MUN\'s passes by id, including inactive ones', async () => {
-    test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, PRODUCTS_LIST_BUG)
     const product = await createProduct({ name: `E2E Owner List ${uid()}`, price: 10, capacity: 1 })
     const res = await api.get(`muns/${munId}/products?includeInactive=true`)
     expect(res.status(), await res.text()).toBe(200)

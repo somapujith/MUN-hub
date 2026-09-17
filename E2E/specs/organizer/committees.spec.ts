@@ -4,11 +4,9 @@ import {
   acceptNextConfirm,
   anonApi,
   cardFor,
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
   toast,
   uid,
@@ -38,13 +36,11 @@ function committeeCard(page: Page, name: string) {
 }
 
 async function openCommittees(page: Page) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, 'committees', 'Committees')
 }
 
 test.describe('committees UI', () => {
   test('lists the sandbox\'s existing committee', async ({ page }) => {
-    expectWorkspaceBug()
     await openCommittees(page)
     const existing = SANDBOX.committees[0]
     await expect(main(page).getByRole('heading', { name: existing.name })).toBeVisible()
@@ -52,7 +48,6 @@ test.describe('committees UI', () => {
   })
 
   test('create, edit, and delete a committee', async ({ page }) => {
-    expectWorkspaceBug()
     const name = `E2E Committee ${uid()}`
     await openCommittees(page)
 
@@ -93,7 +88,6 @@ test.describe('committees UI', () => {
   })
 
   test('cancelling a delete keeps the committee', async ({ page }) => {
-    expectWorkspaceBug()
     const name = `E2E Keep Committee ${uid()}`
     const created = await api.post(`muns/${munId}/committees`, { data: { name, capacity: 5 } })
     expect(created.status()).toBe(201)
@@ -105,7 +99,6 @@ test.describe('committees UI', () => {
   })
 
   test('capacity and name are validated before saving', async ({ page }) => {
-    expectWorkspaceBug()
     await openCommittees(page)
     await main(page).getByRole('button', { name: 'Add committee' }).first().click()
     const form = main(page).locator('form')

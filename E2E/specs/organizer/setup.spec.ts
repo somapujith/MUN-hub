@@ -1,11 +1,9 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { SANDBOX } from '../../fixtures/fixture-muns'
 import {
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
   toast,
   uid,
@@ -51,13 +49,11 @@ async function details(): Promise<MunDetails> {
 }
 
 async function openSetup(page: Page) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, 'setup', 'MUN Setup')
 }
 
 test.describe('MUN setup UI', () => {
   test('shows the conference record and its status', async ({ page }) => {
-    expectWorkspaceBug()
     await openSetup(page)
     const form = main(page).locator('form')
     await expect(form.getByLabel('Conference name')).toHaveValue(SANDBOX.name)
@@ -68,7 +64,6 @@ test.describe('MUN setup UI', () => {
   })
 
   test('edit the conference details and they persist', async ({ page }) => {
-    expectWorkspaceBug()
     const tag = uid()
     await openSetup(page)
     const form = main(page).locator('form')
@@ -96,7 +91,6 @@ test.describe('MUN setup UI', () => {
   })
 
   test('clearing an optional field saves it as empty', async ({ page }) => {
-    expectWorkspaceBug()
     await openSetup(page)
     const form = main(page).locator('form')
     await expect(form.getByLabel('Conference name')).toHaveValue(SANDBOX.name)
@@ -107,7 +101,6 @@ test.describe('MUN setup UI', () => {
   })
 
   test('the conference name is required', async ({ page }) => {
-    expectWorkspaceBug()
     await openSetup(page)
     const form = main(page).locator('form')
     await expect(form.getByLabel('Conference name')).toHaveValue(SANDBOX.name)
@@ -119,7 +112,6 @@ test.describe('MUN setup UI', () => {
   })
 
   test('the go-live progress panel lists every module', async ({ page }) => {
-    expectWorkspaceBug()
     await openSetup(page)
     const progress = await (await api.get(`muns/${munId}/progress`)).json()
     await expect(main(page).getByText(`${progress.requiredComplete}/${progress.requiredTotal} required modules complete`)).toBeVisible()

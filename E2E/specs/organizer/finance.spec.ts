@@ -1,11 +1,9 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import {
   anonApi,
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
   toast,
   uid,
@@ -60,13 +58,11 @@ function settlementPayload(pan: string, accountNumber: string, overrides: Record
 }
 
 async function openFinance(page: Page) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, 'finance', 'Payments & Finance')
 }
 
 test.describe('settlement settings UI', () => {
   test('save bank details; afterwards only the last four digits are ever shown', async ({ page }) => {
-    expectWorkspaceBug()
     const { pan, accountNumber } = secrets()
     const bankName = `E2E Bank ${uid()}`
     await openFinance(page)
@@ -111,7 +107,6 @@ test.describe('settlement settings UI', () => {
   })
 
   test('updating settings requires re-entering the PAN and account number', async ({ page }) => {
-    expectWorkspaceBug()
     const { pan, accountNumber } = secrets()
     expect((await api.put(`muns/${munId}/payment-settings`, { data: settlementPayload(pan, accountNumber) })).status()).toBe(200)
     await openFinance(page)

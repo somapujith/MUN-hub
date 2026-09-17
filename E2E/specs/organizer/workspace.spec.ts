@@ -5,13 +5,11 @@ import { CLOSED, OPEN, SANDBOX } from '../../fixtures/fixture-muns'
 import { pageHeading, watchForCrashes } from '../../fixtures/ui'
 import {
   anonApi,
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
   ownedMunBySlug,
   ownedMuns,
-  prepareWorkspace,
   sandboxId,
   sectionPath,
   type OwnedMun,
@@ -141,6 +139,7 @@ test.describe('org-wide workspace', () => {
   })
 
   test('"Apply to host" opens the host application', async ({ page }) => {
+    test.fixme(true, 'Apply form moves into the onboarding wizard (mun-hub-f1 rebuild); rewrite against the wizard')
     await page.goto('/organizer/dashboard/muns')
     await main(page).getByRole('button', { name: 'Apply to host' }).click()
     await expect(page).toHaveURL(/\/organizer\/apply$/)
@@ -148,8 +147,6 @@ test.describe('org-wide workspace', () => {
   })
 
   test('the conference switcher offers only the organizer\'s own conferences', async ({ page }) => {
-    expectWorkspaceBug()
-    await prepareWorkspace(page, api)
     await page.goto('/organizer/dashboard')
     await sidebar(page).getByRole('button', { name: 'Choose a conference' }).click()
     const menu = page.getByRole('menu')
@@ -171,13 +168,8 @@ test.describe('org-wide workspace', () => {
 })
 
 test.describe('per-MUN workspace shell', () => {
-  test.beforeEach(async ({ page }) => {
-    await prepareWorkspace(page, api)
-  })
-
   for (const section of SECTIONS) {
     test(`the "${section.segment}" section opens for the sandbox`, async ({ page }) => {
-      expectWorkspaceBug()
       const crashes = watchForCrashes(page)
       await openSection(page, sandbox, section.segment, section.heading)
       await expect(pageHeading(page)).toHaveCount(1)
@@ -193,14 +185,12 @@ test.describe('per-MUN workspace shell', () => {
   }
 
   test('the MUN index route redirects to its setup section', async ({ page }) => {
-    expectWorkspaceBug()
     await page.goto(`/organizer/dashboard/${sandbox}`)
     await expect(page).toHaveURL(new RegExp(`${sectionPath(sandbox, 'setup')}$`))
     await expect(pageHeading(page)).toHaveText('MUN Setup')
   })
 
   test('sidebar links move between sections and the breadcrumb follows', async ({ page }) => {
-    expectWorkspaceBug()
     await openSection(page, sandbox, 'setup', 'MUN Setup')
     await expect(breadcrumb(page).getByRole('listitem')).toHaveText(['Overview', SANDBOX.name, 'MUN Setup'])
 
@@ -216,7 +206,6 @@ test.describe('per-MUN workspace shell', () => {
   })
 
   test('the switcher jumps to the same section of another conference', async ({ page }) => {
-    expectWorkspaceBug()
     await openSection(page, sandbox, 'committees', 'Committees')
     const switcher = sidebar(page).getByRole('button', { name: `Conference: ${SANDBOX.name}. Switch conference` })
     await switcher.click()
@@ -244,7 +233,6 @@ test.describe('tenant isolation', () => {
   })
 
   test('opening another organizer\'s MUN never shows its data', async ({ page }) => {
-    await prepareWorkspace(page, api)
     for (const segment of ['setup', 'registrations', 'finance']) {
       await page.goto(sectionPath(vitMunId, segment))
       await expect(main(page)).toBeVisible()
