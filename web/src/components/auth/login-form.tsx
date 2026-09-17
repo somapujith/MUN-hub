@@ -136,7 +136,11 @@ export function LoginForm({ door }: { door: LoginDoor }) {
   if (landedAtWrongDoor && session) {
     const home = homeUrlForRole(session.role);
     return (
-      <div className="w-full max-w-[400px]">
+      // key: forces React to mount a fresh subtree instead of patching the
+      // password step's <form> in place. Without it, the browser can keep an
+      // autofill association with the underlying <input> DOM node across the
+      // swap — observed as the email address reappearing inside a later step.
+      <div key="wrong-door" className="w-full max-w-[400px]">
         <header className="flex flex-col gap-xs">
           <h1 className="font-display text-title-lg text-ink md:text-display-md">
             You&apos;re signed in
@@ -166,7 +170,7 @@ export function LoginForm({ door }: { door: LoginDoor }) {
 
   if (pendingToken) {
     return (
-      <div className="w-full max-w-[400px]">
+      <div key="mfa-step" className="w-full max-w-[400px]">
         <header className="flex flex-col gap-xs">
           <h1 className="font-display text-title-lg text-ink md:text-display-md">
             Two-factor verification
@@ -239,7 +243,7 @@ export function LoginForm({ door }: { door: LoginDoor }) {
   }
 
   return (
-    <div className="w-full max-w-[400px]">
+    <div key="password-step" className="w-full max-w-[400px]">
       <header className="flex flex-col gap-xs">
         <h1 className="font-display text-title-lg text-ink md:text-display-md">{door.title}</h1>
         <p className="text-body-md text-muted-foreground">
