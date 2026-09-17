@@ -54,7 +54,6 @@ import { useSession } from "@/hooks/use-session";
 
 const BROWSE_LINKS = [
   { href: "/muns", label: "Marketplace" },
-  { href: "/muns?sortBy=date", label: "Upcoming" },
   { href: "/organizer/apply", label: "For organizers" },
 ] as const;
 
