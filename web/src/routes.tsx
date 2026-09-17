@@ -67,6 +67,7 @@ import { ResetPasswordPage } from "@/pages/reset-password-page";
 import { SignupPage } from "@/pages/signup-page";
 import { StudentDashboardPage } from "@/pages/student-dashboard-page";
 import { VerifyEmailPage } from "@/pages/verify-email-page";
+import { RegistrationPassPage } from "@/pages/dashboard/registration-pass-page";
 import { StudentSupportPage } from "@/pages/student-support-page";
 import { SupportNewPage } from "@/pages/support-new-page";
 
@@ -115,6 +116,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <StudentDashboardPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: "dashboard/registrations/:registrationId/pass",
+        element: (
+          <RequireAuth>
+            <RegistrationPassPage />
           </RequireAuth>
         ),
       },

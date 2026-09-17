@@ -2,6 +2,7 @@ import type { Context } from 'hono'
 import { ZodError } from 'zod'
 import { APPLICATION_PENDING } from '@/lib/actions/organizer-application'
 import { ONBOARDING_ERRORS } from '@/lib/actions/organizer-onboarding'
+import { ORGANIZER_OPS_ERROR_STATUS } from '@/lib/actions/organizer-ops-errors'
 import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
 import type { AppVariables } from '../src/types'
 
@@ -82,6 +83,11 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   }
   if (message === ORGANIZER_OTP_ERRORS.deliveryFailed) {
     return { status: 503, code: 'UNAVAILABLE', message }
+  }
+
+  // lib/actions/{organizer-dashboard,check-in,organizer-communications,results}.ts
+  if (Object.hasOwn(ORGANIZER_OPS_ERROR_STATUS, message)) {
+    return { ...ORGANIZER_OPS_ERROR_STATUS[message], message }
   }
 
   if (message === APPLICATION_PENDING) {
@@ -335,4 +341,7 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'Registration deadline must be after registration opens', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Registration deadline must be before the conference starts', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Cannot queue — these sections still need review: COMMITTEES', status: 409, code: 'CONFLICT_STATE' },
+  { message: 'Cannot submit results while the MUN is ONBOARDING', status: 409, code: 'CONFLICT_STATE' },
+  { message: 'No confirmed registration for this MUN matches that code', status: 404, code: 'NOT_FOUND' },
+  { message: 'This MUN has reached its limit of 5 delegate messages per hour — try again later', status: 429, code: 'RATE_LIMITED' },
 ]

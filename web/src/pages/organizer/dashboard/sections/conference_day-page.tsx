@@ -17,6 +17,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
+import { CheckInPanel } from "@/components/organizer/check-in-panel";
+import { useOrganizerWorkspaceMuns } from "@/layouts/workspace-layout";
 import type { ScheduleItem, ScheduleItemInput, ScheduleItemKind } from "@/types/mun-schedule";
 
 const KIND_OPTIONS: Array<{ value: ScheduleItemKind; label: string }> = [
@@ -92,14 +94,16 @@ function formatRange(item: ScheduleItem): string {
 }
 
 /**
- * Conference Day — the SCHEDULE module (PRD Section 21). This is a full
- * wrapper over the already-shipped lib/actions/mun-schedule.ts +
- * server/routes/mun-schedule.ts (mounted, not net-new); "conference day"
- * in the nav is this module's operator-facing name.
+ * Conference Day — door check-in (lib/actions/check-in.ts) on top of the
+ * SCHEDULE module (PRD Section 21, lib/actions/mun-schedule.ts +
+ * server/routes/mun-schedule.ts); "conference day" in the nav is the
+ * operator-facing name for both.
  */
 export function OrganizerConferenceDayPage() {
   const { munId = "" } = useParams();
   const queryClient = useQueryClient();
+  const workspace = useOrganizerWorkspaceMuns();
+  const munStatus = workspace.data?.muns.find((mun) => mun.id === munId)?.status;
   const [editing, setEditing] = useState<ScheduleItem | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -157,13 +161,15 @@ export function OrganizerConferenceDayPage() {
       <Helmet title="Conference Day" />
       <WorkspacePage
         title="Conference day"
-        description="The run-of-show schedule for venue logistics and on-site operations — what delegates and staff see for timing, sessions and location."
+        description="Check delegates in at the door, and keep the run-of-show schedule delegates and staff see for timing, sessions and location."
         actions={
           <Button size="sm" onClick={openCreate}>
             <Plus aria-hidden /> Add schedule item
           </Button>
         }
       >
+        <CheckInPanel munId={munId} munStatus={munStatus} />
+        <h2 className="font-display text-title-md text-ink">Schedule</h2>
         <div className="grid gap-lg xl:grid-cols-[minmax(0,1fr)_22rem]">
           <section aria-label="Schedule items" className="flex flex-col gap-md">
             {itemsQuery.isLoading && <p className="text-body-md text-muted-foreground">Loading schedule...</p>}
