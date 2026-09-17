@@ -222,10 +222,6 @@ test.describe('signup validation', () => {
   })
 
   test('the API answers a signup without consent with a 4xx, not a server error', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: lib/actions/auth.ts signUp throws "You must accept the Terms of Service/Privacy Policy…", which server/middleware/error.ts does not map, so the API returns 500 INTERNAL',
-    )
     const api = await newApiContext()
     for (const override of [{ acceptedTermsOfService: false }, { acceptedPrivacyPolicy: false }]) {
       const res = await api.post('auth/users', { data: signUpPayload(override) })

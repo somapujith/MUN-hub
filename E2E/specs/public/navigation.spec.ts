@@ -123,7 +123,7 @@ test.describe('footer', () => {
     await expect(link).toHaveAttribute('href', '/organizer/signup')
     await link.click()
     await expect(page).toHaveURL(/\/organizer\/signup$/)
-    await expect(pageHeading(page)).toHaveText('Create an organizer account')
+    await expect(pageHeading(page)).toHaveText('Create your organizer account')
   })
 
   test('the footer logo returns home', async ({ page }) => {
@@ -140,7 +140,7 @@ test.describe('"List your MUN" for signed-out visitors', () => {
     await expect(cta).toHaveAttribute('href', '/organizer/signup')
     await cta.click()
     await expect(page).toHaveURL(/\/organizer\/signup$/)
-    await expect(pageHeading(page)).toHaveText('Create an organizer account')
+    await expect(pageHeading(page)).toHaveText('Create your organizer account')
   })
 })
 
