@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { recordPiiRead } from '@/lib/actions/admin-pii-read'
 import { listPaymentExceptions, searchRegistrations } from '@/lib/actions/admin-search'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
@@ -21,7 +22,16 @@ adminSearchRoutes.get(
   requireRole([...ADMIN_ROLES]),
   async (c) => {
     const { q } = searchQuerySchema.parse(c.req.query())
-    const results = await searchRegistrations(q, c.get('session'))
+    const session = c.get('session')!
+    const results = await searchRegistrations(q, session)
+    // Rows carry delegate names.
+    recordPiiRead({
+      actorId: session.userId,
+      route: 'GET /admin/search/registrations',
+      targetType: 'registration',
+      targetIds: results.map((row) => row.registrationId),
+      hasQuery: true,
+    })
     return c.json(results)
   },
 )
