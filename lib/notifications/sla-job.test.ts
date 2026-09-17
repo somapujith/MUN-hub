@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, munSubmissions, users } from '@/lib/db/schema'
+import { muns, munSubmissions, users, type MunStatus } from '@/lib/db/schema'
 
 const notifyPipelineEventMock = vi.fn().mockResolvedValue(undefined)
 
@@ -20,14 +20,19 @@ const { runSlaNotifications } = await import('./sla-job')
 // ever touched — correct behavior, not test-order-dependent corruption.
 const NOW = new Date()
 
-async function makeSubmission(overrides: Partial<typeof munSubmissions.$inferInsert> = {}) {
+// Defaults to a mun under MUN Hub's review (VERIFICATION), the only state in
+// which SLA_DELAY is sent.
+async function makeSubmission(
+  overrides: Partial<typeof munSubmissions.$inferInsert> = {},
+  munStatus: MunStatus = 'VERIFICATION',
+) {
   const [organizer] = await db
     .insert(users)
     .values({ name: 'Org', email: `org-${crypto.randomUUID()}@test.dev`, role: 'ORGANIZER' })
     .returning()
   const [mun] = await db
     .insert(muns)
-    .values({ organizerId: organizer.id, name: 'SLA Test Mun', slug: `sla-test-${crypto.randomUUID()}` })
+    .values({ organizerId: organizer.id, name: 'SLA Test Mun', slug: `sla-test-${crypto.randomUUID()}`, status: munStatus })
     .returning()
   const [submission] = await db
     .insert(munSubmissions)
@@ -108,6 +113,45 @@ describe('runSlaNotifications', () => {
       (call) => (call[0] as { munId: string }).munId === submission.munId,
     )
     expect(calledForThisSubmission).toBe(false)
+  })
+
+  it('sends SLA_DELAY for an overdue submission a reviewer has picked up (UNDER_REVIEW)', async () => {
+    const { mun } = await makeSubmission({ status: 'UNDER_REVIEW', slaDeadline: new Date(NOW.getTime() - 1000) })
+
+    await runSlaNotifications(NOW)
+
+    expect(notifyPipelineEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'SLA_DELAY', munId: mun.id }))
+  })
+
+  // The submission row (and its clock) exists from the moment automated checks
+  // pass, but review can't start until the organizer confirms.
+  it('does not tell the organizer review is delayed while MUN Hub waits on their confirmation', async () => {
+    const { mun, submission } = await makeSubmission(
+      { status: 'SUBMITTED', slaDeadline: new Date(NOW.getTime() - 1000) },
+      'ORGANIZER_CONFIRMATION',
+    )
+
+    await runSlaNotifications(NOW)
+
+    const calledForThisMun = notifyPipelineEventMock.mock.calls.some((call) => (call[0] as { munId: string }).munId === mun.id)
+    expect(calledForThisMun).toBe(false)
+    // The stored state still tracks the clock.
+    const [updated] = await db.select({ slaState: munSubmissions.slaState }).from(munSubmissions).where(eq(munSubmissions.id, submission.id))
+    expect(updated.slaState).toBe('OVERDUE')
+  })
+
+  it.each([
+    ['VERIFIED', 'APPROVED'],
+    ['GO_LIVE_QUEUE', 'APPROVED'],
+    ['GO_LIVE_QUEUE', 'QUEUED'],
+    ['UNPUBLISHED', 'APPROVED'],
+  ] as const)('does not send SLA_DELAY once review is decided (mun %s, submission %s)', async (munStatus, status) => {
+    const { mun } = await makeSubmission({ status, slaDeadline: new Date(NOW.getTime() - 1000) }, munStatus)
+
+    await runSlaNotifications(NOW)
+
+    const calledForThisMun = notifyPipelineEventMock.mock.calls.some((call) => (call[0] as { munId: string }).munId === mun.id)
+    expect(calledForThisMun).toBe(false)
   })
 
   it('never touches a terminal (PUBLISHED) submission, even with a long-past deadline', async () => {
