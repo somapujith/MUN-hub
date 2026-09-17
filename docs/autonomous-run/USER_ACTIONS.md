@@ -222,3 +222,18 @@ Landed (`1f08791`, migration 0037 applied to Neon), verified, and deployed:
 
 All 4 of the 5 requested items are now live: platform fee, delegation, admin analytics, and
 the load-testing report/perf fix. Only R2 storage remains, waiting on the user to enable it.
+
+## 14. R2 file storage — DONE, all 5 items now complete
+
+User enabled R2 on Cloudflare (2026-09-17). Bucket `munhub-uploads` created, binding wired
+into `server/wrangler.jsonc` (`a12d81e`), deployed. No KV namespace ever existed in production
+(uploads were refused with 503 before this — zero prior successful uploads), so R2 alone is
+the whole storage story now; no migration/backfill needed.
+
+**Verified end-to-end against live production** (not just a deploy log): signed in as the demo
+organizer, uploaded a real PNG to an owned MUN's branding (201 Created), downloaded it back
+from the public URL and confirmed the bytes were byte-for-byte identical to what was uploaded,
+then deleted it and confirmed it was gone (404). Test account signed out, no residue left.
+
+All 5 requested items are now live: platform fee, delegation/group registration, admin
+analytics, load testing, and file storage.
