@@ -32,6 +32,8 @@ this run (summary in `CONTEXT.md` → "Audit summary").
 | Marketplace & MUN page | mun-hub-62 agent `marketplace` | `web/src/pages/{home,muns,mun-detail,not-found}-page.tsx`, marketplace components, `lib/actions/marketplace.ts`, `server/routes/muns.ts`, FAQ route, SEO files. |
 | Privacy | mun-hub-62 agent `privacy` | Account deletion + data export (`lib/actions/account.ts`, `server/routes/account.ts`, profile page danger zone), guardian consent UI. |
 | Organizer operations | mun-hub-62 agent `org-ops` | `communications-page.tsx`, `registrations-page.tsx` + roster backend, `conference_day-page.tsx` check-in, `results-page.tsx` publishing, delegate MUN pass page. |
+| Storage | mun-hub-62 agent `storage` | `lib/storage/**`, `server/routes/files.ts`, upload validation in `lib/actions/mun-documents.ts` / `mun-branding.ts` (call sites only), KV/R2 bindings. |
+| Support chat | mun-hub-62 agent `support` | `web/src/components/support/**`, support pages (delegate, organizer, admin), `web/src/api/support.ts`, `server/routes/support.ts`, `lib/actions/support.ts` (staff-reply email call point owned by mun-hub-4b). |
 | DevOps | mun-hub-62 agent `devops` | `.github/**`, root scripts/tsconfig, `server/src/worker.ts` scheduled handler + `lib/jobs/**`, wrangler environments/crons, READMEs, `.env.example`, `docs/operations/**`, dead-code removal. |
 
 Shared files (`web/src/routes.tsx`, `server/src/app.ts`, `lib/db/schema.ts`, wrangler files):

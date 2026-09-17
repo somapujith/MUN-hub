@@ -66,3 +66,4 @@ payout execution.
 - f1 committed migrations 0030 (`ba44e79`) and 0032 (`f523604`); 4b wired four pipeline events
   (`21b6c9c`); 84 added MOCK_PAYMENTS_ENABLED/ALLOW_LOCALHOST_ORIGINS to the E2E API env
   (`6699007`) and reports E2E 297+148 passed, 0 failed.
+- 09:20 User reported the support chat is buggy → new `support` lane agent (audit in browser, then fix end to end). E2E full suite green at 50b19db (84).
