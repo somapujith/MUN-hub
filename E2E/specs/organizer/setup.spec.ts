@@ -179,7 +179,7 @@ test.describe('MUN setup UI', () => {
   test('the go-live progress panel lists every module', async ({ page }) => {
     await openSetup(page)
     const progress = await (await api.get(`muns/${munId}/progress`)).json()
-    await expect(main(page).getByText(`${progress.requiredComplete}/${progress.requiredTotal} required sections complete`)).toBeVisible()
+    await expect(main(page).getByText(`${progress.requiredComplete} of ${progress.requiredTotal} required sections complete`)).toBeVisible()
     await expect(main(page).getByText('Go-live checklist')).toBeVisible()
     const panel = main(page)
     for (const module of progress.modules as Array<{ label: string }>) {

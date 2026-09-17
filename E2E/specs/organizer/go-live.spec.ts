@@ -159,18 +159,22 @@ test.describe('submitting an incomplete MUN', () => {
 
   test('the setup page shows the blockers when submission is refused', async ({ page }) => {
     await openSection(page, munId, 'setup', 'MUN Setup')
-    const submitButton = main(page).getByRole('button', { name: 'Submit for review' })
+    const status = page.getByTestId('go-live-status')
+    await expect(status).toContainText('Submit for review')
+    await expect(page.getByTestId('next-section')).toContainText(/^Next up: /)
+    const submitButton = main(page).getByRole('button', { name: 'Run checks and submit' })
     await expect(submitButton).toBeEnabled()
-    await expect(main(page).getByRole('button', { name: 'Confirm & send for verification' })).toBeDisabled()
+    // No confirmation step until the checks pass.
+    await expect(main(page).getByRole('heading', { level: 2, name: 'Confirm your submission' })).toHaveCount(0)
 
     await submitButton.click()
-    await expect(toast(page, /Automated validation found \d+ blocking issue\(s\)/)).toBeVisible()
-    const blockers = main(page).getByRole('complementary').getByRole('list').last()
-    await expect(blockers.getByRole('listitem').first()).toBeVisible()
-    await expect(blockers).toContainText(/logo|cover/i)
-    await expect(main(page).getByText('Automated validation passed')).toHaveCount(0)
-    await expect(main(page).getByRole('button', { name: 'Confirm & send for verification' })).toBeDisabled()
-    await expect(main(page).getByText(/Status: /)).toContainText(/action.required/i)
+    await expect(toast(page, /^Automated checks found \d+ thing\(s\) to fix$/)).toBeVisible()
+    // The branding section needs a logo and cover, and says so.
+    const branding = page.getByTestId('module-BRANDING')
+    await expect(branding).toContainText(/\d+ things? to fix/)
+    await expect(branding).toContainText(/logo|cover/i)
+    await expect(main(page).getByRole('heading', { level: 2, name: 'Confirm your submission' })).toHaveCount(0)
+    expect(['ONBOARDING', 'ACTION_REQUIRED']).toContain((await progress()).lifecycleStatus)
   })
 })
 

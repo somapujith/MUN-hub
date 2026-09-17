@@ -239,11 +239,7 @@ test.describe('registration payment emails', () => {
     await student.api.dispose()
   })
 
-  test('the confirmation email states the amount actually paid', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: lib/notifications/registration-events.ts formatMoney divides by 100 (treats amounts as paise), but payments.amount is whole rupees — a ₹1,499 payment is emailed as "INR 14.99".',
-    )
+  test('the confirmation email states the amount actually paid (4d3d86e)', async () => {
     const student = await delegate()
     await registerForPass(student, OPEN.slug, PASS.name, { pay: 'success' })
     const mail = await waitForEmail(student.email, confirmedSubject)

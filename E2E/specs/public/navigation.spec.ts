@@ -145,12 +145,13 @@ test.describe('"List your MUN" for signed-out visitors', () => {
 })
 
 test.describe('not found', () => {
-  test('an unknown route shows the 404 page with a "Back home" action', async ({ page }) => {
+  test('an unknown route shows the 404 page with a way home', async ({ page }) => {
     const crashes = watchForCrashes(page)
     await page.goto('/definitely-not-a-route-e2e')
-    await expect(pageHeading(page)).toHaveText('Page not found')
-    await expect(page.getByText('The page you requested does not exist.')).toBeVisible()
-    await page.getByRole('button', { name: 'Back home' }).click()
+    await expect(pageHeading(page)).toHaveText("We couldn't find that page")
+    await expect(page.getByText('The link may be mistyped')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Browse conferences' })).toHaveAttribute('href', '/muns')
+    await page.getByRole('button', { name: 'Back to home' }).click()
     await expect(page).toHaveURL(/\/$/)
     await expect(pageHeading(page)).toHaveText(/Model UN conferences/)
     crashes.assertNone()
@@ -158,7 +159,7 @@ test.describe('not found', () => {
 
   test('a deep unknown route is also a 404', async ({ page }) => {
     await page.goto('/muns/extra/segments')
-    await expect(pageHeading(page)).toHaveText('Page not found')
+    await expect(pageHeading(page)).toHaveText("We couldn't find that page")
   })
 })
 
