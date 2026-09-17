@@ -31,15 +31,27 @@ ZEPTOMAIL_TOKEN=""
 # SENTRY_DSN=""
 # SENTRY_ENVIRONMENT="development"
 
-# Added by other lanes of the 2026-09-17 run (confirm against merged code):
-# MOCK_PAYMENTS_ENABLED="true"
-# PAYMENTS_ADAPTER="mock"
-# PLATFORM_FEE_BPS=""
-# PLATFORM_FEE_TAX_BPS=""
-# PAYMENT_FIELD_KEY_PREVIOUS=""
+# Local http only; never set these on a deployed Worker. Without the first the
+# mock checkout is off; the second overrides wrangler.jsonc's production
+# COOKIE_SECURE="true" so the session cookie isn't marked Secure over http.
+MOCK_PAYMENTS_ENABLED="true"
+COOKIE_SECURE="false"
+# Trusts http://localhost:<any port> for CORS/CSRF, instead of listing ports above.
 # ALLOW_LOCALHOST_ORIGINS="true"
-# COOKIE_SECURE="false"
-# TURNSTILE_SECRET_KEY=""
-# RATE_LIMIT_IP_MULTIPLIER=""
+
+# Payments (docs/payments/INTEGRATION.md)
+# PAYMENTS_ADAPTER="mock"
+# PLATFORM_FEE_BPS="0"
+# PLATFORM_FEE_TAX_BPS="1800"
+# PAYMENT_FIELD_KEY_PREVIOUS=""       # decrypt-only key during a rotation
+
+# Scheduled jobs: users.id of a local staff account. Unset, the lifecycle job
+# skips; trigger a run with: curl "http://localhost:8787/__scheduled?cron=*/5+*+*+*+*"
 # SYSTEM_ACTOR_USER_ID=""
-# CHECKIN_CODE_SECRET=""
+
+# Other optional settings
+# REQUIRE_EMAIL_VERIFICATION=""       # "true" blocks registration until the email is verified
+# CHECKIN_CODE_SECRET=""              # >= 32 chars; unset = derived from PAYMENT_FIELD_KEY
+# TURNSTILE_SECRET_KEY=""             # only together with the web build's VITE_TURNSTILE_SITE_KEY
+# RATE_LIMIT_IP_MULTIPLIER=""         # scales per-IP limits in the in-memory fallback only
+# EMAIL_OUTBOX_FILE=""                # append each logged email to this file as a JSON line

@@ -139,27 +139,21 @@ npx wrangler secret list --env=""
 | `SENTRY_DSN` | secret | recommended | Enables Sentry delivery in `server/lib/report-error.ts` |
 | `SENTRY_ENVIRONMENT` | var | no | Defaults to `production`; set `staging` on staging |
 | `SENTRY_RELEASE` | var | no | Set per deploy by the deploy workflow (`--var`) |
-
-Added by other lanes of the 2026-09-17 autonomous run. Confirm the final names against the merged code (`grep -rn "getRuntimeEnv(" lib server`) before relying on this list:
-
-| Name | Kind | Purpose |
-|---|---|---|
-| `PAYMENT_FIELD_KEY_PREVIOUS` | secret | Decrypt-only previous key during a rotation (below) |
-| `PAYMENTS_ADAPTER` | var | Payment provider (`mock` until the real gateway lands) |
-| `MOCK_PAYMENTS_ENABLED` | var | Must be exactly `true` for the mock checkout to work. Leave it unset in production. |
-| `PLATFORM_FEE_BPS`, `PLATFORM_FEE_TAX_BPS` | var | Platform fee and GST on it, in basis points |
-| `SYSTEM_ACTOR_USER_ID` | var | Id of a dedicated staff user recorded as the actor of scheduled lifecycle transitions |
-| `COOKIE_SECURE` | var | Override for the session cookie's `Secure` flag (local http only) |
-| `TURNSTILE_SECRET_KEY` | secret | Cloudflare Turnstile verification for signup and sign-in |
-| `RATE_LIMIT_IP_MULTIPLIER` | var | Scales per-IP limits |
-| `CHECKIN_CODE_SECRET` | secret | Signs conference check-in codes |
-| `REQUIRE_EMAIL_VERIFICATION` | var | `true` blocks registration until the account email is verified |
-
-Other lanes may also add bindings (rate-limit bindings, for example). Each needs its resource created in Cloudflare and its id in `wrangler.jsonc` for both production and `env.staging`.
+| `PAYMENT_FIELD_KEY_PREVIOUS` | secret | rotation only | Decrypt-only previous key during a rotation (below) |
+| `PAYMENTS_ADAPTER` | var | no | Payment provider (default `mock`; see `docs/payments/INTEGRATION.md`) |
+| `MOCK_PAYMENTS_ENABLED` | var | never in prod | Must be exactly `true` for the mock checkout. Unset in production: paid passes answer 503 PAYMENTS_UNAVAILABLE, free passes still work. |
+| `PLATFORM_FEE_BPS`, `PLATFORM_FEE_TAX_BPS` | var | no | Platform fee (default 0) and GST on it (default 1800), in basis points. A malformed value fails checkout. |
+| `COOKIE_SECURE` | var | yes (prod) | `true` in `wrangler.jsonc`. Unset: Secure except on plain-http localhost. |
+| `TURNSTILE_SECRET_KEY` | secret | no | Cloudflare Turnstile check on delegate signup and organizer sign-in code requests. Set it only together with the web build's `VITE_TURNSTILE_SITE_KEY`, or every such request is rejected. |
+| `RATE_LIMIT_IP_MULTIPLIER` | var | no | Scales per-IP limits in the in-memory fallback only (local/E2E); never affects the Workers bindings |
+| `RL_*` (14) | binding | yes | Workers Rate Limiting bindings (`ratelimits` in `wrangler.jsonc`, namespace ids 1001-1014). A missing binding falls back to an in-memory counter per isolate. |
+| `SYSTEM_ACTOR_USER_ID` | var | for the lifecycle job | `users.id` of a dedicated staff account, recorded as the actor of scheduled open/close/start moves. Unset: that job logs `scheduled_job.skipped` and does nothing. |
+| `CHECKIN_CODE_SECRET` | secret | recommended | Signs conference check-in codes (at least 32 characters). Unset: derived from `PAYMENT_FIELD_KEY`. Don't change it once passes are issued. |
+| `REQUIRE_EMAIL_VERIFICATION` | var | no | `true` blocks registration (403) until the account email is verified |
 
 ### `munhub-web`
 
-No runtime vars. The API base URL is compiled in at build time: `VITE_API_URL`, which defaults to `https://api.munhub.in/api/v1` for production builds (`web/vite.config.ts`). The Vercel project needs the same `VITE_API_URL` in its environment settings.
+No runtime vars. The API base URL is compiled in at build time: `VITE_API_URL`, which defaults to `https://api.munhub.in/api/v1` for production builds (`web/vite.config.ts`). The Vercel project needs the same `VITE_API_URL` in its environment settings. `VITE_TURNSTILE_SITE_KEY` (optional, build time) turns on the Turnstile widget on signup and organizer sign-in; set it only together with the API's `TURNSTILE_SECRET_KEY`.
 
 ## Scheduled jobs
 
@@ -167,7 +161,12 @@ No runtime vars. The API base URL is compiled in at build time: `VITE_API_URL`, 
 
 | Job | What it does |
 |---|---|
-| `releaseExpiredHolds` | Cancels PENDING / PAYMENT_PENDING registrations whose 15-minute seat hold has expired, across all MUNs. |
+| `releaseExpiredHolds` | Cancels PENDING / PAYMENT_PENDING registrations whose 15-minute seat hold has expired, across all MUNs, and emails delegates whose checkout hold expired in the last hour. |
+| `runScheduledLifecycleTransitions` | Opens registration at `registrationOpensAt` (if the preconditions pass), closes it at the deadline or on the start day, and starts the conference on its start day. Needs `SYSTEM_ACTOR_USER_ID`; skipped with a warning without it. |
+| `runSlaNotifications` | Emails the organizer (SLA_DELAY) when a go-live review becomes due soon or overdue; once per threshold. |
+| `runConferenceReminders` | Emails confirmed delegates about 24 hours before their conference starts. Uses the cron's scheduled time, so a skipped run's reminders are not re-sent later. |
+| `runOrganizerDigest` | Daily organizer digest for MUNs with open registration, in the 09:00-09:05 IST run only. |
+| `purgeExpiredAuthArtifacts` | Deletes expired sessions, reset tokens used or expired over 7 days ago, and organizer sign-in codes expired over a day ago. |
 
 Jobs must be idempotent: two runs can overlap if one is slow.
 
