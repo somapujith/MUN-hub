@@ -203,3 +203,22 @@ Both landed, verified, and deployed:
 
 Deployed: migration 0036 applied to Neon, `munhub-api` and `munhub-web` both redeployed and
 verified (all 5 hosts 200, marketplace still returns correct data).
+
+## 13. Delegation/group registration — DEPLOYED
+
+Landed (`1f08791`, migration 0037 applied to Neon), verified, and deployed:
+- Head delegate registers a team of up to 20, pays once for the whole group (as decided),
+  invites teammates by email, teammates sign up/in and claim their own seat with no separate
+  payment. Every existing per-delegate feature (roster, check-in, pass, receipt, results)
+  keeps working unmodified — each team member still gets their own `registrations` row.
+- 1868/1868 tests passing (full suite, after the merge), including a concurrency test proving
+  a group registration racing 5 solo callers for the last capacity-5 seats never oversells.
+- Two real bugs found by a full browser walkthrough (unit tests alone missed both) and fixed:
+  a claimed teammate couldn't see their own registration on their own dashboard; a non-head
+  teammate saw a "Manage your team" link that would have 403'd them. Full write-up:
+  `docs/autonomous-run/changes/lane-delegation.md`.
+- Deployed: migration 0037 applied to Neon (38 migrations total), `munhub-api` and `munhub-web`
+  redeployed and verified (all 5 hosts 200, marketplace data confirmed intact).
+
+All 4 of the 5 requested items are now live: platform fee, delegation, admin analytics, and
+the load-testing report/perf fix. Only R2 storage remains, waiting on the user to enable it.
