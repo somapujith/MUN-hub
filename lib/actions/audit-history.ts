@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { adminActions, verificationLogs } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
@@ -29,7 +29,9 @@ export async function getAuditHistory(
 
   const generalActions = await db
     .select({
-      action: adminActions.action,
+      // `metadata.event`, when present, names the precise event behind the
+      // stored enum value (see lib/actions/admin-staff.ts).
+      action: sql<string>`coalesce(${adminActions.metadata}->>'event', ${adminActions.action}::text)`,
       actorId: adminActions.actorId,
       reason: adminActions.reason,
       createdAt: adminActions.createdAt,
