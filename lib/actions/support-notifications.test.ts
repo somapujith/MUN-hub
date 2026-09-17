@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { runWithWaitUntil } from '@/lib/background-tasks'
 import { db } from '@/lib/db/client'
 import { users } from '@/lib/db/schema'
 
@@ -41,19 +42,33 @@ describe('sendMessage support-reply notification wiring', () => {
     expect(notifySupportReplyMock).toHaveBeenCalledWith(ticket.id)
   })
 
-  // On Workers, work still pending once the response is sent can be dropped,
-  // so the email must be finished before sendMessage returns.
-  it('does not resolve until the reply email has finished sending', async () => {
+  // On Workers, work still pending once the response is sent can be dropped.
+  // sendMessage does not wait for the email (a slow mail API must not slow the
+  // reply down); `runInBackground` hands the pending promise to the request's
+  // waitUntil, which is what keeps it alive — see lib/background-tasks.ts.
+  it('hands the reply email to waitUntil rather than making the reply wait', async () => {
     const { student, admin } = await makeStudentAndAdmin()
     let delivered = false
     notifySupportReplyMock.mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 25))
       delivered = true
     })
+    const keptAlive: Promise<unknown>[] = []
 
     const { ticket } = await startConversation({ body: 'Need help' }, { userId: student.id, role: 'STUDENT' })
-    await sendMessage(ticket.id, 'We are looking into it', { userId: admin.id, role: 'ADMIN' })
+    await runWithWaitUntil(
+      (promise) => {
+        keptAlive.push(promise)
+      },
+      () => sendMessage(ticket.id, 'We are looking into it', { userId: admin.id, role: 'ADMIN' }),
+    )
 
+    // Started, registered for keep-alive, and not blocking the reply.
+    expect(notifySupportReplyMock).toHaveBeenCalledWith(ticket.id)
+    expect(keptAlive).toHaveLength(1)
+    expect(delivered).toBe(false)
+
+    await Promise.all(keptAlive)
     expect(delivered).toBe(true)
   })
 
@@ -66,7 +81,7 @@ describe('sendMessage support-reply notification wiring', () => {
     const result = await sendMessage(ticket.id, 'We are looking into it', { userId: admin.id, role: 'ADMIN' })
 
     expect(result.message.body).toBe('We are looking into it')
-    expect(errorSpy).toHaveBeenCalledWith('[support] reply notification failed', expect.any(Error))
+    expect(errorSpy).toHaveBeenCalledWith('[support reply notification] background task failed', expect.any(Error))
   })
 
   it('does NOT fire notifySupportReply when the requester replies to their own ticket', async () => {
