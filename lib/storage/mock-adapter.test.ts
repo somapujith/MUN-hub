@@ -7,6 +7,11 @@ describe('mockStorageAdapter', () => {
     expect(result.url).toBe('/mock-storage/logos/test.png')
   })
 
+  it('discards the bytes, so get returns null', async () => {
+    await mockStorageAdapter.upload(Buffer.from('test'), 'logos/test.png', 'image/png')
+    await expect(mockStorageAdapter.get('logos/test.png')).resolves.toBeNull()
+  })
+
   it('delete resolves without throwing', async () => {
     await expect(mockStorageAdapter.delete('logos/test.png')).resolves.toBeUndefined()
   })
