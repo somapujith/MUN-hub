@@ -8,6 +8,11 @@
   },
   "routes": [
     { "pattern": "app.munhub.in", "custom_domain": true },
+    // publish. is the canonical organizer host (web/src/lib/host-routing.ts);
+    // organize. is kept as an alias for old links. Listed explicitly so
+    // publish. has its own DNS record and certificate instead of depending on
+    // the wildcard route below.
+    { "pattern": "publish.munhub.in", "custom_domain": true },
     { "pattern": "organize.munhub.in", "custom_domain": true },
     { "pattern": "admin.munhub.in", "custom_domain": true },
     // Wildcard: any other *.munhub.in label is a per-MUN slug page.
@@ -18,5 +23,19 @@
   ],
   "observability": {
     "enabled": true
+  },
+  // Named environments. `wrangler deploy --env staging` deploys a separate
+  // Worker, munhub-web-staging, reachable only on workers.dev. Build the
+  // bundle against the staging API first; Vite bakes VITE_API_URL in at build
+  // time and a production build otherwise defaults to api.munhub.in:
+  //   VITE_API_URL=https://munhub-api-staging.somapujith.workers.dev/api/v1 npx vite build
+  // See docs/operations/ENVIRONMENTS.md.
+  "env": {
+    "staging": {
+      // Routes are inherited from the top level unless overridden. The empty
+      // list keeps staging off every munhub.in hostname.
+      "routes": [],
+      "workers_dev": true
+    }
   }
 }
