@@ -154,9 +154,12 @@ test.describe('late payments', () => {
     await page.goto(`/register/${OPEN.slug}/confirmation?registrationId=${registrationId}`)
     const notice = page.getByRole('main')
     await expect(notice).toContainText('Payment received after your seat hold ended')
+    await expect(notice).toContainText("Please don't pay again")
     await expect(notice).toContainText('₹1,499')
     await expect(notice).not.toContainText("Payment didn't go through")
     await expect(notice).not.toContainText('Your seat hold expired')
+    // No way to pay a second time from here.
+    await expect(notice.getByRole('button', { name: /try again|start again/i })).toHaveCount(0)
     await notice.getByRole('button', { name: 'Contact support' }).click()
     await expect(page).toHaveURL(/\/support\/new$/)
     await context.close()

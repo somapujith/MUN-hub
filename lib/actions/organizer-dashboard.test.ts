@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
 import { muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
@@ -57,6 +57,14 @@ describe('organizer dashboard queries', () => {
     expect(overview.revenue).toBe(2000)
     expect(overview.pendingPayments).toBe(1)
     expect(overview.availableSeats).toBe(4) // capacity 5 - 1 counted registration
+
+    // The PAID row is a mock checkout: once the mock is switched off it moved no money.
+    vi.stubEnv('MOCK_PAYMENTS_ENABLED', 'false')
+    try {
+      expect((await getMunOverview(mun.id, sess(organizer))).revenue).toBe(0)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('rejects a non-owning organizer', async () => {

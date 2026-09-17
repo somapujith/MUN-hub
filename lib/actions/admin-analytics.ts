@@ -5,6 +5,7 @@ import type { MunStatus, RegistrationStatus } from '@/lib/db/schema-enums'
 import { registrationStatusEnum } from '@/lib/db/schema-enums'
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
+import { countedPaymentsFilter } from '@/lib/payments/counted-payments'
 
 const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
 
@@ -37,6 +38,7 @@ export interface AdminAnalytics {
  * Platform totals for the /admin overview cards. GMV counts every PAID
  * payment, including one flagged as a payment exception (money was taken
  * either way; exceptions are resolved by an admin, there are no refunds).
+ * Mock checkout payments count only while the mock adapter is active.
  * Amounts are grouped by currency rather than summed across currencies.
  * Four aggregate queries, run in parallel.
  */
@@ -53,7 +55,7 @@ export async function getAdminAnalytics(session: Session | null, now: Date = new
         paidPaymentsWithoutFeeBreakdown: sql<number>`count(*) filter (where ${payments.platformFeeAmount} is null)::int`,
       })
       .from(payments)
-      .where(eq(payments.status, 'PAID'))
+      .where(and(eq(payments.status, 'PAID'), countedPaymentsFilter()))
       .groupBy(payments.currency),
     db
       .select({ status: registrations.status, count: sql<number>`count(*)::int` })

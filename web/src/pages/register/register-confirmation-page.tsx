@@ -75,7 +75,7 @@ export function RegisterConfirmationPage() {
       <Helmet><title>Registration status</title></Helmet>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-xl px-lg py-xxl sm:px-xl">
-        {renderStatus(registration.status, slug, receipt, registrationId, Boolean(payment), payment?.status)}
+        {renderStatus(registration.status, slug, receipt, registrationId, payment?.status)}
       </main>
       <SiteFooter />
     </div>
@@ -87,7 +87,7 @@ function renderStatus(
   slug: string,
   receipt: ReactNode,
   registrationId: string,
-  paid: boolean,
+  /** Undefined when the pass was free (no payment row). */
   paymentStatus: PaymentStatus | undefined,
 ) {
   switch (status) {
@@ -96,7 +96,7 @@ function renderStatus(
         <RegistrationNotice
           tone="success"
           title="You're registered"
-          message={paid ? "Payment went through and your seat is confirmed." : "Your seat is confirmed."}
+          message={paymentStatus ? "Payment went through and your seat is confirmed." : "Your seat is confirmed."}
           detail={receipt}
         >
           <Button render={<Link to={`/mun/${slug}`} />}>Back to conference</Button>
@@ -111,12 +111,15 @@ function renderStatus(
     case "CANCELLED":
       // A cancelled registration can mean three different things for the
       // delegate's money; never say "didn't go through" when it did.
+      // Money taken after the seat hold ended (PAID with an exception, or a
+      // legacy REFUNDED row) is returned by staff by hand — there are no
+      // automatic refunds — so paying again would charge the delegate twice.
       if (paymentStatus === "PAID" || paymentStatus === "REFUNDED") {
         return (
           <RegistrationNotice
             tone="warning"
             title="Payment received after your seat hold ended"
-            message="Your payment reached us after the 15-minute seat hold had expired, so this registration couldn't be confirmed. Our team has been alerted and will return the full amount to your original payment method — you don't need to do anything."
+            message="Your payment reached us after the 15-minute seat hold had expired, so this registration couldn't be confirmed. Please don't pay again. Our team has been alerted and will return the full amount to your original payment method. If you have questions, contact support and quote the reference below."
             detail={receipt}
           >
             <Button render={<Link to="/support/new" />}>Contact support</Button>

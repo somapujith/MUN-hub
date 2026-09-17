@@ -18,6 +18,7 @@ import {
   users,
 } from '@/lib/db/schema'
 import type { MunStatus, PaymentStatus, RegistrationStatus } from '@/lib/db/schema-enums'
+import { countedPaymentsFilter } from '@/lib/payments/counted-payments'
 
 export interface MunOverview {
   totalRegistrations: number
@@ -59,7 +60,7 @@ export async function getMunOverview(munId: string, session: Session | null): Pr
       .select({ total: sum(payments.amount) })
       .from(payments)
       .innerJoin(registrations, eq(payments.registrationId, registrations.id))
-      .where(and(eq(registrations.munId, munId), eq(payments.status, 'PAID')))
+      .where(and(eq(registrations.munId, munId), eq(payments.status, 'PAID'), countedPaymentsFilter()))
       .then((rows) => rows[0]),
     db.$count(
       payments,

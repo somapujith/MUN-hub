@@ -3,6 +3,7 @@ import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { db } from '@/lib/db/client'
 import { payments, registrationProducts, registrations } from '@/lib/db/schema'
+import { countedPaymentsFilter } from '@/lib/payments/counted-payments'
 
 // -----------------------------------------------------------------------------
 // mun-analytics — read-only registration/revenue rollup for the organizer
@@ -68,7 +69,7 @@ export async function getMunAnalytics(munId: string, session: Session | null): P
       .select({ productId: registrations.registrationProductId, total: sum(payments.amount) })
       .from(payments)
       .innerJoin(registrations, eq(payments.registrationId, registrations.id))
-      .where(and(eq(registrations.munId, munId), eq(payments.status, 'PAID')))
+      .where(and(eq(registrations.munId, munId), eq(payments.status, 'PAID'), countedPaymentsFilter()))
       .groupBy(registrations.registrationProductId),
   ])
 
