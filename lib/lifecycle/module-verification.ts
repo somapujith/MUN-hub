@@ -1,4 +1,5 @@
 import { and, eq } from 'drizzle-orm'
+import { runInBackground } from '@/lib/background-work'
 import { db } from '@/lib/db/client'
 import { adminActions, muns, munModuleVerifications, verificationIssues } from '@/lib/db/schema'
 import type { MunModule, ModuleVerificationState, VerificationSeverity } from '@/lib/db/schema-enums'
@@ -258,21 +259,20 @@ export async function reviewModule(
   // resolveMunNotificationContext hits the DB and could theoretically fail —
   // caught and logged here so it can never surface as an error on an
   // already-successful review decision.
+  // runInBackground keeps the send alive past the response on Workers
+  // (lib/background-work.ts).
   if (decision === 'CHANGES_REQUESTED') {
-    resolveMunNotificationContext(munId)
-      .then((context) =>
-        notifyPipelineEvent({
-          type: 'MODULE_ACTION_REQUIRED',
-          munId,
-          organizerEmail: context.organizerEmail,
-          munName: context.munName,
-          moduleName,
-          issues: issues.map((issue) => issue.reason),
-        }),
-      )
-      .catch((error) => {
-        console.error('[module-verification] pipeline notification failed', error)
+    void runInBackground(async () => {
+      const context = await resolveMunNotificationContext(munId)
+      await notifyPipelineEvent({
+        type: 'MODULE_ACTION_REQUIRED',
+        munId,
+        organizerEmail: context.organizerEmail,
+        munName: context.munName,
+        moduleName,
+        issues: issues.map((issue) => issue.reason),
       })
+    }, '[module-verification] pipeline notification failed')
   }
 
   return updated

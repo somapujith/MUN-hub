@@ -1,5 +1,6 @@
 import { and, desc, eq, gt, ilike, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
+import { runInBackground } from '@/lib/background-work'
 import { db } from '@/lib/db/client'
 import { muns, registrations, supportMessages, supportTickets, users } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
@@ -779,10 +780,10 @@ export async function sendMessage(
 
   // After commit, never inside the transaction. Only the requester is
   // emailed; staff see requester messages in the queue.
+  // runInBackground keeps the send alive past the response on Workers
+  // (lib/background-work.ts).
   if (isStaffReply) {
-    notifySupportReply(ticketId).catch((error) => {
-      console.error('[support] reply notification failed', error)
-    })
+    void runInBackground(() => notifySupportReply(ticketId), '[support] reply notification failed')
   }
 
   return result

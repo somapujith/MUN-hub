@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { runWithBackgroundWork } from '@/lib/background-work'
 import { db } from '@/lib/db/client'
 import { muns, organizerApplications, users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
@@ -104,6 +105,26 @@ describe('reviewMunApplication Gate-1 decision notification wiring', () => {
       expect.objectContaining({ type: 'APPLICATION_REJECTED', munId: mun.id, reason: 'Fabricated committee list' }),
     )
     expect(notifyPipelineEventMock).not.toHaveBeenCalled()
+  })
+
+  // Regression: on Workers the send was cancelled once the response went out,
+  // because nothing handed it to waitUntil.
+  it('hands the decision emails to the request waitUntil so Workers keeps them alive', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const admin = await makeUser('ADMIN')
+    const mun = await makeMun(organizer.id, 'UNDER_REVIEW')
+    const waitUntil = vi.fn()
+
+    await runWithBackgroundWork(waitUntil, () =>
+      reviewMunApplication(mun.id, 'APPROVED', 'looks good', undefined, sess(admin)),
+    )
+
+    expect(waitUntil).toHaveBeenCalledTimes(1)
+    await waitUntil.mock.calls[0][0]
+    expect(notifyOrganizerApplicationEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'APPLICATION_APPROVED', munId: mun.id }),
+    )
+    expect(notifyPipelineEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'ONBOARDING_STARTED', munId: mun.id }))
   })
 })
 

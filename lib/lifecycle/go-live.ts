@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, notInArray, or, sql } from 'drizzle-orm'
+import { runInBackground } from '@/lib/background-work'
 import { db } from '@/lib/db/client'
 import {
   adminActions,
@@ -85,9 +86,9 @@ export interface SubmitMunForReviewResult {
  * why. Never awaited by the caller in a way that blocks its return value.
  */
 function notifyAfterCommit(work: () => Promise<void>): void {
-  work().catch((error) => {
-    console.error('[go-live] pipeline notification failed', error)
-  })
+  // runInBackground keeps the send alive past the response on Workers
+  // (lib/background-work.ts).
+  void runInBackground(work, '[go-live] pipeline notification failed')
 }
 
 /**

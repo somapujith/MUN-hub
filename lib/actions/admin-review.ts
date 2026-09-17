@@ -1,4 +1,5 @@
 import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { runInBackground } from '@/lib/background-work'
 import { db } from '@/lib/db/client'
 import {
   muns,
@@ -202,7 +203,9 @@ function notifyReviewDecisionAfterCommit(
   decision: 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED',
   reason: string | undefined,
 ): void {
-  ;(async () => {
+  // runInBackground keeps the send alive past the response on Workers
+  // (lib/background-work.ts).
+  void runInBackground(async () => {
     const context = await resolveMunNotificationContext(munId)
 
     if (decision === 'APPROVED') {
@@ -225,9 +228,7 @@ function notifyReviewDecisionAfterCommit(
       // function, so `reason` is guaranteed defined on this branch.
       reason: reason ?? 'See review notes.',
     })
-  })().catch((error) => {
-    console.error('[admin-review] pipeline notification failed', error)
-  })
+  }, '[admin-review] pipeline notification failed')
 }
 
 /**

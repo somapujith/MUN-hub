@@ -1,4 +1,5 @@
 import { and, eq, inArray } from 'drizzle-orm'
+import { runInBackground } from '@/lib/background-work'
 import { db } from '@/lib/db/client'
 import { muns, munModuleVerifications, verificationIssues } from '@/lib/db/schema'
 import type { MunModule, MunStatus, ModuleCompletionStatus, ModuleVerificationState } from '@/lib/db/schema-enums'
@@ -537,14 +538,13 @@ export async function onModuleDataChanged(munId: string, moduleKey: MunModule, a
     // fire-and-forget-with-logging convention as go-live.ts's
     // `notifyAfterCommit` (a notification failure must never surface as a
     // failure of the module write that triggered it).
+    // runInBackground keeps the send alive past the response on Workers
+    // (lib/background-work.ts).
     if (justBecameReadyForSubmission) {
-      resolveMunNotificationContext(munId)
-        .then((context) =>
-          notifyPipelineEvent({ type: 'READY_FOR_SUBMISSION', munId, organizerEmail: context.organizerEmail, munName: context.munName }),
-        )
-        .catch((error) => {
-          console.error('[module-completion] pipeline notification failed', error)
-        })
+      void runInBackground(async () => {
+        const context = await resolveMunNotificationContext(munId)
+        await notifyPipelineEvent({ type: 'READY_FOR_SUBMISSION', munId, organizerEmail: context.organizerEmail, munName: context.munName })
+      }, '[module-completion] pipeline notification failed')
     }
   }
 }

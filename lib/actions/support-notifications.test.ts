@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { runWithBackgroundWork } from '@/lib/background-work'
 import { db } from '@/lib/db/client'
 import { users } from '@/lib/db/schema'
 
@@ -54,6 +55,29 @@ describe('sendMessage support-reply notification wiring', () => {
 
     await waitForCalls(0)
     expect(notifySupportReplyMock).not.toHaveBeenCalled()
+  })
+
+  // Regression: on Workers the reply email was cancelled once the response
+  // went out, because nothing handed it to waitUntil.
+  it('hands the staff-reply email to the request waitUntil so Workers keeps it alive', async () => {
+    const [student] = await db
+      .insert(users)
+      .values({ name: 'S3', email: `s3-${crypto.randomUUID()}@test.dev`, role: 'STUDENT' })
+      .returning()
+    const [admin] = await db
+      .insert(users)
+      .values({ name: 'A3', email: `a3-${crypto.randomUUID()}@test.dev`, role: 'ADMIN' })
+      .returning()
+    const { ticket } = await startConversation({ body: 'Need help' }, { userId: student.id, role: 'STUDENT' })
+    const waitUntil = vi.fn()
+
+    await runWithBackgroundWork(waitUntil, () =>
+      sendMessage(ticket.id, 'On it', { userId: admin.id, role: 'ADMIN' }),
+    )
+
+    expect(waitUntil).toHaveBeenCalledTimes(1)
+    await waitUntil.mock.calls[0][0]
+    expect(notifySupportReplyMock).toHaveBeenCalledWith(ticket.id)
   })
 })
 

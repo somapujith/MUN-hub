@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray } from 'drizzle-orm'
+import { runInBackground } from '@/lib/background-work'
 import { db } from '@/lib/db/client'
 import {
   munModuleVerifications,
@@ -33,9 +34,9 @@ import { validateMunForSubmission } from './validation'
  * below) and the two call sites otherwise have nothing else in common.
  */
 function notifyFireAndForget(work: () => Promise<void>): void {
-  work().catch((error) => {
-    console.error('[organizer-confirmation] pipeline notification failed', error)
-  })
+  // runInBackground keeps the send alive past the response on Workers
+  // (lib/background-work.ts).
+  void runInBackground(work, '[organizer-confirmation] pipeline notification failed')
 }
 
 /**
