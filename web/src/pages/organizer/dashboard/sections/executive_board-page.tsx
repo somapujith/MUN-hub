@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useId, useRef, useState, type ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
-import { ArrowDown, ArrowUp, Edit3, Plus, Trash2, UsersRound } from "lucide-react";
+import { ArrowDown, ArrowUp, Camera, Edit3, Plus, Trash2, UsersRound } from "lucide-react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
 import {
@@ -9,8 +9,11 @@ import {
   deleteExecutiveBoardMember,
   listCommitteesForExecutiveBoard,
   listExecutiveBoardMembers,
+  removeExecutiveBoardPhoto,
   updateExecutiveBoardMember,
+  uploadExecutiveBoardPhoto,
 } from "@/api/executive-board";
+import { readFileAsBase64 } from "@/lib/read-file-as-base64";
 import { queryKeys } from "@/api/query-keys";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,6 +48,120 @@ const EMPTY_FORM: ExecutiveBoardMemberInput = {
   displayOrder: 0,
 };
 
+type PhotoType = "image/png" | "image/jpeg" | "image/webp";
+const PHOTO_TYPES: readonly PhotoType[] = ["image/png", "image/jpeg", "image/webp"];
+const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+/** Client-side check; the API also verifies the file's contents. */
+function photoProblem(file: File): string | null {
+  if (!PHOTO_TYPES.includes(file.type as PhotoType)) return "Use a PNG, JPEG or WebP image";
+  if (file.size > PHOTO_MAX_BYTES) return "Photos must be 5MB or smaller";
+  return null;
+}
+
+async function photoPayload(file: File) {
+  return { contentType: file.type as PhotoType, fileBase64: await readFileAsBase64(file) };
+}
+
+/**
+ * Photo upload for a board member. Editing: uploads or removes right away.
+ * Adding: holds the file until the member is created.
+ */
+function MemberPhotoField({
+  member,
+  pendingFile,
+  onPendingFile,
+  onChanged,
+}: {
+  member: ExecutiveBoardMember | null;
+  pendingFile: File | null;
+  onPendingFile: (file: File | null) => void;
+  onChanged: (member: ExecutiveBoardMember) => Promise<void>;
+}) {
+  const inputId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const upload = useMutation({
+    mutationFn: async (file: File) => uploadExecutiveBoardPhoto(member!.id, await photoPayload(file)),
+    onSuccess: async (updated) => {
+      await onChanged(updated);
+      toast.success("Photo updated");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to upload photo"),
+    onSettled: () => {
+      if (inputRef.current) inputRef.current.value = "";
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => removeExecutiveBoardPhoto(member!.id),
+    onSuccess: async (updated) => {
+      await onChanged(updated);
+      toast.success("Photo removed");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to remove photo"),
+  });
+
+  const shown = member ? member.photoUrl : previewUrl;
+  const busy = upload.isPending || remove.isPending;
+
+  const pick = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const problem = photoProblem(file);
+    if (problem) {
+      toast.error(problem);
+      event.target.value = "";
+      return;
+    }
+    if (member) {
+      upload.mutate(file);
+      return;
+    }
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(file));
+    onPendingFile(file);
+  };
+
+  const clearPending = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    onPendingFile(null);
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  return (
+    <div className="flex flex-col gap-xs">
+      <Label htmlFor={inputId}>Photo (optional)</Label>
+      <div className="flex items-center gap-sm">
+        {shown ? (
+          <img src={shown} alt="" className="size-14 shrink-0 rounded-full border border-border object-cover" />
+        ) : (
+          <div className="flex size-14 shrink-0 items-center justify-center rounded-full bg-surface-soft text-muted-foreground">
+            <Camera className="size-5" aria-hidden />
+          </div>
+        )}
+        <input id={inputId} ref={inputRef} type="file" accept={PHOTO_TYPES.join(",")} className="sr-only" onChange={pick} disabled={busy} />
+        <div className="flex flex-wrap gap-xxs">
+          <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => inputRef.current?.click()}>
+            {upload.isPending ? "Uploading..." : shown || pendingFile ? "Change photo" : "Upload photo"}
+          </Button>
+          {member?.photoUrl && (
+            <Button type="button" size="xs" variant="ghost" disabled={busy} onClick={() => remove.mutate()}>
+              Remove
+            </Button>
+          )}
+          {!member && pendingFile && (
+            <Button type="button" size="xs" variant="ghost" onClick={clearPending}>
+              Remove
+            </Button>
+          )}
+        </div>
+      </div>
+      <p className="text-caption text-muted-foreground">A square headshot works best. PNG, JPEG or WebP, max 5MB.</p>
+    </div>
+  );
+}
+
 function toForm(member: ExecutiveBoardMember): ExecutiveBoardMemberInput {
   return {
     committeeId: member.committeeId,
@@ -67,6 +184,8 @@ export function OrganizerExecutiveBoardPage() {
   const [editing, setEditing] = useState<ExecutiveBoardMember | null>(null);
   const [form, setForm] = useState<ExecutiveBoardMemberInput>(EMPTY_FORM);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  // A photo picked while adding a member; uploaded once the member exists.
+  const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
   const membersQuery = useQuery({
     queryKey: queryKeys.executiveBoard(munId),
     queryFn: () => listExecutiveBoardMembers(munId),
@@ -79,10 +198,25 @@ export function OrganizerExecutiveBoardPage() {
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.executiveBoard(munId) });
   const saveMutation = useMutation({
-    mutationFn: () => editing ? updateExecutiveBoardMember(editing.id, form) : createExecutiveBoardMember(munId, form),
+    mutationFn: async () => {
+      // The photo is saved on its own (MemberPhotoField), so a stale form
+      // value never overwrites a photo uploaded while the form was open.
+      const { photoUrl: _photoUrl, ...fields } = form;
+      if (editing) return updateExecutiveBoardMember(editing.id, fields);
+      const created = await createExecutiveBoardMember(munId, fields);
+      if (pendingPhoto) {
+        try {
+          await uploadExecutiveBoardPhoto(created.id, await photoPayload(pendingPhoto));
+        } catch (error) {
+          toast.error(`Member added, but the photo didn't upload: ${error instanceof Error ? error.message : "try again"}`);
+        }
+      }
+      return created;
+    },
     onSuccess: async () => {
       await refresh();
       setIsFormOpen(false);
+      setPendingPhoto(null);
       setEditing(null);
       toast.success(editing ? "Board member updated" : "Board member added");
     },
@@ -96,11 +230,13 @@ export function OrganizerExecutiveBoardPage() {
   const members = [...(membersQuery.data ?? [])].sort((a, b) => a.displayOrder - b.displayOrder);
   const openCreate = () => {
     setEditing(null);
+    setPendingPhoto(null);
     setForm({ ...EMPTY_FORM, displayOrder: members.length });
     setIsFormOpen(true);
   };
   const openEdit = (member: ExecutiveBoardMember) => {
     setEditing(member);
+    setPendingPhoto(null);
     setForm(toForm(member));
     setIsFormOpen(true);
   };
@@ -137,12 +273,11 @@ export function OrganizerExecutiveBoardPage() {
             <div className="flex flex-col gap-xs"><Label htmlFor="eb-role">Role</Label><select id="eb-role" className="h-11 rounded-sm border border-input bg-background px-md text-body-md text-ink" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as ExecutiveBoardRole })}>{ROLE_OPTIONS.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></div>
             {form.role === "CUSTOM" && <div className="flex flex-col gap-xs"><Label htmlFor="eb-custom-role">Custom role</Label><Input id="eb-custom-role" value={form.customRole ?? ""} onChange={(event) => setForm({ ...form, customRole: event.target.value })} /></div>}
             <div className="flex flex-col gap-xs"><Label htmlFor="eb-committee">Committee assignment</Label><select id="eb-committee" className="h-11 rounded-sm border border-input bg-background px-md text-body-md text-ink" value={form.committeeId ?? ""} onChange={(event) => setForm({ ...form, committeeId: event.target.value || null })}><option value="">Conference-wide</option>{(committeesQuery.data ?? []).map((committee) => <option key={committee.id} value={committee.id}>{committee.name}</option>)}</select></div>
-            <div className="flex flex-col gap-xs"><Label htmlFor="eb-photo">Photo URL</Label><Input id="eb-photo" type="url" value={form.photoUrl ?? ""} onChange={(event) => setForm({ ...form, photoUrl: event.target.value || null })} /></div>
+            <MemberPhotoField member={editing} pendingFile={pendingPhoto} onPendingFile={setPendingPhoto} onChanged={async (updated) => { setEditing(updated); await refresh(); }} />
             <div className="flex flex-col gap-xs"><Label htmlFor="eb-institution">Institution</Label><Input id="eb-institution" value={form.institution ?? ""} onChange={(event) => setForm({ ...form, institution: event.target.value || null })} /></div>
             <div className="flex flex-col gap-xs"><Label htmlFor="eb-organization">Organization</Label><Input id="eb-organization" value={form.organization ?? ""} onChange={(event) => setForm({ ...form, organization: event.target.value || null })} /></div>
             <div className="flex flex-col gap-xs"><Label htmlFor="eb-social-links">Website or social link</Label><Input id="eb-social-links" type="url" value={form.socialLinks?.website ?? ""} onChange={(event) => setForm({ ...form, socialLinks: event.target.value ? { website: event.target.value } : null })} /></div>
             <div className="flex flex-col gap-xs"><Label htmlFor="eb-bio">Bio</Label><textarea id="eb-bio" className="min-h-28 rounded-sm border border-input bg-background px-md py-sm text-body-md text-ink outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25" value={form.bio ?? ""} onChange={(event) => setForm({ ...form, bio: event.target.value || null })} /></div>
-            <div className="flex flex-col gap-xs"><Label htmlFor="eb-order">Display order</Label><Input id="eb-order" type="number" min="0" value={form.displayOrder} onChange={(event) => setForm({ ...form, displayOrder: Number(event.target.value) || 0 })} /></div>
             <label className="flex items-center gap-sm text-body-md text-body"><input type="checkbox" checked={form.isPublic !== false} onChange={(event) => setForm({ ...form, isPublic: event.target.checked })} /> Show this member on the public conference page</label>
             <div className="flex justify-end gap-xs"><Button type="button" variant="outline" size="sm" onClick={() => setIsFormOpen(false)}>Cancel</Button><Button type="submit" size="sm" disabled={saveMutation.isPending}>{saveMutation.isPending ? "Saving..." : editing ? "Save changes" : "Add member"}</Button></div>
           </form></CardContent></Card>}
