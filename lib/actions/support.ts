@@ -4,6 +4,7 @@ import { supportMessages, supportTickets, users } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
+import { notifySupportReply } from '@/lib/notifications/support-reply-email'
 import type { Role, SupportCategory, SupportPriority, SupportStatus } from '@/lib/db/schema-enums'
 
 const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
@@ -273,7 +274,9 @@ export async function sendMessage(
   const trimmed = body.trim()
   if (!trimmed) throw new Error('Message cannot be empty')
 
-  return db.transaction(async (tx) => {
+  let isStaffReply = false
+
+  const message = await db.transaction(async (tx) => {
     const [ticket] = await tx
       .select({ createdBy: supportTickets.createdBy, status: supportTickets.status })
       .from(supportTickets)
@@ -287,8 +290,9 @@ export async function sendMessage(
 
     const now = new Date()
     const isRequester = session.userId === ticket.createdBy
+    isStaffReply = !isRequester
 
-    const [message] = await tx
+    const [inserted] = await tx
       .insert(supportMessages)
       .values({ ticketId, senderId: session.userId, senderRole: session.role, body: trimmed })
       .returning()
@@ -303,8 +307,20 @@ export async function sendMessage(
       })
       .where(eq(supportTickets.id, ticketId))
 
-    return message
+    return inserted
   })
+
+  // After commit, never inside the transaction above (same convention as
+  // every other notify-after-commit call site in this codebase). Only the
+  // requester gets an email — staff already see new requester messages via
+  // the in-app admin queue, they don't need an email for their own reply.
+  if (isStaffReply) {
+    notifySupportReply(ticketId).catch((error) => {
+      console.error('[support] reply notification failed', error)
+    })
+  }
+
+  return message
 }
 
 /**
