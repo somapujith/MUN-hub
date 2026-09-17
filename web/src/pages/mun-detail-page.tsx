@@ -60,6 +60,17 @@ import type { MunDetail } from "@/types";
  * left out — and out of the section nav — when the organizer added nothing.
  */
 
+const PREVIEW_LIVE_STATUSES: readonly MunDetail["status"][] = [
+  "PUBLISHED",
+  "REGISTRATION_OPEN",
+  "REGISTRATION_CLOSED",
+  "CONFERENCE_ACTIVE",
+  "RESULTS_PENDING",
+  "RESULTS_UNDER_REVIEW",
+  "COMPLETED",
+  "ARCHIVED",
+];
+
 function PageChrome({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
@@ -119,7 +130,14 @@ export function MunDetailPage({
     enabled: Boolean(slug),
   });
 
-  const mun = munQuery.data ?? undefined;
+  const loaded = munQuery.data ?? undefined;
+  // In the organizer preview, a MUN that isn't live yet is shown the way
+  // delegates will first see it: published, registration not yet open.
+  // Its internal pipeline status never reaches the page.
+  const mun =
+    previewMunId && loaded && !PREVIEW_LIVE_STATUSES.includes(loaded.status)
+      ? { ...loaded, status: "PUBLISHED" as const }
+      : loaded;
   const munId = mun?.id;
   const productIds = mun ? mun.registrationProducts.map((p) => p.id) : [];
   const availabilityQuery = useQuery({
@@ -229,7 +247,9 @@ export function MunDetailPage({
         <MunPageMeta mun={mun} soldOutProductIds={soldOutProductIds} />
       )}
 
-      {previewMunId && <PreviewBanner munId={previewMunId} munName={mun.name} status={mun.status} />}
+      {previewMunId && loaded && (
+        <PreviewBanner munId={previewMunId} munName={mun.name} status={loaded.status} />
+      )}
 
       <SiteHeader />
 
@@ -442,7 +462,7 @@ export function MunDetailPage({
 
 /** Strip above the organizer preview, so it's never mistaken for the live page. */
 function PreviewBanner({ munId, munName, status }: { munId: string; munName: string; status: MunDetail["status"] }) {
-  const live = status === "PUBLISHED" || status === "REGISTRATION_OPEN";
+  const live = PREVIEW_LIVE_STATUSES.includes(status);
   return (
     <div
       role="status"
