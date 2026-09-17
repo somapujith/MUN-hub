@@ -64,11 +64,11 @@ export function isRecentlyExpired(expiresAt: Date | null, now: Date): boolean {
  * Sends the seat-hold-expired email for each recently expired checkout hold
  * and returns how many lookups/sends failed. Never throws: failures are
  * logged. (A delegate who turned optional emails off is skipped inside
- * notifySeatHoldExpired and isn't a failure.) Holds released by the lazy
- * sweep in lib/actions/registration.ts don't get this email; only the ones
- * this job releases do.
+ * notifySeatHoldExpired and isn't a failure.) Also used by the lazy sweep in
+ * lib/actions/registration.ts, so a hold gets the email from whichever
+ * releases it first.
  */
-async function notifyExpiredCheckouts(recent: ReleasedHolds['paymentPending']): Promise<number> {
+export async function notifyExpiredCheckouts(recent: ReadonlyArray<{ id: string }>): Promise<number> {
   const outcomes = await Promise.allSettled(recent.map((row) => notifySeatHoldExpired(row.id)))
   let failed = 0
   outcomes.forEach((outcome, index) => {

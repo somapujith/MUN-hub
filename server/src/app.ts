@@ -11,6 +11,7 @@ import { runtimeEnvMiddleware } from '../middleware/runtime-env'
 import { securityHeadersMiddleware } from '../middleware/security-headers'
 import { sessionMiddleware } from '../middleware/session'
 import { storageMiddleware } from '../middleware/storage'
+import { waitUntilMiddleware } from '../middleware/wait-until'
 import { filesRoutes } from '../routes/files'
 import { apiV1 } from '../routes/index'
 import { munLifecycleRoutes } from '../routes/mun-lifecycle'
@@ -21,7 +22,7 @@ import type { AppVariables } from './types'
 /**
  * Base Hono app with the full middleware stack (spec Section 8.2):
  * runtime-env bridge → hyperdrive-bridge (both Workers-only, see below) →
- * storage bindings → request-id → security headers → logger → CORS →
+ * storage bindings → waitUntil bridge → request-id → security headers → logger → CORS →
  * body limit → session → [webhooks outside CSRF] → CSRF → rate-limit →
  * /api/v1/files + /api/v1 routes → JSON 404 / error handler
  */
@@ -36,6 +37,8 @@ export function createApp() {
   // Upload storage bindings + request origin for lib/storage, scoped to the
   // request — see lib/storage/bindings.ts.
   app.use('*', storageMiddleware)
+  // The request's waitUntil for lib/ post-response work (lib/runtime-background.ts).
+  app.use('*', waitUntilMiddleware)
   app.use('*', requestId())
   // Ahead of everything that can answer (CORS preflights, 413s, errors) so
   // every response carries the headers.
