@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { achievements, muns, registrations, verificationLogs } from '@/lib/db/schema'
+import { achievements, muns, registrations, users, verificationLogs } from '@/lib/db/schema'
 import type { MunStatus, RegistrationStatus } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
@@ -55,6 +55,11 @@ export interface AchievementRow {
   createdAt: Date
 }
 
+export interface AchievementListRow extends AchievementRow {
+  delegateName: string
+  delegateEmail: string
+}
+
 export interface CreateAchievementInput {
   munId: string
   registrationId: string
@@ -70,14 +75,21 @@ async function assertAwardsEditable(munId: string): Promise<void> {
 }
 
 /**
- * Organizer-facing award roster for a mun, newest first.
+ * Organizer-facing award roster for a mun, newest first, with each winner's
+ * name and email (the organizer already sees both on the roster).
  *
  * Requires the caller-supplied `session` to own the mun or be an
  * ADMIN/SUPER_ADMIN — throws `Forbidden` otherwise (shared `assertOwnsOrAdmin`).
  */
-export async function listMunAchievements(munId: string, session: Session | null): Promise<AchievementRow[]> {
+export async function listMunAchievements(munId: string, session: Session | null): Promise<AchievementListRow[]> {
   await assertOwnsOrAdmin(munId, session)
-  return db.select().from(achievements).where(eq(achievements.munId, munId)).orderBy(desc(achievements.createdAt))
+  const rows = await db
+    .select({ achievement: achievements, delegateName: users.name, delegateEmail: users.email })
+    .from(achievements)
+    .innerJoin(users, eq(users.id, achievements.userId))
+    .where(eq(achievements.munId, munId))
+    .orderBy(desc(achievements.createdAt), desc(achievements.id))
+  return rows.map(({ achievement, delegateName, delegateEmail }) => ({ ...achievement, delegateName, delegateEmail }))
 }
 
 /**

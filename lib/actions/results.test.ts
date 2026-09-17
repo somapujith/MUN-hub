@@ -28,6 +28,9 @@ describe('awards', () => {
     const fixture = await makeOpsFixture()
     const defaulted = await recordAward(fixture, '  Best Delegate  ')
     expect(defaulted).toMatchObject({ award: 'Best Delegate', committee: 'UNSC', portfolio: 'France' })
+    const [listed] = await listMunAchievements(fixture.mun.id, fixture.organizerSession)
+    expect(listed).toMatchObject({ id: defaulted.id, delegateName: 'Delegate' })
+    expect(listed.delegateEmail).toMatch(/@test\.dev$/)
 
     const { registration } = await addDelegate(fixture, { status: 'CONFIRMED' })
     const overridden = await createAchievement(
