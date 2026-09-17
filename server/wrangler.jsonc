@@ -52,7 +52,8 @@
     { "name": "RL_AVAILABILITY_IP", "namespace_id": "1013", "simple": { "limit": 60, "period": 60 } },
     { "name": "RL_MUNS_LIST_IP", "namespace_id": "1014", "simple": { "limit": 120, "period": 60 } },
     { "name": "RL_MFA_VERIFY_IP", "namespace_id": "1015", "simple": { "limit": 20, "period": 60 } },
-    { "name": "RL_MFA_VERIFY_TOKEN", "namespace_id": "1016", "simple": { "limit": 10, "period": 60 } }
+    { "name": "RL_MFA_VERIFY_TOKEN", "namespace_id": "1016", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_ACCOUNT_DELETE_USER", "namespace_id": "1017", "simple": { "limit": 5, "period": 60 } }
   ],
   // Hyperdrive config "munhub-db", created 2026-09-17 against the production
   // Neon instance. Pools/terminates Postgres connections at Cloudflare's edge
@@ -69,8 +70,9 @@
   // lib/storage/select-adapter.ts. R2 is not enabled on the account yet, so
   // uploads go to Workers KV. The namespace doesn't exist yet (the deploy
   // token can't create KV namespaces — docs/autonomous-run/USER_ACTIONS.md),
-  // so the binding is commented out and production keeps the mock store,
-  // which logs an error on every upload. To enable real uploads:
+  // so the binding is commented out. WITHOUT IT EVERY UPLOAD IS REFUSED with
+  // 503 "File storage is not configured" — deliberately, so nothing writes a
+  // row pointing at a file that was never stored. To enable real uploads:
   //   npx wrangler kv namespace create munhub-uploads
   // then uncomment this block with the printed id and redeploy.
   // "kv_namespaces": [

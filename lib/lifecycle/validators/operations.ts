@@ -1,6 +1,7 @@
 import type { MunValidationContext, ModuleValidationResult, ValidationCheck } from '../validation'
 import { modulePassed } from '../validation'
 import type { MunDocumentKind } from '@/lib/db/schema-enums'
+import { isDiscardedUploadUrl } from '@/lib/storage/mock-adapter'
 
 // -----------------------------------------------------------------------------
 // validators/operations.ts — RULES_DOCUMENTS, SCHEDULE, ACCOMMODATION,
@@ -17,9 +18,14 @@ const REQUIRED_DOCUMENTS: { kind: MunDocumentKind; label: string }[] = [
 ]
 
 export function validateRulesDocuments(ctx: MunValidationContext): ModuleValidationResult {
-  const presentKinds = new Set(ctx.documents.map((d) => d.kind))
-  const missing = REQUIRED_DOCUMENTS.filter((doc) => !presentKinds.has(doc.kind))
+  // A row whose URL points at the discarding mock store has no bytes behind
+  // it (lib/storage/mock-adapter.ts), so it does not count as uploaded — a
+  // delegate following the link would get a not-found page, not the PDF.
+  const storedKinds = new Set(ctx.documents.filter((d) => !isDiscardedUploadUrl(d.url)).map((d) => d.kind))
+  const rowKinds = new Set(ctx.documents.map((d) => d.kind))
+  const missing = REQUIRED_DOCUMENTS.filter((doc) => !storedKinds.has(doc.kind))
   const allPresent = missing.length === 0
+  const someDiscarded = missing.some((doc) => rowKinds.has(doc.kind))
 
   const checks: ValidationCheck[] = [
     {
@@ -27,7 +33,11 @@ export function validateRulesDocuments(ctx: MunValidationContext): ModuleValidat
       label: 'Rules of procedure and code of conduct are uploaded',
       passed: allPresent,
       severity: 'BLOCKER',
-      message: allPresent ? undefined : `Upload your ${missing.map((doc) => doc.label.toLowerCase()).join(' and ')}.`,
+      message: allPresent
+        ? undefined
+        : `Upload your ${missing.map((doc) => doc.label.toLowerCase()).join(' and ')}${
+            someDiscarded ? ' again — the earlier upload was not stored' : ''
+          }.`,
     },
   ]
 

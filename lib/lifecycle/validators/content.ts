@@ -1,5 +1,6 @@
 import type { MunValidationContext, ModuleValidationResult, ValidationCheck } from '../validation'
 import { modulePassed } from '../validation'
+import { isDiscardedUploadUrl } from '@/lib/storage/mock-adapter'
 
 // -----------------------------------------------------------------------------
 // validators/content.ts — BASIC_INFO, DATES_VENUE, BRANDING, CONTACT
@@ -180,25 +181,38 @@ export function validateDatesVenue(ctx: MunValidationContext): ModuleValidationR
   return { moduleKey: 'DATES_VENUE', checks, passed: modulePassed(checks) }
 }
 
-export function validateBranding(ctx: MunValidationContext): ModuleValidationResult {
-  const hasLogo = ctx.media.some((m) => m.kind === 'LOGO')
-  const hasCover = ctx.media.some((m) => m.kind === 'COVER')
+/**
+ * A row whose URL points at the discarding mock store has no bytes behind it
+ * (lib/storage/mock-adapter.ts). Before selectStorageAdapter() failed closed,
+ * an environment with no storage binding wrote exactly such rows while
+ * answering 201, so "the row exists" is not on its own proof the file does.
+ */
+function imageCheck(
+  ctx: MunValidationContext,
+  kind: 'LOGO' | 'COVER',
+  key: string,
+  label: string,
+  noun: string,
+): ValidationCheck {
+  const row = ctx.media.find((m) => m.kind === kind)
+  const stored = row !== undefined && !isDiscardedUploadUrl(row.url)
+  return {
+    key,
+    label,
+    passed: stored,
+    severity: 'BLOCKER',
+    message: stored
+      ? undefined
+      : row
+        ? `Upload your ${noun} again — the earlier upload was not stored.`
+        : `A ${noun} is required.`,
+  }
+}
 
+export function validateBranding(ctx: MunValidationContext): ModuleValidationResult {
   const checks: ValidationCheck[] = [
-    {
-      key: 'logo_present',
-      label: 'Logo is uploaded',
-      passed: hasLogo,
-      severity: 'BLOCKER',
-      message: hasLogo ? undefined : 'A logo image is required.',
-    },
-    {
-      key: 'cover_present',
-      label: 'Cover image is uploaded',
-      passed: hasCover,
-      severity: 'BLOCKER',
-      message: hasCover ? undefined : 'A cover image is required.',
-    },
+    imageCheck(ctx, 'LOGO', 'logo_present', 'Logo is uploaded', 'logo image'),
+    imageCheck(ctx, 'COVER', 'cover_present', 'Cover image is uploaded', 'cover image'),
   ]
 
   return { moduleKey: 'BRANDING', checks, passed: modulePassed(checks) }

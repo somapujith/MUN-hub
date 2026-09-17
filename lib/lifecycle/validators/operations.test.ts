@@ -85,6 +85,18 @@ describe('validateRulesDocuments', () => {
     expect(result.passed).toBe(false)
   })
 
+  // Rows written while no storage backend was configured point at the mock
+  // store, which kept no bytes — the row exists but the PDF does not.
+  it('fails when a required document only points at the discarding mock store', () => {
+    const discarded = { ...(document('RULES') as object), url: '/mock-storage/muns/mun-1/documents/a' } as never
+    const ctx = makeContext({ documents: [discarded, document('CODE_OF_CONDUCT')] })
+    const result = validateRulesDocuments(ctx)
+    expect(result.passed).toBe(false)
+    expect(result.checks[0].message).toBe(
+      'Upload your rules of procedure again — the earlier upload was not stored.',
+    )
+  })
+
   it('does not require a refund policy (MUN Hub has no refunds)', () => {
     const ctx = makeContext({ documents: [document('RULES'), document('CODE_OF_CONDUCT')] })
     expect(validateRulesDocuments(ctx).checks.map((check) => check.label).join(' ')).not.toMatch(/refund/i)

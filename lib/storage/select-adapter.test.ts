@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { StorageAdapter } from './adapter'
+import { STORAGE_NOT_CONFIGURED, StorageNotConfiguredError, type StorageAdapter } from './adapter'
 import { runWithStorageBindings } from './bindings'
 import { createInMemoryKv, createInMemoryR2, SAMPLE_FILES } from './in-memory-bindings'
 import { mockStorageAdapter } from './mock-adapter'
@@ -32,10 +32,8 @@ describe('selectStorageAdapter', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  it('uses the mock outside a request when STORAGE_ADAPTER is mock or unset', () => {
+  it('uses the mock only when STORAGE_ADAPTER is exactly mock', () => {
     process.env.STORAGE_ADAPTER = 'mock'
-    expect(selectStorageAdapter()).toBe(mockStorageAdapter)
-    delete process.env.STORAGE_ADAPTER
     expect(selectStorageAdapter()).toBe(mockStorageAdapter)
   })
 
@@ -94,16 +92,33 @@ describe('selectStorageAdapter', () => {
     expect(selectStorageAdapter()).toBe(mockStorageAdapter)
   })
 
-  it('logs an error when production falls back to the mock', () => {
+  // Fails closed: an unconfigured environment used to hand back the mock,
+  // which answered 201 and dropped the bytes.
+  it('throws instead of discarding the file when nothing is configured', () => {
     delete process.env.STORAGE_ADAPTER
-    vi.stubEnv('NODE_ENV', 'production')
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    expect(selectStorageAdapter()).toBe(mockStorageAdapter)
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('No UPLOADS_BUCKET or UPLOADS_KV binding in production'))
+    expect(() => selectStorageAdapter()).toThrow(StorageNotConfiguredError)
+    expect(() => selectStorageAdapter()).toThrow(STORAGE_NOT_CONFIGURED)
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('No UPLOADS_BUCKET or UPLOADS_KV binding'))
   })
 
-  it('does not log outside production', () => {
+  it('throws in production too, rather than logging and carrying on', () => {
+    delete process.env.STORAGE_ADAPTER
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(() => selectStorageAdapter()).toThrow(STORAGE_NOT_CONFIGURED)
+  })
+
+  it('throws on an unknown STORAGE_ADAPTER value rather than guessing', () => {
+    process.env.STORAGE_ADAPTER = 'r2'
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(() => selectStorageAdapter()).toThrow(STORAGE_NOT_CONFIGURED)
+  })
+
+  it('does not log when a backend is configured', () => {
     process.env.STORAGE_ADAPTER = 'mock'
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     selectStorageAdapter()

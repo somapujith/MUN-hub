@@ -1,4 +1,4 @@
-import type { StorageAdapter } from './adapter'
+import { StorageNotConfiguredError, type StorageAdapter } from './adapter'
 import { getStorageBindings } from './bindings'
 import { createKvStorageAdapter } from './kv-adapter'
 import { createLocalStorageAdapter } from './local-adapter'
@@ -13,11 +13,18 @@ import { getRuntimeEnv } from '@/lib/runtime-env'
  *   2. KV      — the UPLOADS_KV binding, when present (production today:
  *                R2 is not enabled on the Cloudflare account yet)
  *   3. local   — the filesystem, when STORAGE_ADAPTER=local (Node dev)
- *   4. mock    — everything else (tests); discards the bytes
+ *   4. mock    — only when STORAGE_ADAPTER=mock (tests); discards the bytes
  *
  * Bindings come from server/middleware/storage.ts via lib/storage/bindings.ts.
- * Production must have one of them. Falling back to the mock there loses
- * every upload, so it is logged as an error on each call.
+ * Anything else — production without a binding included — throws
+ * `StorageNotConfiguredError`, which the API answers with 503, so the upload
+ * is refused and no row is written.
+ *
+ * This fails closed on purpose. Quietly returning the mock meant an upload
+ * answered 201 while the bytes were dropped, and the `/mock-storage/...` URL
+ * it wrote into mun_media/mun_documents passed the go-live validators: a MUN
+ * could be published with a logo that 404s and a rules PDF delegates can't
+ * open, and adding the binding afterwards did not repair those rows.
  *
  * Called per operation, never cached: the adapters wrap request-scoped
  * binding objects and are cheap to build.
@@ -32,14 +39,14 @@ export function selectStorageAdapter(): StorageAdapter {
 
   const configured = getRuntimeEnv('STORAGE_ADAPTER')
   if (configured === 'local') return createLocalStorageAdapter()
+  if (configured === 'mock') return mockStorageAdapter
 
-  if (process.env.NODE_ENV === 'production') {
-    console.error(
-      '[storage] No UPLOADS_BUCKET or UPLOADS_KV binding in production — falling back to the mock adapter, ' +
-        'so uploaded files are NOT being stored. Add the binding in server/wrangler.jsonc.',
-    )
-  }
-  return mockStorageAdapter
+  console.error(
+    '[storage] No UPLOADS_BUCKET or UPLOADS_KV binding and STORAGE_ADAPTER is ' +
+      `"${configured ?? 'unset'}" — refusing the request instead of discarding the file. ` +
+      'Add the binding in server/wrangler.jsonc, or set STORAGE_ADAPTER=local (Node dev) / mock (tests).',
+  )
+  throw new StorageNotConfiguredError()
 }
 
 /**
