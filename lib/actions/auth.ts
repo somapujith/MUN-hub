@@ -4,6 +4,8 @@ import { sessions, studentProfiles, userConsents, users } from '@/lib/db/schema'
 import { createSession, destroySession, otherSessionsOf } from '@/lib/auth/session'
 import { DUMMY_PASSWORD_HASH, hashPassword, needsRehash, verifyPassword } from '@/lib/auth/password'
 import { buildOptionalProfileFields, required } from '@/lib/actions/student-profile'
+import { beginMfaChallenge, hasConfirmedMfa } from '@/lib/actions/staff-mfa'
+import { STAFF_ROLES } from '@/lib/actions/admin-staff'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import type { StudentProfileInput } from '@/lib/types/student-profile'
@@ -64,6 +66,22 @@ export function isUnderAdultAge(dateOfBirth: Date, now: Date = new Date()): bool
 }
 
 /**
+ * `signIn`'s result: a real session (`SIGNED_IN`), or — only for a staff
+ * (OPERATIONS/ADMIN/SUPER_ADMIN) account with *confirmed* TOTP enrollment —
+ * `MFA_REQUIRED`, meaning the password was correct but a session was
+ * deliberately not created yet. The caller (server/routes/auth.ts) must
+ * complete the challenge via `lib/actions/staff-mfa.ts#completeMfaChallenge`
+ * (`POST /auth/session/mfa`) before the account is actually signed in.
+ * Everyone else — every STUDENT/ORGANIZER, and any staff account that hasn't
+ * finished MFA setup — always gets `SIGNED_IN` here, unchanged from before
+ * MFA existed; enrollment status only gates this branch, never a plain
+ * password check.
+ */
+export type SignInResult =
+  | { status: 'SIGNED_IN'; userId: string; role: Role; token: string; expiresAt: Date }
+  | { status: 'MFA_REQUIRED'; pendingToken: string; expiresAt: Date }
+
+/**
  * Real password sign-in (replaces the old email-only mock). Looks up the
  * user by email and verifies `password` against `users.passwordHash` with a
  * timing-safe scrypt comparison (`lib/auth/password.ts`).
@@ -80,15 +98,13 @@ export function isUnderAdultAge(dateOfBirth: Date, now: Date = new Date()): bool
  *
  * Throws `Error('Account suspended')` if the matched user is suspended.
  *
- * Creates a session row via `createSession` and returns the raw token +
- * expiry. Does NOT touch cookies — the caller (an HTTP-layer route handler)
- * is responsible for setting the session cookie using the returned
- * `token`/`expiresAt`.
+ * On success, creates a session row via `createSession` and returns the raw
+ * token + expiry (`SIGNED_IN`) — unless the account is staff with confirmed
+ * MFA, in which case it returns `MFA_REQUIRED` instead (see `SignInResult`).
+ * Does NOT touch cookies — the caller (an HTTP-layer route handler) is
+ * responsible for setting the session cookie using the returned token.
  */
-export async function signIn(
-  email: string,
-  password: string,
-): Promise<{ userId: string; role: Role; token: string; expiresAt: Date }> {
+export async function signIn(email: string, password: string): Promise<SignInResult> {
   const [user] = await db
     .select({ id: users.id, role: users.role, passwordHash: users.passwordHash, suspended: users.suspended })
     .from(users)
@@ -109,9 +125,14 @@ export async function signIn(
     await upgradePasswordHash(user.id, storedHash, password)
   }
 
+  if ((STAFF_ROLES as readonly string[]).includes(user.role) && (await hasConfirmedMfa(user.id))) {
+    const { pendingToken, expiresAt } = await beginMfaChallenge(user.id)
+    return { status: 'MFA_REQUIRED', pendingToken, expiresAt }
+  }
+
   const { token, expiresAt } = await createSession(user.id)
 
-  return { userId: user.id, role: user.role, token, expiresAt }
+  return { status: 'SIGNED_IN', userId: user.id, role: user.role, token, expiresAt }
 }
 
 /**

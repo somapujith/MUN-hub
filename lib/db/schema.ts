@@ -331,6 +331,77 @@ export const sessionsRelations = relations(sessions, ({ one }) => ({
 }))
 
 // ---------------------------------------------------------------------------
+// Staff TOTP two-factor auth (lib/actions/staff-mfa.ts). OPERATIONS/ADMIN/
+// SUPER_ADMIN only, enforced by server/middleware/require-role.ts when
+// REQUIRE_STAFF_2FA=true. Unlike mun_payment_settings (write-only —
+// lib/crypto/field-encryption.ts), the TOTP secret genuinely needs decrypting
+// on every code check, so it's the first real caller of decryptField, kept
+// under its own key (TOTP_FIELD_KEY) rather than PAYMENT_FIELD_KEY so the two
+// blast radii stay separate.
+// ---------------------------------------------------------------------------
+
+export const userMfa = pgTable('user_mfa', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  totpSecretCiphertext: text('totp_secret_ciphertext').notNull(),
+  // Set once the enrolling user proves they can generate a valid code.
+  // NULL = setup started but not finished; requireRole treats that the same
+  // as "not enrolled".
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  // The last accepted 30s time-step counter, so the same code (or one from an
+  // already-used step) can never be replayed.
+  lastUsedStep: integer('last_used_step'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const userMfaRelations = relations(userMfa, ({ one }) => ({
+  user: one(users, { fields: [userMfa.userId], references: [users.id] }),
+}))
+
+export const mfaRecoveryCodes = pgTable(
+  'mfa_recovery_codes',
+  {
+    id: id(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    codeHash: text('code_hash').notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mfa_recovery_codes_user_id_idx').on(table.userId)],
+)
+
+export const mfaRecoveryCodesRelations = relations(mfaRecoveryCodes, ({ one }) => ({
+  user: one(users, { fields: [mfaRecoveryCodes.userId], references: [users.id] }),
+}))
+
+// The "password verified, TOTP still pending" step — mirrors
+// password_reset_tokens/sessions: only the SHA-256 of the presented token is
+// stored (lib/auth/opaque-token.ts), never the raw value. `attempts` mirrors
+// email_login_codes' per-code guess counter.
+export const mfaPendingChallenges = pgTable(
+  'mfa_pending_challenges',
+  {
+    id: id(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    attempts: integer('attempts').notNull().default(0),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('mfa_pending_challenges_user_id_idx').on(table.userId)],
+)
+
+export const mfaPendingChallengesRelations = relations(mfaPendingChallenges, ({ one }) => ({
+  user: one(users, { fields: [mfaPendingChallenges.userId], references: [users.id] }),
+}))
+
+// ---------------------------------------------------------------------------
 // muns
 // ---------------------------------------------------------------------------
 

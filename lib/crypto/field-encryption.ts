@@ -21,6 +21,13 @@ import { getRuntimeEnv } from '@/lib/runtime-env'
 // doesn't verify), so rows written before the rotation stay readable until
 // they are re-encrypted.
 //
+// Multiple key domains: `encryptField`/`decryptField` take an optional
+// `FieldEncryptionKeyNames` so a second caller can use its own key pair
+// without sharing PAYMENT_FIELD_KEY's blast radius — e.g. `TOTP_KEY_NAMES`
+// below, used by lib/actions/staff-mfa.ts to encrypt TOTP secrets under
+// TOTP_FIELD_KEY/TOTP_FIELD_KEY_PREVIOUS. Omitting the argument keeps every
+// existing call site's behavior (PAYMENT_FIELD_KEY) unchanged.
+//
 // Ciphertext format:
 //   v1:base64(iv):base64(authTag):base64(ciphertext)   ← written now
 //   base64(iv):base64(authTag):base64(ciphertext)      ← legacy, still read
@@ -48,6 +55,23 @@ const AUTH_TAG_BYTE_LENGTH = 16
 const SEPARATOR = ':'
 const CURRENT_VERSION = 'v1'
 
+/** Which env vars hold a key domain's current/previous key. See "Multiple key domains" above. */
+export interface FieldEncryptionKeyNames {
+  currentKeyEnvVar: string
+  previousKeyEnvVar: string
+}
+
+const PAYMENT_KEY_NAMES: FieldEncryptionKeyNames = {
+  currentKeyEnvVar: 'PAYMENT_FIELD_KEY',
+  previousKeyEnvVar: 'PAYMENT_FIELD_KEY_PREVIOUS',
+}
+
+/** lib/actions/staff-mfa.ts's key domain — separate from PAYMENT_KEY_NAMES on purpose. */
+export const TOTP_KEY_NAMES: FieldEncryptionKeyNames = {
+  currentKeyEnvVar: 'TOTP_FIELD_KEY',
+  previousKeyEnvVar: 'TOTP_FIELD_KEY_PREVIOUS',
+}
+
 const decodedKeys = new Map<string, Buffer>()
 
 function decodeKey(name: string, raw: string): Buffer {
@@ -64,30 +88,30 @@ function decodeKey(name: string, raw: string): Buffer {
   return key
 }
 
-function getEncryptionKey(): Buffer {
-  const raw = getRuntimeEnv('PAYMENT_FIELD_KEY')
+function getEncryptionKey(keyNames: FieldEncryptionKeyNames): Buffer {
+  const raw = getRuntimeEnv(keyNames.currentKeyEnvVar)
   if (!raw) {
-    throw new Error('PAYMENT_FIELD_KEY environment variable is not set — refusing to start without a field-encryption key')
+    throw new Error(`${keyNames.currentKeyEnvVar} environment variable is not set — refusing to start without a field-encryption key`)
   }
-  return decodeKey('PAYMENT_FIELD_KEY', raw)
+  return decodeKey(keyNames.currentKeyEnvVar, raw)
 }
 
 /** Current key first, then the decrypt-only previous key when one is configured. */
-function getDecryptionKeys(): Buffer[] {
-  const keys = [getEncryptionKey()]
-  const previous = getRuntimeEnv('PAYMENT_FIELD_KEY_PREVIOUS')
-  if (previous) keys.push(decodeKey('PAYMENT_FIELD_KEY_PREVIOUS', previous))
+function getDecryptionKeys(keyNames: FieldEncryptionKeyNames): Buffer[] {
+  const keys = [getEncryptionKey(keyNames)]
+  const previous = getRuntimeEnv(keyNames.previousKeyEnvVar)
+  if (previous) keys.push(decodeKey(keyNames.previousKeyEnvVar, previous))
   return keys
 }
 
 /**
- * Encrypts `plaintext` with AES-256-GCM under PAYMENT_FIELD_KEY, using a
- * fresh random 12-byte IV. Output is
- * `v1:base64(iv):base64(authTag):base64(ciphertext)` as one string.
+ * Encrypts `plaintext` with AES-256-GCM under `keyNames.currentKeyEnvVar`
+ * (PAYMENT_FIELD_KEY unless overridden), using a fresh random 12-byte IV.
+ * Output is `v1:base64(iv):base64(authTag):base64(ciphertext)` as one string.
  */
-export function encryptField(plaintext: string): string {
+export function encryptField(plaintext: string, keyNames: FieldEncryptionKeyNames = PAYMENT_KEY_NAMES): string {
   const iv = randomBytes(IV_BYTE_LENGTH)
-  const cipher = createCipheriv('aes-256-gcm', getEncryptionKey(), iv, { authTagLength: AUTH_TAG_BYTE_LENGTH })
+  const cipher = createCipheriv('aes-256-gcm', getEncryptionKey(keyNames), iv, { authTagLength: AUTH_TAG_BYTE_LENGTH })
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
   const authTag = cipher.getAuthTag()
 
@@ -127,24 +151,27 @@ function decryptWithKey(key: Buffer, iv: Buffer, authTag: Buffer, data: Buffer):
 
 /**
  * Decrypts a string produced by `encryptField` (current `v1:` format or the
- * legacy unprefixed one), trying PAYMENT_FIELD_KEY and then
- * PAYMENT_FIELD_KEY_PREVIOUS. Throws if the format is malformed (including a
- * tag that isn't 16 bytes) or if no configured key verifies the GCM tag
+ * legacy unprefixed one), trying `keyNames.currentKeyEnvVar` and then
+ * `keyNames.previousKeyEnvVar`. Throws if the format is malformed (including
+ * a tag that isn't 16 bytes) or if no configured key verifies the GCM tag
  * (tampering, or a key that has been rotated out).
  *
- * NOTHING IN THIS CODEBASE CALLS THIS FUNCTION YET. It is exported and
- * tested (round-trip + tamper detection) so the encryption format is proven
- * correct ahead of a future settlement-integration slice, but there is
- * deliberately no read path anywhere that decrypts payment ciphertext back
- * to plaintext (design doc Section 2.3: "a decrypt path with no consumer is
- * pure attack surface"). Do NOT delete this as dead code, and do NOT wire it
- * into any action or query without a dedicated threat review first.
+ * For the PAYMENT_FIELD_KEY domain specifically: nothing in this codebase
+ * decrypts payment ciphertext back to plaintext. It is exported and tested
+ * (round-trip + tamper detection) so the encryption format is proven correct
+ * ahead of a future settlement-integration slice, but there is deliberately
+ * no read path anywhere that does this (design doc Section 2.3: "a decrypt
+ * path with no consumer is pure attack surface"). Do NOT wire a payment
+ * decrypt into any action or query without a dedicated threat review first.
+ * lib/actions/staff-mfa.ts's TOTP_KEY_NAMES domain is different: decrypting
+ * the TOTP secret on every code check is the whole point, and is its
+ * legitimate, intended caller.
  */
-export function decryptField(ciphertext: string): string {
+export function decryptField(ciphertext: string, keyNames: FieldEncryptionKeyNames = PAYMENT_KEY_NAMES): string {
   const { iv, authTag, data } = parseCiphertext(ciphertext)
 
   let lastError: unknown
-  for (const key of getDecryptionKeys()) {
+  for (const key of getDecryptionKeys(keyNames)) {
     try {
       return decryptWithKey(key, iv, authTag, data)
     } catch (error) {

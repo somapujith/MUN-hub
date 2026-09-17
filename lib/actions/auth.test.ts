@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { sessions, studentProfiles, userConsents, users } from '@/lib/db/schema'
+import { sessions, studentProfiles, userConsents, userMfa, users } from '@/lib/db/schema'
 import { DUMMY_PASSWORD_HASH, hashPassword, needsRehash, verifyPassword } from '@/lib/auth/password'
 import { hashOpaqueToken } from '@/lib/auth/opaque-token'
 import { createSession, getSessionByToken } from '@/lib/auth/session'
@@ -202,6 +202,7 @@ describe('signIn', () => {
     const { userId } = await signUp(signUpInput({ name: 'Sign In User', email }))
 
     const result = await signIn(email, 'a-good-password')
+    if (result.status !== 'SIGNED_IN') throw new Error('expected SIGNED_IN')
 
     expect(result.userId).toBe(userId)
     expect(result.role).toBe('STUDENT')
@@ -287,12 +288,54 @@ describe('signIn', () => {
     const rows = await db.select().from(sessions).where(eq(sessions.userId, user.id))
     expect(rows.length).toBe(0)
   })
+
+  it('a staff account with no confirmed MFA still signs in directly, unaffected by 2FA existing', async () => {
+    const admin = await makeUser('ADMIN')
+
+    const result = await signIn(admin.email, DEFAULT_TEST_PASSWORD)
+
+    expect(result.status).toBe('SIGNED_IN')
+  })
+
+  it('a staff account with confirmed MFA gets MFA_REQUIRED instead of a session', async () => {
+    const admin = await makeUser('ADMIN')
+    await db.insert(userMfa).values({
+      userId: admin.id,
+      totpSecretCiphertext: 'v1:not-real:not-real:not-real',
+      confirmedAt: new Date(),
+    })
+
+    const result = await signIn(admin.email, DEFAULT_TEST_PASSWORD)
+    if (result.status !== 'MFA_REQUIRED') throw new Error('expected MFA_REQUIRED')
+
+    expect(typeof result.pendingToken).toBe('string')
+    expect(result.pendingToken.length).toBeGreaterThan(0)
+    expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now())
+
+    const rows = await db.select().from(sessions).where(eq(sessions.userId, admin.id))
+    expect(rows.length).toBe(0)
+  })
+
+  it('a non-staff account is never gated by MFA even with a (hypothetical) confirmed row', async () => {
+    const student = await makeUser('STUDENT')
+    await db.insert(userMfa).values({
+      userId: student.id,
+      totpSecretCiphertext: 'v1:not-real:not-real:not-real',
+      confirmedAt: new Date(),
+    })
+
+    const result = await signIn(student.email, DEFAULT_TEST_PASSWORD)
+
+    expect(result.status).toBe('SIGNED_IN')
+  })
 })
 
 describe('signOut', () => {
   it('destroys the session for the given token', async () => {
     const user = await makeUser('ADMIN')
-    const { token } = await signIn(user.email, DEFAULT_TEST_PASSWORD)
+    const result = await signIn(user.email, DEFAULT_TEST_PASSWORD)
+    if (result.status !== 'SIGNED_IN') throw new Error('expected SIGNED_IN')
+    const { token } = result
 
     await signOut(token)
 
