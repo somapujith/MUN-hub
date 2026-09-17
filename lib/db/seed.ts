@@ -53,20 +53,30 @@ async function upsertUserByEmail(db: Db, users: Users, data: NewUser) {
     // Backfill fields that have drifted from the current seed definition —
     // same "re-seeding must backfill rather than silently skip" reasoning as
     // seedMun's organizerDrifted/datesDrifted handling below, applied here to
-    // passwordHash: rows created before real password auth landed would
-    // otherwise stay permanently un-signinable across re-seeds.
-    if (!existing.passwordHash && data.passwordHash) {
-      const [updated] = await db
-        .update(users)
-        .set({ passwordHash: data.passwordHash })
-        .where(eq(users.id, existing.id))
-        .returning()
-      console.log(`    (backfilled passwordHash for ${existing.email})`)
+    // passwordHash (rows created before real password auth landed would
+    // otherwise stay permanently un-signinable across re-seeds) and
+    // emailVerifiedAt (seeded accounts count as verified — see below;
+    // rows created before this column existed would otherwise stay
+    // permanently unverified across re-seeds too).
+    const backfill: Partial<NewUser> = {}
+    if (!existing.passwordHash && data.passwordHash) backfill.passwordHash = data.passwordHash
+    if (!existing.emailVerifiedAt) backfill.emailVerifiedAt = new Date()
+
+    if (Object.keys(backfill).length > 0) {
+      const [updated] = await db.update(users).set(backfill).where(eq(users.id, existing.id)).returning()
+      console.log(`    (backfilled ${Object.keys(backfill).join(', ')} for ${existing.email})`)
       return updated
     }
     return existing
   }
-  const [created] = await db.insert(users).values(data).returning()
+  // Seeded accounts count as verified (email-verification task) — every
+  // seed-created user gets emailVerifiedAt set at creation, not left to the
+  // migration's one-time backfill (which only ever covered rows that existed
+  // at migration time, not new seed runs afterward).
+  const [created] = await db
+    .insert(users)
+    .values({ emailVerifiedAt: new Date(), ...data })
+    .returning()
   return created
 }
 

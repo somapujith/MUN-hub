@@ -62,6 +62,7 @@ import { RegisterPayPage } from "@/pages/register/register-pay-page";
 import { ResetPasswordPage } from "@/pages/reset-password-page";
 import { SignupPage } from "@/pages/signup-page";
 import { StudentDashboardPage } from "@/pages/student-dashboard-page";
+import { VerifyEmailPage } from "@/pages/verify-email-page";
 import { StudentSupportPage } from "@/pages/student-support-page";
 import { SupportNewPage } from "@/pages/support-new-page";
 
@@ -96,6 +97,7 @@ export const router = createBrowserRouter([
       { path: "signup", element: <SignupPage /> },
       { path: "forgot-password", element: <ForgotPasswordPage /> },
       { path: "reset-password", element: <ResetPasswordPage /> },
+      { path: "verify-email", element: <VerifyEmailPage /> },
       {
         path: "profile",
         element: (

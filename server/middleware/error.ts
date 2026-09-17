@@ -103,6 +103,9 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     message === 'Website must be a full URL, including https://' ||
     message === 'UPI ID must look like name@bank' ||
     message === 'You must accept the organizer agreement to continue' ||
+    message === 'You must confirm the submission is accurate and complete' ||
+    message === 'Registration deadline must be after registration opens' ||
+    message === 'Registration deadline must be before the conference starts' ||
     / must be a 10-digit Indian mobile number$/.test(message)
   ) {
     return { status: 400, code: 'VALIDATION_FAILED', message }
@@ -117,9 +120,18 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   if (
     message === 'Name is required' ||
     /^Password must be at least \d+ characters$/.test(message) ||
-    message === 'This reset link is invalid or has expired'
+    message === 'This reset link is invalid or has expired' ||
+    message === 'This verification link is invalid or has expired'
   ) {
     return { status: 400, code: 'VALIDATION_FAILED', message }
+  }
+
+  // lib/actions/email-verification.ts#assertEmailVerifiedIfRequired — not
+  // wired into any route by this lane (that's the registration owner's
+  // call), but mapped here in advance so it doesn't fall through to a 500
+  // once it is.
+  if (message === 'Please verify your email address before registering for a MUN') {
+    return { status: 403, code: 'FORBIDDEN', message }
   }
 
   if (/ not found$/.test(message)) {

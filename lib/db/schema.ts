@@ -59,6 +59,12 @@ export const users = pgTable('users', {
   // second one is needed, rather than pre-building a generic preferences
   // system nobody's asked for yet.
   emailNotificationsEnabled: boolean('email_notifications_enabled').notNull().default(true),
+  // Presence = verified (lib/actions/email-verification.ts). Null for every
+  // pre-existing row at migration time — the migration backfills this to
+  // `createdAt` for all of them (seeded demo accounts included), so turning
+  // on REQUIRE_EMAIL_VERIFICATION doesn't retroactively lock out anyone who
+  // signed up before this column existed.
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   suspended: boolean('suspended').notNull().default(false),
   suspendedReason: text('suspended_reason'),
@@ -214,6 +220,35 @@ export const passwordResetTokens = pgTable(
 
 export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
   user: one(users, { fields: [passwordResetTokens.userId], references: [users.id] }),
+}))
+
+// ---------------------------------------------------------------------------
+// email_verification_tokens — lib/actions/email-verification.ts. Unlike
+// password_reset_tokens above (a known, separately-tracked gap), the raw
+// token is NEVER stored — only its SHA-256 hash (`tokenHash`), so a DB leak
+// alone can never be used to complete a verification. High-entropy random
+// token (32 bytes), so a fast hash is the correct/intended choice here, not
+// a slow KDF like lib/auth/password.ts's scrypt (that's for low-entropy
+// user-chosen secrets, a different threat model).
+// ---------------------------------------------------------------------------
+
+export const emailVerificationTokens = pgTable(
+  'email_verification_tokens',
+  {
+    id: id(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('email_verification_tokens_user_id_idx').on(table.userId)],
+)
+
+export const emailVerificationTokensRelations = relations(emailVerificationTokens, ({ one }) => ({
+  user: one(users, { fields: [emailVerificationTokens.userId], references: [users.id] }),
 }))
 
 // ---------------------------------------------------------------------------
