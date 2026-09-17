@@ -154,6 +154,17 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
     expect(otherUser.status).toBe(200)
   })
 
+  it('limits account deletion attempts (password re-checks) per signed-in user, not per address', async () => {
+    const user = `user-${crypto.randomUUID()}`
+    const result = await statuses(LIMITERS.accountDeleteUser.limit + 1, () =>
+      send('/account/delete', { ip: freshIp(), user, body: { confirmation: 'DELETE', password: 'guess' } }),
+    )
+    expect(result).toEqual(allowedThenBlocked(LIMITERS.accountDeleteUser.limit))
+
+    const otherUser = await send('/account/delete', { ip: freshIp(), user: `user-${crypto.randomUUID()}`, body: {} })
+    expect(otherUser.status).toBe(200)
+  })
+
   it('limits media and document uploads per signed-in user, across MUNs and addresses', async () => {
     const user = `user-${crypto.randomUUID()}`
     const paths = (i: number) => `/muns/${crypto.randomUUID()}/${i % 2 === 0 ? 'media' : 'documents'}`

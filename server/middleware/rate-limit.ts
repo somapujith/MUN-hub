@@ -37,6 +37,10 @@ export const LIMITERS = {
   resetRequestEmail: { binding: 'RL_RESET_REQUEST_EMAIL', limit: 3, periodSeconds: 60, perIp: false },
   resetConfirmIp: { binding: 'RL_RESET_CONFIRM_IP', limit: 10, periodSeconds: 60, perIp: true },
   changePasswordUser: { binding: 'RL_CHANGE_PASSWORD_USER', limit: 5, periodSeconds: 60, perIp: false },
+  // Self-service account deletion re-checks the password (scrypt), so it gets
+  // a per-user cap like password changes: no password guessing with a stolen
+  // session, and no stream of scrypt runs from one account.
+  accountDeleteUser: { binding: 'RL_ACCOUNT_DELETE_USER', limit: 5, periodSeconds: 60, perIp: false },
   // Base64 media/document uploads (up to ~13 MB of JSON each). Per signed-in
   // user; lib/actions/upload-limits.ts also caps what one MUN can store.
   uploadsUser: { binding: 'RL_UPLOADS_USER', limit: 30, periodSeconds: 60, perIp: false },
@@ -97,6 +101,13 @@ const RULES: LimitRule[] = [
     path: '/auth/session/password',
     checks: ({ ip, sessionUserId }) => [
       { limiter: LIMITERS.changePasswordUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
+    ],
+  },
+  {
+    method: 'POST',
+    path: '/account/delete',
+    checks: ({ ip, sessionUserId }) => [
+      { limiter: LIMITERS.accountDeleteUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
     ],
   },
   {
