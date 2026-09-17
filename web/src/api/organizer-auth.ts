@@ -1,4 +1,4 @@
-import type { Session } from "@/types";
+import type { Role } from "@/types/enums";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -13,26 +13,40 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
     throw new Error(body?.error?.message ?? `Request failed (${response.status})`);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
-export interface OrganizerSignUpInput {
+export interface OrganizerProfileInput {
   name: string;
-  email: string;
-  password: string;
   phone?: string;
   acceptedTermsOfService: boolean;
   acceptedPrivacyPolicy: boolean;
 }
 
+export type OrganizerCodeVerification =
+  | { status: "PROFILE_REQUIRED" }
+  | { status: "SIGNED_IN"; userId: string; role: Role; isNewAccount: boolean };
+
 /**
- * POST /api/v1/auth/organizers — creates an ORGANIZER account and signs it in
- * (session cookie set by the server). Organizer and delegate accounts are
- * separate: this never creates or touches a student profile, and a delegate
- * account can't be turned into an organizer one.
+ * POST /api/v1/auth/organizers/code — emails a 6-digit sign-in code. Succeeds
+ * the same way for any address, registered or not.
  */
-export function signUpOrganizer(input: OrganizerSignUpInput) {
-  return request<Session>("/auth/organizers", {
+export function requestOrganizerCode(email: string) {
+  return request<void>("/auth/organizers/code", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+/**
+ * POST /api/v1/auth/organizers/session — checks the code. An existing
+ * organizer is signed in (session cookie set by the server). A new address
+ * gets `PROFILE_REQUIRED` and calls again with the same code plus `profile`,
+ * which creates the organizer account. There are no organizer passwords.
+ */
+export function verifyOrganizerCode(input: { email: string; code: string; profile?: OrganizerProfileInput }) {
+  return request<OrganizerCodeVerification>("/auth/organizers/session", {
     method: "POST",
     body: JSON.stringify(input),
   });

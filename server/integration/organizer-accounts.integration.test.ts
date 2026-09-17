@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { studentProfiles, users } from '@/lib/db/schema'
 import { SESSION_COOKIE_NAME } from '@/lib/auth/session'
+import { consoleNotificationsAdapter } from '@/lib/notifications/console-adapter'
+import type { NotificationPayload } from '@/lib/notifications/adapter'
 import { createApp } from '../src/app'
 import { authHeaders, makeUser } from './helpers'
 
@@ -17,57 +19,103 @@ const APPLICATION_BODY = {
   description: 'Testing that only organizer accounts can apply.',
 }
 
-function organizerSignUpBody(overrides: Record<string, unknown> = {}) {
-  return {
-    name: 'Route Organizer',
-    email: `route-org-${crypto.randomUUID()}@test.com`,
-    password: 'a-good-password',
-    acceptedTermsOfService: true,
-    acceptedPrivacyPolicy: true,
-    ...overrides,
-  }
+const PROFILE = { name: 'Route Organizer', acceptedTermsOfService: true, acceptedPrivacyPolicy: true }
+
+let sendSpy: MockInstance<(notification: NotificationPayload) => Promise<void>>
+
+beforeEach(() => {
+  sendSpy = vi.spyOn(consoleNotificationsAdapter, 'send').mockResolvedValue(undefined)
+})
+
+afterEach(() => {
+  sendSpy.mockRestore()
+})
+
+function post(path: string, body: unknown, headers: Record<string, string> = {}) {
+  return app.request(`/api/v1${path}`, {
+    method: 'POST',
+    headers: { ...JSON_HEADERS, ...headers },
+    body: JSON.stringify(body),
+  })
 }
 
-describe('POST /api/v1/auth/organizers', () => {
-  it('creates an ORGANIZER account with no student profile and sets the session cookie', async () => {
-    const body = organizerSignUpBody()
-    const res = await app.request('/api/v1/auth/organizers', {
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify(body),
-    })
+async function requestCode(email: string): Promise<string> {
+  const res = await post('/auth/organizers/code', { email })
+  expect(res.status).toBe(204)
+  const code = sendSpy.mock.calls.at(-1)?.[0].body.match(/\b(\d{6})\b/)?.[1]
+  if (!code) throw new Error('no code emailed')
+  return code
+}
 
-    expect(res.status).toBe(201)
-    const created = await res.json()
-    expect(created.role).toBe('ORGANIZER')
-    expect(res.headers.get('set-cookie')).toContain(`${SESSION_COOKIE_NAME}=`)
+describe('organizer email-code auth routes', () => {
+  it('signs a new organizer up in two steps and sets the session cookie', async () => {
+    const email = `route-otp-${crypto.randomUUID()}@test.com`
+    const code = await requestCode(email)
 
-    const [user] = await db.select().from(users).where(eq(users.id, created.userId))
-    expect(user.role).toBe('ORGANIZER')
-    const profiles = await db.select().from(studentProfiles).where(eq(studentProfiles.userId, created.userId))
-    expect(profiles).toHaveLength(0)
+    const first = await post('/auth/organizers/session', { email, code })
+    expect(first.status).toBe(200)
+    expect(await first.json()).toEqual({ status: 'PROFILE_REQUIRED' })
+    expect(first.headers.get('set-cookie')).toBeNull()
+
+    const second = await post('/auth/organizers/session', { email, code, profile: PROFILE })
+    expect(second.status).toBe(201)
+    const body = await second.json()
+    expect(body).toMatchObject({ status: 'SIGNED_IN', role: 'ORGANIZER', isNewAccount: true })
+    expect(second.headers.get('set-cookie')).toContain(`${SESSION_COOKIE_NAME}=`)
+
+    const [user] = await db.select().from(users).where(eq(users.id, body.userId))
+    expect(user).toMatchObject({ role: 'ORGANIZER', passwordHash: null })
+    expect(await db.select().from(studentProfiles).where(eq(studentProfiles.userId, user.id))).toHaveLength(0)
   })
 
-  it('rejects a body that tries to pick its own role', async () => {
-    const res = await app.request('/api/v1/auth/organizers', {
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify(organizerSignUpBody({ role: 'ADMIN' })),
-    })
+  it('answers a delegate address exactly like any other, without sending a code', async () => {
+    const student = await makeUser('STUDENT')
+    const res = await post('/auth/organizers/code', { email: student.email })
+    expect(res.status).toBe(204)
+    expect(sendSpy.mock.calls.at(-1)?.[0].body).not.toMatch(/\d{6}/)
+  })
 
-    expect(res.status).toBeGreaterThanOrEqual(400)
-    expect(res.status).toBeLessThan(500)
+  it('maps a wrong code to 401 and a resend inside the cooldown to 429', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const code = await requestCode(organizer.email)
+    const wrong = code === '000000' ? '111111' : '000000'
+
+    const wrongRes = await post('/auth/organizers/session', { email: organizer.email, code: wrong })
+    expect(wrongRes.status).toBe(401)
+
+    const resend = await post('/auth/organizers/code', { email: organizer.email })
+    expect(resend.status).toBe(429)
+  })
+
+  it('rejects smuggled fields: a role on the profile, or a password', async () => {
+    const email = `route-smuggle-${crypto.randomUUID()}@test.com`
+    const withRole = await post('/auth/organizers/session', {
+      email,
+      code: '123456',
+      profile: { ...PROFILE, role: 'ADMIN' },
+    })
+    expect(withRole.status).toBe(400)
+
+    const withPassword = await post('/auth/organizers/code', { email, password: 'hunter22' })
+    expect(withPassword.status).toBe(400)
+  })
+
+  it('no longer accepts password signup for organizers', async () => {
+    const res = await post('/auth/organizers', {
+      name: 'Old Flow',
+      email: `route-old-${crypto.randomUUID()}@test.com`,
+      password: 'a-good-password',
+      acceptedTermsOfService: true,
+      acceptedPrivacyPolicy: true,
+    })
+    expect(res.status).toBe(404)
   })
 })
 
 describe('POST /api/v1/organizer/applications', () => {
   it('refuses a delegate account', async () => {
     const student = await makeUser('STUDENT')
-    const res = await app.request('/api/v1/organizer/applications', {
-      method: 'POST',
-      headers: { ...(await authHeaders(student.id)), ...JSON_HEADERS },
-      body: JSON.stringify(APPLICATION_BODY),
-    })
+    const res = await post('/organizer/applications', APPLICATION_BODY, await authHeaders(student.id))
 
     expect(res.status).toBe(403)
     const [unchanged] = await db.select({ role: users.role }).from(users).where(eq(users.id, student.id))
@@ -76,11 +124,7 @@ describe('POST /api/v1/organizer/applications', () => {
 
   it('accepts an organizer account', async () => {
     const organizer = await makeUser('ORGANIZER')
-    const res = await app.request('/api/v1/organizer/applications', {
-      method: 'POST',
-      headers: { ...(await authHeaders(organizer.id)), ...JSON_HEADERS },
-      body: JSON.stringify(APPLICATION_BODY),
-    })
+    const res = await post('/organizer/applications', APPLICATION_BODY, await authHeaders(organizer.id))
 
     expect(res.status).toBe(201)
   })

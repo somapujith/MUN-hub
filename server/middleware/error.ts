@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
 import { ZodError } from 'zod'
+import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
 import type { AppVariables } from '../src/types'
 
 export type ErrorCode =
@@ -12,6 +13,8 @@ export type ErrorCode =
   | 'CONFLICT_STATE'
   | 'CONFLICT_UNIQUE'
   | 'VALIDATION_FAILED'
+  | 'RATE_LIMITED'
+  | 'UNAVAILABLE'
   | 'INTERNAL'
 
 export interface ApiErrorBody {
@@ -56,6 +59,33 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
 
   if (message === 'An account with that email already exists') {
     return { status: 409, code: 'CONFLICT_UNIQUE', message }
+  }
+
+  // lib/actions/organizer-otp.ts — passwordless organizer sign-in.
+  if (message === ORGANIZER_OTP_ERRORS.incorrect) {
+    return { status: 401, code: 'UNAUTHORIZED', message }
+  }
+  if (message === ORGANIZER_OTP_ERRORS.expired) {
+    return { status: 400, code: 'VALIDATION_FAILED', message }
+  }
+  if (
+    message === ORGANIZER_OTP_ERRORS.cooldown ||
+    message === ORGANIZER_OTP_ERRORS.hourlyLimit ||
+    message === ORGANIZER_OTP_ERRORS.tooManyAttempts
+  ) {
+    return { status: 429, code: 'RATE_LIMITED', message }
+  }
+  if (message === ORGANIZER_OTP_ERRORS.delegateAccount) {
+    return { status: 403, code: 'FORBIDDEN', message }
+  }
+  if (message === ORGANIZER_OTP_ERRORS.deliveryFailed) {
+    return { status: 503, code: 'UNAVAILABLE', message }
+  }
+
+  // Signup validation (lib/actions/auth.ts, organizer-otp.ts, and the
+  // shared `required()` helper) — previously fell through to a 500.
+  if (/^You must accept the .+ to create an account$/.test(message) || / is required$/.test(message)) {
+    return { status: 400, code: 'VALIDATION_FAILED', message }
   }
 
   if (
@@ -152,7 +182,7 @@ export function errorHandler(error: unknown, c: Context<{ Variables: AppVariable
     },
   }
 
-  return c.json(body, mapped.status as 400 | 403 | 404 | 409 | 500)
+  return c.json(body, mapped.status as 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503)
 }
 
 /** Exported for integration tests — every known lib throw string must map here. */
@@ -162,6 +192,15 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'Current password is incorrect', status: 401, code: 'UNAUTHORIZED' },
   { message: 'Account suspended', status: 403, code: 'FORBIDDEN' },
   { message: 'An account with that email already exists', status: 409, code: 'CONFLICT_UNIQUE' },
+  { message: ORGANIZER_OTP_ERRORS.incorrect, status: 401, code: 'UNAUTHORIZED' },
+  { message: ORGANIZER_OTP_ERRORS.expired, status: 400, code: 'VALIDATION_FAILED' },
+  { message: ORGANIZER_OTP_ERRORS.cooldown, status: 429, code: 'RATE_LIMITED' },
+  { message: ORGANIZER_OTP_ERRORS.hourlyLimit, status: 429, code: 'RATE_LIMITED' },
+  { message: ORGANIZER_OTP_ERRORS.tooManyAttempts, status: 429, code: 'RATE_LIMITED' },
+  { message: ORGANIZER_OTP_ERRORS.delegateAccount, status: 403, code: 'FORBIDDEN' },
+  { message: ORGANIZER_OTP_ERRORS.deliveryFailed, status: 503, code: 'UNAVAILABLE' },
+  { message: 'You must accept the Terms of Service to create an account', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'Emergency contact name is required', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Mun not found', status: 404, code: 'NOT_FOUND' },
   { message: 'Committee not found', status: 404, code: 'NOT_FOUND' },
   { message: 'Ticket not found', status: 404, code: 'NOT_FOUND' },

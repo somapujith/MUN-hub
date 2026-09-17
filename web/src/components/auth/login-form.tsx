@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { signIn } from "@/api/auth";
 import { queryKeys } from "@/api/query-keys";
-import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,15 +37,6 @@ export interface LoginDoor {
   expectedRoles: readonly Role[] | null;
   /** Rendered under the form (signup prompt, cross-door links). */
   footer?: ReactNode;
-  /**
-   * `centered` is the compact treatment for the split-screen layout: centered
-   * heading, placeholder-led inputs (labels kept for screen readers only).
-   */
-  variant?: "default" | "centered";
-  /** Primary label for the submit button. */
-  submitLabel?: string;
-  /** Rendered directly under the submit button, with no divider above it. */
-  afterForm?: ReactNode;
 }
 
 const DESTINATION_LABELS: { prefix: string; label: string }[] = [
@@ -67,7 +57,6 @@ export function LoginForm({ door }: { door: LoginDoor }) {
   const queryClient = useQueryClient();
   const redirectTo = safeRedirectTo(searchParams.get("redirectTo") ?? searchParams.get("redirect"));
   const returningTo = destinationLabel(redirectTo);
-  const centered = door.variant === "centered";
 
   const signInMutation = useMutation({
     mutationFn: signIn,
@@ -145,7 +134,7 @@ export function LoginForm({ door }: { door: LoginDoor }) {
 
   return (
     <div className="w-full max-w-[400px]">
-      <header className={cn("flex flex-col gap-xs", centered && "items-center text-center")}>
+      <header className="flex flex-col gap-xs">
         <h1 className="font-display text-title-lg text-ink md:text-display-md">{door.title}</h1>
         <p className="text-body-md text-muted-foreground">
           {returningTo ? `Sign in to continue to ${returningTo}.` : door.subtitle}
@@ -154,9 +143,7 @@ export function LoginForm({ door }: { door: LoginDoor }) {
 
       <form onSubmit={handleSubmit} className="mt-xl flex flex-col gap-md" noValidate>
         <div className="flex flex-col gap-xs">
-          <Label htmlFor="email" className={centered ? "sr-only" : undefined}>
-            Email address
-          </Label>
+          <Label htmlFor="email">Email address</Label>
           <Input
             id="email"
             name="email"
@@ -164,46 +151,32 @@ export function LoginForm({ door }: { door: LoginDoor }) {
             autoComplete="email"
             autoFocus
             required
-            placeholder={centered ? "Enter email address" : "you@school.edu"}
+            placeholder="you@school.edu"
             aria-invalid={errorMessage ? true : undefined}
             aria-describedby={errorMessage ? "login-error" : undefined}
           />
         </div>
 
         <div className="flex flex-col gap-xs">
-          {centered ? (
-            <Label htmlFor="password" className="sr-only">
-              Password
-            </Label>
-          ) : (
-            <div className="flex items-center justify-between gap-sm">
-              <Label htmlFor="password">Password</Label>
-              <Link
-                to="/forgot-password"
-                className="text-body-md text-link underline-offset-2 hover:underline"
-              >
-                Forgot password?
-              </Link>
-            </div>
-          )}
+          <div className="flex items-center justify-between gap-sm">
+            <Label htmlFor="password">Password</Label>
+            <Link
+              to="/forgot-password"
+              className="text-body-md text-link underline-offset-2 hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
           <Input
             id="password"
             name="password"
             type="password"
             autoComplete="current-password"
             required
-            placeholder={centered ? "Enter password" : "Your password"}
+            placeholder="Your password"
             aria-invalid={errorMessage ? true : undefined}
             aria-describedby={errorMessage ? "login-error" : undefined}
           />
-          {centered ? (
-            <Link
-              to="/forgot-password"
-              className="self-end text-body-md text-link underline-offset-2 hover:underline"
-            >
-              Forgot password?
-            </Link>
-          ) : null}
         </div>
 
         {errorMessage ? (
@@ -220,11 +193,9 @@ export function LoginForm({ door }: { door: LoginDoor }) {
         ) : null}
 
         <Button type="submit" className="w-full" disabled={signInMutation.isPending}>
-          {signInMutation.isPending ? "Signing in…" : (door.submitLabel ?? "Sign in")}
+          {signInMutation.isPending ? "Signing in…" : "Sign in"}
         </Button>
       </form>
-
-      {door.afterForm ? <div className="mt-lg">{door.afterForm}</div> : null}
 
       {door.footer ? (
         <div className="mt-xl border-t border-border pt-lg text-body-md text-muted-foreground">

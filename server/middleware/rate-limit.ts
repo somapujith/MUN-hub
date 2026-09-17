@@ -3,6 +3,9 @@ import { checkRateLimit, getClientIp } from '../lib/rate-limit-store'
 import type { AppVariables } from '../src/types'
 
 const WINDOW_MS = 60_000
+/** Caps how many different addresses one IP can send sign-in codes to per window. */
+const ORGANIZER_CODE_IP_LIMIT = 30
+const EMAIL_KEYED_PATHS = new Set(['/auth/session', '/auth/organizers/code', '/auth/organizers/session'])
 
 type LimitRule = {
   match: (path: string, method: string) => boolean
@@ -15,6 +18,18 @@ const RULES: LimitRule[] = [
     match: (path, method) => method === 'POST' && path === '/auth/session',
     limit: 5,
     key: ({ ip, email }) => `auth-session:ip:${ip}${email ? `:email:${email}` : ''}`,
+  },
+  // Organizer email-code sign-in. lib/actions/organizer-otp.ts also enforces a
+  // per-address resend cooldown and hourly cap, and a per-code attempt limit.
+  {
+    match: (path, method) => method === 'POST' && path === '/auth/organizers/code',
+    limit: 3,
+    key: ({ ip, email }) => `organizer-code:ip:${ip}${email ? `:email:${email}` : ''}`,
+  },
+  {
+    match: (path, method) => method === 'POST' && path === '/auth/organizers/session',
+    limit: 10,
+    key: ({ ip, email }) => `organizer-session:ip:${ip}${email ? `:email:${email}` : ''}`,
   },
   {
     match: (path, method) => method === 'POST' && path === '/registrations',
@@ -44,13 +59,24 @@ export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }>
   const sessionUserId = c.get('session')?.userId ?? null
 
   let email: string | undefined
-  if (method === 'POST' && path === '/auth/session') {
+  if (method === 'POST' && EMAIL_KEYED_PATHS.has(path)) {
     try {
       const clone = c.req.raw.clone()
       const body = (await clone.json()) as { email?: string }
-      email = body.email?.toLowerCase()
+      email = body.email?.trim().toLowerCase()
     } catch {
       // body parse failure handled by route validation
+    }
+  }
+
+  if (method === 'POST' && path === '/auth/organizers/code') {
+    const perIp = checkRateLimit(`organizer-code:ip:${ip}`, ORGANIZER_CODE_IP_LIMIT, WINDOW_MS)
+    if (!perIp.allowed) {
+      c.header('Retry-After', String(perIp.retryAfterSec))
+      return c.json(
+        { error: { code: 'RATE_LIMITED', message: 'Too many requests. Try again later.' } },
+        429,
+      )
     }
   }
 

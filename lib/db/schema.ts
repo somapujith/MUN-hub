@@ -217,6 +217,29 @@ export const passwordResetTokensRelations = relations(passwordResetTokens, ({ on
 }))
 
 // ---------------------------------------------------------------------------
+// email_login_codes — the 6-digit codes behind passwordless organizer sign-in
+// (lib/actions/organizer-otp.ts). Keyed by email rather than user because a
+// code also verifies an address that has no account yet (organizer signup).
+// Unlike reset tokens, a 6-digit code is low-entropy, so only a hash is
+// stored and `attempts` caps guessing. Only the newest unconsumed row per
+// email is ever valid; requesting a new code consumes the older ones.
+// ---------------------------------------------------------------------------
+
+export const emailLoginCodes = pgTable(
+  'email_login_codes',
+  {
+    id: id(),
+    email: text('email').notNull(),
+    codeHash: text('code_hash').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('email_login_codes_email_created_at_idx').on(table.email, table.createdAt)],
+)
+
+// ---------------------------------------------------------------------------
 // sessions (new — supports getSession()/createSession()/destroySession())
 // ---------------------------------------------------------------------------
 

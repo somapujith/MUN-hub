@@ -183,6 +183,13 @@
       "when": 1789603410395,
       "tag": "0025_foamy_talon",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789608123309,
+      "tag": "0026_redundant_lilandra",
+      "breakpoints": true
     }
   ]
 }

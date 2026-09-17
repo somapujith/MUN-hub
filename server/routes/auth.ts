@@ -1,7 +1,8 @@
 import { Hono, type Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
-import { changePassword, signIn, signOut, signUp, signUpOrganizer } from '@/lib/actions/auth'
+import { changePassword, signIn, signOut, signUp } from '@/lib/actions/auth'
+import { requestOrganizerLoginCode, verifyOrganizerLoginCode } from '@/lib/actions/organizer-otp'
 import { SESSION_COOKIE_NAME } from '@/lib/auth/session'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import { requireAuth } from '../middleware/require-auth'
@@ -73,16 +74,27 @@ const signUpBodySchema = z
   })
   .strict()
 
-// Mirrors lib/actions/auth.ts's OrganizerSignUpInput. Deliberately none of the
-// delegate profile fields — organizer accounts don't have a student profile.
-const organizerSignUpBodySchema = z
+const organizerCodeRequestBodySchema = z
   .object({
-    name: z.string().trim().min(1),
     email: z.string().trim().min(1).email(),
-    password: z.string().min(8),
-    phone: z.string().optional(),
-    acceptedTermsOfService: z.boolean(),
-    acceptedPrivacyPolicy: z.boolean(),
+  })
+  .strict()
+
+// `profile` is only sent for a brand-new organizer, after the first verify
+// answered PROFILE_REQUIRED. Deliberately none of the delegate profile fields.
+const organizerCodeVerifyBodySchema = z
+  .object({
+    email: z.string().trim().min(1).email(),
+    code: z.string().trim().regex(/^\d{6}$/),
+    profile: z
+      .object({
+        name: z.string().trim().min(1),
+        phone: z.string().optional(),
+        acceptedTermsOfService: z.boolean(),
+        acceptedPrivacyPolicy: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 
@@ -125,16 +137,32 @@ authRoutes.post('/users', async (c) => {
   return c.json({ userId, role }, 201)
 })
 
-// The only way an ORGANIZER account comes into existence. Separate from
-// POST /users on purpose: a delegate account is never turned into an
-// organizer one — see lib/actions/auth.ts's signUpOrganizer.
-authRoutes.post('/organizers', async (c) => {
-  const body = organizerSignUpBodySchema.parse(await c.req.json())
-  const { userId, role, token, expiresAt } = await signUpOrganizer(body)
+// Passwordless organizer sign-in / sign-up (lib/actions/organizer-otp.ts).
+// Step 1 emails a 6-digit code. The response is identical whether or not the
+// address has an account, so it can't be used to discover registered emails.
+authRoutes.post('/organizers/code', async (c) => {
+  const body = organizerCodeRequestBodySchema.parse(await c.req.json())
+  await requestOrganizerLoginCode(body.email)
 
-  setSessionCookie(c, token, expiresAt)
+  return c.body(null, 204)
+})
 
-  return c.json({ userId, role }, 201)
+// Step 2 checks the code. This is the only way an ORGANIZER account comes into
+// existence — a delegate account is never turned into an organizer one.
+authRoutes.post('/organizers/session', async (c) => {
+  const body = organizerCodeVerifyBodySchema.parse(await c.req.json())
+  const result = await verifyOrganizerLoginCode(body)
+
+  if (result.status === 'PROFILE_REQUIRED') {
+    return c.json({ status: result.status })
+  }
+
+  setSessionCookie(c, result.token, result.expiresAt)
+
+  return c.json(
+    { status: result.status, userId: result.userId, role: result.role, isNewAccount: result.isNewAccount },
+    result.isNewAccount ? 201 : 200,
+  )
 })
 
 // Session-gated "change password while logged in" — see lib/actions/auth.ts's

@@ -179,13 +179,36 @@ Migration `0022_happy_marten_broadcloak.sql`. 45 new tests (`changePassword` cas
 
 **A delegate (STUDENT) account can never become an ORGANIZER account, and the delegate experience offers no way to register as an organizer.** Organizer accounts are created separately, and a person who wants to both attend and host uses two accounts with two different emails. Don't add a role-promotion path. An earlier agent built one on `reviewMunApplication` approval, and it was reverted on the user's instruction.
 
-- **Creation:** `lib/actions/auth.ts#signUpOrganizer` → `POST /api/v1/auth/organizers` → `web/src/pages/organizer/organizer-signup-page.tsx` at `/organizer/signup` on publish.munhub.in. Organizer signup asks for name, email, password, optional phone, and Terms/Privacy consent. It creates no `student_profiles` row. It is the only code path that creates an ORGANIZER; the seed script is the other source.
+- **Creation:** passwordless, by emailed one-time code. See "Organizer email-code sign-in" below. It creates no `student_profiles` row. It is the only code path that creates an ORGANIZER; the seed script is the other source.
 - **Hosting still needs Gate 1:** an ORGANIZER account can't list anything by itself; it must submit an organizer application and pass `reviewMunApplication`.
 - **Enforcement:**
   - API: `POST /organizer/applications` requires `requireRole(['ORGANIZER'])`.
   - Web: the organizer workspace layouts and the apply pages are wrapped in `RequireOrganizer` (`web/src/guards/require-organizer.tsx`).
   - publish.munhub.in's index sends only ORGANIZER sessions to the dashboard. The session cookie is shared across `.munhub.in`, so a signed-in delegate still lands on the organizer login.
 - **Student UI:** "List your MUN" CTAs (home page, footer) resolve through `useListYourMunHref`. A signed-out visitor goes to `/organizer/signup` and an organizer goes to `/organizer/apply`. A signed-in delegate or staff account gets no link at all. Route any new organizer-registration CTA through that hook.
+
+## Organizer email-code sign-in (landed 2026-09-17, explicit user direction)
+
+**Organizers have no password.** publish.munhub.in's `/organizer/login` asks for an email and then a 6-digit code emailed to it. `/organizer/signup` asks for name, email, optional phone and Terms/Privacy consent first, then the code confirms the email, and only then is the account created. Delegate (`/login`, `/signup`) and admin sign-in still use passwords; that scope was the user's choice.
+
+- **Backend:** `lib/actions/organizer-otp.ts` exports `requestOrganizerLoginCode` and `verifyOrganizerLoginCode`.
+  - Routes: `POST /api/v1/auth/organizers/code` `{email}` returns 204. `POST /api/v1/auth/organizers/session` takes `{email, code, profile?}`.
+  - A verify for an address with no account and no `profile` returns `{status: 'PROFILE_REQUIRED'}` without using up the code. The login page then asks for the details and calls again with the same code. Signup sends `profile` on the first verify.
+  - The old password route `POST /auth/organizers` and `signUpOrganizer` are gone.
+- **Table `email_login_codes`** (migration `0026`) is keyed by email, not user, because a code also verifies an address with no account yet.
+  - Codes are scrypt-hashed with `lib/auth/password.ts#hashPassword`, and verified with `verifyPassword`. To seed a known code in tests, insert `{email, codeHash: await hashPassword('123456'), expiresAt}`.
+  - Only the newest unconsumed row per email is valid; requesting a new code consumes the older ones.
+  - Limits: 10-minute expiry, single use, 5 wrong guesses lock the code, 60-second resend cooldown, 5 codes per address per hour.
+  - Route rate limits in `server/middleware/rate-limit.ts` are keyed per IP plus email, plus 30 code requests per IP per minute.
+- **No enumeration, separate accounts:**
+  - A code request answers identically for every address.
+  - An address that belongs to a delegate or staff account gets an explanatory email and never a usable code. It still gets a throttle row, so the endpoint can't flood that inbox.
+  - Account lookups compare `lower(users.email)`.
+- **Email:** sent through `getNotificationsAdapter()` using mun-hub-4b's branded template, `lib/notifications/templates/otp-email.ts`.
+  - Production sends real mail through ZeptoMail from `noreply@munhub.in`.
+  - Locally, and in tests, the console adapter prints the code in the API log line `[notification] <email> …`.
+- **Password sign-in still works for any account that has a password**, including seeded demo organizers and E2E fixtures, through `POST /auth/session`. Organizers created by the code flow have `passwordHash = null`, so they can only use codes.
+- **Web:** `web/src/components/auth/organizer-otp-form.tsx` (`mode: 'login' | 'signup'`), rendered by `organizer-login-page.tsx` and `organizer-signup-page.tsx` inside the shared `OrganizerAuthLayout`.
 
 ## Cloudflare Hyperdrive bridge for `lib/db/client.ts` (landed 2026-09-17)
 
