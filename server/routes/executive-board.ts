@@ -7,6 +7,7 @@ import {
   listEbMembersForOrganizer,
   updateEbMember,
 } from '@/lib/actions/executive-board'
+import { assertMunReadable } from '@/lib/actions/mun-read-access'
 import { ebRoleEnum } from '@/lib/db/schema-enums'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
@@ -51,8 +52,12 @@ const updateEbBodySchema = z
 
 export const executiveBoardRoutes = new Hono<{ Variables: AppVariables }>()
 
+// Public members of a published MUN for anyone; unpublished MUNs for the
+// owner and staff only (404 otherwise). Hidden members: /manage below.
 executiveBoardRoutes.get('/muns/:munId/executive-board', async (c) => {
-  const members = await listEbMembers(c.req.param('munId'))
+  const munId = c.req.param('munId')
+  await assertMunReadable(munId, c.get('session'))
+  const members = await listEbMembers(munId)
   return c.json(members)
 })
 

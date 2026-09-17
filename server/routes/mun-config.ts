@@ -17,7 +17,11 @@ import {
   updatePortfolio,
   updateRegistrationProduct,
 } from '@/lib/actions/mun-config'
-import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
+import {
+  assertMunReadable,
+  findMunIdForCommittee,
+  resolveMunReadAccess,
+} from '@/lib/actions/mun-read-access'
 import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
 
@@ -136,23 +140,6 @@ const updateMunDetailsBodySchema = z
   })
   .strict()
 
-async function resolveIncludeInactive(
-  munId: string,
-  raw: string | undefined,
-  session: AppVariables['session'],
-): Promise<boolean> {
-  if (raw !== 'true') {
-    return false
-  }
-
-  try {
-    await assertOwnsOrAdmin(munId, session)
-    return true
-  } catch {
-    return false
-  }
-}
-
 export const munConfigRoutes = new Hono<{ Variables: AppVariables }>()
 
 // Organizer's own setup/edit read — NOT the public `/muns/:slug` route
@@ -166,8 +153,11 @@ munConfigRoutes.get('/organizer/muns/:munId/details', requireAuth, async (c) => 
   return c.json(mun)
 })
 
+// Published MUNs for anyone; unpublished ones for the owner and staff only (404 otherwise).
 munConfigRoutes.get('/muns/:munId/committees', async (c) => {
-  const committees = await listCommittees(c.req.param('munId'))
+  const munId = c.req.param('munId')
+  await assertMunReadable(munId, c.get('session'))
+  const committees = await listCommittees(munId)
   return c.json(committees)
 })
 
@@ -204,8 +194,15 @@ munConfigRoutes.delete('/committees/:committeeId', requireAuth, async (c) => {
   return c.body(null, 204)
 })
 
+// Same visibility as the committee's MUN; an unknown committee and an
+// unreadable one both answer 404.
 munConfigRoutes.get('/committees/:committeeId/portfolios', async (c) => {
-  const items = await listPortfolios(c.req.param('committeeId'))
+  const committeeId = c.req.param('committeeId')
+  const munId = await findMunIdForCommittee(committeeId)
+  if (!munId || (await resolveMunReadAccess(munId, c.get('session'))) === 'none') {
+    throw new Error('Committee not found')
+  }
+  const items = await listPortfolios(committeeId)
   return c.json(items)
 })
 
@@ -241,13 +238,13 @@ munConfigRoutes.delete('/portfolios/:portfolioId', requireAuth, async (c) => {
   return c.body(null, 204)
 })
 
+// Reached for ids only (munsRoutes answers public slugs first). Published
+// MUNs for anyone; unpublished ones for the owner and staff only (404
+// otherwise). Archived products only for the owner/admin.
 munConfigRoutes.get('/muns/:munId/products', async (c) => {
   const munId = c.req.param('munId')
-  const includeInactive = await resolveIncludeInactive(
-    munId,
-    c.req.query('includeInactive'),
-    c.get('session'),
-  )
+  const access = await assertMunReadable(munId, c.get('session'))
+  const includeInactive = access === 'owner' && c.req.query('includeInactive') === 'true'
   const products = await listRegistrationProducts(munId, { includeInactive })
   return c.json(products)
 })

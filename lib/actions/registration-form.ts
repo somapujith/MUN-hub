@@ -331,18 +331,65 @@ export async function reorderFormFields(input: ReorderFormFieldsInput, session: 
 
   await onModuleDataChanged(input.munId, 'REGISTRATION_FORM', session!.userId)
 
-  return listFormFields(input.munId)
+  return listFormFieldsForOrganizer(input.munId, session)
 }
 
-/** Public read, no auth — the registration funnel renders these to build the form. */
-export async function listFormFields(munId: string): Promise<FormField[]> {
-  await db
-    .insert(munFormFields)
-    .values(DEFAULT_REGISTRATION_FIELDS.map((field) => ({ ...field, munId, conditionalOn: null, conditionalOperator: null, conditionalValue: null })))
-    .onConflictDoNothing({ target: [munFormFields.munId, munFormFields.fieldKey] })
+// DEFAULT FIELDS: every form carries DEFAULT_REGISTRATION_FIELDS. They are
+// written as real rows only from an authenticated organizer read
+// (`listFormFieldsForOrganizer`), so the organizer can edit them. A public
+// read never writes — it used to seed rows on every anonymous GET, for any
+// mun id — and instead fills in any default the mun has no row for yet as a
+// synthetic, read-only field (id `default:<fieldKey>`). Either way the
+// registration funnel sees the same questions.
+
+const SYNTHETIC_FIELD_CREATED_AT = new Date(0)
+
+function syntheticDefaultField(munId: string, field: (typeof DEFAULT_REGISTRATION_FIELDS)[number]): FormField {
+  return {
+    ...field,
+    id: `default:${field.fieldKey}`,
+    munId,
+    conditionalOn: null,
+    conditionalOperator: null,
+    conditionalValue: null,
+    createdAt: SYNTHETIC_FIELD_CREATED_AT,
+  }
+}
+
+async function listStoredFormFields(munId: string): Promise<FormField[]> {
   return db
     .select()
     .from(munFormFields)
     .where(eq(munFormFields.munId, munId))
     .orderBy(asc(munFormFields.displayOrder))
+}
+
+/**
+ * Public read, no auth, no writes — the registration funnel renders these to
+ * build the form. Stored fields plus any default field not stored yet (see
+ * "DEFAULT FIELDS" above), ordered by displayOrder.
+ */
+export async function listFormFields(munId: string): Promise<FormField[]> {
+  const stored = await listStoredFormFields(munId)
+  const storedKeys = new Set(stored.map((field) => field.fieldKey))
+  const missingDefaults = DEFAULT_REGISTRATION_FIELDS.filter((field) => !storedKeys.has(field.fieldKey))
+  if (missingDefaults.length === 0) return stored
+
+  return [...stored, ...missingDefaults.map((field) => syntheticDefaultField(munId, field))].sort(
+    (a, b) => a.displayOrder - b.displayOrder,
+  )
+}
+
+/**
+ * Organizer read for the form builder: owning organizer or admin only.
+ * Materializes the default fields as real rows first (idempotent), so every
+ * field it returns has a real id that update/delete/reorder accept.
+ */
+export async function listFormFieldsForOrganizer(munId: string, session: Session | null): Promise<FormField[]> {
+  await assertOwnsOrAdmin(munId, session)
+  await db
+    .insert(munFormFields)
+    .values(DEFAULT_REGISTRATION_FIELDS.map((field) => ({ ...field, munId, conditionalOn: null, conditionalOperator: null, conditionalValue: null })))
+    .onConflictDoNothing({ target: [munFormFields.munId, munFormFields.fieldKey] })
+  return listStoredFormFields(munId)
 }

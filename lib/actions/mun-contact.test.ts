@@ -3,7 +3,7 @@ import { db } from '@/lib/db/client'
 import { muns, users } from '@/lib/db/schema'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
-import { getMunContact, upsertMunContact } from './mun-contact'
+import { getMunContact, getPublicMunContact, upsertMunContact } from './mun-contact'
 
 async function makeUser(role: 'ORGANIZER' | 'ADMIN' | 'SUPER_ADMIN' | 'STUDENT') {
   const [user] = await db
@@ -109,6 +109,42 @@ describe('mun-contact actions', () => {
 
       const contact = await getMunContact(mun.id)
       expect(contact).toBeNull()
+    })
+  })
+
+  describe('getPublicMunContact', () => {
+    it('returns the official channels without any contact-person field', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      await upsertMunContact(
+        mun.id,
+        {
+          officialEmail: 'info@mun.example',
+          phone: '+911234567890',
+          website: 'https://mun.example',
+          contactPersonName: 'Jane Doe',
+          contactPersonRole: 'Secretary-General',
+          contactPersonEmail: 'jane@mun.example',
+          contactPersonPhone: '+919876543210',
+        },
+        sessionFor(organizer),
+      )
+
+      const contact = await getPublicMunContact(mun.id)
+      expect(contact).toEqual({
+        id: expect.any(String),
+        munId: mun.id,
+        officialEmail: 'info@mun.example',
+        phone: '+911234567890',
+        website: 'https://mun.example',
+        socialLinks: null,
+      })
+    })
+
+    it('returns null when no contact row exists yet', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      expect(await getPublicMunContact(mun.id)).toBeNull()
     })
   })
 

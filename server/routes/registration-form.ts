@@ -4,9 +4,11 @@ import {
   createFormField,
   deleteFormField,
   listFormFields,
+  listFormFieldsForOrganizer,
   reorderFormFields,
   updateFormField,
 } from '@/lib/actions/registration-form'
+import { assertMunReadable } from '@/lib/actions/mun-read-access'
 import { formFieldTypeEnum } from '@/lib/db/schema-enums'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
@@ -57,8 +59,14 @@ const reorderFieldsBodySchema = z
 
 export const registrationFormRoutes = new Hono<{ Variables: AppVariables }>()
 
+// The owner (or an admin) gets the form builder's view, which materializes
+// the default fields. Everyone else gets a read-only view that never writes —
+// of a published MUN only (404 otherwise), except OPERATIONS reviewers.
 registrationFormRoutes.get('/muns/:munId/form-fields', async (c) => {
-  const fields = await listFormFields(c.req.param('munId'))
+  const munId = c.req.param('munId')
+  const session = c.get('session')
+  const access = await assertMunReadable(munId, session)
+  const fields = access === 'owner' ? await listFormFieldsForOrganizer(munId, session) : await listFormFields(munId)
   return c.json(fields)
 })
 
