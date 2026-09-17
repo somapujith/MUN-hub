@@ -147,6 +147,14 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     return { status: 409, code: 'CONFLICT_UNIQUE', message }
   }
 
+  // lib/actions/mun-config.ts portfolio writes.
+  if (/^A portfolio named ".+" already exists in this committee$/.test(message)) {
+    return { status: 409, code: 'CONFLICT_UNIQUE', message }
+  }
+  if (message === 'Add at least one portfolio' || /^You can add at most \d+ portfolios at once$/.test(message)) {
+    return { status: 400, code: 'VALIDATION_FAILED', message }
+  }
+
   if (
     message.includes('conditionalOn references unknown fieldKey') ||
     message.includes('would create a cycle via') ||
@@ -319,4 +327,11 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'FINAL_REVIEW cannot be made optional', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'A non-empty reason is required to reject a submission', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'A reason is required to reject or request changes', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'A portfolio named "India" already exists in this committee', status: 409, code: 'CONFLICT_UNIQUE' },
+  { message: 'Add at least one portfolio', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'You can add at most 300 portfolios at once', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'Portfolio name is required', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'You must confirm the submission is accurate and complete', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'Registration deadline must be after registration opens', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'Registration deadline must be before the conference starts', status: 400, code: 'VALIDATION_FAILED' },
 ]

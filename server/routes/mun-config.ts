@@ -4,6 +4,7 @@ import { z } from 'zod'
 import {
   createCommittee,
   createPortfolio,
+  createPortfolios,
   createRegistrationProduct,
   deleteCommittee,
   deletePortfolio,
@@ -12,6 +13,7 @@ import {
   listCommittees,
   listPortfolios,
   listRegistrationProducts,
+  MAX_PORTFOLIOS_PER_REQUEST,
   updateCommittee,
   updateMunDetails,
   updatePortfolio,
@@ -67,6 +69,15 @@ const createPortfolioBodySchema = z
     name: z.string().min(1),
     type: z.string().optional(),
     availability: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+
+const createPortfoliosBodySchema = z
+  .object({
+    portfolios: z
+      .array(createPortfolioBodySchema)
+      .min(1)
+      .max(MAX_PORTFOLIOS_PER_REQUEST),
   })
   .strict()
 
@@ -216,6 +227,21 @@ munConfigRoutes.post(
       c.get('session'),
     )
     return c.json(portfolio, 201)
+  },
+)
+
+// Many portfolios at once (a pasted list), all or nothing.
+munConfigRoutes.post(
+  '/committees/:committeeId/portfolios/bulk',
+  requireAuth,
+  zValidator('json', createPortfoliosBodySchema),
+  async (c) => {
+    const created = await createPortfolios(
+      c.req.param('committeeId'),
+      c.req.valid('json').portfolios,
+      c.get('session'),
+    )
+    return c.json(created, 201)
   },
 )
 

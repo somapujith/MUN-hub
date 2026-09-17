@@ -7,6 +7,7 @@ import type { Session } from '@/lib/auth/adapter'
 import {
   createCommittee,
   createPortfolio,
+  createPortfolios,
   createRegistrationProduct,
   deleteCommittee,
   deletePortfolio,
@@ -177,6 +178,58 @@ describe('mun-config actions', () => {
       expect(listA).toHaveLength(2)
       const listB = await listPortfolios(committeeB.id)
       expect(listB).toHaveLength(1)
+    })
+
+    it('refuses a duplicate portfolio name in the same committee, ignoring case and spaces', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+      const committee = await createCommittee({ munId: mun.id, name: 'UNHRC', capacity: 30 }, session)
+      const other = await createCommittee({ munId: mun.id, name: 'DISEC', capacity: 30 }, session)
+
+      const india = await createPortfolio({ committeeId: committee.id, name: '  India ' }, session)
+      expect(india.name).toBe('India')
+      await expect(createPortfolio({ committeeId: committee.id, name: 'india' }, session)).rejects.toThrow(
+        'A portfolio named "India" already exists in this committee',
+      )
+      // Another committee may reuse the name.
+      await expect(createPortfolio({ committeeId: other.id, name: 'India' }, session)).resolves.toBeDefined()
+
+      const japan = await createPortfolio({ committeeId: committee.id, name: 'Japan' }, session)
+      await expect(updatePortfolio(japan.id, { name: 'INDIA' }, session)).rejects.toThrow(/already exists/)
+      // Renaming to its own name (a no-op save) is fine.
+      await expect(updatePortfolio(japan.id, { name: 'Japan', availability: 2 }, session)).resolves.toMatchObject({
+        availability: 2,
+      })
+    })
+
+    it('adds many portfolios at once, all or nothing', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+      const committee = await createCommittee({ munId: mun.id, name: 'UNSC', capacity: 15 }, session)
+      await createPortfolio({ committeeId: committee.id, name: 'France' }, session)
+
+      const created = await createPortfolios(
+        committee.id,
+        [
+          { name: 'United States', type: 'country' },
+          { name: 'China', type: 'country' },
+        ],
+        session,
+      )
+      expect(created.map((p) => p.name)).toEqual(['United States', 'China'])
+
+      await expect(
+        createPortfolios(committee.id, [{ name: 'Brazil' }, { name: 'brazil' }], session),
+      ).rejects.toThrow('A portfolio named "brazil" already exists in this committee')
+      await expect(createPortfolios(committee.id, [{ name: 'Kenya' }, { name: 'FRANCE' }], session)).rejects.toThrow(
+        'A portfolio named "France" already exists in this committee',
+      )
+      expect(await listPortfolios(committee.id)).toHaveLength(3)
+
+      const stranger = await makeUser('ORGANIZER')
+      await expect(createPortfolios(committee.id, [{ name: 'Chile' }], sessionFor(stranger))).rejects.toThrow('Forbidden')
     })
   })
 

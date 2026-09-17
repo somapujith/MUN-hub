@@ -149,15 +149,69 @@ export interface CreatePortfolioInput {
   availability?: number
 }
 
+export const portfolioNameTaken = (name: string) => `A portfolio named "${name}" already exists in this committee`
+
+const normalizePortfolioName = (name: string) => name.trim().toLowerCase()
+
+/** Portfolio names must be unique within a committee (the PORTFOLIOS go-live check), ignoring case. */
+async function assertPortfolioNamesFree(committeeId: string, names: string[], excludeId?: string): Promise<void> {
+  const seen = new Set<string>()
+  for (const name of names) {
+    const key = normalizePortfolioName(name)
+    if (seen.has(key)) throw new Error(portfolioNameTaken(name.trim()))
+    seen.add(key)
+  }
+  const existing = await db
+    .select({ id: portfolios.id, name: portfolios.name })
+    .from(portfolios)
+    .where(eq(portfolios.committeeId, committeeId))
+  const clash = existing.find((row) => row.id !== excludeId && seen.has(normalizePortfolioName(row.name)))
+  if (clash) throw new Error(portfolioNameTaken(clash.name))
+}
+
 export async function createPortfolio(input: CreatePortfolioInput, session: Session | null): Promise<Portfolio> {
   const munId = await getMunIdForCommittee(input.committeeId)
   await assertOwnsOrAdmin(munId, session)
   await assertModuleNotLocked(munId, 'PORTFOLIOS', session)
-  const [portfolio] = await db.insert(portfolios).values(input).returning()
+  const name = input.name.trim()
+  if (!name) throw new Error('Portfolio name is required')
+  await assertPortfolioNamesFree(input.committeeId, [name])
+  const [portfolio] = await db.insert(portfolios).values({ ...input, name }).returning()
 
   await onModuleDataChanged(munId, 'PORTFOLIOS', session!.userId)
 
   return portfolio
+}
+
+export const MAX_PORTFOLIOS_PER_REQUEST = 300
+
+/**
+ * Adds many portfolios to one committee at once (e.g. a pasted country list).
+ * All or nothing, and one progress recompute instead of one per portfolio.
+ */
+export async function createPortfolios(
+  committeeId: string,
+  items: Omit<CreatePortfolioInput, 'committeeId'>[],
+  session: Session | null,
+): Promise<Portfolio[]> {
+  const munId = await getMunIdForCommittee(committeeId)
+  await assertOwnsOrAdmin(munId, session)
+  await assertModuleNotLocked(munId, 'PORTFOLIOS', session)
+
+  const rows = items.map((item) => ({ ...item, committeeId, name: item.name.trim() }))
+  if (rows.length === 0) throw new Error('Add at least one portfolio')
+  if (rows.length > MAX_PORTFOLIOS_PER_REQUEST) {
+    throw new Error(`You can add at most ${MAX_PORTFOLIOS_PER_REQUEST} portfolios at once`)
+  }
+  if (rows.some((row) => !row.name)) throw new Error('Portfolio name is required')
+  await assertPortfolioNamesFree(
+    committeeId,
+    rows.map((row) => row.name),
+  )
+
+  const created = await db.insert(portfolios).values(rows).returning()
+  await onModuleDataChanged(munId, 'PORTFOLIOS', session!.userId)
+  return created
 }
 
 export interface UpdatePortfolioInput {
@@ -179,7 +233,13 @@ export async function updatePortfolio(
   const [existing] = await db.select().from(portfolios).where(eq(portfolios.id, id)).limit(1)
   if (!existing) throw new Error('Portfolio not found')
 
-  const [updated] = await db.update(portfolios).set(input).where(eq(portfolios.id, id)).returning()
+  const changes = input.name === undefined ? input : { ...input, name: input.name.trim() }
+  if (changes.name !== undefined) {
+    if (!changes.name) throw new Error('Portfolio name is required')
+    await assertPortfolioNamesFree(committeeId, [changes.name], id)
+  }
+
+  const [updated] = await db.update(portfolios).set(changes).where(eq(portfolios.id, id)).returning()
   if (!updated) throw new Error('Portfolio not found')
 
   await triggerReverificationIfNeeded('PORTFOLIOS', existing, updated, munId, session!.userId)
