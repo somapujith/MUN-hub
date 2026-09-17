@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { emailLoginCodes, sessions, studentProfiles, userConsents, users } from '@/lib/db/schema'
+import { hashOpaqueToken } from '@/lib/auth/opaque-token'
 import { consoleNotificationsAdapter } from '@/lib/notifications/console-adapter'
 import type { NotificationPayload } from '@/lib/notifications/adapter'
 import {
@@ -90,7 +91,7 @@ describe('organizer email-code sign-up', () => {
     expect(consents.map((row) => row.consentType).sort()).toEqual(['PRIVACY_POLICY', 'TERMS_OF_SERVICE'])
     expect(await db.select().from(studentProfiles).where(eq(studentProfiles.userId, user.id))).toHaveLength(0)
 
-    const [session] = await db.select().from(sessions).where(eq(sessions.token, result.token))
+    const [session] = await db.select().from(sessions).where(eq(sessions.token, hashOpaqueToken(result.token)))
     expect(session.userId).toBe(user.id)
   })
 

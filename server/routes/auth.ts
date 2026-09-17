@@ -3,12 +3,37 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { changePassword, signIn, signOut, signUp } from '@/lib/actions/auth'
 import { requestOrganizerLoginCode, verifyOrganizerLoginCode } from '@/lib/actions/organizer-otp'
-import { SESSION_COOKIE_NAME } from '@/lib/auth/session'
+import { SESSION_COOKIE_NAME, SESSION_MAX_LIFETIME_MS } from '@/lib/auth/session'
 import { getRuntimeEnv } from '@/lib/runtime-env'
+import { TURNSTILE_ACTIONS, TURNSTILE_TOKEN_MAX_LENGTH, turnstileRejection } from '../lib/turnstile'
 import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
 
-const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+// The cookie lives as long as a session possibly can (the absolute cap);
+// the server-side idle deadline in lib/auth/session.ts decides whether the
+// session behind it is still valid.
+const COOKIE_MAX_AGE_SECONDS = SESSION_MAX_LIFETIME_MS / 1000
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+/**
+ * Whether the session cookie carries `Secure`. COOKIE_SECURE=true|false
+ * decides outright (production sets true in server/wrangler.jsonc). Unset,
+ * the cookie is Secure for every request except plain http to a loopback
+ * host — local dev, the E2E suite and Hono's test helper — so a deployment
+ * that forgot the variable still gets Secure cookies rather than depending
+ * on NODE_ENV (which Workers doesn't expose to getRuntimeEnv).
+ */
+export function sessionCookieSecure(requestUrl: string): boolean {
+  const configured = getRuntimeEnv('COOKIE_SECURE')?.trim().toLowerCase()
+  if (configured === 'true') return true
+  if (configured === 'false') return false
+
+  const url = new URL(requestUrl)
+  return !(url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname))
+}
+
+const turnstileTokenSchema = z.string().max(TURNSTILE_TOKEN_MAX_LENGTH).optional()
 
 // Unset locally (host-only cookie, today's behavior). In production, set to
 // ".munhub.in" so the session cookie is sent to app./organize./admin. too.
@@ -71,12 +96,14 @@ const signUpBodySchema = z
     areasOfInterest: z.array(z.string()).optional(),
     languages: z.array(z.string()).optional(),
     isPublicProfileVisible: z.boolean().optional(),
+    turnstileToken: turnstileTokenSchema,
   })
   .strict()
 
 const organizerCodeRequestBodySchema = z
   .object({
     email: z.string().trim().min(1).email(),
+    turnstileToken: turnstileTokenSchema,
   })
   .strict()
 
@@ -107,32 +134,36 @@ const changePasswordBodySchema = z
 
 export const authRoutes = new Hono<{ Variables: AppVariables }>()
 
-function setSessionCookie(c: Context<{ Variables: AppVariables }>, token: string, expiresAt: Date) {
+function setSessionCookie(c: Context<{ Variables: AppVariables }>, token: string) {
   setCookie(c, SESSION_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: sessionCookieSecure(c.req.url),
     sameSite: 'Lax',
     path: '/',
     domain: cookieDomain(),
     maxAge: COOKIE_MAX_AGE_SECONDS,
-    expires: expiresAt,
   })
 }
 
 authRoutes.post('/session', async (c) => {
   const body = signInBodySchema.parse(await c.req.json())
-  const { userId, role, token, expiresAt } = await signIn(body.email, body.password)
+  const { userId, role, token } = await signIn(body.email, body.password)
 
-  setSessionCookie(c, token, expiresAt)
+  setSessionCookie(c, token)
 
   return c.json({ userId, role })
 })
 
+// Delegate self-signup. Behind Turnstile when TURNSTILE_SECRET_KEY is set
+// (server/lib/turnstile.ts), plus a per-IP rate limit.
 authRoutes.post('/users', async (c) => {
-  const body = signUpBodySchema.parse(await c.req.json())
-  const { userId, role, token, expiresAt } = await signUp(body)
+  const { turnstileToken, ...input } = signUpBodySchema.parse(await c.req.json())
+  const rejection = await turnstileRejection(c, turnstileToken, TURNSTILE_ACTIONS.delegateSignup)
+  if (rejection) return rejection
 
-  setSessionCookie(c, token, expiresAt)
+  const { userId, role, token } = await signUp(input)
+
+  setSessionCookie(c, token)
 
   return c.json({ userId, role }, 201)
 })
@@ -140,8 +171,12 @@ authRoutes.post('/users', async (c) => {
 // Passwordless organizer sign-in / sign-up (lib/actions/organizer-otp.ts).
 // Step 1 emails a 6-digit code. The response is identical whether or not the
 // address has an account, so it can't be used to discover registered emails.
+// Behind Turnstile when TURNSTILE_SECRET_KEY is set: each request sends an email.
 authRoutes.post('/organizers/code', async (c) => {
   const body = organizerCodeRequestBodySchema.parse(await c.req.json())
+  const rejection = await turnstileRejection(c, body.turnstileToken, TURNSTILE_ACTIONS.organizerCode)
+  if (rejection) return rejection
+
   await requestOrganizerLoginCode(body.email)
 
   return c.body(null, 204)
@@ -157,7 +192,7 @@ authRoutes.post('/organizers/session', async (c) => {
     return c.json({ status: result.status })
   }
 
-  setSessionCookie(c, result.token, result.expiresAt)
+  setSessionCookie(c, result.token)
 
   return c.json(
     { status: result.status, userId: result.userId, role: result.role, isNewAccount: result.isNewAccount },
@@ -166,12 +201,13 @@ authRoutes.post('/organizers/session', async (c) => {
 })
 
 // Session-gated "change password while logged in" — see lib/actions/auth.ts's
-// changePassword for how this differs from the signed-out reset flow in
-// server/routes/password-reset.ts (which invalidates other sessions; this
-// does not).
+// changePassword. Signs the user out of every other session; the one making
+// the change (identified by its cookie) stays signed in. The signed-out reset
+// flow in server/routes/password-reset.ts ends every session.
 authRoutes.post('/session/password', requireAuth, async (c) => {
   const body = changePasswordBodySchema.parse(await c.req.json())
-  await changePassword(body.currentPassword, body.newPassword, c.get('session')!)
+  const currentToken = getCookie(c, SESSION_COOKIE_NAME) ?? ''
+  await changePassword(body.currentPassword, body.newPassword, c.get('session')!, currentToken)
 
   return c.body(null, 204)
 })
@@ -180,7 +216,11 @@ authRoutes.delete('/session', async (c) => {
   const token = getCookie(c, SESSION_COOKIE_NAME) ?? ''
   await signOut(token)
 
-  deleteCookie(c, SESSION_COOKIE_NAME, { path: '/', domain: cookieDomain() })
+  deleteCookie(c, SESSION_COOKIE_NAME, {
+    path: '/',
+    domain: cookieDomain(),
+    secure: sessionCookieSecure(c.req.url),
+  })
 
   return c.body(null, 204)
 })

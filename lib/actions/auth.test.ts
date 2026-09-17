@@ -1,10 +1,36 @@
-import { afterAll, describe, expect, it } from 'vitest'
+import crypto from 'node:crypto'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { sessions, studentProfiles, userConsents, users } from '@/lib/db/schema'
-import { hashPassword } from '@/lib/auth/password'
-import { changePassword, signIn, signOut, signUp } from './auth'
+import { DUMMY_PASSWORD_HASH, hashPassword, needsRehash, verifyPassword } from '@/lib/auth/password'
+import { hashOpaqueToken } from '@/lib/auth/opaque-token'
+import { createSession, getSessionByToken } from '@/lib/auth/session'
+import { GUARDIAN_CONSENT_REQUIRED, changePassword, isUnderAdultAge, signIn, signOut, signUp } from './auth'
 import type { SignUpInput } from './auth'
+
+// Real implementation, wrapped so tests can see which hash sign-in checked against.
+vi.mock('@/lib/auth/password', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/auth/password')>()
+  return { ...actual, verifyPassword: vi.fn(actual.verifyPassword) }
+})
+
+function sessionRowsFor(token: string) {
+  return db.select().from(sessions).where(eq(sessions.token, hashOpaqueToken(token)))
+}
+
+/** A hash in the pre-2026-09-17 `salt:hash` format. */
+function legacyHash(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex')
+  return `${salt}:${crypto.scryptSync(password, salt, 64).toString('hex')}`
+}
+
+/** `YYYY-MM-DD` for the date `years` years (and `days` days) before today, UTC. */
+function birthDate(years: number, days = 0): string {
+  const now = new Date()
+  const date = new Date(Date.UTC(now.getUTCFullYear() - years, now.getUTCMonth(), now.getUTCDate() - days))
+  return date.toISOString().slice(0, 10)
+}
 
 const DEFAULT_TEST_PASSWORD = 'test-password-123'
 
@@ -48,7 +74,7 @@ describe('signUp', () => {
     expect(result.token.length).toBeGreaterThan(0)
     expect(result.expiresAt).toBeInstanceOf(Date)
 
-    const rows = await db.select().from(sessions).where(eq(sessions.token, result.token))
+    const rows = await sessionRowsFor(result.token)
     expect(rows.length).toBe(1)
     expect(rows[0].userId).toBe(result.userId)
   })
@@ -99,6 +125,32 @@ describe('signUp', () => {
       .from(userConsents)
       .where(eq(userConsents.userId, withoutAck.userId))
     expect(noAckRows.some((row) => row.consentType === 'GUARDIAN_ACKNOWLEDGEMENT')).toBe(false)
+  })
+
+  it('rejects an under-18 signup without the guardian acknowledgement, creating no user', async () => {
+    const email = `signup-minor-${Date.now()}-${Math.random()}@test.com`
+
+    for (const acceptedGuardianAcknowledgement of [undefined, false]) {
+      await expect(
+        signUp(signUpInput({ email, dateOfBirth: birthDate(15), acceptedGuardianAcknowledgement })),
+      ).rejects.toThrow(GUARDIAN_CONSENT_REQUIRED)
+    }
+
+    const rows = await db.select({ id: users.id }).from(users).where(eq(users.email, email))
+    expect(rows.length).toBe(0)
+  })
+
+  it('accepts an under-18 signup with the guardian acknowledgement and records it', async () => {
+    const { userId } = await signUp(
+      signUpInput({ dateOfBirth: birthDate(17, 364), acceptedGuardianAcknowledgement: true }),
+    )
+
+    const consents = await db.select().from(userConsents).where(eq(userConsents.userId, userId))
+    expect(consents.some((row) => row.consentType === 'GUARDIAN_ACKNOWLEDGEMENT')).toBe(true)
+  })
+
+  it('does not require the guardian acknowledgement from someone turning 18 today', async () => {
+    await expect(signUp(signUpInput({ dateOfBirth: birthDate(18) }))).resolves.toMatchObject({ role: 'STUDENT' })
   })
 
   it('rejects a duplicate email with "An account with that email already exists"', async () => {
@@ -157,7 +209,7 @@ describe('signIn', () => {
     expect(result.token.length).toBeGreaterThan(0)
     expect(result.expiresAt).toBeInstanceOf(Date)
 
-    const rows = await db.select().from(sessions).where(eq(sessions.token, result.token))
+    const rows = await sessionRowsFor(result.token)
     expect(rows.length).toBe(1)
     expect(rows[0].userId).toBe(userId)
   })
@@ -166,6 +218,46 @@ describe('signIn', () => {
     await expect(signIn(`nobody-${Date.now()}@test.com`, 'whatever')).rejects.toThrow(
       'Invalid email or password',
     )
+  })
+
+  it('still runs a full scrypt verification for an unknown email (against the dummy hash)', async () => {
+    vi.mocked(verifyPassword).mockClear()
+
+    await expect(signIn(`nobody-${Date.now()}@test.com`, 'whatever')).rejects.toThrow('Invalid email or password')
+
+    expect(vi.mocked(verifyPassword)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(verifyPassword)).toHaveBeenCalledWith('whatever', DUMMY_PASSWORD_HASH)
+  })
+
+  it('upgrades a legacy password hash on successful sign-in, and the password keeps working', async () => {
+    const email = `signin-legacy-${Date.now()}-${Math.random()}@test.com`
+    const oldHash = legacyHash('legacy-password-1')
+    const [user] = await db
+      .insert(users)
+      .values({ name: 'Legacy User', email, role: 'STUDENT', passwordHash: oldHash })
+      .returning()
+
+    await expect(signIn(email, 'legacy-password-1')).resolves.toMatchObject({ userId: user.id })
+
+    const [after] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, user.id))
+    expect(after.passwordHash).not.toBe(oldHash)
+    expect(after.passwordHash).toMatch(/^scrypt\$/)
+    expect(needsRehash(after.passwordHash!)).toBe(false)
+    await expect(signIn(email, 'legacy-password-1')).resolves.toMatchObject({ userId: user.id })
+  })
+
+  it('leaves a legacy hash alone when the password is wrong', async () => {
+    const email = `signin-legacy-wrong-${Date.now()}-${Math.random()}@test.com`
+    const oldHash = legacyHash('legacy-password-2')
+    const [user] = await db
+      .insert(users)
+      .values({ name: 'Legacy User', email, role: 'STUDENT', passwordHash: oldHash })
+      .returning()
+
+    await expect(signIn(email, 'wrong-password')).rejects.toThrow('Invalid email or password')
+
+    const [after] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, user.id))
+    expect(after.passwordHash).toBe(oldHash)
   })
 
   it('rejects a wrong password for a known email with the same "Invalid email or password" message', async () => {
@@ -204,7 +296,7 @@ describe('signOut', () => {
 
     await signOut(token)
 
-    const rows = await db.select().from(sessions).where(eq(sessions.token, token))
+    const rows = await sessionRowsFor(token)
     expect(rows.length).toBe(0)
   })
 
@@ -218,39 +310,77 @@ describe('signOut', () => {
 })
 
 describe('changePassword', () => {
-  it('succeeds with the correct current password: signs in with the new one, and the old one no longer works', async () => {
-    const user = await makeUser('STUDENT', 'old-password-123')
+  /** A signed-in user plus the token of the session making the change. */
+  async function signedInUser(password: string | null) {
+    const user = await makeUser('STUDENT', password)
+    const { token } = await createSession(user.id)
+    return { user, token, session: { userId: user.id, role: user.role } }
+  }
 
-    await changePassword('old-password-123', 'new-password-456', { userId: user.id, role: user.role })
+  it('succeeds with the correct current password: signs in with the new one, and the old one no longer works', async () => {
+    const { user, token, session } = await signedInUser('old-password-123')
+
+    await changePassword('old-password-123', 'new-password-456', session, token)
 
     await expect(signIn(user.email, 'new-password-456')).resolves.toMatchObject({ userId: user.id })
     await expect(signIn(user.email, 'old-password-123')).rejects.toThrow('Invalid email or password')
   })
 
-  it('rejects a wrong current password with "Current password is incorrect" and leaves the password unchanged', async () => {
-    const user = await makeUser('STUDENT', 'correct-password-1')
+  it("signs the user out everywhere else but keeps the caller's own session", async () => {
+    const { user, token, session } = await signedInUser('old-password-123')
+    const otherDevice = await createSession(user.id)
+    const someoneElse = await makeUser('STUDENT')
+    const unrelated = await createSession(someoneElse.id)
 
-    await expect(
-      changePassword('totally-wrong-password', 'new-password-456', { userId: user.id, role: user.role }),
-    ).rejects.toThrow('Current password is incorrect')
+    await changePassword('old-password-123', 'new-password-456', session, token)
+
+    expect(await getSessionByToken(token)).toEqual(session)
+    expect(await getSessionByToken(otherDevice.token)).toBeNull()
+    expect(await getSessionByToken(unrelated.token)).not.toBeNull()
+  })
+
+  it('rejects a wrong current password with "Current password is incorrect" and leaves the password and sessions unchanged', async () => {
+    const { user, token, session } = await signedInUser('correct-password-1')
+    const otherDevice = await createSession(user.id)
+
+    await expect(changePassword('totally-wrong-password', 'new-password-456', session, token)).rejects.toThrow(
+      'Current password is incorrect',
+    )
 
     await expect(signIn(user.email, 'correct-password-1')).resolves.toMatchObject({ userId: user.id })
+    expect(await getSessionByToken(otherDevice.token)).not.toBeNull()
   })
 
   it('rejects a too-short new password with "Password must be at least 8 characters"', async () => {
-    const user = await makeUser('STUDENT', 'correct-password-1')
+    const { token, session } = await signedInUser('correct-password-1')
 
-    await expect(
-      changePassword('correct-password-1', 'short', { userId: user.id, role: user.role }),
-    ).rejects.toThrow('Password must be at least 8 characters')
+    await expect(changePassword('correct-password-1', 'short', session, token)).rejects.toThrow(
+      'Password must be at least 8 characters',
+    )
   })
 
   it('rejects for a user with no password set with "Current password is incorrect", without crashing', async () => {
-    const user = await makeUser('STUDENT', null)
+    const { token, session } = await signedInUser(null)
 
-    await expect(
-      changePassword('anything', 'new-password-456', { userId: user.id, role: user.role }),
-    ).rejects.toThrow('Current password is incorrect')
+    await expect(changePassword('anything', 'new-password-456', session, token)).rejects.toThrow(
+      'Current password is incorrect',
+    )
+  })
+})
+
+describe('isUnderAdultAge', () => {
+  const now = new Date('2026-09-17T10:00:00Z')
+
+  it('is true the day before the 18th birthday and false on it', () => {
+    expect(isUnderAdultAge(new Date('2008-09-18'), now)).toBe(true)
+    expect(isUnderAdultAge(new Date('2008-09-17'), now)).toBe(false)
+    expect(isUnderAdultAge(new Date('1990-01-01'), now)).toBe(false)
+  })
+
+  it('treats a 29 February birthday as reaching 18 on 1 March', () => {
+    const leapBaby = new Date('2008-02-29')
+    expect(isUnderAdultAge(leapBaby, new Date('2026-02-28T23:59:59Z'))).toBe(true)
+    expect(isUnderAdultAge(leapBaby, new Date('2026-03-01T00:00:00Z'))).toBe(false)
   })
 })
 
