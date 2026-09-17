@@ -25,7 +25,8 @@ const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
 const KIND_LABELS: Record<MunDocumentKind, string> = {
   RULES: "Rules of procedure",
   CODE_OF_CONDUCT: "Code of conduct",
-  REFUND_POLICY: "Refund policy",
+  // Same label as the public MUN page (lib/mun-public-labels.ts).
+  REFUND_POLICY: "Fee policy",
   BROCHURE: "Brochure",
   HANDBOOK: "Handbook",
   DELEGATE_GUIDE: "Delegate guide",

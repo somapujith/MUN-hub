@@ -18,7 +18,8 @@ const STATUS_LABEL: Record<RegistrationStatus, string> = {
   PAYMENT_PENDING: "Payment in progress",
   CONFIRMED: "Confirmed",
   CANCELLED: "Cancelled",
-  REFUNDED: "Refunded",
+  // Legacy status (no refunds on MUN Hub); see components/dashboard/registration-status.ts.
+  REFUNDED: "Payment returned",
   ATTENDED: "Attended",
   NO_SHOW: "Marked as no-show",
 };

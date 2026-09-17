@@ -480,8 +480,8 @@ function PaymentStep({ data, onSaved }: StepProps) {
 const AGREEMENT_POINTS = [
   "Everything you publish about your conference — dates, venue, committees, fees — is accurate, and you'll keep it up to date.",
   "MUN Hub reviews every application and listing before it goes live, and may ask for changes, pause or remove a listing.",
-  "Delegate payments collected on MUN Hub are settled to the UPI ID you provided, after any applicable fees and refunds.",
-  "You'll honour your published refund policy and handle delegate queries promptly.",
+  "Delegate payments collected on MUN Hub are settled to the UPI ID you provided, less MUN Hub's platform fee.",
+  "Registrations on MUN Hub are final: you won't promise delegates refunds, and you'll handle their queries promptly.",
   "You'll use delegate details only to run your conference, and keep them secure.",
 ];
 
