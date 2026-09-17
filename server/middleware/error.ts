@@ -105,7 +105,7 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   if (message === MFA_ERRORS.expired) {
     return { status: 400, code: 'VALIDATION_FAILED', message }
   }
-  if (message === MFA_ERRORS.tooManyAttempts) {
+  if (message === MFA_ERRORS.tooManyAttempts || message === MFA_ERRORS.lockedOut) {
     return { status: 429, code: 'RATE_LIMITED', message }
   }
 
@@ -368,4 +368,5 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: MFA_ERRORS.invalidCode, status: 401, code: 'UNAUTHORIZED' },
   { message: MFA_ERRORS.expired, status: 400, code: 'VALIDATION_FAILED' },
   { message: MFA_ERRORS.tooManyAttempts, status: 429, code: 'RATE_LIMITED' },
+  { message: MFA_ERRORS.lockedOut, status: 429, code: 'RATE_LIMITED' },
 ]

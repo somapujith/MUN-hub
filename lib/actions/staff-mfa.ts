@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, gt, isNull, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { mfaPendingChallenges, mfaRecoveryCodes, userMfa, users } from '@/lib/db/schema'
 import { decryptField, encryptField, TOTP_KEY_NAMES } from '@/lib/crypto/field-encryption'
@@ -43,6 +43,20 @@ const MFA_CHALLENGE_TTL_MS = 5 * 60 * 1000
 const MFA_MAX_ATTEMPTS = 5
 const RECOVERY_CODE_COUNT = 10
 
+/**
+ * Wrong codes are also counted per *account*, across every challenge and
+ * every code-checking route, over this rolling window. MFA_MAX_ATTEMPTS
+ * alone only caps one challenge: `signIn` mints a brand-new challenge every
+ * time the password verifies, so whoever has a staff password could
+ * otherwise buy five more guesses at will and keep going indefinitely (and
+ * `regenerateMfaRecoveryCodes`/`disableMfa` counted nothing at all). Two
+ * exhausted challenges' worth of wrong codes freeze the account's second
+ * factor for the window; nothing here can lock anyone out permanently, and
+ * the window clears on its own.
+ */
+const MFA_FAILURE_WINDOW_MS = 15 * 60 * 1000
+const MFA_MAX_FAILURES_PER_WINDOW = 2 * MFA_MAX_ATTEMPTS
+
 export const MFA_ERRORS = {
   staffOnly: 'Two-factor authentication is only available for staff accounts',
   alreadyEnrolled: 'Two-factor authentication is already set up for this account',
@@ -51,6 +65,7 @@ export const MFA_ERRORS = {
   invalidCode: 'Invalid verification code',
   expired: 'This sign-in attempt has expired — sign in again',
   tooManyAttempts: 'Too many incorrect attempts — sign in again',
+  lockedOut: 'Too many incorrect codes for this account — try again in a few minutes',
   unavailable: "Two-factor authentication isn't available yet",
 } as const
 
@@ -159,13 +174,65 @@ function generateRecoveryCode(): string {
 }
 
 /**
+ * Wrong codes this account has submitted in the last MFA_FAILURE_WINDOW_MS,
+ * from every source: the `attempts` each sign-in challenge counted, plus the
+ * marker rows `recordMfaFailure` writes for the routes that have no
+ * challenge of their own.
+ */
+async function countRecentMfaFailures(executor: Executor, userId: string, now: Date): Promise<number> {
+  const [row] = await executor
+    .select({ total: sql<string | null>`sum(${mfaPendingChallenges.attempts})` })
+    .from(mfaPendingChallenges)
+    .where(
+      and(
+        eq(mfaPendingChallenges.userId, userId),
+        gt(mfaPendingChallenges.createdAt, new Date(now.getTime() - MFA_FAILURE_WINDOW_MS)),
+      ),
+    )
+  return Number(row?.total ?? 0)
+}
+
+/**
+ * Records one wrong code for an account on a path that has no challenge row
+ * to count it on (`regenerateMfaRecoveryCodes`, `disableMfa`), so those
+ * guesses land in the same per-account budget `countRecentMfaFailures`
+ * reads. The row is written already-expired and already-consumed, and its
+ * token hash is random, so it can never be redeemed as a challenge — it
+ * exists only to be counted.
+ */
+async function recordMfaFailure(executor: Executor, userId: string, now: Date): Promise<void> {
+  await executor.insert(mfaPendingChallenges).values({
+    userId,
+    tokenHash: hashOpaqueToken(generateOpaqueToken()),
+    attempts: 1,
+    expiresAt: now,
+    consumedAt: now,
+    createdAt: now,
+  })
+}
+
+/** Throws `lockedOut` once the account has spent its per-window guess budget. */
+async function assertNotLockedOut(executor: Executor, userId: string, now: Date): Promise<void> {
+  if ((await countRecentMfaFailures(executor, userId, now)) >= MFA_MAX_FAILURES_PER_WINDOW) {
+    throw new Error(MFA_ERRORS.lockedOut)
+  }
+}
+
+/**
  * Called by `signIn` once the password has verified for a staff account with
  * confirmed MFA — mints a short-lived, single-use, hashed-at-rest pending
  * token (mirrors lib/auth/session.ts's opaque tokens) instead of a session.
+ *
+ * Refuses (`lockedOut`) while the account is over its per-window guess
+ * budget, so a caller who knows the password can't keep minting fresh
+ * challenges to buy another MFA_MAX_ATTEMPTS guesses each time.
  */
 export async function beginMfaChallenge(userId: string): Promise<{ pendingToken: string; expiresAt: Date }> {
+  const now = new Date()
+  await assertNotLockedOut(db, userId, now)
+
   const pendingToken = generateOpaqueToken()
-  const expiresAt = new Date(Date.now() + MFA_CHALLENGE_TTL_MS)
+  const expiresAt = new Date(now.getTime() + MFA_CHALLENGE_TTL_MS)
   await db.insert(mfaPendingChallenges).values({ userId, tokenHash: hashOpaqueToken(pendingToken), expiresAt })
   return { pendingToken, expiresAt }
 }
@@ -202,6 +269,10 @@ export async function completeMfaChallenge(
     if (row.attempts >= MFA_MAX_ATTEMPTS) {
       return { kind: 'error', message: MFA_ERRORS.tooManyAttempts }
     }
+    // …and the account-wide budget, which a fresh challenge can't reset.
+    if ((await countRecentMfaFailures(tx, row.userId, now)) >= MFA_MAX_FAILURES_PER_WINDOW) {
+      return { kind: 'error', message: MFA_ERRORS.lockedOut }
+    }
 
     const [mfa] = await tx.select().from(userMfa).where(eq(userMfa.userId, row.userId)).limit(1)
     if (!mfa?.confirmedAt) {
@@ -237,8 +308,22 @@ export async function completeMfaChallenge(
   return { userId: outcome.userId, role: outcome.role, token, expiresAt }
 }
 
-/** The shape generateRecoveryCode produces (case-insensitive, since the sign-in field only displays uppercase). */
-const RECOVERY_CODE_PATTERN = /^[0-9A-F]{5}-[0-9A-F]{5}$/i
+/**
+ * A typed-back recovery code in exactly the form `generateRecoveryCode`
+ * produces (`XXXXX-XXXXX`, uppercase hex) — or null if it isn't one.
+ *
+ * Case, spaces and dashes are all ignored, because the stored value is a
+ * scrypt hash of the exact printed string and an exact-match check would
+ * reject a correctly copied code typed in lowercase (what a phone keyboard
+ * sends, whatever the field's `text-transform` displays) or without the
+ * dash — burning one of five attempts at the moment the user has already
+ * lost their authenticator.
+ */
+function canonicalRecoveryCode(code: string): string | null {
+  const compact = code.replace(/[\s-]/g, '').toUpperCase()
+  if (!/^[0-9A-F]{10}$/.test(compact)) return null
+  return `${compact.slice(0, 5)}-${compact.slice(5)}`
+}
 
 /**
  * The id of the first unused recovery code that verifies against `code`, or
@@ -248,8 +333,8 @@ const RECOVERY_CODE_PATTERN = /^[0-9A-F]{5}-[0-9A-F]{5}$/i
  * ten codes would make each failed attempt expensive to serve.
  */
 async function matchRecoveryCode(executor: Executor, userId: string, code: string): Promise<string | null> {
-  if (!RECOVERY_CODE_PATTERN.test(code)) return null
-  const normalized = code.toUpperCase()
+  const normalized = canonicalRecoveryCode(code)
+  if (!normalized) return null
 
   const candidates = await executor
     .select({ id: mfaRecoveryCodes.id, codeHash: mfaRecoveryCodes.codeHash })
@@ -268,6 +353,11 @@ async function matchRecoveryCode(executor: Executor, userId: string, code: strin
  * specifically (not a recovery code) — regenerating is about to invalidate
  * every recovery code anyway, so spending one here to do it would be an odd,
  * wasteful path when the authenticator app is right there.
+ *
+ * A wrong code counts against the account's per-window budget the same way a
+ * sign-in guess does (`recordMfaFailure`) — the per-user rate limit on this
+ * route bounds how *fast* guesses arrive, not how many, and a fresh set of
+ * recovery codes is a permanent 2FA bypass for whoever guesses right.
  */
 export async function regenerateMfaRecoveryCodes(code: string, session: Session): Promise<{ recoveryCodes: string[] }> {
   assertStaff(session)
@@ -275,9 +365,15 @@ export async function regenerateMfaRecoveryCodes(code: string, session: Session)
   const [row] = await db.select().from(userMfa).where(eq(userMfa.userId, session.userId)).limit(1)
   if (!row?.confirmedAt) throw new Error(MFA_ERRORS.notConfirmed)
 
+  const now = new Date()
+  await assertNotLockedOut(db, session.userId, now)
+
   const secret = decryptField(row.totpSecretCiphertext, TOTP_KEY_NAMES)
   const matchedStep = verifyTotp(secret, code.trim(), { lastUsedStep: row.lastUsedStep })
-  if (matchedStep === null) throw new Error(MFA_ERRORS.invalidCode)
+  if (matchedStep === null) {
+    await recordMfaFailure(db, session.userId, now)
+    throw new Error(MFA_ERRORS.invalidCode)
+  }
 
   const recoveryCodes = Array.from({ length: RECOVERY_CODE_COUNT }, generateRecoveryCode)
   const codeHashes = await Promise.all(recoveryCodes.map((recoveryCode) => hashPassword(recoveryCode)))
@@ -297,9 +393,11 @@ export async function regenerateMfaRecoveryCodes(code: string, session: Session)
  * the session cookie) before the safety net comes down. Throws
  * `notConfirmed` if there's nothing confirmed to disable.
  *
- * Unlike completeMfaChallenge, nothing here counts wrong codes: guessing is
- * bounded by the per-user RL_MFA_MANAGE_USER limit on this route and on
- * regenerate (server/middleware/rate-limit.ts).
+ * Wrong codes count against the same per-window, per-account budget
+ * completeMfaChallenge uses (`recordMfaFailure`), on top of the per-user
+ * RL_MFA_MANAGE_USER limit this route and regenerate share
+ * (server/middleware/rate-limit.ts) — that limit only bounds the rate, and
+ * turning 2FA off is the most valuable thing a guesser could achieve here.
  */
 export async function disableMfa(code: string, session: Session): Promise<void> {
   assertStaff(session)
@@ -307,12 +405,18 @@ export async function disableMfa(code: string, session: Session): Promise<void> 
   const [row] = await db.select().from(userMfa).where(eq(userMfa.userId, session.userId)).limit(1)
   if (!row?.confirmedAt) throw new Error(MFA_ERRORS.notConfirmed)
 
+  const now = new Date()
+  await assertNotLockedOut(db, session.userId, now)
+
   const trimmedCode = code.trim()
   const matchedStep = /^\d{6}$/.test(trimmedCode)
     ? verifyTotp(decryptField(row.totpSecretCiphertext, TOTP_KEY_NAMES), trimmedCode, { lastUsedStep: row.lastUsedStep })
     : null
   const recoveryCodeId = matchedStep === null ? await matchRecoveryCode(db, session.userId, trimmedCode) : null
-  if (matchedStep === null && !recoveryCodeId) throw new Error(MFA_ERRORS.invalidCode)
+  if (matchedStep === null && !recoveryCodeId) {
+    await recordMfaFailure(db, session.userId, now)
+    throw new Error(MFA_ERRORS.invalidCode)
+  }
 
   await db.transaction(async (tx) => {
     await tx.delete(userMfa).where(eq(userMfa.userId, session.userId))
