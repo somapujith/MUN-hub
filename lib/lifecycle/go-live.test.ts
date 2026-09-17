@@ -18,10 +18,13 @@ import {
   munVersions,
   verificationIssues,
   adminActions,
+  munModuleVerifications,
 } from '@/lib/db/schema'
 import { enqueueForGoLive, getGoLiveQueue, publishFromQueue, reviewSubmission, submitMunForReview } from './go-live'
+import { reviewModule } from './module-verification'
 import { submitFinalConfirmation } from './organizer-confirmation'
 import { updateMunDetails } from '@/lib/actions/mun-config'
+import { unpublishMun } from '@/lib/actions/admin-review'
 
 async function makeUser(role: 'ORGANIZER' | 'ADMIN' = 'ORGANIZER') {
   const [user] = await db
@@ -534,6 +537,125 @@ describe('enqueueForGoLive', () => {
     const { mun } = await makeApprovedSubmission(organizer, admin)
 
     await expect(enqueueForGoLive(mun.id, { userId: organizer.id, role: 'ORGANIZER' })).rejects.toThrow('Forbidden')
+  })
+
+  async function publishFresh(organizer: { id: string }, admin: { id: string }) {
+    const { mun } = await makeQueuedSubmission(organizer, admin)
+    await db
+      .update(munPaymentSettings)
+      .set({ verificationState: 'VERIFIED', verifiedAt: new Date(), verifiedBy: admin.id })
+      .where(eq(munPaymentSettings.munId, mun.id))
+    await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' }, crypto.randomUUID())
+    return mun
+  }
+
+  it('an unpublished mun can be queued and published again, in a fresh round', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const adminSession = { userId: admin.id, role: 'ADMIN' as const }
+    const mun = await publishFresh(organizer, admin)
+    await unpublishMun(mun.id, adminSession)
+
+    const queued = await enqueueForGoLive(mun.id, adminSession)
+    expect(queued).toMatchObject({ status: 'APPROVED', versionNumber: 2, reviewerId: admin.id })
+    expect(queued.queuedAt).toBeInstanceOf(Date)
+    const queue = await getGoLiveQueue({ limit: 100 }, adminSession)
+    expect(queue.results.some((row) => row.munId === mun.id && row.submissionId === queued.id)).toBe(true)
+
+    const result = await publishFromQueue(mun.id, adminSession, crypto.randomUUID())
+    expect(result.replay).toBe(false)
+    expect(result.mun.status).toBe('PUBLISHED')
+    expect(result.submission.id).toBe(queued.id)
+
+    const versions = await db.select().from(munVersions).where(eq(munVersions.munId, mun.id))
+    expect(versions.map((version) => version.versionNumber).sort()).toEqual([1, 2])
+  })
+
+  it('a change made while unpublished goes through re-verification before the mun can be queued', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const adminSession = { userId: admin.id, role: 'ADMIN' as const }
+    const mun = await publishFresh(organizer, admin)
+    await unpublishMun(mun.id, adminSession)
+
+    await updateMunDetails(mun.id, { venue: 'A Different Hall' }, { userId: organizer.id, role: 'ORGANIZER' })
+    const [moved] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(moved.status).toBe('VERIFICATION')
+    await expect(enqueueForGoLive(mun.id, adminSession)).rejects.toThrow(
+      'Cannot queue a MUN in status VERIFICATION; it must be verified or unpublished',
+    )
+
+    await reviewModule(mun.id, 'DATES_VENUE', 'VERIFIED', [], adminSession)
+    const [verified] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(verified.status).toBe('VERIFIED')
+
+    const queued = await enqueueForGoLive(mun.id, adminSession)
+    expect(queued.versionNumber).toBe(2)
+    await expect(publishFromQueue(mun.id, adminSession, crypto.randomUUID())).resolves.toMatchObject({
+      replay: false,
+      mun: { status: 'PUBLISHED' },
+    })
+  })
+
+  it('refuses to re-queue while a required section is still waiting for review', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const adminSession = { userId: admin.id, role: 'ADMIN' as const }
+    const mun = await publishFresh(organizer, admin)
+    await unpublishMun(mun.id, adminSession)
+    await db
+      .update(munModuleVerifications)
+      .set({ state: 'CHANGES_REQUESTED' })
+      .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'COMMITTEES')))
+
+    await expect(enqueueForGoLive(mun.id, adminSession)).rejects.toThrow(
+      'Cannot queue — these sections still need review: COMMITTEES',
+    )
+    const [still] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(still.status).toBe('UNPUBLISHED')
+  })
+
+  it('a mun that was never published still needs an approved submission', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const [mun] = await db
+      .insert(muns)
+      .values({ organizerId: organizer.id, name: 'Never Published', slug: `never-published-${crypto.randomUUID()}`, status: 'VERIFIED' })
+      .returning()
+
+    await expect(enqueueForGoLive(mun.id, { userId: admin.id, role: 'ADMIN' })).rejects.toThrow(
+      'No active submission found for this mun',
+    )
+  })
+})
+
+describe('reviewSubmission approval', () => {
+  it('verifies every section and answers the open reviewer issues', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeMunAtVerification(organizer)
+    await db.insert(verificationIssues).values({
+      munId: mun.id,
+      moduleName: 'COMMITTEES',
+      severity: 'BLOCKER',
+      reason: 'Add an agenda',
+      raisedBy: admin.id,
+      source: 'REVIEWER',
+    })
+
+    await reviewSubmission(mun.id, 'APPROVED', {}, { userId: admin.id, role: 'ADMIN' })
+
+    const states = await db
+      .select({ state: munModuleVerifications.state })
+      .from(munModuleVerifications)
+      .where(eq(munModuleVerifications.munId, mun.id))
+    expect(states.length).toBeGreaterThan(0)
+    expect(states.every((row) => row.state === 'VERIFIED')).toBe(true)
+    const open = await db
+      .select()
+      .from(verificationIssues)
+      .where(and(eq(verificationIssues.munId, mun.id), eq(verificationIssues.source, 'REVIEWER'), eq(verificationIssues.resolved, false)))
+    expect(open).toHaveLength(0)
   })
 })
 

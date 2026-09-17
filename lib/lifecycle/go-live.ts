@@ -1,6 +1,13 @@
-import { and, desc, eq, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { adminActions, muns, munSubmissions, munVersions, verificationIssues } from '@/lib/db/schema'
+import {
+  adminActions,
+  munModuleVerifications,
+  muns,
+  munSubmissions,
+  munVersions,
+  verificationIssues,
+} from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
@@ -432,6 +439,30 @@ export async function reviewSubmission(
     if (decision === 'APPROVED') {
       await transitionMun(munId, 'VERIFIED', session.userId, opts.notes, undefined, tx)
 
+      // Approving the whole submission verifies every section in it, and
+      // answers the reviewers' open issues. Otherwise the organizer's
+      // checklist keeps saying "waiting for MUN Hub", and an open BLOCKER
+      // issue would fail FINAL_REVIEW at publish time.
+      await tx
+        .update(munModuleVerifications)
+        .set({ state: 'VERIFIED', lastReviewedAt: now, lastReviewedBy: session.userId, updatedAt: now })
+        .where(
+          and(
+            eq(munModuleVerifications.munId, munId),
+            notInArray(munModuleVerifications.state, ['VERIFIED', 'REJECTED']),
+          ),
+        )
+      await tx
+        .update(verificationIssues)
+        .set({ resolved: true, resolvedAt: now })
+        .where(
+          and(
+            eq(verificationIssues.munId, munId),
+            eq(verificationIssues.source, 'REVIEWER'),
+            eq(verificationIssues.resolved, false),
+          ),
+        )
+
       const [row] = await tx
         .update(munSubmissions)
         .set({
@@ -532,21 +563,95 @@ export async function reviewSubmission(
   return updated
 }
 
+/** Statuses a previously published mun can be queued again from. */
+const REQUEUEABLE_STATUSES = ['UNPUBLISHED', 'VERIFIED'] as const
+
+/**
+ * A mun that was published before and has since been unpublished (or sent
+ * back through re-verification and verified again) has no active submission:
+ * the round that published it is finished. Opens a fresh, already-approved
+ * round so it can go through the queue and publish again.
+ *
+ * Safe without a new content review: any high-impact edit while UNPUBLISHED
+ * moves the mun to VERIFICATION (reverification.ts), so a mun still in
+ * UNPUBLISHED hasn't changed in a way that needs review, and a mun in VERIFIED
+ * has just been re-verified. As a backstop, refuses while any required section
+ * is still waiting for review. `publishFromQueue` re-validates live data too.
+ */
+async function openRepublishSubmission(tx: Tx, munId: string, actorId: string) {
+  const [mun] = await tx.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).for('update').limit(1)
+  if (!mun) throw new Error('Mun not found')
+
+  const [published] = await tx
+    .select({ id: munSubmissions.id })
+    .from(munSubmissions)
+    .where(and(eq(munSubmissions.munId, munId), eq(munSubmissions.status, 'PUBLISHED')))
+    .limit(1)
+  if (!published) return null
+  if (!(REQUEUEABLE_STATUSES as readonly string[]).includes(mun.status)) {
+    throw new Error(`Cannot queue a MUN in status ${mun.status}; it must be verified or unpublished`)
+  }
+
+  const waiting = await tx
+    .select({ moduleName: munModuleVerifications.moduleName })
+    .from(munModuleVerifications)
+    .where(
+      and(
+        eq(munModuleVerifications.munId, munId),
+        eq(munModuleVerifications.isRequired, true),
+        inArray(munModuleVerifications.state, ['PENDING_REVIEW', 'CHANGES_REQUESTED', 'REJECTED']),
+      ),
+    )
+  if (waiting.length > 0) {
+    const names = waiting.map((row) => row.moduleName).join(', ')
+    throw new Error(`Cannot queue — these sections still need review: ${names}`)
+  }
+
+  const [prior] = await tx
+    .select({ versionNumber: munSubmissions.versionNumber })
+    .from(munSubmissions)
+    .where(eq(munSubmissions.munId, munId))
+    .orderBy(desc(munSubmissions.versionNumber))
+    .limit(1)
+  const now = new Date()
+  const [submission] = await tx
+    .insert(munSubmissions)
+    .values({
+      munId,
+      submittedBy: actorId,
+      versionNumber: (prior?.versionNumber ?? 0) + 1,
+      status: 'APPROVED',
+      progressPercentage: 100,
+      submittedAt: now,
+      reviewStartedAt: now,
+      decidedAt: now,
+      approvedAt: now,
+      reviewerId: actorId,
+      slaDeadline: addBusinessDays(now, 1, DEFAULT_BUSINESS_CALENDAR),
+      slaState: 'ON_TRACK',
+    })
+    .returning()
+  return submission
+}
+
 /**
  * Admin moves a VERIFIED mun into the go-live queue (design doc Section 5.3)
  * — ADMIN/SUPER_ADMIN only. Row-locks the active submission (the thing
- * `queuedAt` lives on) before transitioning the mun.
+ * `queuedAt` lives on) before transitioning the mun. A previously published
+ * mun gets a fresh round first (see `openRepublishSubmission`).
  */
 export async function enqueueForGoLive(munId: string, session: Session | null): Promise<typeof munSubmissions.$inferSelect> {
   requireRole(session, [...PUBLISH_ROLES])
 
   return db.transaction(async (tx) => {
-    const submission = await lockActiveSubmission(tx, munId)
+    const active = await lockActiveSubmission(tx, munId)
+    const submission = active ?? (await openRepublishSubmission(tx, munId, session.userId))
     if (!submission) {
       throw new Error('No active submission found for this mun')
     }
 
-    await transitionMun(munId, 'GO_LIVE_QUEUE', session.userId, undefined, undefined, tx)
+    const note = active ? undefined : 'Queued to publish again'
+    await transitionMun(munId, 'GO_LIVE_QUEUE', session.userId, note, undefined, tx)
 
     const [updated] = await tx
       .update(munSubmissions)

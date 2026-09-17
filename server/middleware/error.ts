@@ -195,7 +195,7 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
 
-  if (/^Cannot (submit|publish|transition|confirm)/.test(message)) {
+  if (/^Cannot (submit|publish|transition|confirm|queue)/.test(message)) {
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
 
@@ -334,4 +334,5 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'You must confirm the submission is accurate and complete', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Registration deadline must be after registration opens', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Registration deadline must be before the conference starts', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'Cannot queue — these sections still need review: COMMITTEES', status: 409, code: 'CONFLICT_STATE' },
 ]
