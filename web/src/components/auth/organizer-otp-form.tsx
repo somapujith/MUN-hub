@@ -142,7 +142,7 @@ function useCompleteSignIn() {
     // so the organizer guards see the new account without a refetch.
     queryClient.clear();
     queryClient.setQueryData(queryKeys.session(), { userId: result.userId, role: result.role });
-    const home = result.isNewAccount ? "/organizer/apply" : "/organizer/dashboard";
+    const home = result.isNewAccount ? "/organizer/welcome" : "/organizer/dashboard";
     navigate(redirectTo !== "/" ? redirectTo : home, { replace: true });
   };
 }

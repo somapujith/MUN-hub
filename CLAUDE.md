@@ -209,6 +209,10 @@ Migration `0022_happy_marten_broadcloak.sql`. 45 new tests (`changePassword` cas
   - Locally, and in tests, the console adapter prints the code in the API log line `[notification] <email> …`.
 - **Password sign-in still works for any account that has a password**, including seeded demo organizers and E2E fixtures, through `POST /auth/session`. Organizers created by the code flow have `passwordHash = null`, so they can only use codes.
 - **Web:** `web/src/components/auth/organizer-otp-form.tsx` (`mode: 'login' | 'signup'`), rendered by `organizer-login-page.tsx` and `organizer-signup-page.tsx` inside the shared `OrganizerAuthLayout`.
+- **Destination after sign-in:**
+  - A new organizer account lands on `/organizer/welcome` (`organizer-welcome-page.tsx`): a District-style three-step page whose "Start your journey" button leads to `/organizer/apply`. The user asked for that page to stay bright, so it uses fixed light colors instead of theme tokens and must look the same in dark mode.
+  - Returning organizers go to `/organizer/dashboard`.
+  - An explicit `?redirectTo=` wins over both.
 
 ## Cloudflare Hyperdrive bridge for `lib/db/client.ts` (landed 2026-09-17)
 
