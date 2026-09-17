@@ -116,7 +116,7 @@ export function CheckInPanel({ munId, munStatus }: CheckInPanelProps) {
             submit(code);
           }}
         >
-          <div className="flex min-w-[min(100%,16rem)] flex-1 flex-col gap-xs">
+          <div className="flex w-full flex-col gap-xs sm:w-[20rem]">
             <Label htmlFor="check-in-code">Check-in code</Label>
             <Input
               ref={inputRef}

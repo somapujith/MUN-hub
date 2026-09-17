@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
 import { ChevronLeft, ChevronRight, Download, UserCheck, UserX, UsersRound } from "lucide-react";
@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { DelegateDetailSheet } from "@/components/organizer/delegate-detail-sheet";
 import { RegistrationStatusChip } from "@/components/dashboard/registration-status-chip";
 import { getPaymentStatusMeta, getToneClassName } from "@/components/dashboard/registration-status";
@@ -61,15 +62,6 @@ function formatDate(value: string): string {
 /** Latest payment on the registration — payments.registrationId is unique in practice, so there's at most one. */
 function latestPayment(row: DelegateRow) {
   return row.payment.length > 0 ? row.payment[row.payment.length - 1] : null;
-}
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(timer);
-  }, [value, delayMs]);
-  return debounced;
 }
 
 export function OrganizerRegistrationsPage() {
@@ -332,7 +324,36 @@ export function OrganizerRegistrationsPage() {
                         </div>
                       </td>
                       <td className="px-md py-sm">
-                        <RegistrationStatusChip status={row.status} />
+                        <div className="flex flex-col items-start gap-xxs">
+                          <RegistrationStatusChip status={row.status} />
+                          {/* Only the attendance changes that apply to this row. */}
+                          {canMark && (
+                            <div className="-ml-2 flex flex-wrap">
+                              {row.status !== "ATTENDED" && (
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  aria-label={`Mark ${row.user.name} attended`}
+                                  disabled={attendanceMutation.isPending}
+                                  onClick={() => markAttendance(row.id, "ATTENDED")}
+                                >
+                                  <UserCheck aria-hidden /> Attended
+                                </Button>
+                              )}
+                              {row.status !== "NO_SHOW" && (
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  aria-label={`Mark ${row.user.name} no-show`}
+                                  disabled={attendanceMutation.isPending}
+                                  onClick={() => markAttendance(row.id, "NO_SHOW")}
+                                >
+                                  <UserX aria-hidden /> No-show
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="px-md py-sm">
                         {payment && paymentMeta ? (
@@ -346,33 +367,9 @@ export function OrganizerRegistrationsPage() {
                           <span className="text-caption text-muted-foreground">No payment recorded</span>
                         )}
                       </td>
-                      <td className="px-md py-sm text-body">{formatDate(row.createdAt)}</td>
+                      <td className="px-md py-sm whitespace-nowrap text-body">{formatDate(row.createdAt)}</td>
                       <td className="px-md py-sm">
                         <div className="flex items-center justify-end gap-xxs">
-                          {canMark && (
-                            <>
-                              <Button
-                                size="icon-xs"
-                                variant="ghost"
-                                aria-label={`Mark ${row.user.name} attended`}
-                                title="Mark attended"
-                                disabled={attendanceMutation.isPending || row.status === "ATTENDED"}
-                                onClick={() => markAttendance(row.id, "ATTENDED")}
-                              >
-                                <UserCheck aria-hidden />
-                              </Button>
-                              <Button
-                                size="icon-xs"
-                                variant="ghost"
-                                aria-label={`Mark ${row.user.name} no-show`}
-                                title="Mark no-show"
-                                disabled={attendanceMutation.isPending || row.status === "NO_SHOW"}
-                                onClick={() => markAttendance(row.id, "NO_SHOW")}
-                              >
-                                <UserX aria-hidden />
-                              </Button>
-                            </>
-                          )}
                           <Button size="xs" variant="outline" onClick={() => setOpenRegistrationId(row.id)}>
                             View
                           </Button>

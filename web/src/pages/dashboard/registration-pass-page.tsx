@@ -87,7 +87,8 @@ export function RegistrationPassPage() {
               <span className="inline-flex items-center gap-xs text-caption text-[#c7c9cf]">
                 <TicketIcon className="size-4" aria-hidden /> Delegate pass
               </span>
-              <h1 className="font-display text-display-md text-balance">{pass.mun.name}</h1>
+              {/* Explicit colour: the base layer paints every h1 in --ink. */}
+              <h1 className="font-display text-display-md text-balance text-white">{pass.mun.name}</h1>
               <p className="flex items-center gap-xs text-body-md text-[#e0e2e6]">
                 <CalendarIcon className="size-4 shrink-0" aria-hidden />
                 {formatDateRange(
@@ -121,7 +122,7 @@ export function RegistrationPassPage() {
 
               <div className="flex flex-col items-center gap-xs rounded-md border border-dashed border-border-strong bg-surface-soft px-md py-lg text-center">
                 <span className="text-caption text-muted-foreground">Check-in code</span>
-                <p className="font-mono text-display-md font-semibold tracking-[0.18em] break-all text-ink">
+                <p className="font-mono text-[26px] leading-tight font-medium tracking-[0.12em] whitespace-nowrap text-ink sm:text-display-md sm:tracking-[0.18em]">
                   {pass.checkInCode}
                 </p>
                 {pass.checkedIn ? (

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
 import { Award, CircleCheck, Lock, Plus, Send, Trash2, Undo2 } from "lucide-react";
@@ -19,12 +19,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import type { CreateAchievementInput, ResultsState } from "@/types/results";
 
 const EMPTY_FORM: CreateAchievementInput = {
   registrationId: "",
-  committee: "",
-  portfolio: "",
+  committee: null,
+  portfolio: null,
   award: "",
 };
 
@@ -36,15 +37,6 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(
     new Date(value),
   );
-}
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(timer);
-  }, [value, delayMs]);
-  return debounced;
 }
 
 /**
@@ -89,7 +81,15 @@ export function OrganizerResultsPage() {
     ]);
 
   const createMutation = useMutation({
-    mutationFn: () => createAchievement(munId, form),
+    // Blank overrides go as null: the API rejects empty strings, and a null
+    // override means "use the delegate's own committee/portfolio".
+    mutationFn: () =>
+      createAchievement(munId, {
+        registrationId: form.registrationId,
+        award: form.award.trim(),
+        committee: form.committee?.trim() || null,
+        portfolio: form.portfolio?.trim() || null,
+      }),
     onSuccess: async () => {
       await refresh();
       setIsFormOpen(false);
