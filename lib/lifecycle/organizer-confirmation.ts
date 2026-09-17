@@ -20,6 +20,7 @@ import {
 } from '@/lib/db/schema'
 import type { Mun } from '@/lib/types'
 import type { Session } from '@/lib/auth/adapter'
+import { runInBackground } from '@/lib/background-tasks'
 import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
 import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import { transitionMun } from './mun-state-machine'
@@ -31,11 +32,18 @@ import { validateMunForSubmission } from './validation'
  * failure of the state change that triggered it), duplicated locally rather
  * than imported since this file has no transaction boundary to wait on (see
  * below) and the two call sites otherwise have nothing else in common.
+ *
+ * Handed to `runInBackground` so Cloudflare Workers keeps the send alive
+ * past the response (`waitUntil`) instead of cancelling the DB lookup or the
+ * ZeptoMail fetch as soon as the route replies. No-op under Node — see
+ * lib/background-tasks.ts.
  */
 function notifyFireAndForget(work: () => Promise<void>): void {
-  work().catch((error) => {
-    console.error('[organizer-confirmation] pipeline notification failed', error)
-  })
+  runInBackground(
+    work().catch((error) => {
+      console.error('[organizer-confirmation] pipeline notification failed', error)
+    }),
+  )
 }
 
 /**

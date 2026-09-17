@@ -11,6 +11,7 @@ import {
 import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
+import { runInBackground } from '@/lib/background-tasks'
 import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
 import { buildPublicMunUrl, resolveAdminEmails, resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import { addBusinessDays, computeSlaState, DEFAULT_BUSINESS_CALENDAR, type SlaState } from './sla'
@@ -83,11 +84,19 @@ export interface SubmitMunForReviewResult {
  * file. Wraps the recipient-resolution + `notifyPipelineEvent` call in its
  * own try/catch and logs (never throws) — see the file header comment for
  * why. Never awaited by the caller in a way that blocks its return value.
+ *
+ * Handed to `runInBackground` so Cloudflare Workers keeps the send alive
+ * past the response (`waitUntil`); without that, the DB lookup or the
+ * ZeptoMail fetch can be cancelled the moment the route replies and the
+ * email silently never goes out. No-op under Node — see
+ * lib/background-tasks.ts.
  */
 function notifyAfterCommit(work: () => Promise<void>): void {
-  work().catch((error) => {
-    console.error('[go-live] pipeline notification failed', error)
-  })
+  runInBackground(
+    work().catch((error) => {
+      console.error('[go-live] pipeline notification failed', error)
+    }),
+  )
 }
 
 /**

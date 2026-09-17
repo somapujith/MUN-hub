@@ -15,6 +15,7 @@ import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { publishFromQueue, type PublishFromQueueResult } from '@/lib/lifecycle/go-live'
+import { runInBackground } from '@/lib/background-tasks'
 import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
 import { notifyOrganizerApplicationEvent } from '@/lib/notifications/organizer-application-events'
 import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
@@ -202,32 +203,39 @@ function notifyReviewDecisionAfterCommit(
   decision: 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED',
   reason: string | undefined,
 ): void {
-  ;(async () => {
-    const context = await resolveMunNotificationContext(munId)
+  // Handed to `runInBackground` so Cloudflare Workers keeps the send alive
+  // past the response (`waitUntil`); without it the Hyperdrive lookup or the
+  // ZeptoMail fetch can be cancelled the instant the route replies, and the
+  // `.catch` below never even runs, so the drop is silent. No-op under Node
+  // — see lib/background-tasks.ts.
+  runInBackground(
+    (async () => {
+      const context = await resolveMunNotificationContext(munId)
 
-    if (decision === 'APPROVED') {
+      if (decision === 'APPROVED') {
+        await notifyOrganizerApplicationEvent({
+          type: 'APPLICATION_APPROVED',
+          munId,
+          organizerEmail: context.organizerEmail,
+          munName: context.munName,
+        })
+        await notifyPipelineEvent({ type: 'ONBOARDING_STARTED', munId, organizerEmail: context.organizerEmail, munName: context.munName })
+        return
+      }
+
       await notifyOrganizerApplicationEvent({
-        type: 'APPLICATION_APPROVED',
+        type: decision === 'REJECTED' ? 'APPLICATION_REJECTED' : 'APPLICATION_CHANGES_REQUESTED',
         munId,
         organizerEmail: context.organizerEmail,
         munName: context.munName,
+        // Non-APPROVED decisions require a non-empty `notes` earlier in this
+        // function, so `reason` is guaranteed defined on this branch.
+        reason: reason ?? 'See review notes.',
       })
-      await notifyPipelineEvent({ type: 'ONBOARDING_STARTED', munId, organizerEmail: context.organizerEmail, munName: context.munName })
-      return
-    }
-
-    await notifyOrganizerApplicationEvent({
-      type: decision === 'REJECTED' ? 'APPLICATION_REJECTED' : 'APPLICATION_CHANGES_REQUESTED',
-      munId,
-      organizerEmail: context.organizerEmail,
-      munName: context.munName,
-      // Non-APPROVED decisions require a non-empty `notes` earlier in this
-      // function, so `reason` is guaranteed defined on this branch.
-      reason: reason ?? 'See review notes.',
-    })
-  })().catch((error) => {
-    console.error('[admin-review] pipeline notification failed', error)
-  })
+    })().catch((error) => {
+      console.error('[admin-review] pipeline notification failed', error)
+    }),
+  )
 }
 
 /**

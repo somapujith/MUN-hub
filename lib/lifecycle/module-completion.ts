@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import { muns, munModuleVerifications, verificationIssues } from '@/lib/db/schema'
 import type { MunModule, MunStatus, ModuleCompletionStatus, ModuleVerificationState } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
+import { runInBackground } from '@/lib/background-tasks'
 import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
 import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import { getModuleDefinition, TRACKED_MODULES } from './module-registry'
@@ -536,15 +537,19 @@ export async function onModuleDataChanged(munId: string, moduleKey: MunModule, a
     // Fired here, after the transaction above has actually committed — same
     // fire-and-forget-with-logging convention as go-live.ts's
     // `notifyAfterCommit` (a notification failure must never surface as a
-    // failure of the module write that triggered it).
+    // failure of the module write that triggered it). Handed to
+    // `runInBackground` so Workers keeps it alive past the response
+    // (lib/background-tasks.ts); a no-op under Node.
     if (justBecameReadyForSubmission) {
-      resolveMunNotificationContext(munId)
-        .then((context) =>
-          notifyPipelineEvent({ type: 'READY_FOR_SUBMISSION', munId, organizerEmail: context.organizerEmail, munName: context.munName }),
-        )
-        .catch((error) => {
-          console.error('[module-completion] pipeline notification failed', error)
-        })
+      runInBackground(
+        resolveMunNotificationContext(munId)
+          .then((context) =>
+            notifyPipelineEvent({ type: 'READY_FOR_SUBMISSION', munId, organizerEmail: context.organizerEmail, munName: context.munName }),
+          )
+          .catch((error) => {
+            console.error('[module-completion] pipeline notification failed', error)
+          }),
+      )
     }
   }
 }
