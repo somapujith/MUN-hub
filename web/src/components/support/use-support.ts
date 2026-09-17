@@ -51,9 +51,14 @@ export function invalidateSupportSummaries(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.adminUnreadConversationCount() });
 }
 
-/** One thread, polled while `enabled`. */
+/**
+ * One thread, polled while `enabled`. Whatever the thread poll learns about
+ * the ticket (a new status, new activity) is copied into the cached lists, so
+ * the list next to the thread never contradicts it until its own slower poll.
+ */
 export function useConversation(ticketId: string | null, enabled = true) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: queryKeys.conversation(ticketId ?? "none"),
     queryFn: () => getConversation(ticketId as string),
     enabled: enabled && ticketId !== null,
@@ -61,6 +66,16 @@ export function useConversation(ticketId: string | null, enabled = true) {
     refetchInterval: SUPPORT_POLL_MS.thread,
     refetchIntervalInBackground: false,
   });
+
+  const ticket = query.data?.ticket;
+  const version = ticket ? `${ticket.id}:${ticket.updatedAt}:${ticket.status}:${ticket.lastMessageAt ?? ""}` : null;
+  React.useEffect(() => {
+    if (ticket) patchTicketInLists(queryClient, ticket);
+    // `version` captures every field worth copying.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, queryClient]);
+
+  return query;
 }
 
 /**
