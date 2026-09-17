@@ -29,9 +29,16 @@ describe('getNotificationsAdapter', () => {
     expect(getNotificationsAdapter()).toBe(zeptoMailNotificationsAdapter)
   })
 
-  it('throws instead of falling back to the console adapter in production without ZEPTOMAIL_TOKEN', () => {
+  // Regression: this used to throw. Wrangler statically replaces
+  // process.env.NODE_ENV with 'production' in EVERY deployed bundle, staging
+  // included, so the throw broke the documented no-token staging deploy
+  // (organizer sign-in codes 503'd, every cron run reported a failure). The
+  // OTP/reset-link leak it guarded against is closed inside the console
+  // adapter itself, which redacts bodies whenever isProductionRuntime() —
+  // see console-adapter-redaction.test.ts.
+  it('falls back to the (redacting) console adapter in production without ZEPTOMAIL_TOKEN', () => {
     delete process.env.ZEPTOMAIL_TOKEN
     process.env.NODE_ENV = 'production'
-    expect(() => getNotificationsAdapter()).toThrow('Refusing to fall back to the console notifications adapter')
+    expect(getNotificationsAdapter()).toBe(consoleNotificationsAdapter)
   })
 })
