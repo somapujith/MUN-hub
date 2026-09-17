@@ -51,3 +51,6 @@ mun-hub-62 does not run E2E itself. This session is the only one that runs the s
 | run 1 | b24846a | New `organizer/multi-mun.spec.ts`, 13 tests covering multi-MUN hosting (57943d3) |
 | run 1 | 50b19db | Accommodation "offered?" question (73bcdf4), and `/organizer/apply` as the host-another-MUN page, in the onboarding and workspace specs |
 | run 1 | full run | Fresh prepare: 437 passed, 16 skipped, 5 failed. All 5 were test drift, now fixed |
+| run 1 | 422fb55 | New `public/content-pages.spec.ts` for About, Curation, Contact and Legal; phone overflow checks for those 7 pages. Known bug: a legal deep link overshoots its section (reported to mun-hub-62) |
+| run 1 | 34ff901 | Setup address, map and registration-window API tests. Known bug: a deadline earlier than the opening date is accepted (reported to mun-hub-f1) |
+| run 1 | (none) | Asked mun-hub-4b for a dev-only email outbox, so E2E can check emails |
