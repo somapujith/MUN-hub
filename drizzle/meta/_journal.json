@@ -225,6 +225,13 @@
       "when": 1789613676843,
       "tag": "0031_payments_fees_exceptions_webhook_events",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789614174560,
+      "tag": "0032_organizer_application_answers",
+      "breakpoints": true
     }
   ]
 }

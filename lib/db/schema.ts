@@ -680,6 +680,11 @@ export const organizerApplications = pgTable(
     munId: text('mun_id').unique().references(() => muns.id),
     status: applicationStatusEnum('status').notNull().default('SUBMITTED'),
     reviewNotes: text('review_notes'),
+    // The organizer's answers that have no home on the mun row (migration
+    // 0032), kept so the Gate-1 reviewer can see them.
+    expectedDelegateCount: integer('expected_delegate_count'),
+    previousEditions: text('previous_editions'),
+    websiteUrl: text('website_url'),
     submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('organizer_applications_organizer_id_idx').on(table.organizerId)],
