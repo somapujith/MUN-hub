@@ -13,14 +13,12 @@ import { insertPasswordResetToken } from './password-reset'
 // only. Organizer accounts are managed in organizer-admin.ts, never here, and
 // that file refuses to touch staff accounts.
 //
-// Audit trail: admin_actions has no staff-specific enum values yet and this
-// run adds no migrations, so each write stores the closest existing value —
-// USER_SUSPENDED for a suspension, ORGANIZER_REINSTATED for every
-// access-granting change (account created, role changed, reinstated,
-// set-password link issued) — and always records the precise event name in
-// `metadata.event` (STAFF_CREATED, STAFF_ROLE_CHANGED, ...). The platform
-// audit feed (admin-audit.ts#listAdminActions) displays `metadata.event` when
-// present. Dedicated enum values are a follow-up.
+// Audit trail: each write stores its own admin_action value (STAFF_CREATED,
+// STAFF_ROLE_CHANGED, ..., added in migration 0035) and repeats it in
+// `metadata.event`. Rows written before 0035 stored the closest older value
+// (USER_SUSPENDED / ORGANIZER_REINSTATED) with the precise name only in
+// `metadata.event`, which is why the audit feeds
+// (admin-audit.ts#listAdminActions, audit-history.ts) prefer `metadata.event`.
 //
 // Set-password links: `mintSetPasswordLink` below mints its token through
 // password-reset.ts#insertPasswordResetToken (which stores only the token's
@@ -167,16 +165,25 @@ async function lockStaffTarget(tx: Tx, userId: string): Promise<StaffRow> {
   return toStaffRow(row)
 }
 
+type StaffAuditAction = Extract<
+  AdminAction,
+  | 'STAFF_CREATED'
+  | 'STAFF_ROLE_CHANGED'
+  | 'STAFF_SUSPENDED'
+  | 'STAFF_REINSTATED'
+  | 'STAFF_SET_PASSWORD_LINK_ISSUED'
+  | 'SUPER_ADMIN_BOOTSTRAPPED'
+>
+
 async function audit(
   tx: Tx,
   actorId: string,
-  action: AdminAction,
+  action: StaffAuditAction,
   targetId: string,
-  event: string,
   reason?: string,
   details: Record<string, unknown> = {},
 ): Promise<void> {
-  await recordAdminAction(tx, actorId, action, 'user', targetId, reason, { event, ...details })
+  await recordAdminAction(tx, actorId, action, 'user', targetId, reason, { event: action, ...details })
 }
 
 export interface ListStaffParams {
@@ -259,7 +266,7 @@ export async function createStaffAccount(
 
     const [created] = await tx.insert(users).values({ name, email, role }).returning({ id: users.id })
     const link = await mintSetPasswordLink(tx, created.id, appUrl)
-    await audit(tx, session.userId, 'ORGANIZER_REINSTATED', created.id, 'STAFF_CREATED', undefined, { role })
+    await audit(tx, session.userId, 'STAFF_CREATED', created.id, undefined, { role })
 
     const [row] = await tx.select(STAFF_COLUMNS).from(users).where(eq(users.id, created.id)).limit(1)
     return { staff: toStaffRow(row), ...link }
@@ -284,7 +291,7 @@ export async function changeStaffRole(userId: string, role: StaffRole, session: 
     if (target.role === role) return target
 
     await tx.update(users).set({ role }).where(eq(users.id, userId))
-    await audit(tx, session.userId, 'ORGANIZER_REINSTATED', userId, 'STAFF_ROLE_CHANGED', undefined, {
+    await audit(tx, session.userId, 'STAFF_ROLE_CHANGED', userId, undefined, {
       fromRole: target.role,
       toRole: role,
     })
@@ -316,7 +323,7 @@ export async function suspendStaff(userId: string, reason: string, session: Sess
       .set({ suspended: true, suspendedReason: trimmedReason, suspendedAt })
       .where(eq(users.id, userId))
     await tx.delete(sessions).where(eq(sessions.userId, userId))
-    await audit(tx, session.userId, 'USER_SUSPENDED', userId, 'STAFF_SUSPENDED', trimmedReason, { role: target.role })
+    await audit(tx, session.userId, 'STAFF_SUSPENDED', userId, trimmedReason, { role: target.role })
 
     return { ...target, suspended: true, suspendedReason: trimmedReason, suspendedAt }
   })
@@ -336,7 +343,7 @@ export async function reinstateStaff(userId: string, session: Session | null): P
       .update(users)
       .set({ suspended: false, suspendedReason: null, suspendedAt: null })
       .where(eq(users.id, userId))
-    await audit(tx, session.userId, 'ORGANIZER_REINSTATED', userId, 'STAFF_REINSTATED', undefined, {
+    await audit(tx, session.userId, 'STAFF_REINSTATED', userId, undefined, {
       role: target.role,
     })
 
@@ -364,7 +371,7 @@ export async function issueStaffSetPasswordLink(
 
     const link = await mintSetPasswordLink(tx, userId, appUrl)
     // The token itself is never written to the audit log.
-    await audit(tx, session.userId, 'ORGANIZER_REINSTATED', userId, 'STAFF_SET_PASSWORD_LINK_ISSUED', undefined, {
+    await audit(tx, session.userId, 'STAFF_SET_PASSWORD_LINK_ISSUED', userId, undefined, {
       expiresAt: link.expiresAt.toISOString(),
     })
     return link
@@ -417,7 +424,7 @@ export async function bootstrapSuperAdmin(
     }
 
     const link = await mintSetPasswordLink(tx, userId, appUrl)
-    await audit(tx, userId, 'ORGANIZER_REINSTATED', userId, 'SUPER_ADMIN_BOOTSTRAPPED', undefined, {
+    await audit(tx, userId, 'SUPER_ADMIN_BOOTSTRAPPED', userId, undefined, {
       via: 'scripts/create-admin.ts',
       created: !existing,
       previousRole: existing?.role ?? null,

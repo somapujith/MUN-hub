@@ -9,6 +9,7 @@ import {
   studentProfiles,
   users,
 } from '@/lib/db/schema'
+import { recordAdminAction } from '@/lib/audit/log'
 import { verifyPassword } from '@/lib/auth/password'
 import type { RegistrationStatus } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
@@ -43,6 +44,8 @@ import type { Session } from '@/lib/auth/adapter'
  * - Kept as-is: consent records (proof of what was agreed and when),
  *   support tickets and their messages (they can concern payment exceptions an
  *   admin still has to resolve).
+ * - Recorded: one ACCOUNT_DELETED admin_actions row (actor = the account
+ *   itself), with the counts below and no personal data.
  *
  * Organizer and staff accounts can't delete themselves here: they own
  * conferences, payouts, or admin history that need a person to hand over.
@@ -212,7 +215,7 @@ export async function deleteOwnAccount(
         )
     }
 
-    return {
+    const summary: AccountDeletionResult = {
       userId: user.id,
       sessionsRevoked: revokedSessions.length,
       unpaidHoldsCancelled: cancelledHolds.length,
@@ -220,21 +223,22 @@ export async function deleteOwnAccount(
       registrationAnswersCleared: toClear.length,
       registrationAnswersRetained: withAnswers.length - toClear.length,
     }
-  })
 
-  // Structured audit line (no personal data: the id is all that's left).
-  // admin_actions can't record this yet — its enum has no self-service
-  // deletion value and adding one needs a migration.
-  console.info(
-    JSON.stringify({
-      type: 'audit',
-      event: 'account.deleted',
+    // Audit row in the same transaction. The actor is the deleted account
+    // itself (its anonymized users row stays, so the FK holds); no personal
+    // data, only counts.
+    await recordAdminAction(tx, user.id, 'ACCOUNT_DELETED', 'user', user.id, undefined, {
       actor: 'self',
-      at: now.toISOString(),
       role: user.role,
-      ...result,
-    }),
-  )
+      sessionsRevoked: summary.sessionsRevoked,
+      unpaidHoldsCancelled: summary.unpaidHoldsCancelled,
+      registrationsKept: summary.registrationsKept,
+      registrationAnswersCleared: summary.registrationAnswersCleared,
+      registrationAnswersRetained: summary.registrationAnswersRetained,
+    })
+
+    return summary
+  })
 
   return result
 }

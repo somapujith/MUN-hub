@@ -1,7 +1,8 @@
-import { afterAll, describe, expect, it, vi } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { afterAll, describe, expect, it } from 'vitest'
+import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
+  adminActions,
   emailLoginCodes,
   passwordResetTokens,
   payments,
@@ -122,8 +123,6 @@ describe('deleteOwnAccount', () => {
       codeHash: 'irrelevant',
       expiresAt: new Date(Date.now() + 60_000),
     })
-    const auditSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
-
     const result = await deleteOwnAccount({ confirmation: 'DELETE', password: DELEGATE_PASSWORD }, session)
 
     const after = await loadUser(delegate.id)
@@ -164,22 +163,30 @@ describe('deleteOwnAccount', () => {
       registrationAnswersRetained: 1,
     })
 
-    const auditLines = auditSpy.mock.calls
-      .map(([line]) => (typeof line === 'string' ? line : ''))
-      .filter((line) => line.includes('account.deleted'))
-    expect(auditLines).toHaveLength(1)
-    expect(JSON.parse(auditLines[0])).toMatchObject({ type: 'audit', event: 'account.deleted', userId: delegate.id })
-    expect(auditLines[0]).not.toContain(delegate.email)
-    auditSpy.mockRestore()
+    // One ACCOUNT_DELETED audit row, the account itself as the actor, no personal data.
+    const auditRows = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetType, 'user'), eq(adminActions.targetId, delegate.id)))
+    expect(auditRows).toHaveLength(1)
+    expect(auditRows[0]).toMatchObject({ actorId: delegate.id, action: 'ACCOUNT_DELETED', reason: null })
+    expect(auditRows[0].metadata).toEqual({
+      actor: 'self',
+      role: 'STUDENT',
+      sessionsRevoked: 1,
+      unpaidHoldsCancelled: 1,
+      registrationsKept: 4,
+      registrationAnswersCleared: 3,
+      registrationAnswersRetained: 1,
+    })
+    expect(JSON.stringify(auditRows[0])).not.toContain(delegate.email)
   })
 
   it('keeps registrations and payments, clearing answers except on seats the organizer still needs', async () => {
     const fixture = await makeDelegateWithHistory()
     const session: Session = { userId: fixture.delegate.id, role: 'STUDENT' }
-    vi.spyOn(console, 'info').mockImplementation(() => {})
 
     await deleteOwnAccount({ confirmation: 'DELETE', password: DELEGATE_PASSWORD }, session)
-    vi.restoreAllMocks()
 
     const rows = await db.select().from(registrations).where(eq(registrations.userId, fixture.delegate.id))
     const byId = new Map(rows.map((row) => [row.id, row]))
@@ -213,13 +220,11 @@ describe('deleteOwnAccount', () => {
   it("leaves other delegates' data alone", async () => {
     const target = await makeDelegateWithHistory()
     const bystander = await makeDelegateWithHistory()
-    vi.spyOn(console, 'info').mockImplementation(() => {})
 
     await deleteOwnAccount(
       { confirmation: 'DELETE', password: DELEGATE_PASSWORD },
       { userId: target.delegate.id, role: 'STUDENT' },
     )
-    vi.restoreAllMocks()
 
     const after = await loadUser(bystander.delegate.id)
     expect(after.email).toBe(bystander.delegate.email)
