@@ -26,6 +26,15 @@ export function getProfileCompletion() {
   return request<{ complete: boolean }>("/profile/complete");
 }
 
+/**
+ * GET /profile/form-defaults — the saved profile keyed by the per-mun
+ * registration form's own `fieldKey`s, for pre-filling matching questions.
+ * `{}` when the student has no profile yet.
+ */
+export function getProfileFormDefaults() {
+  return request<Record<string, string>>("/profile/form-defaults");
+}
+
 /** PUT /profile — create-or-update, same action serves first-time onboarding and later edits. */
 export function completeStudentProfile(input: StudentProfileInput) {
   return request<StudentProfile>("/profile", {

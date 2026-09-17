@@ -12,6 +12,7 @@ export const queryKeys = {
   executiveBoard: (munId: string) => ["organizer", "executive-board", munId] as const,
   committees: (munId: string) => ["organizer", "committees", munId] as const,
   account: () => ["account"] as const,
+  profileFormDefaults: () => ["profile", "form-defaults"] as const,
   accommodationOptions: (munId: string) => ["organizer", "accommodation", munId] as const,
   accommodationOptionFields: (optionId: string) =>
     ["organizer", "accommodation", "fields", optionId] as const,

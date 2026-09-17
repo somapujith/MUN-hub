@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import {
   completeStudentProfile,
+  getProfileFormDefaults,
   getStudentProfile,
   isProfileComplete,
 } from '@/lib/actions/student-profile'
@@ -35,6 +36,17 @@ studentProfileRoutes.get('/profile', requireAuth, async (c) => {
 studentProfileRoutes.get('/profile/complete', requireAuth, async (c) => {
   const complete = await isProfileComplete(c.get('session')!.userId)
   return c.json({ complete })
+})
+
+// The profile mapped onto the per-mun registration form's own `fieldKey`s
+// (grade_class, emergency_contact_phone, …), so the registration funnel can
+// pre-fill matching questions. Served rather than mapped client-side so the
+// key mapping has exactly one definition — lib/actions/student-profile.ts's
+// getProfileFormDefaults — instead of a copy in the SPA that silently drifts
+// when a field key changes. Returns {} when no profile exists yet.
+studentProfileRoutes.get('/profile/form-defaults', requireAuth, async (c) => {
+  const defaults = await getProfileFormDefaults(c.get('session')!)
+  return c.json(defaults)
 })
 
 studentProfileRoutes.put(

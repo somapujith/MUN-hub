@@ -7,15 +7,16 @@ import { cn } from "cn";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
-import { RegistrationFormMock } from "@/components/registration/registration-form-mock";
+import { RegistrationForm } from "@/components/registration/registration-form";
 import { RegistrationNotice } from "@/components/registration/registration-notice";
 import { hasPassed } from "@/components/registration/deadline";
 import type { ProductWithAvailability } from "@/components/registration/types";
 import { formatDateRange } from "@/components/shared/date-range";
 import { queryKeys } from "@/api/query-keys";
 import { getProductsAvailability } from "@/api/registration";
-import { getMockMunBySlug } from "@/mocks/data";
-import { fetchMockUserProfile } from "@/mocks/session";
+import { getMunBySlug } from "@/api/marketplace";
+import { getProfileFormDefaults } from "@/api/student-profile";
+import { getAccountSettings } from "@/api/account";
 import { useSession } from "@/hooks/use-session";
 import { NotFoundPage } from "@/pages/not-found-page";
 
@@ -71,21 +72,46 @@ export function RegisterPage() {
   const [searchParams] = useSearchParams();
   const preselectedProductId = searchParams.get("product") ?? undefined;
 
-  const mun = getMockMunBySlug(slug);
-  if (!mun) return <NotFoundPage />;
+  // Every hook runs before any early return — the previous version bailed to
+  // <NotFoundPage /> above its useQuery calls, which changes the hook count
+  // between renders and throws once a slug misses.
+  const munQuery = useQuery({
+    queryKey: queryKeys.mun(slug),
+    queryFn: () => getMunBySlug(slug),
+    enabled: slug !== "",
+  });
+  const mun = munQuery.data ?? null;
 
-  const profileQuery = useQuery({
-    queryKey: queryKeys.userProfile(session?.userId ?? ""),
-    queryFn: () => fetchMockUserProfile(session!.userId),
+  const profileDefaultsQuery = useQuery({
+    queryKey: queryKeys.profileFormDefaults(),
+    queryFn: getProfileFormDefaults,
     enabled: Boolean(session?.userId),
   });
 
-  const productIds = mun.registrationProducts.map((product) => product.id);
+  const accountQuery = useQuery({
+    queryKey: queryKeys.account(),
+    queryFn: getAccountSettings,
+    enabled: Boolean(session?.userId),
+  });
+
+  const productIds = mun?.registrationProducts.map((product) => product.id) ?? [];
   const availabilityQuery = useQuery({
     queryKey: queryKeys.productAvailability(productIds),
     queryFn: () => getProductsAvailability(productIds),
-    enabled: mun.status === "REGISTRATION_OPEN" && productIds.length > 0,
+    enabled: mun?.status === "REGISTRATION_OPEN" && productIds.length > 0,
   });
+
+  if (munQuery.isPending) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col">
+        <SiteHeader />
+        <main className="mx-auto w-full max-w-5xl flex-1 px-lg py-xl" aria-busy="true" />
+        <SiteFooter />
+      </div>
+    );
+  }
+
+  if (!mun) return <NotFoundPage />;
 
   const dateRange = formatDateRange(mun.startDate, mun.endDate);
   const location = [mun.city, mun.country].filter(Boolean).join(", ");
@@ -201,7 +227,7 @@ export function RegisterPage() {
     );
   }
 
-  const profile = profileQuery.data;
+  const account = accountQuery.data;
   const validPreselected = availability.some(
     (entry) => entry.product.id === preselectedProductId,
   )
@@ -218,19 +244,20 @@ export function RegisterPage() {
         />
       </Helmet>
       <RegistrationShell munName={mun.name} dateRange={dateRange} location={location}>
-        <RegistrationFormMock
+        <RegistrationForm
           slug={slug}
           munId={mun.id}
           munName={mun.name}
           products={availability}
           committees={mun.committees}
-          preselectedProductId={validPreselected}
-          defaults={{
-            fullName: profile?.name ?? "",
-            email: profile?.email ?? "",
-            phone: profile?.phone ?? "",
-            institution: profile?.institution ?? "",
+          formFields={mun.formFields ?? []}
+          profileDefaults={profileDefaultsQuery.data ?? {}}
+          accountDefaults={{
+            fullName: account?.name ?? "",
+            email: account?.email ?? "",
+            phone: "",
           }}
+          preselectedProductId={validPreselected}
         />
       </RegistrationShell>
     </>

@@ -188,6 +188,9 @@ function detailFromSummary(s: MunSummary, extra?: Partial<MunDetail>): MunDetail
       },
     ],
     ...extra,
+    // Spreading Partial<MunDetail> widens required keys back to optional,
+    // so required ones are re-pinned after it.
+    formFields: extra?.formFields ?? [],
   };
 }
 

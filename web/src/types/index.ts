@@ -1,4 +1,5 @@
 import type { MunStatus, Role } from "@/types/enums";
+import type { FormField } from "@/types/registration-form";
 
 export type {
   MunStatus,
@@ -6,6 +7,7 @@ export type {
   RegistrationStatus,
   PaymentStatus,
 } from "@/types/enums";
+export type { FormField } from "@/types/registration-form";
 
 /** Card-shaped summary for marketplace listing/search results. */
 export interface MunSummary {
@@ -75,6 +77,12 @@ export interface MunDetail {
   committees: CommitteeWithPortfolios[];
   registrationProducts: RegistrationProduct[];
   organizerName: string | null;
+  /**
+   * The organizer's configured registration questions. Already served by
+   * GET /muns/:slug — it was just never declared here, so the registration
+   * page couldn't see it and asked four hardcoded questions instead.
+   */
+  formFields: FormField[];
 }
 
 export interface Session {
