@@ -130,6 +130,7 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   if (
     message === 'Expected start date must be a valid date' ||
     /^Maximum expected delegates must be a whole number from 1 to \d+$/.test(message) ||
+    /^Display order must be a whole number from 0 to \d+$/.test(message) ||
     /^Description must be at least \d+ characters$/.test(message) ||
     message === 'Website must be a full URL, including https://' ||
     message === 'UPI ID must look like name@bank' ||
@@ -318,6 +319,7 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: ONBOARDING_ERRORS.outOfOrder, status: 409, code: 'CONFLICT_STATE' },
   { message: 'Maximum expected delegates must be a whole number from 1 to 10000', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Description must be at least 40 characters', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'Display order must be a whole number from 0 to 100000', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'MUN title is required', status: 400, code: 'VALIDATION_FAILED' },
   { message: APPLICATION_PENDING, status: 409, code: 'CONFLICT_DUPLICATE' },
   {

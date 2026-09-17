@@ -4,6 +4,7 @@ import {
   createMunFaq,
   deleteMunFaq,
   FAQ_ANSWER_MAX_LENGTH,
+  FAQ_DISPLAY_ORDER_MAX,
   FAQ_QUESTION_MAX_LENGTH,
   listMunFaqsForOrganizer,
   listPublicMunFaqs,
@@ -15,7 +16,9 @@ import type { AppVariables } from '../src/types'
 
 const questionSchema = z.string().trim().min(1).max(FAQ_QUESTION_MAX_LENGTH)
 const answerSchema = z.string().trim().min(1).max(FAQ_ANSWER_MAX_LENGTH)
-const displayOrderSchema = z.number().int().nonnegative()
+// Bounded, not just non-negative: display_order is a Postgres integer and
+// createMunFaq appends with `max(display_order) + 1` (see FAQ_DISPLAY_ORDER_MAX).
+const displayOrderSchema = z.number().int().min(0).max(FAQ_DISPLAY_ORDER_MAX)
 
 const createFaqBodySchema = z
   .object({
