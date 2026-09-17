@@ -52,24 +52,10 @@ import { useSession } from "@/hooks/use-session";
  * specifies a fixed 64px bar, so content drops out of it instead of growing it.
  */
 
-const BROWSE_LINKS = [
-  { href: "/muns", label: "Marketplace" },
-  { href: "/organizer/apply", label: "For organizers" },
-] as const;
-
-/**
- * Organizers get their own labelled door rather than sharing the delegate
- * "Sign in" button — it's the same `POST /auth/session` underneath, but the
- * separate entry point means an organizer never has to wonder whether the
- * student-facing sign-in is "the right one", and it lands them straight in the
- * organizer workspace instead of a delegate dashboard.
- *
- * Admins deliberately get NO public link: `/admin/login` exists and works, but
- * advertising a staff console entry point on a public marketplace nav invites
- * credential-stuffing at the highest-privilege door for zero user benefit.
- * Staff reach it directly (or via admin.munhub.in, which lands there).
- */
-const ORGANIZER_LOGIN_LINK = { href: "/organizer/login", label: "Organizer login" } as const;
+// Organizer entry points (/organizer/apply, /organizer/login) are deliberately
+// not in the bar — they're being given a home elsewhere on the site. Both
+// routes still exist, and /login's footer still links to /organizer/login.
+const NAV_LINKS = [{ href: "/muns", label: "Marketplace" }];
 
 interface SiteHeaderProps {
   /**
@@ -88,9 +74,6 @@ export function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) 
   // page you were on. One source of truth, every page.
   const { data: session } = useSession();
   const showCityPicker = Boolean(cities && cities.length > 0);
-  // Signed-in users already have their door; the organizer link is wayfinding
-  // for people who haven't authenticated yet.
-  const navLinks = session ? BROWSE_LINKS.map((l) => ({ ...l })) : [...BROWSE_LINKS, ORGANIZER_LOGIN_LINK].map((l) => ({ ...l }));
 
   return (
     <>
@@ -126,10 +109,9 @@ export function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) 
             className="min-w-0 flex-1 sm:max-w-[220px] lg:max-w-[260px]"
           />
   
-          {/* `whitespace-nowrap` matters: at exactly 768px the nav is tight and
-              "For organizers" otherwise wraps to two lines inside the 64px bar.
-              The link row is the first thing to go when the city picker is
-              present — two browse controls plus three links don't fit until xl. */}
+          {/* `whitespace-nowrap` keeps a link from wrapping to a second line
+              inside the fixed 64px bar. The link row is the first thing to go
+              when the city picker is present, so it only appears from xl there. */}
           <nav
             aria-label="Primary"
             className={
@@ -138,7 +120,7 @@ export function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) 
                 : "hidden items-center gap-md md:flex lg:gap-lg"
             }
           >
-            {navLinks.map((link) => (
+            {NAV_LINKS.map((link) => (
               <Link
                 key={link.href}
                 to={link.href}
@@ -176,7 +158,7 @@ export function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) 
   
   
             <SiteHeaderMobileNav
-              links={navLinks}
+              links={NAV_LINKS}
               isSignedIn={Boolean(session)}
               role={session?.role ?? null}
               cities={showCityPicker ? cities : undefined}
