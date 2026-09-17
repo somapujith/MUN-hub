@@ -161,6 +161,19 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
     })
   })
 
+  it('limits MFA disable and recovery-code attempts per signed-in user, across both routes and any address', async () => {
+    const user = `staff-${crypto.randomUUID()}`
+    const routes = ['/auth/mfa/disable', '/auth/mfa/recovery-codes']
+    const result = await statuses(LIMITERS.mfaManageUser.limit + 1, (i) =>
+      send(routes[i % routes.length], { ip: freshIp(), user, body: { code: '000000' } }),
+    )
+    expect(result).toEqual(allowedThenBlocked(LIMITERS.mfaManageUser.limit))
+    expect((await send('/auth/mfa/recovery-codes', { ip: freshIp(), user, body: { code: '000000' } })).status).toBe(429)
+
+    const otherUser = await send('/auth/mfa/disable', { ip: freshIp(), user: `staff-${crypto.randomUUID()}`, body: {} })
+    expect(otherUser.status).toBe(200)
+  })
+
   it('limits password changes per signed-in user, not per address', async () => {
     const user = `user-${crypto.randomUUID()}`
     const result = await statuses(LIMITERS.changePasswordUser.limit + 1, () =>

@@ -143,11 +143,27 @@ describe('staff writes', () => {
     expect(notStaff.status).toBe(404)
   })
 
+  it('resets another staff member’s 2FA (204), but not your own (409) or a non-staff account (404)', async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    const admin = await makeUser('ADMIN')
+    const student = await makeUser('STUDENT')
+
+    expect((await call(superAdmin.id, 'POST', `/admin/staff/${admin.id}/mfa/reset`)).status).toBe(204)
+
+    const self = await call(superAdmin.id, 'POST', `/admin/staff/${superAdmin.id}/mfa/reset`)
+    expect(self.status).toBe(409)
+    expect((await self.json()).error.code).toBe('CONFLICT_STATE')
+
+    expect((await call(superAdmin.id, 'POST', `/admin/staff/${student.id}/mfa/reset`)).status).toBe(404)
+    expect((await call(superAdmin.id, 'POST', `/admin/staff/${crypto.randomUUID()}/mfa/reset`)).status).toBe(404)
+  })
+
   it.each([
     ['PATCH', 'role', { role: 'SUPER_ADMIN' }],
     ['POST', 'suspend', { reason: 'x' }],
     ['POST', 'reinstate', undefined],
     ['POST', 'set-password-link', undefined],
+    ['POST', 'mfa/reset', undefined],
   ] as const)('refuses ADMIN on %s /%s with 403', async (method, action, body) => {
     const admin = await makeUser('ADMIN')
     const target = await makeUser('OPERATIONS')

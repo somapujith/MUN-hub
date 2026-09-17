@@ -2,8 +2,8 @@ import crypto from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
-import { mfaPendingChallenges, mfaRecoveryCodes, userMfa, users } from '@/lib/db/schema'
-import { hashPassword } from '@/lib/auth/password'
+import { adminActions, mfaPendingChallenges, mfaRecoveryCodes, userMfa, users } from '@/lib/db/schema'
+import { hashPassword, verifyPassword } from '@/lib/auth/password'
 import { totp } from '@/lib/auth/totp'
 import type { Session } from '@/lib/auth/adapter'
 import type { Role } from '@/lib/db/schema-enums'
@@ -19,6 +19,14 @@ import {
   regenerateMfaRecoveryCodes,
   resetStaffMfa,
 } from './staff-mfa'
+import { STAFF_ERRORS } from './admin-staff'
+
+// The real implementation, wrapped so a test can see how often recovery-code
+// hashes get checked.
+vi.mock('@/lib/auth/password', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/auth/password')>()
+  return { ...actual, verifyPassword: vi.fn(actual.verifyPassword) }
+})
 
 type AnyRole = 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' | 'SUPER_ADMIN'
 
@@ -206,6 +214,52 @@ describe('resetStaffMfa', () => {
 
     await expect(resetStaffMfa(target.id, sess(otherAdmin))).rejects.toThrow('Forbidden')
   })
+
+  it("refuses a super admin's own account, which must go through disableMfa and its code check", async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    await enrollAndConfirm(superAdmin)
+
+    await expect(resetStaffMfa(superAdmin.id, sess(superAdmin))).rejects.toThrow(STAFF_ERRORS.self)
+    expect(await hasConfirmedMfa(superAdmin.id)).toBe(true)
+  })
+
+  it('answers Staff member not found for a delegate, an organizer or an unknown id, and writes no audit row', async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    const student = await makeUser('STUDENT')
+    const organizer = await makeUser('ORGANIZER')
+
+    for (const targetId of [student.id, organizer.id, crypto.randomUUID()]) {
+      await expect(resetStaffMfa(targetId, sess(superAdmin))).rejects.toThrow(STAFF_ERRORS.notFound)
+    }
+    const audit = await db.select().from(adminActions).where(eq(adminActions.actorId, superAdmin.id))
+    expect(audit).toHaveLength(0)
+  })
+
+  it('refuses a super admin whose account has since been suspended', async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    const target = await makeUser('ADMIN')
+    await enrollAndConfirm(target)
+    await db.update(users).set({ suspended: true }).where(eq(users.id, superAdmin.id))
+
+    await expect(resetStaffMfa(target.id, sess(superAdmin))).rejects.toThrow('Forbidden')
+    expect(await hasConfirmedMfa(target.id)).toBe(true)
+  })
+
+  it('also discards unfinished sign-in challenges, so they cannot be completed after re-enrolling', async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    const admin = await makeUser('ADMIN')
+    await enrollAndConfirm(admin)
+    const { pendingToken } = await beginMfaChallenge(admin.id)
+
+    await resetStaffMfa(admin.id, sess(superAdmin))
+
+    const pending = await db.select().from(mfaPendingChallenges).where(eq(mfaPendingChallenges.userId, admin.id))
+    expect(pending).toHaveLength(0)
+    const { secret } = await enrollAndConfirm(admin)
+    await expect(completeMfaChallenge(pendingToken, totp(secret, new Date(Date.now() + 30_000)))).rejects.toThrow(
+      MFA_ERRORS.expired,
+    )
+  })
 })
 
 describe('regenerateMfaRecoveryCodes', () => {
@@ -273,6 +327,22 @@ describe('disableMfa', () => {
     await disableMfa(recoveryCodes[0], sess(admin))
 
     expect(await hasConfirmedMfa(admin.id)).toBe(false)
+  })
+
+  it('refuses input that is not a TOTP or recovery code without hashing anything', async () => {
+    const admin = await makeUser('ADMIN')
+    const { recoveryCodes } = await enrollAndConfirm(admin)
+    vi.mocked(verifyPassword).mockClear()
+
+    for (const code of ['not-a-code', 'AAAAAAAAAAA', recoveryCodes[0].toLowerCase(), `${recoveryCodes[0]}0`, '1234567']) {
+      await expect(disableMfa(code, sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
+    }
+    expect(verifyPassword).not.toHaveBeenCalled()
+
+    // A well-formed guess is still checked against the stored codes.
+    await expect(disableMfa('00000-00000', sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
+    expect(verifyPassword).toHaveBeenCalled()
+    expect(await hasConfirmedMfa(admin.id)).toBe(true)
   })
 })
 

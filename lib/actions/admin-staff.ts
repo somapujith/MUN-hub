@@ -146,8 +146,10 @@ export async function mintSetPasswordLink(
  * demoting or suspending each other at the same moment serialize on this
  * lock: the second one re-reads the rows after the first commits, no longer
  * matches role = SUPER_ADMIN (or is suspended), and gets Forbidden.
+ *
+ * Exported for the other SUPER_ADMIN staff write, staff-mfa.ts#resetStaffMfa.
  */
-async function lockSuperAdmins(tx: Tx, actorId: string): Promise<void> {
+export async function lockSuperAdmins(tx: Tx, actorId: string): Promise<void> {
   const rows = await tx
     .select({ id: users.id, suspended: users.suspended })
     .from(users)
@@ -161,7 +163,7 @@ async function lockSuperAdmins(tx: Tx, actorId: string): Promise<void> {
 }
 
 /** Row-locks the target and returns it, or throws `notFound` unless it is a staff account. */
-async function lockStaffTarget(tx: Tx, userId: string): Promise<StaffRow> {
+export async function lockStaffTarget(tx: Tx, userId: string): Promise<StaffRow> {
   const [row] = await tx.select(STAFF_COLUMNS).from(users).where(eq(users.id, userId)).for('update').limit(1)
   if (!row || !isStaffRole(row.role)) throw new Error(STAFF_ERRORS.notFound)
   return toStaffRow(row)

@@ -137,7 +137,9 @@ adminStaffRoutes.post('/admin/staff/:userId/set-password-link', requireAuth, req
 
 // Clears a staff member's TOTP enrollment (lib/actions/staff-mfa.ts) so they
 // can re-enroll after losing their device — SUPER_ADMIN only, audit-logged.
-adminStaffRoutes.post('/admin/staff/:userId/mfa/reset', requireAuth, requireRole([...MANAGE_ROLES]), async (c) => {
-  await resetStaffMfa(c.req.param('userId'), c.get('session')!)
-  return c.body(null, 204)
-})
+adminStaffRoutes.post('/admin/staff/:userId/mfa/reset', requireAuth, requireRole([...MANAGE_ROLES]), (c) =>
+  withStaffErrors(c, async () => {
+    await resetStaffMfa(c.req.param('userId'), c.get('session')!)
+    return c.body(null, 204)
+  }),
+)

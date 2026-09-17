@@ -43,6 +43,10 @@ export const LIMITERS = {
   // different tokens from one IP, and hammering one token's endpoint fast.
   mfaVerifyIp: { binding: 'RL_MFA_VERIFY_IP', limit: 20, periodSeconds: 60, perIp: true },
   mfaVerifyToken: { binding: 'RL_MFA_VERIFY_TOKEN', limit: 10, periodSeconds: 60, perIp: false },
+  // Signed-in staff turning MFA off or minting new recovery codes. Both take
+  // a TOTP or recovery code as proof it's the account holder, so guesses are
+  // capped per account, from whichever addresses they come.
+  mfaManageUser: { binding: 'RL_MFA_MANAGE_USER', limit: 5, periodSeconds: 60, perIp: false },
   // Verification-email resends: per IP and per address, for known and
   // unknown addresses alike. lib/actions/email-verification.ts additionally
   // sends an account at most one email a minute and three an hour.
@@ -132,6 +136,16 @@ const RULES: LimitRule[] = [
       ...(pendingToken ? [{ limiter: LIMITERS.mfaVerifyToken, key: `token:${pendingToken}` }] : []),
     ],
   },
+  // One budget shared by both routes, so alternating between them doesn't double it.
+  ...['/auth/mfa/disable', '/auth/mfa/recovery-codes'].map(
+    (path): LimitRule => ({
+      method: 'POST',
+      path,
+      checks: ({ ip, sessionUserId }) => [
+        { limiter: LIMITERS.mfaManageUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
+      ],
+    }),
+  ),
   {
     method: 'POST',
     path: '/auth/organizers/code',
