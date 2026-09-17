@@ -20,7 +20,9 @@ function fetchRegistrationsForUser(userId: string) {
       mun: true,
       committee: true,
       portfolio: true,
-      payment: true,
+      // Only what the delegate should see: never the platform-fee split or
+      // an admin's payment-exception notes.
+      payment: { columns: { id: true, amount: true, currency: true, status: true } },
     },
   })
 }

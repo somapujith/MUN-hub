@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, ne, or } from 'drizzle-orm'
+import { eq, ilike, or } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { committees, muns, payments, portfolios, registrations, users } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
@@ -64,62 +64,12 @@ export async function searchRegistrations(
   return rows
 }
 
-export interface PaymentExceptionRow {
-  registrationId: string
-  paymentId: string
-  reason: 'PAYMENT_FAILED' | 'CONFIRMATION_MISMATCH'
-  amount: number
-  studentName: string
-  munName: string
-}
-
-/**
- * Computed, not a stored state (matches project convention — the webhook
- * handler's refundOwed logic already treats this as derived). Two cases:
- * a FAILED payment, or a PAID payment whose registration isn't CONFIRMED
- * (the registration expired/was cancelled after the webhook fired — see
- * CLAUDE.md "Registration integrity" section for the underlying webhook
- * behavior this surfaces).
- *
- * Newest-first, capped at 100 rows — this has no pagination yet, so an
- * explicit ORDER BY + LIMIT keeps a single admin-overview page load from
- * pulling an unbounded result set as payment exceptions accumulate, while
- * also guaranteeing a freshly-created exception is always visible on this
- * one page rather than depending on where it happens to fall in insertion
- * order.
- */
-export async function listPaymentExceptions(session: Session | null): Promise<PaymentExceptionRow[]> {
-  requireRole(session, [...ADMIN_ROLES])
-
-  const rows = await db
-    .select({
-      registrationId: registrations.id,
-      paymentId: payments.id,
-      paymentStatus: payments.status,
-      registrationStatus: registrations.status,
-      amount: payments.amount,
-      studentName: users.name,
-      munName: muns.name,
-    })
-    .from(payments)
-    .innerJoin(registrations, eq(payments.registrationId, registrations.id))
-    .innerJoin(users, eq(registrations.userId, users.id))
-    .innerJoin(muns, eq(registrations.munId, muns.id))
-    .where(
-      or(
-        eq(payments.status, 'FAILED'),
-        and(eq(payments.status, 'PAID'), ne(registrations.status, 'CONFIRMED')),
-      ),
-    )
-    .orderBy(desc(payments.createdAt))
-    .limit(100)
-
-  return rows.map((row) => ({
-    registrationId: row.registrationId,
-    paymentId: row.paymentId,
-    reason: row.paymentStatus === 'FAILED' ? ('PAYMENT_FAILED' as const) : ('CONFIRMATION_MISMATCH' as const),
-    amount: row.amount,
-    studentName: row.studentName,
-    munName: row.munName,
-  }))
-}
+// Payment exceptions are stored on the payment row by the webhook processor
+// and live in lib/payments/exceptions.ts. Re-exported here because the admin
+// overview (admin-audit.ts) and the admin payments route read them from this
+// module. A failed payment is NOT an exception — no money was taken.
+export type { PaymentExceptionRow } from '@/lib/payments/exceptions'
+export {
+  listOpenPaymentExceptions as listPaymentExceptions,
+  resolvePaymentException,
+} from '@/lib/payments/exceptions'

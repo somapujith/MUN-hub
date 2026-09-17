@@ -1,7 +1,9 @@
+import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
-import { muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
-import { listPaymentExceptions, searchRegistrations } from './admin-search'
+import { adminActions, muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
+import { PAYMENT_EXCEPTION_ERRORS } from '@/lib/payments/exceptions'
+import { listPaymentExceptions, resolvePaymentException, searchRegistrations } from './admin-search'
 import type { Session } from '@/lib/auth/adapter'
 
 async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' | 'SUPER_ADMIN') {
@@ -17,8 +19,9 @@ function sess(user: { id: string; role: Session['role'] }): Session {
 }
 
 async function seedRegistrationWithPayment(
-  paymentStatus: 'PAID' | 'FAILED',
+  paymentStatus: 'PAID' | 'FAILED' | 'REFUNDED' | 'PENDING',
   registrationStatus: 'CONFIRMED' | 'PAYMENT_PENDING' | 'CANCELLED',
+  exception: { reason: string; raisedAt?: Date } | null = null,
 ) {
   const organizer = await makeUser('ORGANIZER')
   const student = await makeUser('STUDENT')
@@ -43,13 +46,18 @@ async function seedRegistrationWithPayment(
       status: registrationStatus,
     })
     .returning()
-  await db.insert(payments).values({
-    registrationId: registration.id,
-    providerOrderId: `order-${Date.now()}-${Math.random()}`,
-    amount: 50000,
-    status: paymentStatus,
-  })
-  return { mun, student, registration }
+  const [payment] = await db
+    .insert(payments)
+    .values({
+      registrationId: registration.id,
+      providerOrderId: `order-${Date.now()}-${Math.random()}`,
+      amount: 50000,
+      status: paymentStatus,
+      exceptionReason: exception?.reason ?? null,
+      exceptionRaisedAt: exception ? (exception.raisedAt ?? new Date()) : null,
+    })
+    .returning()
+  return { mun, student, registration, payment }
 }
 
 describe('searchRegistrations', () => {
@@ -80,20 +88,43 @@ describe('searchRegistrations', () => {
 })
 
 describe('listPaymentExceptions', () => {
-  it('includes FAILED payments', async () => {
-    const { registration } = await seedRegistrationWithPayment('FAILED', 'PAYMENT_PENDING')
+  it('lists an open stored exception with delegate, MUN, amount and raised-at', async () => {
+    const raisedAt = new Date()
+    const { registration, payment, student, mun } = await seedRegistrationWithPayment('PAID', 'CANCELLED', {
+      reason: 'PAYMENT_AFTER_HOLD_EXPIRED',
+      raisedAt,
+    })
     const ops = await makeUser('OPERATIONS')
 
     const exceptions = await listPaymentExceptions(sess(ops))
-    expect(exceptions.some((e) => e.registrationId === registration.id && e.reason === 'PAYMENT_FAILED')).toBe(true)
+    const row = exceptions.find((e) => e.paymentId === payment.id)
+    expect(row).toMatchObject({
+      registrationId: registration.id,
+      reason: 'PAYMENT_AFTER_HOLD_EXPIRED',
+      amount: 50000,
+      currency: 'INR',
+      paymentStatus: 'PAID',
+      registrationStatus: 'CANCELLED',
+      studentName: student.name,
+      studentEmail: student.email,
+      munName: mun.name,
+    })
+    expect(row?.raisedAt.getTime()).toBe(raisedAt.getTime())
   })
 
-  it('includes PAID payments whose registration is not CONFIRMED', async () => {
-    const { registration } = await seedRegistrationWithPayment('PAID', 'CANCELLED')
+  it('surfaces a legacy REFUNDED (late-payment) row as PAYMENT_AFTER_HOLD_EXPIRED', async () => {
+    const { payment } = await seedRegistrationWithPayment('REFUNDED', 'CANCELLED')
     const ops = await makeUser('OPERATIONS')
+    const row = (await listPaymentExceptions(sess(ops))).find((e) => e.paymentId === payment.id)
+    expect(row?.reason).toBe('PAYMENT_AFTER_HOLD_EXPIRED')
+    expect(row?.raisedAt).toBeInstanceOf(Date)
+  })
 
+  it('does not treat a failed payment as an exception (no money was taken)', async () => {
+    const { registration } = await seedRegistrationWithPayment('FAILED', 'CANCELLED')
+    const ops = await makeUser('OPERATIONS')
     const exceptions = await listPaymentExceptions(sess(ops))
-    expect(exceptions.some((e) => e.registrationId === registration.id && e.reason === 'CONFIRMATION_MISMATCH')).toBe(true)
+    expect(exceptions.some((e) => e.registrationId === registration.id)).toBe(false)
   })
 
   it('excludes a healthy PAID+CONFIRMED payment', async () => {
@@ -104,8 +135,117 @@ describe('listPaymentExceptions', () => {
     expect(exceptions.some((e) => e.registrationId === registration.id)).toBe(false)
   })
 
+  it('excludes a resolved exception', async () => {
+    const { payment } = await seedRegistrationWithPayment('PAID', 'CONFIRMED', { reason: 'DUPLICATE_PAYMENT' })
+    const ops = await makeUser('OPERATIONS')
+    await resolvePaymentException(payment.id, 'Extra charge returned', sess(ops))
+    expect((await listPaymentExceptions(sess(ops))).some((e) => e.paymentId === payment.id)).toBe(false)
+  })
+
+  it('lists newest first', async () => {
+    const older = await seedRegistrationWithPayment('PAID', 'CANCELLED', {
+      reason: 'PAYMENT_AFTER_HOLD_EXPIRED',
+      raisedAt: new Date(Date.now() + 60_000),
+    })
+    const newer = await seedRegistrationWithPayment('PENDING', 'PAYMENT_PENDING', {
+      reason: 'AMOUNT_MISMATCH',
+      raisedAt: new Date(Date.now() + 120_000),
+    })
+    const ops = await makeUser('OPERATIONS')
+    const ids = (await listPaymentExceptions(sess(ops))).map((e) => e.paymentId)
+    expect(ids.indexOf(newer.payment.id)).toBeLessThan(ids.indexOf(older.payment.id))
+  })
+
   it('throws Forbidden for a STUDENT', async () => {
     const student = await makeUser('STUDENT')
     await expect(listPaymentExceptions(sess(student))).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('resolvePaymentException', () => {
+  it('records who resolved it, when, and why — with an admin audit entry', async () => {
+    const { payment, registration } = await seedRegistrationWithPayment('PAID', 'CANCELLED', {
+      reason: 'PAYMENT_AFTER_HOLD_EXPIRED',
+    })
+    const ops = await makeUser('OPERATIONS')
+
+    const resolved = await resolvePaymentException(payment.id, '  Returned via bank transfer, UTR 1234  ', sess(ops))
+    expect(resolved).toMatchObject({
+      paymentId: payment.id,
+      reason: 'PAYMENT_AFTER_HOLD_EXPIRED',
+      resolvedBy: ops.id,
+      note: 'Returned via bank transfer, UTR 1234',
+    })
+
+    const [row] = await db.select().from(payments).where(eq(payments.id, payment.id))
+    expect(row.exceptionResolvedAt).toBeInstanceOf(Date)
+    expect(row.exceptionResolvedBy).toBe(ops.id)
+    expect(row.exceptionResolutionNote).toBe('Returned via bank transfer, UTR 1234')
+    expect(row.status).toBe('PAID')
+
+    const [audit] = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetType, 'payment'), eq(adminActions.targetId, payment.id)))
+    expect(audit).toMatchObject({
+      actorId: ops.id,
+      action: 'PAYMENT_DETAILS_CHANGED',
+      reason: 'Returned via bank transfer, UTR 1234',
+      metadata: expect.objectContaining({
+        kind: 'PAYMENT_EXCEPTION_RESOLVED',
+        exceptionReason: 'PAYMENT_AFTER_HOLD_EXPIRED',
+        registrationId: registration.id,
+      }),
+    })
+  })
+
+  it('writes down the implied reason when resolving a legacy REFUNDED row', async () => {
+    const { payment } = await seedRegistrationWithPayment('REFUNDED', 'CANCELLED')
+    const admin = await makeUser('ADMIN')
+    await resolvePaymentException(payment.id, 'Returned', sess(admin))
+    const [row] = await db.select().from(payments).where(eq(payments.id, payment.id))
+    expect(row.exceptionReason).toBe('PAYMENT_AFTER_HOLD_EXPIRED')
+    expect(row.exceptionRaisedAt).toBeInstanceOf(Date)
+    expect(row.status).toBe('REFUNDED')
+  })
+
+  it('requires a note', async () => {
+    const { payment } = await seedRegistrationWithPayment('PAID', 'CANCELLED', { reason: 'PAYMENT_AFTER_HOLD_EXPIRED' })
+    const ops = await makeUser('OPERATIONS')
+    await expect(resolvePaymentException(payment.id, '   ', sess(ops))).rejects.toThrow(
+      PAYMENT_EXCEPTION_ERRORS.noteRequired,
+    )
+    await expect(resolvePaymentException(payment.id, 'x'.repeat(2001), sess(ops))).rejects.toThrow(
+      PAYMENT_EXCEPTION_ERRORS.noteTooLong,
+    )
+  })
+
+  it('refuses a second resolution', async () => {
+    const { payment } = await seedRegistrationWithPayment('PAID', 'CANCELLED', { reason: 'PAYMENT_AFTER_HOLD_EXPIRED' })
+    const ops = await makeUser('OPERATIONS')
+    await resolvePaymentException(payment.id, 'Done', sess(ops))
+    await expect(resolvePaymentException(payment.id, 'Again', sess(ops))).rejects.toThrow(
+      PAYMENT_EXCEPTION_ERRORS.alreadyResolved,
+    )
+  })
+
+  it('refuses a payment with no exception, and an unknown id', async () => {
+    const { payment } = await seedRegistrationWithPayment('PAID', 'CONFIRMED')
+    const failed = await seedRegistrationWithPayment('FAILED', 'CANCELLED')
+    const ops = await makeUser('OPERATIONS')
+    for (const id of [payment.id, failed.payment.id, crypto.randomUUID()]) {
+      await expect(resolvePaymentException(id, 'Nothing to do', sess(ops))).rejects.toThrow(
+        PAYMENT_EXCEPTION_ERRORS.notFound,
+      )
+    }
+  })
+
+  it('is staff-only', async () => {
+    const { payment } = await seedRegistrationWithPayment('PAID', 'CANCELLED', { reason: 'PAYMENT_AFTER_HOLD_EXPIRED' })
+    for (const role of ['STUDENT', 'ORGANIZER'] as const) {
+      const user = await makeUser(role)
+      await expect(resolvePaymentException(payment.id, 'Mine now', sess(user))).rejects.toThrow('Forbidden')
+    }
+    await expect(resolvePaymentException(payment.id, 'Anon', null)).rejects.toThrow('Forbidden')
   })
 })

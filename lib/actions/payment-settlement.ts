@@ -26,10 +26,10 @@
 // `upsertPaymentSettings` calls `assertModuleNotLocked` right after the
 // ownership check, same as every other high-impact module's write path.
 
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { munPaymentSettings } from '@/lib/db/schema'
-import type { PaymentVerificationState } from '@/lib/db/schema-enums'
+import { munPaymentSettings, payments, registrations } from '@/lib/db/schema'
+import type { PaymentVerificationState, RegistrationStatus } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { requireRole } from '@/lib/auth/authorize'
@@ -67,7 +67,6 @@ export interface MaskedPaymentSettings {
   accountType: string
   gateway: string
   currency: string
-  refundPolicy: string | null
   settlementNotes: string | null
   verificationState: PaymentVerificationState
   verifiedAt: Date | null
@@ -95,7 +94,6 @@ const MASKED_COLUMNS = {
   accountType: munPaymentSettings.accountType,
   gateway: munPaymentSettings.gateway,
   currency: munPaymentSettings.currency,
-  refundPolicy: munPaymentSettings.refundPolicy,
   settlementNotes: munPaymentSettings.settlementNotes,
   verificationState: munPaymentSettings.verificationState,
   verifiedAt: munPaymentSettings.verifiedAt,
@@ -124,7 +122,6 @@ export interface UpsertPaymentSettingsInput {
   accountType: string
   gateway: string
   currency?: string
-  refundPolicy?: string | null
   settlementNotes?: string | null
 }
 
@@ -182,7 +179,9 @@ export async function upsertPaymentSettings(
     accountType: input.accountType,
     gateway: input.gateway,
     currency: input.currency ?? 'INR',
-    refundPolicy: input.refundPolicy ?? null,
+    // `refundPolicy` is deliberately not written: MUN Hub has one platform-wide
+    // no-refunds policy (/legal/refunds), so organizers no longer set their
+    // own. The column stays for existing rows and is left untouched here.
     settlementNotes: input.settlementNotes ?? null,
     updatedAt: new Date(),
   }
@@ -199,6 +198,66 @@ export async function upsertPaymentSettings(
   await onModuleDataChanged(munId, 'PAYMENT_SETTLEMENT', session!.userId)
 
   return row
+}
+
+export interface MunPaymentsSummary {
+  currency: string
+  /** What delegates paid. */
+  grossCollected: number
+  /** MUN Hub's platform fee, included in `grossCollected`. */
+  platformFee: number
+  /** GST on the platform fee, included in `grossCollected`. */
+  platformFeeTax: number
+  /** What the organizer is owed: gross − fee − tax. */
+  organizerNet: number
+  paidRegistrations: number
+}
+
+// A paid registration that still stands. A PAID payment whose registration
+// was never confirmed (a late payment) is money owed back, not revenue.
+const STANDING_REGISTRATION_STATUSES: RegistrationStatus[] = ['CONFIRMED', 'ATTENDED', 'NO_SHOW']
+
+/**
+ * Money collected for one MUN from PAID payments, split into platform fee,
+ * fee tax and organizer net — one row per currency (normally just INR; an
+ * empty list means nothing has been paid yet). Payments recorded before the
+ * fee model existed carry no split and count as zero fee.
+ * Owner or ADMIN/SUPER_ADMIN only (same rule as the settings above).
+ */
+export async function getMunPaymentsSummary(munId: string, session: Session | null): Promise<MunPaymentsSummary[]> {
+  await assertOwnsOrAdmin(munId, session)
+
+  const fee = sql`coalesce(${payments.platformFeeAmount}, 0)`
+  const tax = sql`coalesce(${payments.platformFeeTaxAmount}, 0)`
+  const rows = await db
+    .select({
+      currency: payments.currency,
+      grossCollected: sql<string>`coalesce(sum(${payments.amount}), 0)::bigint`,
+      platformFee: sql<string>`coalesce(sum(${fee}), 0)::bigint`,
+      platformFeeTax: sql<string>`coalesce(sum(${tax}), 0)::bigint`,
+      organizerNet: sql<string>`coalesce(sum(coalesce(${payments.organizerNetAmount}, ${payments.amount} - ${fee} - ${tax})), 0)::bigint`,
+      paidRegistrations: sql<string>`count(*)::bigint`,
+    })
+    .from(payments)
+    .innerJoin(registrations, eq(payments.registrationId, registrations.id))
+    .where(
+      and(
+        eq(registrations.munId, munId),
+        eq(payments.status, 'PAID'),
+        inArray(registrations.status, STANDING_REGISTRATION_STATUSES),
+      ),
+    )
+    .groupBy(payments.currency)
+    .orderBy(payments.currency)
+
+  return rows.map((row) => ({
+    currency: row.currency,
+    grossCollected: Number(row.grossCollected),
+    platformFee: Number(row.platformFee),
+    platformFeeTax: Number(row.platformFeeTax),
+    organizerNet: Number(row.organizerNet),
+    paidRegistrations: Number(row.paidRegistrations),
+  }))
 }
 
 /**

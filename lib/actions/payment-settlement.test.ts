@@ -1,9 +1,15 @@
+import { eq } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
-import { muns, users } from '@/lib/db/schema'
+import { munPaymentSettings, muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
-import { getPaymentSettings, setPaymentVerificationState, upsertPaymentSettings } from './payment-settlement'
+import {
+  getMunPaymentsSummary,
+  getPaymentSettings,
+  setPaymentVerificationState,
+  upsertPaymentSettings,
+} from './payment-settlement'
 import type { UpsertPaymentSettingsInput } from './payment-settlement'
 
 async function makeUser(role: 'ORGANIZER' | 'ADMIN' | 'SUPER_ADMIN' | 'STUDENT') {
@@ -216,6 +222,111 @@ describe('payment-settlement actions', () => {
       const mun = await makeMun(organizer.id)
 
       await expect(setPaymentVerificationState(mun.id, 'VERIFIED', sessionFor(admin))).rejects.toThrow('not found')
+    })
+  })
+
+  describe('refund policy', () => {
+    it('no longer writes refundPolicy, and leaves an existing value untouched', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      await upsertPaymentSettings(mun.id, fullInput(), sessionFor(organizer))
+      await db
+        .update(munPaymentSettings)
+        .set({ refundPolicy: 'legacy text' })
+        .where(eq(munPaymentSettings.munId, mun.id))
+
+      const result = await upsertPaymentSettings(mun.id, fullInput({ bankName: 'Other Bank' }), sessionFor(organizer))
+      expect(result).not.toHaveProperty('refundPolicy')
+
+      const [row] = await db
+        .select({ refundPolicy: munPaymentSettings.refundPolicy })
+        .from(munPaymentSettings)
+        .where(eq(munPaymentSettings.munId, mun.id))
+      expect(row.refundPolicy).toBe('legacy text')
+    })
+  })
+
+  describe('getMunPaymentsSummary', () => {
+    async function paid(
+      munId: string,
+      productId: string,
+      opts: {
+        amount: number
+        fee?: number | null
+        tax?: number | null
+        net?: number | null
+        paymentStatus?: 'PAID' | 'PENDING' | 'FAILED'
+        registrationStatus?: 'CONFIRMED' | 'ATTENDED' | 'CANCELLED' | 'PAYMENT_PENDING'
+      },
+    ) {
+      const delegate = await makeUser('STUDENT')
+      const [registration] = await db
+        .insert(registrations)
+        .values({
+          userId: delegate.id,
+          munId,
+          registrationProductId: productId,
+          status: opts.registrationStatus ?? 'CONFIRMED',
+        })
+        .returning()
+      await db.insert(payments).values({
+        registrationId: registration.id,
+        providerOrderId: `order-${crypto.randomUUID()}`,
+        amount: opts.amount,
+        platformFeeAmount: opts.fee ?? null,
+        platformFeeTaxAmount: opts.tax ?? null,
+        organizerNetAmount: opts.net ?? null,
+        status: opts.paymentStatus ?? 'PAID',
+      })
+    }
+
+    async function munWithProduct() {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const [product] = await db
+        .insert(registrationProducts)
+        .values({ munId: mun.id, name: 'Delegate', price: 1499, capacity: 100 })
+        .returning()
+      return { organizer, mun, product }
+    }
+
+    it('sums gross, fee, fee tax and net over paid registrations that still stand', async () => {
+      const { organizer, mun, product } = await munWithProduct()
+      await paid(mun.id, product.id, { amount: 1499, fee: 37, tax: 7, net: 1455 })
+      await paid(mun.id, product.id, { amount: 1499, fee: 37, tax: 7, net: 1455, registrationStatus: 'ATTENDED' })
+      // Legacy row with no split: counts as zero fee.
+      await paid(mun.id, product.id, { amount: 1000 })
+      // Not counted: late payment (money owed back), pending and failed payments.
+      await paid(mun.id, product.id, { amount: 5000, fee: 0, tax: 0, net: 5000, registrationStatus: 'CANCELLED' })
+      await paid(mun.id, product.id, { amount: 7000, paymentStatus: 'PENDING', registrationStatus: 'PAYMENT_PENDING' })
+      await paid(mun.id, product.id, { amount: 9000, paymentStatus: 'FAILED', registrationStatus: 'CANCELLED' })
+
+      expect(await getMunPaymentsSummary(mun.id, sessionFor(organizer))).toEqual([
+        {
+          currency: 'INR',
+          grossCollected: 3998,
+          platformFee: 74,
+          platformFeeTax: 14,
+          organizerNet: 3910,
+          paidRegistrations: 3,
+        },
+      ])
+    })
+
+    it('is empty before anything is paid', async () => {
+      const { organizer, mun } = await munWithProduct()
+      expect(await getMunPaymentsSummary(mun.id, sessionFor(organizer))).toEqual([])
+    })
+
+    it('is owner-or-admin only', async () => {
+      const { mun } = await munWithProduct()
+      const stranger = await makeUser('ORGANIZER')
+      const student = await makeUser('STUDENT')
+      const admin = await makeUser('ADMIN')
+      await expect(getMunPaymentsSummary(mun.id, sessionFor(stranger))).rejects.toThrow('Forbidden')
+      await expect(getMunPaymentsSummary(mun.id, sessionFor(student))).rejects.toThrow('Forbidden')
+      await expect(getMunPaymentsSummary(mun.id, null)).rejects.toThrow('Forbidden')
+      await expect(getMunPaymentsSummary(mun.id, sessionFor(admin))).resolves.toEqual([])
     })
   })
 
