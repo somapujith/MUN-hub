@@ -195,6 +195,7 @@ function queryDelegates(munId: string, filters?: DelegateFilters) {
       committeeId: true,
       portfolioId: true,
       accommodationOptionId: true,
+      registrationGroupId: true,
       status: true,
       createdAt: true,
       updatedAt: true,
@@ -207,6 +208,13 @@ function queryDelegates(munId: string, filters?: DelegateFilters) {
       portfolio: { columns: { id: true, name: true } },
       payment: { columns: { id: true, status: true, amount: true, currency: true } },
       registrationProduct: { columns: { id: true, name: true, price: true, currency: true } },
+      // Group/delegation registration (2026-09-17): so the roster can show a
+      // "part of a group, paid by <head>" indicator instead of looking like
+      // N separate transactions that happen to share a pass.
+      registrationGroup: {
+        columns: { id: true, teamSize: true },
+        with: { headUser: { columns: { name: true } } },
+      },
     },
     // A stable order, or limit/offset pages can repeat or skip rows. Newest first.
     orderBy: (registration, { desc }) => [desc(registration.createdAt), desc(registration.id)],

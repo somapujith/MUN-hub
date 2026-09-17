@@ -7,6 +7,7 @@ import {
   paymentWebhookEvents,
   payments,
   portfolios,
+  registrationGroups,
   registrationProducts,
   registrations,
 } from '@/lib/db/schema'
@@ -40,7 +41,7 @@ const RESERVATION_TTL_MS = 15 * 60 * 1000
  * post-confirmation half. CANCELLED/REFUNDED are excluded so a released or
  * refunded seat frees capacity immediately.
  */
-const ACTIVE_REGISTRATION_STATUSES: RegistrationStatus[] = [
+export const ACTIVE_REGISTRATION_STATUSES: RegistrationStatus[] = [
   'PENDING',
   'PAYMENT_PENDING',
   'CONFIRMED',
@@ -48,6 +49,10 @@ const ACTIVE_REGISTRATION_STATUSES: RegistrationStatus[] = [
   'NO_SHOW',
 ]
 const RELEASABLE_STATUSES: RegistrationStatus[] = ['PENDING', 'PAYMENT_PENDING']
+
+/** Group/delegation registration — reserved team size range (spec: 2 to a sane max). */
+export const GROUP_MIN_SIZE = 2
+export const GROUP_MAX_SIZE = 20
 
 /**
  * Lazy seat-hold sweep: cancels the PENDING/PAYMENT_PENDING registrations in
@@ -135,6 +140,9 @@ export const REGISTRATION_ERRORS = {
     "Online payments aren't available yet, so paid passes can't be booked right now. Please try again later.",
   paymentStartFailed: "We couldn't start your payment, so no seat was held. Please try again.",
   idempotencyKeyReused: 'This request key was already used for a different registration',
+  // Group/delegation registration (2026-09-17) — see initiateGroupRegistration below.
+  delegationNotAllowed: 'This pass does not support group registration',
+  groupSizeInvalid: `Team size must be a whole number from ${GROUP_MIN_SIZE} to ${GROUP_MAX_SIZE}`,
 } as const
 
 /** HTTP status for each `REGISTRATION_ERRORS` message. */
@@ -153,6 +161,8 @@ export const REGISTRATION_ERROR_STATUS: Record<string, 400 | 409 | 503> = {
   [REGISTRATION_ERRORS.paymentsUnavailable]: 503,
   [REGISTRATION_ERRORS.paymentStartFailed]: 503,
   [REGISTRATION_ERRORS.idempotencyKeyReused]: 409,
+  [REGISTRATION_ERRORS.delegationNotAllowed]: 409,
+  [REGISTRATION_ERRORS.groupSizeInvalid]: 400,
 }
 
 export interface InitiateRegistrationOptions {
@@ -183,6 +193,10 @@ async function findByIdempotencyKey(executor: DbOrTx, userId: string, idempotenc
       registrationProductId: registrations.registrationProductId,
       status: registrations.status,
       orderId: payments.providerOrderId,
+      // Set only for the head delegate's own row from a group/delegation
+      // registration — lets a replayed group-start request be told apart
+      // from a replayed solo one (see toGroupReplay below).
+      registrationGroupId: registrations.registrationGroupId,
     })
     .from(registrations)
     .leftJoin(payments, eq(payments.registrationId, registrations.id))
@@ -587,6 +601,334 @@ async function reserveAndStartPayment(
   })
 
   return { registrationId: registration.id, orderId: order.orderId, status: 'PAYMENT_PENDING', replayed: false }
+}
+
+// ---------------------------------------------------------------------------
+// Group/delegation registration (2026-09-17). A head delegate reserves and
+// pays for `teamSize` seats in one order instead of each teammate paying
+// individually — gated on `registrationProducts.allowsDelegation`. Full
+// design: docs/autonomous-run/changes/lane-delegation.md.
+//
+// Reuses the exact same locking discipline as `reserveAndStartPayment`
+// above (share-lock the mun, row-lock the product) — this is deliberately
+// NOT a second, incompatible capacity check. The only difference is that N
+// seats are counted/reserved atomically instead of 1.
+//
+// Shape: one `registrations` row per team member, all sharing one
+// `registration_groups` row. The head's own row is created and filled in
+// immediately (status mirrors the solo flow); the other `teamSize - 1` rows
+// are created as placeholders — temporarily owned by the head
+// (`userId = headUserId`) until a teammate accepts an emailed invitation
+// and the row is reassigned to them (lib/actions/registration-group.ts).
+// This holds their seats for real (they count toward
+// ACTIVE_REGISTRATION_STATUSES like any other row) without requiring
+// `registrations.userId` to become nullable — a change with a much bigger
+// blast radius across the rest of the codebase.
+//
+// Committee/portfolio selection and accommodation are intentionally not
+// offered in the group flow (scope decision — see the design doc):
+// portfolios are individual (one delegate each) and don't map cleanly onto
+// "N delegates, not yet named", and accommodation adds another per-member
+// dimension the head can't answer on a teammate's behalf. An organizer can
+// still assign committees/portfolios to individual members afterwards via
+// the roster the same way they always could.
+// ---------------------------------------------------------------------------
+
+export interface GroupRegistrationInput {
+  munId: string
+  registrationProductId: string
+  /** Whole team size, GROUP_MIN_SIZE..GROUP_MAX_SIZE, including the head delegate. */
+  teamSize: number
+  /** The head delegate's own answers to the mun's registration-form fields. */
+  formResponses?: Record<string, unknown>
+}
+
+export interface InitiateGroupRegistrationResult {
+  groupId: string
+  /** The head delegate's own registration id — this is what gets paid for at `/register/:slug/pay`. */
+  headRegistrationId: string
+  orderId: string | null
+  status: RegistrationStatus
+  replayed: boolean
+}
+
+function toGroupReplay(existing: IdempotentMatch): InitiateGroupRegistrationResult {
+  if (!existing.registrationGroupId) {
+    // The same idempotency key was already used for a *solo* registration —
+    // never silently reinterpret it as a group one.
+    throw new Error(REGISTRATION_ERRORS.idempotencyKeyReused)
+  }
+  return {
+    groupId: existing.registrationGroupId,
+    headRegistrationId: existing.id,
+    orderId: existing.orderId,
+    status: existing.status,
+    replayed: true,
+  }
+}
+
+/**
+ * Group/delegation counterpart to `initiateRegistration`. Same IDOR
+ * guarantee: the head delegate is derived exclusively from `session`.
+ *
+ * Throws `Error('Forbidden')` with no session, `REGISTRATION_ERRORS.groupSizeInvalid`
+ * for a `teamSize` outside GROUP_MIN_SIZE..GROUP_MAX_SIZE,
+ * `REGISTRATION_ERRORS.delegationNotAllowed` when the pass doesn't have
+ * `allowsDelegation` set, and `Error('Registration product is at capacity')`
+ * when fewer than `teamSize` seats remain (mapped to 409 CONFLICT_CAPACITY
+ * by the same global error handler solo registration uses).
+ */
+export async function initiateGroupRegistration(
+  input: GroupRegistrationInput,
+  session: Session | null,
+  options: InitiateRegistrationOptions = {},
+): Promise<InitiateGroupRegistrationResult> {
+  if (!session) {
+    throw new Error('Forbidden')
+  }
+  const userId = session.userId
+  const idempotencyKey = options.idempotencyKey || undefined
+
+  if (!Number.isInteger(input.teamSize) || input.teamSize < GROUP_MIN_SIZE || input.teamSize > GROUP_MAX_SIZE) {
+    throw new Error(REGISTRATION_ERRORS.groupSizeInvalid)
+  }
+
+  if (idempotencyKey) {
+    const existing = await findByIdempotencyKey(db, userId, idempotencyKey)
+    if (existing) return toGroupReplay(existing)
+  }
+
+  try {
+    return await reserveGroupAndStartPayment(input, userId, idempotencyKey)
+  } catch (error) {
+    if (idempotencyKey && isUniqueViolation(error, IDEMPOTENCY_KEY_CONSTRAINT)) {
+      const existing = await findByIdempotencyKey(db, userId, idempotencyKey)
+      if (existing) return toGroupReplay(existing)
+    }
+    throw error
+  }
+}
+
+async function reserveGroupAndStartPayment(
+  input: GroupRegistrationInput,
+  userId: string,
+  idempotencyKey: string | undefined,
+): Promise<InitiateGroupRegistrationResult> {
+  const adapter = getPaymentsAdapter()
+
+  await releaseExpiredReservations(input.registrationProductId)
+
+  const reservation = await db.transaction(async (tx) => {
+    const [mun] = await tx
+      .select({
+        id: muns.id,
+        status: muns.status,
+        registrationOpensAt: muns.registrationOpensAt,
+        registrationDeadline: muns.registrationDeadline,
+      })
+      .from(muns)
+      .where(eq(muns.id, input.munId))
+      .for('share')
+      .limit(1)
+
+    if (!mun) {
+      throw new Error('Mun not found')
+    }
+    const now = new Date()
+    if (mun.status !== 'REGISTRATION_OPEN') {
+      throw new Error(REGISTRATION_ERRORS.notOpen)
+    }
+    if (mun.registrationOpensAt && mun.registrationOpensAt > now) {
+      throw new Error(REGISTRATION_ERRORS.notOpenYet)
+    }
+    if (mun.registrationDeadline && mun.registrationDeadline < now) {
+      throw new Error(REGISTRATION_ERRORS.deadlinePassed)
+    }
+
+    // Same row lock as solo registration: every concurrent
+    // initiateRegistration/initiateGroupRegistration call for this product
+    // serializes here, so a group registration can never oversell a
+    // capacity that a simultaneous solo registration (or another group
+    // registration) is also counting against.
+    const [product] = await tx
+      .select()
+      .from(registrationProducts)
+      .where(eq(registrationProducts.id, input.registrationProductId))
+      .for('update')
+      .limit(1)
+
+    if (!product) {
+      throw new Error('Registration product not found')
+    }
+    if (product.munId !== input.munId) {
+      throw new Error(REGISTRATION_ERRORS.passWrongMun)
+    }
+    if (product.status !== 'active') {
+      throw new Error(REGISTRATION_ERRORS.passUnavailable)
+    }
+    if (product.deadline && product.deadline < now) {
+      throw new Error(REGISTRATION_ERRORS.passDeadlinePassed)
+    }
+    if (!product.allowsDelegation) {
+      throw new Error(REGISTRATION_ERRORS.delegationNotAllowed)
+    }
+
+    if (idempotencyKey) {
+      const existing = await findByIdempotencyKey(tx, userId, idempotencyKey)
+      if (existing) return { kind: 'replay' as const, existing }
+    }
+
+    const activeRegistrations = await tx
+      .select({ id: registrations.id, userId: registrations.userId })
+      .from(registrations)
+      .where(
+        and(
+          eq(registrations.registrationProductId, input.registrationProductId),
+          inArray(registrations.status, ACTIVE_REGISTRATION_STATUSES),
+        ),
+      )
+
+    if (activeRegistrations.some((r) => r.userId === userId)) {
+      throw new Error('You already have an active registration for this product')
+    }
+
+    if (activeRegistrations.length + input.teamSize > product.capacity) {
+      throw new Error('Registration product is at capacity')
+    }
+
+    const total = effectivePassPrice(product, now).price * input.teamSize
+    const free = total === 0
+
+    let fees: FeeBreakdown | null = null
+    if (!free) {
+      if (!adapter) {
+        throw new Error(REGISTRATION_ERRORS.paymentsUnavailable)
+      }
+      fees = computeFeeBreakdown(total, getPlatformFeeRates())
+    }
+
+    const [group] = await tx
+      .insert(registrationGroups)
+      .values({
+        munId: input.munId,
+        registrationProductId: input.registrationProductId,
+        headUserId: userId,
+        teamSize: input.teamSize,
+      })
+      .returning({ id: registrationGroups.id })
+
+    const expiresAt = free ? null : new Date(Date.now() + RESERVATION_TTL_MS)
+    const status: RegistrationStatus = free ? 'CONFIRMED' : 'PENDING'
+
+    const [headRegistration] = await tx
+      .insert(registrations)
+      .values({
+        userId,
+        munId: input.munId,
+        registrationProductId: input.registrationProductId,
+        formResponses: input.formResponses,
+        registrationGroupId: group.id,
+        status,
+        expiresAt,
+        idempotencyKey,
+      })
+      .returning({ id: registrations.id, status: registrations.status })
+
+    // The other teamSize-1 seats: reserved now, unclaimed until a teammate
+    // accepts an invitation (lib/actions/registration-group.ts). Temporarily
+    // owned by the head — see this section's header comment.
+    const placeholderCount = input.teamSize - 1
+    if (placeholderCount > 0) {
+      await tx.insert(registrations).values(
+        Array.from({ length: placeholderCount }, () => ({
+          userId,
+          munId: input.munId,
+          registrationProductId: input.registrationProductId,
+          registrationGroupId: group.id,
+          status,
+          expiresAt,
+        })),
+      )
+    }
+
+    await tx
+      .update(registrationGroups)
+      .set({ headRegistrationId: headRegistration.id })
+      .where(eq(registrationGroups.id, group.id))
+
+    return {
+      kind: 'created' as const,
+      groupId: group.id,
+      headRegistration,
+      total,
+      currency: product.currency,
+      fees,
+    }
+  })
+
+  if (reservation.kind === 'replay') {
+    return toGroupReplay(reservation.existing)
+  }
+
+  const { groupId, headRegistration, total, currency, fees } = reservation
+
+  if (!fees || !adapter) {
+    await runPaymentHook(onRegistrationConfirmed, headRegistration.id)
+    return {
+      groupId,
+      headRegistrationId: headRegistration.id,
+      orderId: null,
+      status: headRegistration.status,
+      replayed: false,
+    }
+  }
+
+  let order: { orderId: string }
+  try {
+    order = await adapter.createOrder({ amount: total, currency, registrationId: headRegistration.id })
+  } catch (error) {
+    console.error(`[payments] createOrder failed for group ${groupId} (head registration ${headRegistration.id})`, error)
+    // Release every seat in the group together — a group hold is all-or-nothing.
+    await db
+      .update(registrations)
+      .set({ status: 'CANCELLED', idempotencyKey: null, updatedAt: new Date() })
+      .where(and(eq(registrations.registrationGroupId, groupId), eq(registrations.status, 'PENDING')))
+    throw new Error(REGISTRATION_ERRORS.paymentStartFailed)
+  }
+
+  await db.transaction(async (tx) => {
+    // One statement flips every seat in the group (head + placeholders) from
+    // PENDING to PAYMENT_PENDING together — they share one payment.
+    await tx
+      .update(registrations)
+      .set({ status: 'PAYMENT_PENDING', updatedAt: new Date() })
+      .where(and(eq(registrations.registrationGroupId, groupId), eq(registrations.status, 'PENDING')))
+
+    const [payment] = await tx
+      .insert(payments)
+      .values({
+        registrationId: headRegistration.id,
+        provider: adapter.provider,
+        providerOrderId: order.orderId,
+        amount: total,
+        currency,
+        platformFeeAmount: fees.platformFee,
+        platformFeeTaxAmount: fees.platformFeeTax,
+        organizerNetAmount: fees.organizerNet,
+        status: 'PENDING',
+      })
+      .returning({ id: payments.id })
+
+    await tx.update(registrationGroups).set({ paymentId: payment.id }).where(eq(registrationGroups.id, groupId))
+  })
+
+  return {
+    groupId,
+    headRegistrationId: headRegistration.id,
+    orderId: order.orderId,
+    status: 'PAYMENT_PENDING',
+    replayed: false,
+  }
 }
 
 export interface RegistrationWithDetails {

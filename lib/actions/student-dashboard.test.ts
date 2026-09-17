@@ -1,6 +1,7 @@
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
-import { muns, registrationProducts, registrations, users } from '@/lib/db/schema'
+import { muns, registrationGroups, registrationProducts, registrations, users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 
 import { getUpcomingRegistrations, getPastRegistrations } from './student-dashboard'
@@ -170,6 +171,73 @@ describe('student dashboard queries', () => {
 
     const upcoming = await getUpcomingRegistrations(session)
     expect(upcoming.every((r) => r.userId === studentId)).toBe(true)
+  })
+
+  describe('group/delegation registration', () => {
+    // Regression coverage for a bug only a full browser walkthrough caught:
+    // the head's own dashboard must not show unclaimed teammate placeholder
+    // rows (still tagged with the head's own userId) as if they were extra
+    // registrations of the head's own — but an ALREADY-CLAIMED teammate's
+    // row (reassigned to their own userId on accept) must show up on THEIR
+    // dashboard like any other registration. An earlier version of
+    // isOwnRegistration compared a row's id to the group's
+    // headRegistrationId alone, which hid a claimed member's own row from
+    // their own dashboard too (their row's id is never headRegistrationId
+    // either, but it is genuinely theirs).
+    it("shows the head's own row and hides unclaimed placeholders from the head, and shows a claimed member's row on their own dashboard", async () => {
+      const suffix = crypto.randomUUID()
+      const [organizer] = await db
+        .insert(users)
+        .values({ name: 'Org', email: `org-grp-dash-${suffix}@test.com`, role: 'ORGANIZER' })
+        .returning()
+      const [head] = await db
+        .insert(users)
+        .values({ name: 'Head', email: `head-grp-dash-${suffix}@test.com`, role: 'STUDENT' })
+        .returning()
+      const [member] = await db
+        .insert(users)
+        .values({ name: 'Member', email: `member-grp-dash-${suffix}@test.com`, role: 'STUDENT' })
+        .returning()
+      const [mun] = await db
+        .insert(muns)
+        .values({
+          organizerId: organizer.id,
+          name: 'Group Dashboard Mun',
+          slug: `group-dashboard-${suffix}`,
+          startDate: new Date(Date.now() + 86_400_000),
+        })
+        .returning()
+      const [product] = await db
+        .insert(registrationProducts)
+        .values({ munId: mun.id, name: 'Delegation', price: 500, capacity: 10, allowsDelegation: true })
+        .returning()
+      const [group] = await db
+        .insert(registrationGroups)
+        .values({ munId: mun.id, registrationProductId: product.id, headUserId: head.id, teamSize: 3 })
+        .returning()
+
+      // Head's own row, a claimed member row (already reassigned, as
+      // acceptGroupInvitation would do), and a still-unclaimed placeholder
+      // (userId still the head's).
+      const [headRow, memberRow, placeholderRow] = await db
+        .insert(registrations)
+        .values([
+          { userId: head.id, munId: mun.id, registrationProductId: product.id, registrationGroupId: group.id, status: 'CONFIRMED' },
+          { userId: member.id, munId: mun.id, registrationProductId: product.id, registrationGroupId: group.id, status: 'CONFIRMED' },
+          { userId: head.id, munId: mun.id, registrationProductId: product.id, registrationGroupId: group.id, status: 'CONFIRMED' },
+        ])
+        .returning()
+      await db.update(registrationGroups).set({ headRegistrationId: headRow.id }).where(eq(registrationGroups.id, group.id))
+
+      const headSession: Session = { userId: head.id, role: 'STUDENT' }
+      const headUpcoming = await getUpcomingRegistrations(headSession)
+      expect(headUpcoming.map((r) => r.id)).toEqual([headRow.id])
+      expect(headUpcoming.map((r) => r.id)).not.toContain(placeholderRow.id)
+
+      const memberSession: Session = { userId: member.id, role: 'STUDENT' }
+      const memberUpcoming = await getUpcomingRegistrations(memberSession)
+      expect(memberUpcoming.map((r) => r.id)).toEqual([memberRow.id])
+    })
   })
 
   afterAll(async () => {

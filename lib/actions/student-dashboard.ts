@@ -23,6 +23,9 @@ function fetchRegistrationsForUser(userId: string) {
       // Only what the delegate should see: never the platform-fee split or
       // an admin's payment-exception notes.
       payment: { columns: { id: true, amount: true, currency: true, status: true } },
+      // Group/delegation registration (2026-09-17): just enough to filter
+      // out an unclaimed teammate placeholder below — see isOwnRegistration.
+      registrationGroup: { columns: { id: true, headUserId: true, headRegistrationId: true } },
     },
   })
 }
@@ -30,6 +33,29 @@ function fetchRegistrationsForUser(userId: string) {
 /** A cancelled conference is over whatever its dates say; its registrations belong under Past. */
 function isConferenceCancelled(row: RegistrationWithMun): boolean {
   return row.mun.status === 'CANCELLED'
+}
+
+/**
+ * A group/delegation registration creates `teamSize` rows up front, but only
+ * one of them is genuinely the head delegate's own registration; the rest
+ * are placeholder seats temporarily tagged with the head's `userId` until a
+ * teammate accepts an invitation and the row is reassigned to them (see
+ * lib/db/schema.ts's registrationGroups header comment).
+ *
+ * `fetchRegistrationsForUser` already scopes every row to
+ * `userId = session.userId`, so the ONLY row this needs to hide is a
+ * still-unclaimed placeholder the HEAD is viewing under their own id — never
+ * a genuinely claimed row, whoever is now looking at it. The distinguishing
+ * signal is comparing `userId` against the group's `headUserId`, not against
+ * `headRegistrationId`: a first version of this check compared `row.id` to
+ * `headRegistrationId` alone, which also hid an accepted teammate's own
+ * registration from THEIR OWN dashboard (their row's id is never
+ * `headRegistrationId` either, but it is genuinely theirs).
+ */
+function isOwnRegistration(row: RegistrationWithMun): boolean {
+  if (!row.registrationGroup) return true
+  if (row.id === row.registrationGroup.headRegistrationId) return true
+  return row.userId !== row.registrationGroup.headUserId
 }
 
 /**
@@ -49,6 +75,7 @@ export async function getUpcomingRegistrations(session: Session | null): Promise
 
   return rows.filter(
     (row) =>
+      isOwnRegistration(row) &&
       !isConferenceCancelled(row) &&
       UPCOMING_STATUSES.includes(row.status) &&
       row.mun.startDate !== null &&
@@ -76,8 +103,7 @@ export async function getPastRegistrations(session: Session | null): Promise<Reg
 
   return rows.filter(
     (row) =>
-      isConferenceCancelled(row) ||
-      PAST_STATUSES.includes(row.status) ||
-      (row.mun.startDate !== null && row.mun.startDate < now),
+      isOwnRegistration(row) &&
+      (isConferenceCancelled(row) || PAST_STATUSES.includes(row.status) || (row.mun.startDate !== null && row.mun.startDate < now)),
   )
 }
