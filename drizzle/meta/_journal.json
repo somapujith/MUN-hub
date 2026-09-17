@@ -218,6 +218,13 @@
       "when": 1789613601825,
       "tag": "0030_organizer_many_muns",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1789613676843,
+      "tag": "0031_payments_fees_exceptions_webhook_events",
+      "breakpoints": true
     }
   ]
 }

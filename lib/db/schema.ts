@@ -492,10 +492,17 @@ export const registrations = pgTable(
     formResponses: jsonb('form_responses'),
     status: registrationStatusEnum('status').notNull().default('PENDING'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
+    // Client-supplied Idempotency-Key from POST /registrations: a retried
+    // submit with the same key returns the original registration instead of
+    // creating (or rejecting) a second one. Unique per user.
+    idempotencyKey: text('idempotency_key'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex('registrations_user_idempotency_key_uq')
+      .on(table.userId, table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} is not null`),
     index('registrations_mun_id_status_idx').on(table.munId, table.status),
     index('registrations_registration_product_id_status_idx').on(
       table.registrationProductId,
@@ -535,14 +542,59 @@ export const payments = pgTable(
     providerOrderId: text('provider_order_id').notNull().unique(),
     providerPaymentId: text('provider_payment_id'),
     amount: integer('amount').notNull(),
+    currency: text('currency').notNull().default('INR'),
+    // Fee breakdown, computed server-side when the order is created (same
+    // minor units as `amount`). `amount` is what the delegate pays; the
+    // organizer is owed `organizerNetAmount` = amount - platformFee - tax.
+    // Nullable: rows created before the fee model existed have no breakdown.
+    platformFeeAmount: integer('platform_fee_amount'),
+    platformFeeTaxAmount: integer('platform_fee_tax_amount'),
+    organizerNetAmount: integer('organizer_net_amount'),
     status: paymentStatusEnum('status').notNull().default('CREATED'),
+    // Payment exceptions (there are no refunds): money was taken but no valid
+    // registration stands behind it — e.g. a payment that completed after the
+    // seat hold expired. Set by the webhook, resolved manually by an admin.
+    exceptionReason: text('exception_reason'),
+    exceptionRaisedAt: timestamp('exception_raised_at', { withTimezone: true }),
+    exceptionResolvedAt: timestamp('exception_resolved_at', { withTimezone: true }),
+    exceptionResolvedBy: text('exception_resolved_by').references((): AnyPgColumn => users.id),
+    exceptionResolutionNote: text('exception_resolution_note'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   // getDelegateList (organizer-dashboard.ts) filters registrations joined to
   // payments by payments.status — needs this index once a mun has enough
   // delegates for the join+filter to matter.
-  (table) => [index('payments_status_idx').on(table.status)],
+  (table) => [
+    index('payments_status_idx').on(table.status),
+    index('payments_exception_open_idx')
+      .on(table.exceptionRaisedAt)
+      .where(sql`${table.exceptionReason} is not null and ${table.exceptionResolvedAt} is null`),
+  ],
+)
+
+// ---------------------------------------------------------------------------
+// payment_webhook_events — one row per provider event, so a redelivered or
+// replayed webhook is recognised and ignored. Unique on (provider, event_id).
+// ---------------------------------------------------------------------------
+
+export const paymentWebhookEvents = pgTable(
+  'payment_webhook_events',
+  {
+    id: id(),
+    provider: text('provider').notNull(),
+    eventId: text('event_id').notNull(),
+    eventType: text('event_type'),
+    providerOrderId: text('provider_order_id'),
+    payloadSha256: text('payload_sha256').notNull(),
+    outcome: text('outcome'),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('payment_webhook_events_provider_event_id_uq').on(table.provider, table.eventId),
+    index('payment_webhook_events_order_idx').on(table.providerOrderId),
+  ],
 )
 
 export const paymentsRelations = relations(payments, ({ one }) => ({
