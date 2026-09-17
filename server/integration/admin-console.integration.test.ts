@@ -225,14 +225,14 @@ describe('staff reads of delegate data are logged', () => {
 
     const res = await get(ops.id, '/admin/payment-exceptions')
     expect(res.status).toBe(200)
-    const body = (await res.json()) as Array<{ paymentId: string }>
-    expect(body.map((row) => row.paymentId)).toContain(payment.id)
+    const body = (await res.json()) as { results: Array<{ paymentId: string }>; total: number }
+    expect(body.results.map((row) => row.paymentId)).toContain(payment.id)
 
     const rows = await piiReads(ops.id)
     expect(rows).toHaveLength(1)
     const metadata = rows[0].metadata as { route: string; recordType: string; targetIds: string[] }
     expect(metadata).toMatchObject({ route: 'GET /admin/payment-exceptions', recordType: 'payment', hasQuery: false })
-    expect(metadata.targetIds).toEqual(body.map((row) => row.paymentId))
+    expect(metadata.targetIds).toEqual(body.results.map((row) => row.paymentId))
   })
 
   it('a read that returns nothing, or is refused, records nothing', async () => {

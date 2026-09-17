@@ -18,8 +18,19 @@ import type { AppVariables } from '../src/types'
 const REVIEW_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
 const PUBLISH_ROLES = ['ADMIN', 'SUPER_ADMIN'] as const
 
-const paginationQuerySchema = z
+const reviewQueueQuerySchema = z
   .object({
+    status: z.enum(['SUBMITTED', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED']).optional(),
+    q: z.string().trim().min(1).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    offset: z.coerce.number().int().min(0).optional(),
+  })
+  .strict()
+
+const moduleReviewQueueQuerySchema = z
+  .object({
+    status: z.enum(['NOT_SUBMITTED', 'PENDING_REVIEW', 'VERIFIED', 'CHANGES_REQUESTED', 'REJECTED']).optional(),
+    q: z.string().trim().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
     offset: z.coerce.number().int().min(0).optional(),
   })
@@ -52,8 +63,11 @@ adminReviewRoutes.get(
   requireAuth,
   requireRole([...REVIEW_ROLES]),
   async (c) => {
-    const params = paginationQuerySchema.parse(c.req.query())
-    const result = await getReviewQueue(params, c.get('session'))
+    const query = reviewQueueQuerySchema.parse(c.req.query())
+    const result = await getReviewQueue(
+      { status: query.status, search: query.q, limit: query.limit, offset: query.offset },
+      c.get('session'),
+    )
     return c.json(result)
   },
 )
@@ -134,8 +148,11 @@ adminReviewRoutes.get(
   requireAuth,
   requireRole([...REVIEW_ROLES]),
   async (c) => {
-    const params = paginationQuerySchema.parse(c.req.query())
-    const result = await getModuleReviewQueue(params, c.get('session'))
+    const query = moduleReviewQueueQuerySchema.parse(c.req.query())
+    const result = await getModuleReviewQueue(
+      { status: query.status, search: query.q, limit: query.limit, offset: query.offset },
+      c.get('session'),
+    )
     return c.json(result)
   },
 )

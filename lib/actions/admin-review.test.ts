@@ -56,6 +56,23 @@ async function makeMun(
   return mun
 }
 
+/**
+ * `getReviewQueue` now joins `organizerApplications` (filtering by the
+ * application's own decision status, not `muns.status` — see its doc
+ * comment), so a queue-eligible fixture needs both rows, matching what the
+ * real submission flow (`submitOrganizerApplication`) always creates
+ * together. `applicationStatus` defaults to 'SUBMITTED' (pending).
+ */
+async function makeQueuedMun(
+  organizerId: string,
+  munStatus: 'SUBMITTED' | 'UNDER_REVIEW',
+  applicationStatus: 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED' = 'SUBMITTED',
+) {
+  const mun = await makeMun(organizerId, munStatus)
+  await db.insert(organizerApplications).values({ organizerId, munId: mun.id, status: applicationStatus })
+  return mun
+}
+
 describe('getReviewQueue', () => {
   it('throws Forbidden for a STUDENT', async () => {
     const student = await makeUser('STUDENT')
@@ -68,11 +85,11 @@ describe('getReviewQueue', () => {
     await expect(getReviewQueue({}, __actor)).rejects.toThrow('Forbidden')
   })
 
-  it('returns SUBMITTED and UNDER_REVIEW muns for OPERATIONS', async () => {
+  it('returns SUBMITTED and UNDER_REVIEW muns for OPERATIONS (pending application status)', async () => {
     const organizer = await makeUser('ORGANIZER')
-    const submitted = await makeMun(organizer.id, 'SUBMITTED')
-    const underReview = await makeMun(organizer.id, 'UNDER_REVIEW')
-    await makeMun(organizer.id, 'VERIFICATION') // should NOT appear
+    const submitted = await makeQueuedMun(organizer.id, 'SUBMITTED')
+    const underReview = await makeQueuedMun(organizer.id, 'UNDER_REVIEW')
+    await makeMun(organizer.id, 'VERIFICATION') // no application row at all — should NOT appear
 
     const ops = await makeUser('OPERATIONS')
     const __actor = sess(ops)
@@ -88,7 +105,7 @@ describe('getReviewQueue', () => {
   it('paginates with limit/offset', async () => {
     const organizer = await makeUser('ORGANIZER')
     for (let i = 0; i < 3; i++) {
-      await makeMun(organizer.id, 'SUBMITTED')
+      await makeQueuedMun(organizer.id, 'SUBMITTED')
     }
 
     const ops = await makeUser('OPERATIONS')
@@ -97,6 +114,36 @@ describe('getReviewQueue', () => {
     const page1 = await getReviewQueue({ limit: 2, offset: 0 }, __actor)
     expect(page1.results.length).toBe(2)
     expect(page1.total).toBeGreaterThanOrEqual(3)
+  })
+
+  it('filters by application status: a decided application is absent from the default (SUBMITTED) queue', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const approved = await makeQueuedMun(organizer.id, 'SUBMITTED', 'APPROVED')
+
+    const ops = await makeUser('OPERATIONS')
+    const __actor = sess(ops)
+
+    const pending = await getReviewQueue({}, __actor)
+    expect(pending.results.some((m) => m.id === approved.id)).toBe(false)
+
+    const approvedQueue = await getReviewQueue({ status: 'APPROVED' }, __actor)
+    expect(approvedQueue.results.some((m) => m.id === approved.id)).toBe(true)
+  })
+
+  it('searches by MUN name and by organizer name/email', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeQueuedMun(organizer.id, 'SUBMITTED')
+    const ops = await makeUser('OPERATIONS')
+    const __actor = sess(ops)
+
+    const byMunName = await getReviewQueue({ search: mun.name.slice(0, 10) }, __actor)
+    expect(byMunName.results.some((m) => m.id === mun.id)).toBe(true)
+
+    const byOrganizerEmail = await getReviewQueue({ search: organizer.email }, __actor)
+    expect(byOrganizerEmail.results.some((m) => m.id === mun.id)).toBe(true)
+
+    const byNoMatch = await getReviewQueue({ search: `no-such-thing-${crypto.randomUUID()}` }, __actor)
+    expect(byNoMatch.results.some((m) => m.id === mun.id)).toBe(false)
   })
 })
 
@@ -408,6 +455,43 @@ describe('getModuleReviewQueue', () => {
     const __actor = sess(student)
 
     await expect(getModuleReviewQueue({}, __actor)).rejects.toThrow('Forbidden')
+  })
+
+  it('filters by status: VERIFIED rows are absent from the default (PENDING_REVIEW) queue', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const reviewer = await makeUser('OPERATIONS')
+    const mun = await makeMun(organizer.id, 'VERIFICATION')
+    await db
+      .insert(munModuleVerifications)
+      .values({ munId: mun.id, moduleName: 'committees', state: 'VERIFIED', organizerConfirmedAt: new Date() })
+
+    const __actor = sess(reviewer)
+    const pending = await getModuleReviewQueue({ limit: 1000 }, __actor)
+    expect(pending.results.some((row) => row.munId === mun.id)).toBe(false)
+
+    const verified = await getModuleReviewQueue({ status: 'VERIFIED', limit: 1000 }, __actor)
+    expect(verified.results.some((row) => row.munId === mun.id)).toBe(true)
+  })
+
+  it('searches by MUN name', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const reviewer = await makeUser('OPERATIONS')
+    const marker = `Verify Search Mun ${crypto.randomUUID()}`
+    const [mun] = await db
+      .insert(muns)
+      .values({ organizerId: organizer.id, name: marker, slug: `verify-search-${crypto.randomUUID()}`, status: 'VERIFICATION' })
+      .returning()
+    await db
+      .insert(munModuleVerifications)
+      .values({ munId: mun.id, moduleName: 'committees', state: 'PENDING_REVIEW', organizerConfirmedAt: new Date() })
+
+    const __actor = sess(reviewer)
+    const byName = await getModuleReviewQueue({ search: marker }, __actor)
+    expect(byName.results.some((row) => row.munId === mun.id)).toBe(true)
+    expect(byName.total).toBe(1)
+
+    const byNoMatch = await getModuleReviewQueue({ search: `no-such-thing-${crypto.randomUUID()}` }, __actor)
+    expect(byNoMatch.results.some((row) => row.munId === mun.id)).toBe(false)
   })
 })
 

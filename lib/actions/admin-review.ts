@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, ilike, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
   muns,
@@ -18,6 +18,7 @@ import { publishFromQueue, type PublishFromQueueResult } from '@/lib/lifecycle/g
 import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
 import { notifyOrganizerApplicationEvent } from '@/lib/notifications/organizer-application-events'
 import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
+import type { ApplicationStatus, ModuleVerificationState } from '@/lib/db/schema-enums'
 import type { Mun, MunWithApplication } from '@/lib/types'
 
 const REVIEW_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
@@ -31,6 +32,10 @@ const PUBLISH_ROLES = ['ADMIN', 'SUPER_ADMIN'] as const
 const ACTIVE_SUBMISSION_PREDICATE = sql`${munSubmissions.status} NOT IN ('PUBLISHED','REJECTED','WITHDRAWN')`
 
 export interface ReviewQueueParams {
+  /** Default 'SUBMITTED' — the pending queue (covers mun.status SUBMITTED and UNDER_REVIEW alike, since the application row stays SUBMITTED until a decision is recorded). */
+  status?: ApplicationStatus
+  /** Matches the MUN name or the organizer's name/email. */
+  search?: string
   limit?: number
   offset?: number
 }
@@ -41,10 +46,13 @@ export interface ReviewQueueResult {
 }
 
 /**
- * Muns awaiting ops/admin action, for the review queue dashboard. Requires
- * OPERATIONS/ADMIN/SUPER_ADMIN — actor is derived from the caller-supplied
- * `session` (resolved by the HTTP layer from the request), never trusted
- * from any other input.
+ * Gate-1 organizer applications, for the review queue dashboard — filtered by
+ * the application's own decision status (`organizerApplications.status`),
+ * not `muns.status`: an APPROVED application's mun moves on to ONBOARDING and
+ * beyond, so `muns.status` alone can't answer "was this application
+ * approved" once Gate 1 is behind it. Requires OPERATIONS/ADMIN/SUPER_ADMIN
+ * — actor is derived from the caller-supplied `session` (resolved by the
+ * HTTP layer from the request), never trusted from any other input.
  *
  * Paginated (default 20/page) — this grows with total platform submission
  * volume, not per-mun, so it needs a bound before real organizer counts
@@ -59,11 +67,20 @@ export async function getReviewQueue(
 
   const limit = params.limit ?? 20
   const offset = params.offset ?? 0
-  const whereClause = inArray(muns.status, ['SUBMITTED', 'UNDER_REVIEW'])
+  const status = params.status ?? 'SUBMITTED'
+  const q = params.search?.trim()
+  const whereClause = and(
+    eq(organizerApplications.status, status),
+    q
+      ? or(ilike(muns.name, `%${pattern(q)}%`), ilike(users.name, `%${pattern(q)}%`), ilike(users.email, `%${pattern(q)}%`))
+      : undefined,
+  )
 
   const results = await db
-    .select()
+    .select(getTableColumns(muns))
     .from(muns)
+    .innerJoin(organizerApplications, eq(organizerApplications.munId, muns.id))
+    .innerJoin(users, eq(organizerApplications.organizerId, users.id))
     .where(whereClause)
     .orderBy(desc(muns.createdAt))
     .limit(limit)
@@ -72,6 +89,8 @@ export async function getReviewQueue(
   const [{ count } = { count: 0 }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(muns)
+    .innerJoin(organizerApplications, eq(organizerApplications.munId, muns.id))
+    .innerJoin(users, eq(organizerApplications.organizerId, users.id))
     .where(whereClause)
 
   return { results, total: count }
@@ -346,24 +365,38 @@ export interface ModuleReviewQueueResult {
   total: number
 }
 
+export interface ModuleReviewQueueParams {
+  /** Default 'PENDING_REVIEW' — the pending queue. */
+  status?: ModuleVerificationState
+  /** Matches the MUN name. */
+  search?: string
+  limit?: number
+  offset?: number
+}
+
 /**
- * All PENDING_REVIEW module-verification rows across every mun, joined to
- * the mun's name, for the MUNHub Verification Console (PRD Section 15).
- * Requires OPERATIONS/ADMIN/SUPER_ADMIN.
+ * Module-verification rows across every mun, joined to the mun's name, for
+ * the MUNHub Verification Console (PRD Section 15). Requires
+ * OPERATIONS/ADMIN/SUPER_ADMIN.
  *
  * Paginated (default 20/page) — same reasoning as `getReviewQueue`: this
- * grows with total platform submission volume, not per-mun. Backed by
- * `mun_module_verifications_state_idx` (added alongside this change).
+ * grows with total platform submission volume, not per-mun. The default
+ * `status` ('PENDING_REVIEW') is backed by `mun_module_verifications_state_idx`.
  */
 export async function getModuleReviewQueue(
-  params: ReviewQueueParams = {},
+  params: ModuleReviewQueueParams = {},
   session: Session | null,
 ): Promise<ModuleReviewQueueResult> {
   requireRole(session, [...REVIEW_ROLES])
 
   const limit = params.limit ?? 20
   const offset = params.offset ?? 0
-  const whereClause = eq(munModuleVerifications.state, 'PENDING_REVIEW')
+  const status = params.status ?? 'PENDING_REVIEW'
+  const q = params.search?.trim()
+  const whereClause = and(
+    eq(munModuleVerifications.state, status),
+    q ? ilike(muns.name, `%${pattern(q)}%`) : undefined,
+  )
 
   const results = await db
     .select({
@@ -384,6 +417,7 @@ export async function getModuleReviewQueue(
   const [{ count } = { count: 0 }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(munModuleVerifications)
+    .innerJoin(muns, eq(munModuleVerifications.munId, muns.id))
     .where(whereClause)
 
   return { results, total: count }
