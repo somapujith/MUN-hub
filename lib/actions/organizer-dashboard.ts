@@ -19,6 +19,7 @@ import {
   users,
 } from '@/lib/db/schema'
 import type { MunStatus, PaymentStatus, RegistrationStatus } from '@/lib/db/schema-enums'
+import { countedPaymentsFilter } from '@/lib/payments/counted-payments'
 
 export interface MunOverview {
   totalRegistrations: number
@@ -73,6 +74,7 @@ export async function getMunOverview(munId: string, session: Session | null): Pr
           eq(registrations.munId, munId),
           eq(payments.status, 'PAID'),
           inArray(registrations.status, REVENUE_REGISTRATION_STATUSES),
+          countedPaymentsFilter(),
         ),
       )
       .then((rows) => rows[0]),

@@ -296,6 +296,38 @@ export async function submitMunForReview(munId: string, session: Session | null)
   return result
 }
 
+/**
+ * The organizer steps back from Gate 3 ("Make changes first"): the MUN passed
+ * the automated checks but they spotted something in the summary they want to
+ * fix before confirming. Closes the open submission (WITHDRAWN) and returns
+ * the MUN to READY_FOR_SUBMISSION, which unlocks every section. Only from
+ * ORGANIZER_CONFIRMATION: once confirmed, MUN Hub's review has started.
+ * Owning organizer or admin.
+ */
+export async function withdrawSubmission(munId: string, session: Session | null): Promise<void> {
+  if (!session) throw new Error('Forbidden')
+
+  await db.transaction(async (tx) => {
+    const [mun] = await tx.select().from(muns).where(eq(muns.id, munId)).for('update').limit(1)
+    if (!mun) throw new Error('Mun not found')
+    if (session.role !== 'ADMIN' && session.role !== 'SUPER_ADMIN' && mun.organizerId !== session.userId) {
+      throw new Error('Forbidden')
+    }
+    if (mun.status !== 'ORGANIZER_CONFIRMATION') {
+      throw new Error('Cannot withdraw: this MUN is not waiting for your confirmation')
+    }
+
+    const now = new Date()
+    await tx
+      .update(munSubmissions)
+      .set({ status: 'WITHDRAWN', slaState: 'COMPLETED', decidedAt: now, updatedAt: now })
+      .where(and(eq(munSubmissions.munId, munId), ACTIVE_SUBMISSION_PREDICATE))
+    await transitionMun(munId, 'READY_FOR_SUBMISSION', session.userId, 'Organizer went back to make changes', undefined, tx)
+    // Clears the LOCKED display state on the sections.
+    await recomputeMunProgress(munId, session.userId, tx)
+  })
+}
+
 // -----------------------------------------------------------------------------
 // Task 11 — review decisions, go-live queue, idempotent publish.
 // -----------------------------------------------------------------------------
@@ -462,6 +494,8 @@ export async function reviewSubmission(
             eq(verificationIssues.resolved, false),
           ),
         )
+      // The MUN has left review, so sections no longer show as LOCKED.
+      await recomputeMunProgress(munId, session.userId, tx)
 
       const [row] = await tx
         .update(munSubmissions)

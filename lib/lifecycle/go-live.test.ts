@@ -20,7 +20,14 @@ import {
   adminActions,
   munModuleVerifications,
 } from '@/lib/db/schema'
-import { enqueueForGoLive, getGoLiveQueue, publishFromQueue, reviewSubmission, submitMunForReview } from './go-live'
+import {
+  enqueueForGoLive,
+  getGoLiveQueue,
+  publishFromQueue,
+  reviewSubmission,
+  submitMunForReview,
+  withdrawSubmission,
+} from './go-live'
 import { reviewModule } from './module-verification'
 import { submitFinalConfirmation } from './organizer-confirmation'
 import { updateMunDetails } from '@/lib/actions/mun-config'
@@ -629,7 +636,67 @@ describe('enqueueForGoLive', () => {
   })
 })
 
+describe('withdrawSubmission', () => {
+  it('takes the organizer back from Gate 3 so they can edit, and they can submit again', async () => {
+    const organizer = await makeUser()
+    const session = { userId: organizer.id, role: 'ORGANIZER' as const }
+    const mun = await makeCompleteMun(organizer.id)
+    const first = await submitMunForReview(mun.id, session)
+    expect(first.passed).toBe(true)
+    await expect(updateMunDetails(mun.id, { venue: 'Blocked Hall' }, session)).rejects.toThrow(
+      'Dates & Venue is locked while MUN Hub reviews this MUN. To edit it, choose "Make changes first" on MUN Setup.',
+    )
+
+    await withdrawSubmission(mun.id, session)
+
+    const [row] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(row.status).toBe('READY_FOR_SUBMISSION')
+    const [submission] = await db.select().from(munSubmissions).where(eq(munSubmissions.id, first.submissionId!))
+    expect(submission.status).toBe('WITHDRAWN')
+    const locked = await db
+      .select()
+      .from(munModuleVerifications)
+      .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.completionStatus, 'LOCKED')))
+    expect(locked).toHaveLength(0)
+
+    await expect(updateMunDetails(mun.id, { venue: 'Better Hall' }, session)).resolves.toMatchObject({ venue: 'Better Hall' })
+    const again = await submitMunForReview(mun.id, session)
+    expect(again.passed).toBe(true)
+  })
+
+  it('refuses once MUN Hub review has started, and for other organizers', async () => {
+    const organizer = await makeUser()
+    const stranger = await makeUser()
+    const { mun } = await makeMunAtVerification(organizer)
+
+    await expect(withdrawSubmission(mun.id, { userId: organizer.id, role: 'ORGANIZER' })).rejects.toThrow(
+      'Cannot withdraw: this MUN is not waiting for your confirmation',
+    )
+    await expect(withdrawSubmission(mun.id, { userId: stranger.id, role: 'ORGANIZER' })).rejects.toThrow('Forbidden')
+    await expect(withdrawSubmission(mun.id, null)).rejects.toThrow('Forbidden')
+  })
+})
+
 describe('reviewSubmission approval', () => {
+  it('clears the LOCKED display state now the MUN has left review', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeMunAtVerification(organizer)
+    const lockedBefore = await db
+      .select()
+      .from(munModuleVerifications)
+      .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.completionStatus, 'LOCKED')))
+    expect(lockedBefore.length).toBeGreaterThan(0)
+
+    await reviewSubmission(mun.id, 'APPROVED', {}, { userId: admin.id, role: 'ADMIN' })
+
+    const lockedAfter = await db
+      .select()
+      .from(munModuleVerifications)
+      .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.completionStatus, 'LOCKED')))
+    expect(lockedAfter).toHaveLength(0)
+  })
+
   it('verifies every section and answers the open reviewer issues', async () => {
     const organizer = await makeUser()
     const admin = await makeUser('ADMIN')

@@ -19,6 +19,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { getToneClassName, type StatusTone } from "@/components/dashboard/registration-status";
 import type { PaymentExceptionRow } from "@/types/admin-payments";
+import type { RegistrationStatus } from "@/types/enums";
 
 const NOTE_MAX_LENGTH = 2000;
 
@@ -31,17 +32,28 @@ const REASON_META: Record<string, { label: string; tone: StatusTone; hint: strin
   DUPLICATE_PAYMENT: {
     label: "Charged twice",
     tone: "destructive",
-    hint: "A second payment was captured for a registration that was already paid. Return the extra charge.",
+    hint: "A second payment was captured on an order that was already paid.",
   },
   AMOUNT_MISMATCH: {
     label: "Amount mismatch",
     tone: "destructive",
-    hint: "The provider reported a different amount or currency than the order, so the registration was not confirmed. Check the charge with the provider.",
+    hint: "The provider reported a different amount or currency than the order, so that charge did not confirm the registration.",
   },
 };
 
 function reasonMeta(reason: string) {
   return REASON_META[reason] ?? { label: reason, tone: "muted" as const, hint: "Check this payment with the provider." };
+}
+
+const STANDING_REGISTRATION_STATUSES = new Set<RegistrationStatus>(["CONFIRMED", "ATTENDED", "NO_SHOW"]);
+
+// Only one payment ID is stored per order: the latest capture, or the one that
+// confirmed the seat. The charge that raised the exception may not be the one
+// on file, so say which charges to return and look them up by order ID.
+function returnGuidance(row: PaymentExceptionRow): string {
+  return STANDING_REGISTRATION_STATUSES.has(row.registrationStatus)
+    ? "Keep the payment on file: it confirmed the seat. Return every other charge on this order; look the order up in the provider dashboard to find them."
+    : "No seat was confirmed, so every charge on this order is owed back; look the order up in the provider dashboard to find them.";
 }
 
 function formatAmount(amount: number, currency: string): string {
@@ -149,8 +161,13 @@ export function AdminPaymentsPage() {
                       <td className="max-w-52 px-md py-sm break-all">
                         <span className="block font-mono text-caption text-muted-foreground">{row.registrationId}</span>
                         <span className="block font-mono text-caption text-muted-foreground">
-                          {row.providerPaymentId ?? row.providerOrderId}
+                          Order {row.providerOrderId}
                         </span>
+                        {row.providerPaymentId && (
+                          <span className="block font-mono text-caption text-muted-foreground">
+                            Payment {row.providerPaymentId}
+                          </span>
+                        )}
                       </td>
                       <td className="max-w-60 px-md py-sm break-all">
                         <span className="block text-ink">{row.studentName}</span>
@@ -194,7 +211,9 @@ export function AdminPaymentsPage() {
           <form onSubmit={handleResolve} className="flex flex-col gap-lg">
             <DialogHeader>
               <DialogTitle>Resolve payment exception</DialogTitle>
-              <DialogDescription>{target ? reasonMeta(target.reason).hint : ""}</DialogDescription>
+              <DialogDescription>
+                {target ? `${reasonMeta(target.reason).hint} ${returnGuidance(target)}` : ""}
+              </DialogDescription>
             </DialogHeader>
             {target && (
               <dl className="grid grid-cols-[auto_1fr] gap-x-md gap-y-xxs text-body-md">
@@ -202,12 +221,12 @@ export function AdminPaymentsPage() {
                 <dd className="text-ink">{target.studentName}</dd>
                 <dt className="text-muted-foreground">MUN</dt>
                 <dd className="text-ink">{target.munName}</dd>
-                <dt className="text-muted-foreground">Amount</dt>
+                <dt className="text-muted-foreground">Order amount</dt>
                 <dd className="tabular-nums text-ink">{formatAmount(target.amount, target.currency)}</dd>
-                <dt className="text-muted-foreground">Payment</dt>
-                <dd className="font-mono text-caption break-all text-ink">
-                  {target.providerPaymentId ?? target.providerOrderId}
-                </dd>
+                <dt className="text-muted-foreground">Order</dt>
+                <dd className="font-mono text-caption break-all text-ink">{target.providerOrderId}</dd>
+                <dt className="text-muted-foreground">Payment on file</dt>
+                <dd className="font-mono text-caption break-all text-ink">{target.providerPaymentId ?? "None"}</dd>
               </dl>
             )}
             <div className="flex flex-col gap-xs">

@@ -14,6 +14,9 @@ const ADMIN_PAGES = [
   '/admin/organizers',
   '/admin/support',
   '/admin/audit',
+  '/admin/muns',
+  '/admin/muns/00000000-0000-0000-0000-000000000000',
+  '/admin/staff',
 ]
 
 const ADMIN_READS = [
@@ -29,6 +32,11 @@ const ADMIN_READS = [
   'admin/audit',
   'admin/audit/user/00000000-0000-0000-0000-000000000000',
   'admin/search/registrations?q=e2e',
+  'admin/muns',
+  'admin/muns/00000000-0000-0000-0000-000000000000',
+  'admin/staff',
+  'admin/analytics',
+  'admin/go-live-queue/details',
 ]
 
 async function expectRefused(api: APIRequestContext, allowed: number[]) {

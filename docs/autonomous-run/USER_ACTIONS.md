@@ -54,3 +54,20 @@ With a token that has **Workers KV Storage: Edit** (or in the dashboard), run
 Worker logs `[storage] No UPLOADS_BUCKET or UPLOADS_KV binding in production`.
 The existing `RATE_LIMIT_KV` namespace on the account is not referenced by this repo (it may
 belong to another project), so it was deliberately not reused.
+
+## 6. Product decision — a live MUN re-checked after a high-impact edit
+
+Today a high-impact edit (dates, venue, prices, capacity, …) on a live conference moves it back to
+VERIFICATION, which removes it from the marketplace and pauses registration until the review
+passes (the organizer's Setup page now warns about this). Alternative: keep the last verified
+version listed while the change is reviewed (needs the published page to render from
+`mun_versions`). Decide which behaviour you want.
+
+## 7. Decision — organizer team access (co-organizers)
+
+The organizer "Team" page is still a placeholder: only the MUN's owner can manage it. A scoped
+design is ready to build (OWNER / EDITOR / VIEWER roles, email invitations, one central
+`assertMunAccess` check replacing `assertOwnsOrAdmin` at every organizer call site, staff keep
+full access). It was not built because CLAUDE.md lists "team & permissions / sub-organizer
+roles" as deferred — do not build without asking. Say the word and it can be scheduled
+(needs one migration).

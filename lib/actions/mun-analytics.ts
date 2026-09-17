@@ -4,6 +4,7 @@ import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { db } from '@/lib/db/client'
 import { payments, registrationProducts, registrations } from '@/lib/db/schema'
 import type { RegistrationStatus } from '@/lib/db/schema-enums'
+import { countedPaymentsFilter } from '@/lib/payments/counted-payments'
 
 // -----------------------------------------------------------------------------
 // mun-analytics — read-only registration/revenue rollup for the organizer
@@ -101,6 +102,7 @@ export async function getMunAnalytics(munId: string, session: Session | null): P
           eq(registrations.munId, munId),
           eq(payments.status, 'PAID'),
           inArray(registrations.status, REVENUE_REGISTRATION_STATUSES),
+          countedPaymentsFilter(),
         ),
       )
       .groupBy(registrations.registrationProductId),

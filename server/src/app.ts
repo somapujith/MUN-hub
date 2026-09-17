@@ -17,6 +17,7 @@ import { apiV1 } from '../routes/index'
 import { munLifecycleRoutes } from '../routes/mun-lifecycle'
 import { apiHostRobotsTxt } from '../routes/sitemap'
 import { webhooks } from '../routes/webhooks'
+import { devJobsRoutes } from '../routes/dev-jobs'
 import type { AppVariables } from './types'
 
 /**
@@ -67,6 +68,8 @@ export function createApp() {
   app.route('/api/v1/files', filesRoutes)
   app.route('/api/v1', apiV1)
   app.route('/api/v1', munLifecycleRoutes)
+  // Dev/test-only cron trigger; 404 unless ENABLE_DEV_ENDPOINTS=true off-production.
+  app.route('/api/v1', devJobsRoutes)
 
   // Hono's default 404 is a plain-text body; keep every API answer JSON.
   app.notFound((c) => c.json({ error: { code: 'NOT_FOUND', message: 'Not found' } }, 404))

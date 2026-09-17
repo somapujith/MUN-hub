@@ -1,7 +1,7 @@
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { PlusIcon } from "lucide-react";
+import { ChevronRightIcon, PlusIcon } from "lucide-react";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
 import { Button } from "@/components/ui/button";
 import { MunStatusBadge } from "@/components/mun/mun-status-badge";
@@ -26,7 +26,7 @@ export function OrganizerMunsPage() {
         actions={
           <Button size="sm" render={<Link to="/organizer/apply" />}>
             <PlusIcon aria-hidden strokeWidth={1.75} />
-            Apply to host
+            Host a MUN
           </Button>
         }
       >
@@ -44,7 +44,7 @@ export function OrganizerMunsPage() {
             </p>
             <Button className="mt-lg" size="sm" render={<Link to="/organizer/apply" />}>
               <PlusIcon aria-hidden strokeWidth={1.75} />
-              Apply to host a MUN
+              Host a MUN
             </Button>
           </div>
         )}
@@ -63,6 +63,10 @@ export function OrganizerMunsPage() {
                   <p className="text-body-md text-muted-foreground">
                     {mun.registrationCount} registrations · {mun.confirmedCount} confirmed
                   </p>
+                  <span className="mt-auto inline-flex items-center gap-xxs text-body-md font-medium text-link">
+                    Open
+                    <ChevronRightIcon aria-hidden className="size-4" />
+                  </span>
                 </Link>
               </li>
             ))}

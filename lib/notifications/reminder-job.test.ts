@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
-import { muns, registrationProducts, registrations, users } from '@/lib/db/schema'
+import { muns, registrationProducts, registrations, users, type MunStatus } from '@/lib/db/schema'
 import { runConferenceReminders } from './reminder-job'
 import type { NotificationsAdapter } from './adapter'
 
@@ -15,6 +15,7 @@ async function makeConfirmedRegistration(opts: {
   endDate?: Date | null
   venue?: string | null
   status?: 'CONFIRMED' | 'PENDING'
+  munStatus?: MunStatus
 }) {
   const organizer = (
     await db.insert(users).values({ name: 'Org', email: `org-${crypto.randomUUID()}@test.dev`, role: 'ORGANIZER' }).returning()
@@ -31,6 +32,7 @@ async function makeConfirmedRegistration(opts: {
       startDate: opts.startDate,
       endDate: opts.endDate ?? opts.startDate,
       venue: opts.venue ?? null,
+      status: opts.munStatus ?? 'REGISTRATION_CLOSED',
     })
     .returning()
   const [product] = await db.insert(registrationProducts).values({ munId: mun.id, name: 'Standard', price: 1000, capacity: 20 }).returning()
@@ -92,6 +94,34 @@ describe('runConferenceReminders', () => {
 
     expect(send.mock.calls.some((c) => c[0].to === delegate.email)).toBe(false)
   })
+
+  it.each(['PUBLISHED', 'REGISTRATION_OPEN', 'CONFERENCE_ACTIVE'] as const)(
+    'emails a CONFIRMED delegate of a %s mun inside the window',
+    async (munStatus) => {
+      const now = new Date()
+      const { delegate } = await makeConfirmedRegistration({ startDate: new Date(now.getTime() + 24 * HOUR), munStatus })
+      const { adapter, send } = mockAdapter()
+
+      await runConferenceReminders(now, adapter)
+
+      expect(send.mock.calls.some((c) => c[0].to === delegate.email)).toBe(true)
+    },
+  )
+
+  // Cancelling keeps CONFIRMED registrations (no refunds), so the mun status is
+  // the only thing that stops a "see you there" for a conference that isn't happening.
+  it.each(['CANCELLED', 'SUSPENDED', 'UNPUBLISHED', 'VERIFICATION', 'DRAFT'] as const)(
+    'does not email a CONFIRMED delegate of a %s mun inside the window',
+    async (munStatus) => {
+      const now = new Date()
+      const { delegate } = await makeConfirmedRegistration({ startDate: new Date(now.getTime() + 24 * HOUR), munStatus })
+      const { adapter, send } = mockAdapter()
+
+      await runConferenceReminders(now, adapter)
+
+      expect(send.mock.calls.some((c) => c[0].to === delegate.email)).toBe(false)
+    },
+  )
 
   it('does not re-notify on a later run once the 5-minute window has passed', async () => {
     const now = new Date()

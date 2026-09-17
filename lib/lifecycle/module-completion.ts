@@ -127,10 +127,19 @@ export async function assertModuleNotLocked(munId: string, moduleKey: MunModule,
       .where(and(eq(munModuleVerifications.munId, munId), eq(munModuleVerifications.moduleName, moduleKey)))
       .limit(1)
     if (row?.state === 'CHANGES_REQUESTED') return
-    throw new Error(
-      `The "${moduleKey}" module is locked while this mun is under MUNHub review (current status: ${mun.status}) — changes to this module are blocked until review completes. Contact MUNHub support if this is urgent.`,
-    )
+    throw new Error(moduleLockedMessage(getModuleDefinition(moduleKey).label, mun.status))
   }
+}
+
+/** Matches every message `assertModuleNotLocked` throws (for the HTTP error mapping). */
+export const MODULE_LOCKED_PATTERN = / is locked while MUN Hub reviews this MUN\./
+
+function moduleLockedMessage(label: string, status: MunStatus): string {
+  const next =
+    status === 'VERIFICATION'
+      ? 'You can edit it again if a reviewer sends it back.'
+      : 'To edit it, choose "Make changes first" on MUN Setup.'
+  return `${label} is locked while MUN Hub reviews this MUN. ${next}`
 }
 
 /**

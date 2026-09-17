@@ -59,7 +59,7 @@ test.describe('role boundaries — pages', () => {
   })
 
   test('the organizer support inbox refuses a delegate', async ({ page }) => {
-    await expectAccessDenied(page, '/organizer/support', ADMIN_REASON)
+    await expectAccessDenied(page, '/organizer/support', ORGANIZER_REASON)
   })
 
   test('the admin console refuses a delegate', async ({ page }) => {
@@ -99,7 +99,7 @@ test.describe('role boundaries — no organizer entry points for delegates', () 
     await page.goto('/muns')
     await page.getByRole('button', { name: /account menu/i }).click()
     const items = page.getByRole('menu').getByRole('menuitem')
-    await expect(items).toHaveText(['Dashboard', 'My registrations', 'Profile & account', 'Sign out'])
+    await expect(items).toHaveText(['Dashboard', 'My registrations', 'Profile & account', 'Support', 'Sign out'])
     for (const href of await items.evaluateAll((els) => els.map((el) => el.getAttribute('href') ?? ''))) {
       expect(href).not.toMatch(/organizer|admin/)
     }

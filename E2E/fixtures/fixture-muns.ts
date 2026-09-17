@@ -57,6 +57,30 @@ export const FIXTURE_MUNS = {
   },
 
   /**
+   * REGISTRATION_OPEN, for early-bird pricing and the platform-fee split.
+   * Deleted and recreated (new id, no registrations) by the specs that use it,
+   * through fixtures/payments-fixture-db.ts#recreatePricingMun, so their
+   * payment totals start from zero. Reserved for specs/student/payments.spec.ts
+   * and specs/organizer/finance.spec.ts.
+   *
+   * `earlyBird.daysFromNow` sets the early-bird deadline relative to the reset:
+   * positive = still running, negative = already over.
+   */
+  pricing: {
+    slug: 'e2e-pricing-mun',
+    name: 'E2E Pricing MUN',
+    committees: [{ name: 'E2E Pricing Committee', capacity: 100, portfolioSeats: 100, portfolios: ['Mexico'] }],
+    products: [
+      // Early bird running: charged 1,500 instead of 2,000.
+      { name: 'E2E Early Bird Pass', price: 2000, capacity: 100, status: 'active', displayOrder: 0, earlyBird: { price: 1500, daysFromNow: 10 } },
+      // Early bird over: back to the regular 1,800.
+      { name: 'E2E Late Pass', price: 1800, capacity: 100, status: 'active', displayOrder: 1, earlyBird: { price: 1200, daysFromNow: -1 } },
+      // "Early bird" dearer than the regular price: ignored, 1,000 charged.
+      { name: 'E2E Odd Early Bird Pass', price: 1000, capacity: 100, status: 'active', displayOrder: 2, earlyBird: { price: 1300, daysFromNow: 10 } },
+    ],
+  },
+
+  /**
    * ONBOARDING with all 15 go-live modules filled in (lib/db/seed-go-live-modules.ts),
    * so it can pass automated validation and go through Gate 2 review and publish.
    * Deleted and recreated every run (new id each time). Reserved for
@@ -123,6 +147,7 @@ export const SUSPEND = FIXTURE_MUNS.suspend
 export const CONFIRM = FIXTURE_MUNS.confirm
 export const ADMIN_CONSOLE = FIXTURE_MUNS.adminConsole
 export const LIFECYCLE = FIXTURE_MUNS.lifecycle
+export const PRICING = FIXTURE_MUNS.pricing
 export const SANDBOX = FIXTURE_MUNS.sandbox
 export const CLOSED = FIXTURE_MUNS.closed
 export const OPS = FIXTURE_MUNS.ops

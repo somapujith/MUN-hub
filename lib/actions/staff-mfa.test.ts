@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
 import { adminActions, mfaPendingChallenges, mfaRecoveryCodes, userMfa, users } from '@/lib/db/schema'
 import { hashPassword } from '@/lib/auth/password'
@@ -12,9 +12,11 @@ import {
   beginMfaEnrollment,
   completeMfaChallenge,
   confirmMfaEnrollment,
+  disableMfa,
   getMfaEnrollmentStatus,
   hasConfirmedMfa,
   MFA_ERRORS,
+  regenerateMfaRecoveryCodes,
   resetStaffMfa,
 } from './staff-mfa'
 
@@ -207,5 +209,86 @@ describe('resetStaffMfa', () => {
     await enrollAndConfirm(target)
 
     await expect(resetStaffMfa(target.id, sess(otherAdmin))).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('regenerateMfaRecoveryCodes', () => {
+  it('rejects an unconfirmed account', async () => {
+    const admin = await makeUser('ADMIN')
+    await expect(regenerateMfaRecoveryCodes('123456', sess(admin))).rejects.toThrow(MFA_ERRORS.notConfirmed)
+  })
+
+  it('rejects a wrong TOTP code', async () => {
+    const admin = await makeUser('ADMIN')
+    await enrollAndConfirm(admin)
+    await expect(regenerateMfaRecoveryCodes('000000', sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
+  })
+
+  it('rejects a recovery code where a TOTP code is required', async () => {
+    const admin = await makeUser('ADMIN')
+    const { recoveryCodes } = await enrollAndConfirm(admin)
+    await expect(regenerateMfaRecoveryCodes(recoveryCodes[0], sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
+  })
+
+  it('replaces the old codes: old ones stop working, new ones work', async () => {
+    const admin = await makeUser('ADMIN')
+    const { secret, recoveryCodes: oldCodes } = await enrollAndConfirm(admin)
+
+    const { recoveryCodes: newCodes } = await regenerateMfaRecoveryCodes(totp(secret, new Date(Date.now() + 30_000)), sess(admin))
+
+    expect(newCodes).toHaveLength(10)
+    expect(new Set(newCodes)).not.toEqual(new Set(oldCodes))
+
+    const { pendingToken: p1 } = await beginMfaChallenge(admin.id)
+    await expect(completeMfaChallenge(p1, oldCodes[0])).rejects.toThrow(MFA_ERRORS.invalidCode)
+
+    const { pendingToken: p2 } = await beginMfaChallenge(admin.id)
+    await expect(completeMfaChallenge(p2, newCodes[0])).resolves.toMatchObject({ userId: admin.id })
+  })
+})
+
+describe('disableMfa', () => {
+  it('rejects an unconfirmed account', async () => {
+    const admin = await makeUser('ADMIN')
+    await expect(disableMfa('123456', sess(admin))).rejects.toThrow(MFA_ERRORS.notConfirmed)
+  })
+
+  it('rejects a wrong code', async () => {
+    const admin = await makeUser('ADMIN')
+    await enrollAndConfirm(admin)
+    await expect(disableMfa('000000', sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
+  })
+
+  it('disables with a valid TOTP code and clears enrollment + recovery codes', async () => {
+    const admin = await makeUser('ADMIN')
+    const { secret } = await enrollAndConfirm(admin)
+
+    await disableMfa(totp(secret, new Date(Date.now() + 30_000)), sess(admin))
+
+    expect(await hasConfirmedMfa(admin.id)).toBe(false)
+    const recoveryRows = await db.select().from(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, admin.id))
+    expect(recoveryRows).toHaveLength(0)
+  })
+
+  it('disables with a valid recovery code', async () => {
+    const admin = await makeUser('ADMIN')
+    const { recoveryCodes } = await enrollAndConfirm(admin)
+
+    await disableMfa(recoveryCodes[0], sess(admin))
+
+    expect(await hasConfirmedMfa(admin.id)).toBe(false)
+  })
+})
+
+describe('beginMfaEnrollment — TOTP_FIELD_KEY unavailable', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('throws MFA_ERRORS.unavailable instead of the raw field-encryption error when the key is unset', async () => {
+    const admin = await makeUser('ADMIN')
+    vi.stubEnv('TOTP_FIELD_KEY', '')
+
+    await expect(beginMfaEnrollment(sess(admin))).rejects.toThrow(MFA_ERRORS.unavailable)
   })
 })

@@ -4,7 +4,16 @@ import { db } from '@/lib/db/client'
 import { committees, munExecutiveBoard, muns, users } from '@/lib/db/schema'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
-import { createEbMember, deleteEbMember, listEbMembers, updateEbMember } from './executive-board'
+import { runWithStorageBindings } from '@/lib/storage/bindings'
+import { createInMemoryKv, SAMPLE_FILES } from '@/lib/storage/in-memory-bindings'
+import {
+  createEbMember,
+  deleteEbMember,
+  listEbMembers,
+  removeEbMemberPhoto,
+  updateEbMember,
+  uploadEbMemberPhoto,
+} from './executive-board'
 
 async function makeUser(role: 'ORGANIZER' | 'ADMIN' | 'SUPER_ADMIN' | 'STUDENT') {
   const [user] = await db
@@ -248,6 +257,60 @@ describe('executive-board actions', () => {
       const listA = await listEbMembers(munA.id)
       expect(listA).toHaveLength(1)
       expect(listA[0].name).toBe('A Chair')
+    })
+  })
+
+  describe('member photos', () => {
+    it('uploads a photo, replaces it (deleting the old file), and removes it', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+      const member = await createEbMember({ munId: mun.id, name: 'Photo Chair', role: 'CHAIR' }, session)
+      const kv = createInMemoryKv()
+      const run = <T>(work: () => Promise<T>) => runWithStorageBindings({ kv, requestOrigin: 'http://localhost:3001' }, work)
+
+      const first = await run(() => uploadEbMemberPhoto(member.id, SAMPLE_FILES.png, 'image/png', session))
+      expect(first.photoUrl).toMatch(new RegExp(`/api/v1/files/muns/${mun.id}/board/`))
+      expect(kv.entries.size).toBe(1)
+
+      const second = await run(() => uploadEbMemberPhoto(member.id, SAMPLE_FILES.jpeg, 'image/jpeg', session))
+      expect(second.photoUrl).not.toBe(first.photoUrl)
+      expect(kv.entries.size).toBe(1)
+
+      const cleared = await run(() => removeEbMemberPhoto(member.id, session))
+      expect(cleared.photoUrl).toBeNull()
+      expect(kv.entries.size).toBe(0)
+    })
+
+    it('rejects a file that is not really an image, and other organizers', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const stranger = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const member = await createEbMember({ munId: mun.id, name: 'Chair', role: 'CHAIR' }, sessionFor(organizer))
+      const kv = createInMemoryKv()
+
+      await expect(
+        runWithStorageBindings({ kv }, () =>
+          uploadEbMemberPhoto(member.id, SAMPLE_FILES.html, 'image/png', sessionFor(organizer)),
+        ),
+      ).rejects.toThrow()
+      await expect(
+        runWithStorageBindings({ kv }, () =>
+          uploadEbMemberPhoto(member.id, SAMPLE_FILES.png, 'image/png', sessionFor(stranger)),
+        ),
+      ).rejects.toThrow('Forbidden')
+      expect(kv.entries.size).toBe(0)
+    })
+
+    it('leaves a pasted external link alone when the member is deleted', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id)
+      const session = sessionFor(organizer)
+      const member = await createEbMember(
+        { munId: mun.id, name: 'Linked', role: 'CHAIR', photoUrl: 'https://example.com/me.png' },
+        session,
+      )
+      await expect(deleteEbMember(member.id, session)).resolves.toBeUndefined()
     })
   })
 

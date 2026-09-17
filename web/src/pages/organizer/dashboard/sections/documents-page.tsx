@@ -190,7 +190,8 @@ export function OrganizerDocumentsPage() {
                       <Badge variant="secondary">{kindLabel(document.kind)}</Badge>
                     </div>
                     <p className="mt-xxs text-body-md text-muted-foreground">
-                      {formatSize(document.sizeBytes)} · Uploaded {new Date(document.createdAt).toLocaleDateString()}
+                      {formatSize(document.sizeBytes)} · Uploaded{" "}
+                      {new Date(document.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                     </p>
                   </div>
                   <div className="flex items-center gap-xxs">

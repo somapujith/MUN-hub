@@ -61,14 +61,30 @@ test('the checklist shows every module, with its state and a link to fix it', as
   crashes.assertNone()
 })
 
-test('a complete module can be sent for review on its own', async ({ page }) => {
+test('sections that were never sent back have no per-section send button', async ({ page }) => {
   await openSetup(page)
   const row = page.getByTestId('module-BASIC_INFO')
   await expect(row).toContainText('Complete')
-  await row.getByRole('button', { name: 'Send Basic Info for review' }).click()
-  await expect(toast(page, 'Basic Info sent to MUN Hub for review')).toBeVisible()
-  await expect(row).toContainText('Waiting for MUN Hub')
-  await expect(row.getByRole('button', { name: /Send Basic Info/ })).toHaveCount(0)
+  await expect(row.getByRole('button', { name: /^Send Basic Info/ })).toHaveCount(0)
+  await expect(page.getByTestId('go-live-status')).toContainText('Submit for review')
+})
+
+test('"Make changes first" takes a submission back from the confirmation step', async ({ page }) => {
+  await openSetup(page)
+  await main(page).getByRole('button', { name: 'Run checks and submit' }).click()
+  await expect(toast(page, 'Automated checks passed. Confirm your submission to send it to MUN Hub.')).toBeVisible()
+  expect(await status()).toBe('ORGANIZER_CONFIRMATION')
+
+  await main(page).getByRole('button', { name: 'Make changes first' }).click()
+  await expect(toast(page, "Your sections are unlocked. Run the checks again when you're ready.")).toBeVisible()
+  expect(await status()).toBe('READY_FOR_SUBMISSION')
+  await expect(main(page).getByRole('heading', { level: 2, name: 'Confirm your submission' })).toHaveCount(0)
+  await expect(banner(page)).toHaveCount(0)
+
+  // The API refuses a second withdrawal.
+  const again = await api.post(`muns/${munId}/actions/withdraw-submission`)
+  expect(again.status()).toBe(409)
+  expect((await again.json()).error.message).toBe('Cannot withdraw: this MUN is not waiting for your confirmation')
 })
 
 test('"Run checks and submit" passes and asks for confirmation', async ({ page }) => {
@@ -85,6 +101,7 @@ test('"Run checks and submit" passes and asks for confirmation', async ({ page }
 
   // While waiting for confirmation, the other sections are locked and point back here.
   await expect(banner(page)).toContainText(`${CONFIRM.name} is waiting for your confirmation`)
+  await expect(banner(page)).toContainText('choose "Make changes first" on MUN Setup to edit something')
   await expect(banner(page).getByRole('link')).toHaveCount(0)
   await expect(main(page).getByText('These details are locked while MUN Hub reviews your MUN.')).toBeVisible()
 })

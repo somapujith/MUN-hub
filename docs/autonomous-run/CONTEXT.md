@@ -106,3 +106,21 @@ payout execution.
   link (`35cd296`). DEPLOY: `munhub-api` needs secret TOTP_FIELD_KEY (fresh 32-byte base64, not
   PAYMENT_FIELD_KEY); REQUIRE_STAFF_2FA stays unset until the user enrolls. New ratelimit
   bindings RL_MFA_VERIFY_IP/TOKEN (namespace ids 1015/1016). 4b now on MFA web UI + admin UX pass.
+- 10:05 Lanes workflow finished: wiring commits `f8ea0a9` `9942dc7` `69c7664` `2dfca00`; unit suite
+  1,556/1,556, all typechecks/lints/build/dry-run clean. Launched: `followups` agent (slot 0035 +
+  wiring leftovers), `munhub-integrated-review` workflow (9 areas, verify, fix, merge), and the
+  delegate/visitor UX walkthrough agent. f1 = organizer UX pass, 4b = MFA web UI + admin UX pass.
+  Deploy-time vars/secrets list: see the wiring report section in lane change logs + RUNBOOK.
+- 10:20 Fixed from 84's E2E: webhook hold-expiry timing + confirmation-page wording (`1d86713`);
+  seeded student has a complete profile (`edb7b83`); dev-only cron trigger (`042a436`,
+  ENABLE_DEV_ENDPOINTS). f1 organizer UX pass done (`4e62a1d`, log `5888df1`), now on preview
+  labels, toaster position, organization name (slot 0036 after 0035). QUEUED (lead): payout
+  settings rework — UPI-first, optional bank, no PAN/GST, verificationState PENDING on save
+  (needs slot 0037: pan/bank columns NOT NULL today, no UPI column).
+- ~11:00–14:36 Usage limit hit ("session limit, resets 11:30") — review fix agents, the followups
+  agent and the delegate UX agent stopped mid-work. 14:40 resumed: followups + UX agents continued
+  from their transcripts; review workflow resumed from `.claude/workflows/munhub-integrated-review.js`
+  with a SKIP filter so re-run fixers don't duplicate fixes already merged (edge `046649c`/`bc7d217`
+  pending merge; notifications `1cab522…67fc63f` merged; payments `7dd1c47` `bb65b07` `5014559`
+  merged). Review confirmed 43 findings (2 high: staff TOTP brute force; bank-detail change leaves
+  payout VERIFIED). Workflow scripts saved under `.claude/workflows/`.

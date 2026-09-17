@@ -13,6 +13,7 @@ import { AdminGoLiveQueuePage } from "@/pages/admin/go-live-queue-page";
 import { AdminOrganizersPage } from "@/pages/admin/organizers-page";
 import { AdminOverviewPage } from "@/pages/admin/overview-page";
 import { AdminPaymentsPage } from "@/pages/admin/payments-page";
+import { AdminSecurityPage } from "@/pages/admin/security-page";
 import { AdminRegistrationsPage } from "@/pages/admin/registrations-page";
 import { AdminReviewPage } from "@/pages/admin/review-page";
 import { AdminSupportPage } from "@/pages/admin/support-page";
@@ -217,6 +218,7 @@ export const router = createBrowserRouter([
           { path: "muns", element: <AdminConferencesPage /> },
           { path: "muns/:munId", element: <AdminConferenceDetailPage /> },
           { path: "staff", element: <AdminStaffPage /> },
+          { path: "security", element: <AdminSecurityPage /> },
           { path: "registrations", element: <AdminRegistrationsPage /> },
           { path: "payments", element: <AdminPaymentsPage /> },
           { path: "organizers", element: <AdminOrganizersPage /> },

@@ -12,7 +12,7 @@ async function makeUser(emailNotificationsEnabled = true) {
   return user
 }
 
-async function makeRegistration(userId: string, price = 100000) {
+async function makeRegistration(userId: string, price = 1000) {
   const [organizer] = await db
     .insert(users)
     .values({ name: 'Org', email: `org-${crypto.randomUUID()}@test.dev`, role: 'ORGANIZER' })
@@ -41,7 +41,7 @@ function mockAdapter() {
 describe('notifyRegistrationConfirmed', () => {
   it('sends a receipt with the product name and amount', async () => {
     const user = await makeUser()
-    const { mun, registration } = await makeRegistration(user.id, 150000)
+    const { mun, registration } = await makeRegistration(user.id, 1500)
     const { adapter, send } = mockAdapter()
 
     await notifyRegistrationConfirmed(registration.id, adapter)
@@ -51,23 +51,36 @@ describe('notifyRegistrationConfirmed', () => {
     expect(call.to).toBe(user.email)
     expect(call.subject).toContain(mun.name)
     expect(call.body).toContain('Standard Delegate')
-    expect(call.body).toContain('1500.00')
+    // Whole rupees (not paise) — regression test for the ÷100 bug that once
+    // turned a ₹1,500 registration into "INR 15.00" in the receipt email.
+    expect(call.body).toContain('₹1,500')
   })
 
   it('uses the payments row amount over the product list price when a payment exists', async () => {
     const user = await makeUser()
-    const { registration } = await makeRegistration(user.id, 150000)
+    const { registration } = await makeRegistration(user.id, 1500)
     await db.insert(payments).values({
       registrationId: registration.id,
       providerOrderId: `order-${crypto.randomUUID()}`,
-      amount: 140000, // e.g. an early-bird discount applied at charge time
+      amount: 1400, // e.g. an early-bird discount applied at charge time
       status: 'PAID',
     })
     const { adapter, send } = mockAdapter()
 
     await notifyRegistrationConfirmed(registration.id, adapter)
 
-    expect(send.mock.calls[0][0].body).toContain('1400.00')
+    expect(send.mock.calls[0][0].body).toContain('₹1,400')
+  })
+
+  it('groups digits the Indian way past one lakh, not the Western way', async () => {
+    const user = await makeUser()
+    const { registration } = await makeRegistration(user.id, 150000)
+    const { adapter, send } = mockAdapter()
+
+    await notifyRegistrationConfirmed(registration.id, adapter)
+
+    expect(send.mock.calls[0][0].body).toContain('₹1,50,000')
+    expect(send.mock.calls[0][0].body).not.toContain('₹150,000')
   })
 
   it('does not send when the user has opted out of email notifications', async () => {

@@ -64,14 +64,14 @@ const REGISTRATION_STATUS_META: Record<RegistrationStatus, RegistrationStatusMet
     icon: "x-circle",
     hint: "This registration was cancelled and the seat released.",
   },
-  // Legacy status: MUN Hub has no refunds, and nothing sets it any more. The
-  // few old rows were registrations closed with the payment given back, so
-  // the label says that rather than "Refunded".
+  // Legacy status: MUN Hub has no refunds, and nothing sets it any more. Old
+  // rows are payment problems MUN Hub settles by hand (payment exceptions),
+  // so the label says that rather than "Refunded".
   REFUNDED: {
-    label: "Payment returned",
+    label: "Payment exception",
     tone: "muted",
     icon: "rotate-ccw",
-    hint: "This registration was closed and the payment returned to you.",
+    hint: "There was a problem with this payment. Our support team settles it with you directly.",
   },
   ATTENDED: {
     label: "Attended",

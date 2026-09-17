@@ -111,9 +111,10 @@ export const GATE1_AUDIT_ACTIONS = [
  *
  * Two sources:
  * - every `admin_actions` row (suspensions, Gate 2 decisions, publishes, …),
- *   labelled with `metadata.event` when the row carries one. Staff-management
- *   writes (admin-staff.ts) store the closest existing enum value and put the
- *   precise event name (STAFF_CREATED, STAFF_ROLE_CHANGED, …) there;
+ *   labelled with `metadata.event` when the row carries one — staff-management
+ *   writes (admin-staff.ts) repeat their action name there, and rows written
+ *   before migration 0035 have only that name (their action is the closest
+ *   older value);
  * - Gate 1 organizer-application decisions (`reviewMunApplication`), which
  *   are recorded only as `verification_logs` transitions. A row counts as a
  *   Gate 1 decision when it is APPROVED/REJECTED/CHANGES_REQUESTED and the

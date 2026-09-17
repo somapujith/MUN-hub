@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon } from "lucide-react";
 import {
   MAX_EXPECTED_DELEGATES,
+  MAX_ORGANIZATION_LENGTH,
   MIN_DESCRIPTION_LENGTH,
   ONBOARDING_STEPS,
   acceptAgreement,
@@ -255,6 +256,7 @@ function ProfileStep({ data, onSaved }: StepProps) {
   const [firstName, setFirstName] = React.useState(data.profile.firstName ?? "");
   const [lastName, setLastName] = React.useState(data.profile.lastName ?? "");
   const [phone, setPhone] = React.useState(data.profile.contactPhone ?? "");
+  const [organization, setOrganization] = React.useState(data.profile.organization ?? "");
   const { mutation, error } = useStepMutation(saveProfileStep, onSaved);
   const phoneLooksWrong = phone.length === 10 && !TEN_DIGITS.test(phone);
 
@@ -264,8 +266,8 @@ function ProfileStep({ data, onSaved }: StepProps) {
       error={error ?? (phoneLooksWrong ? "Enter a valid 10-digit mobile number." : null)}
       submitLabel="Continue"
       submitting={mutation.isPending}
-      canSubmit={Boolean(firstName.trim() && lastName.trim() && TEN_DIGITS.test(phone))}
-      onSubmit={() => mutation.mutate({ firstName, lastName, contactPhone: phone })}
+      canSubmit={Boolean(firstName.trim() && lastName.trim() && organization.trim() && TEN_DIGITS.test(phone))}
+      onSubmit={() => mutation.mutate({ firstName, lastName, contactPhone: phone, organization })}
     >
       <div className="grid gap-md sm:grid-cols-2">
         <BrightField id="onboarding-first-name" label="First name">
@@ -289,6 +291,21 @@ function ProfileStep({ data, onSaved }: StepProps) {
           />
         </BrightField>
       </div>
+      <BrightField
+        id="onboarding-organization"
+        label="Organizing body"
+        hint="The school, college or society hosting your MUN. Delegates see it as the host."
+      >
+        <input
+          id="onboarding-organization"
+          autoComplete="organization"
+          placeholder="e.g. Deccan Debating Society"
+          maxLength={MAX_ORGANIZATION_LENGTH}
+          value={organization}
+          onChange={(event) => setOrganization(event.target.value)}
+          className={BRIGHT_INPUT_CLASS}
+        />
+      </BrightField>
       <BrightField id="onboarding-phone" label="Contact number">
         <PhoneInput id="onboarding-phone" value={phone} onChange={setPhone} invalid={phoneLooksWrong} />
       </BrightField>

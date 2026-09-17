@@ -46,6 +46,12 @@ the shared tree commit only their own hunks.
 |---|---|---|---|
 | 0030 | mun-hub-f1 | organizer_applications uniqueness for multi-MUN organizers | committed ba44e79 |
 | 0031 | mun-hub-62 | payments fee breakdown, exceptions, webhook events, registration idempotency key | committed 3b122be |
+| 0032 | mun-hub-f1 | organizer application answers | committed f523604 |
+| 0033 | mun-hub-4b | email verification | committed 97e0ce7 |
+| 0034 | mun-hub-4b | staff TOTP 2FA | committed e6a0db9 |
+| 0035 | mun-hub-62 agent `followups` | admin audit enum values + seeded REFUND_POLICY doc cleanup | in progress |
+| 0036 | mun-hub-4b | payout settings rework (UPI-first, no PAN/GST) | reserved (after 0035) |
+| 0037 | — | (released: team access awaits the user, USER_ACTIONS §7) | free |
 
 Lead-agent lanes must not add migrations without a slot from the lead.
 

@@ -86,14 +86,37 @@ export interface SignUpInput {
 }
 
 /**
+ * `signIn`'s result: a real session (cookie set), or — only for a staff
+ * account with confirmed TOTP enrollment (lib/actions/staff-mfa.ts) —
+ * `MFA_REQUIRED`, meaning the password was correct but no cookie was set yet.
+ * `pendingToken` must be completed via `completeMfaChallenge`.
+ */
+export type SignInResult =
+  | ({ status: "SIGNED_IN" } & Session)
+  | { status: "MFA_REQUIRED"; pendingToken: string };
+
+/**
  * Real password sign-in — POST /api/v1/auth/session (`server/routes/auth.ts`).
- * The server sets the `mun_hub_session` cookie on the response; the caller
- * never sees or stores a token directly (`credentials: "include"` above is
- * what makes the browser keep it), it only gets the resulting `{userId,
- * role}` back to seed the client-side session cache with.
+ * On `SIGNED_IN`, the server sets the `mun_hub_session` cookie on the
+ * response; the caller never sees or stores a token directly
+ * (`credentials: "include"` above is what makes the browser keep it). On
+ * `MFA_REQUIRED`, no cookie is set — the caller must complete the challenge.
  */
 export function signIn(input: SignInInput) {
-  return request<Session>("/auth/session", {
+  return request<SignInResult>("/auth/session", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/**
+ * Step 2 of staff sign-in when `signIn` returned `MFA_REQUIRED` — POST
+ * /api/v1/auth/session/mfa. `code` is either a 6-digit TOTP or an
+ * `XXXXX-XXXXX` recovery code. Sets the session cookie on success, same as
+ * `signIn`'s `SIGNED_IN` branch.
+ */
+export function completeMfaChallenge(input: { pendingToken: string; code: string }) {
+  return request<{ status: "SIGNED_IN" } & Session>("/auth/session/mfa", {
     method: "POST",
     body: JSON.stringify(input),
   });

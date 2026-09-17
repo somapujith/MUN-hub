@@ -125,18 +125,37 @@ interface LockedPayment {
   exceptionResolvedAt: Date | null
 }
 
+/** The charge an event reports, for log lines: which payment, for how much. */
+function describeCharge(event: PaymentWebhookEvent): string {
+  return `${event.providerPaymentId ?? 'unknown payment'} (${event.amount} ${event.currency})`
+}
+
 /**
  * Exception columns for a new exception. An exception that is still open is
  * never overwritten (the first reason stands until an admin resolves it);
  * a resolved one is replaced — the earlier resolution stays in admin_actions.
+ *
+ * KNOWN GAP (needs a migration): the payment row has no column for the
+ * charge that raised the exception, so only these log lines name it. The
+ * admin queue sends staff to the provider dashboard by order ID instead.
  */
-function raiseException(payment: LockedPayment, reason: PaymentExceptionReason, now: Date) {
+function raiseException(
+  payment: LockedPayment,
+  reason: PaymentExceptionReason,
+  event: PaymentWebhookEvent,
+  now: Date,
+) {
+  const context =
+    `payment ${payment.id} (order ${event.providerOrderId}, ${payment.amount} ${payment.currency}, ` +
+    `payment on file ${payment.providerPaymentId ?? 'none'})`
   if (payment.exceptionReason !== null && payment.exceptionResolvedAt === null) {
     console.warn(
-      `[payments] payment ${payment.id} already has open exception ${payment.exceptionReason}; also saw ${reason}`,
+      `[payments] ${context} already has open exception ${payment.exceptionReason}; ` +
+        `not recorded: ${reason} for charge ${describeCharge(event)}`,
     )
     return {}
   }
+  console.warn(`[payments] ${context}: exception ${reason} for charge ${describeCharge(event)}`)
   return {
     exceptionReason: reason,
     exceptionRaisedAt: now,
@@ -183,7 +202,7 @@ async function applyEvent(
   }
 
   const [registration] = await tx
-    .select({ status: registrations.status })
+    .select({ status: registrations.status, expiresAt: registrations.expiresAt })
     .from(registrations)
     .where(eq(registrations.id, payment.registrationId))
     .for('update')
@@ -234,13 +253,11 @@ async function applyEvent(
     if (!differentPayment) {
       return { kind: 'done', body: await finish('DUPLICATE_CAPTURE', { ok: true, duplicate: true }) }
     }
-    // A second, distinct charge against an order that is already paid.
-    console.warn(
-      `[payments] duplicate capture on order ${event.providerOrderId}: ${event.providerPaymentId} (kept ${payment.providerPaymentId})`,
-    )
+    // A second, distinct charge against an order that is already paid. The
+    // payment on file stays the first one (it may be what confirmed the seat).
     await tx
       .update(payments)
-      .set({ ...raiseException(payment, PAYMENT_EXCEPTION_REASONS.duplicatePayment, now), updatedAt: now })
+      .set({ ...raiseException(payment, PAYMENT_EXCEPTION_REASONS.duplicatePayment, event, now), updatedAt: now })
       .where(eq(payments.id, payment.id))
     return {
       kind: 'done',
@@ -253,13 +270,10 @@ async function applyEvent(
   if (!amountMatches) {
     // Never confirm on an amount we didn't ask for. The registration keeps
     // its hold (and expires as usual); the admin reconciles the charge.
-    console.warn(
-      `[payments] amount mismatch on order ${event.providerOrderId}: expected ${payment.amount} ${payment.currency}, got ${event.amount} ${event.currency}`,
-    )
     await tx
       .update(payments)
       .set({
-        ...raiseException(payment, PAYMENT_EXCEPTION_REASONS.amountMismatch, now),
+        ...raiseException(payment, PAYMENT_EXCEPTION_REASONS.amountMismatch, event, now),
         providerPaymentId: payment.providerPaymentId ?? event.providerPaymentId,
         updatedAt: now,
       })
@@ -270,7 +284,24 @@ async function applyEvent(
     }
   }
 
-  if (registration?.status === 'PAYMENT_PENDING') {
+  // A hold that ran out before the money moved is expired even if the
+  // release sweep hasn't reached it yet — otherwise the outcome would depend
+  // on sweep timing. Judge by when the provider says the capture happened
+  // (a delayed webhook for an in-time payment still confirms), and release
+  // the seat exactly as the sweep would.
+  const capturedAt = Number.isNaN(event.occurredAt.getTime()) ? now : event.occurredAt
+  const holdExpired =
+    registration?.status === 'PAYMENT_PENDING' &&
+    registration.expiresAt !== null &&
+    registration.expiresAt.getTime() < capturedAt.getTime()
+  if (holdExpired) {
+    await tx
+      .update(registrations)
+      .set({ status: 'CANCELLED', updatedAt: now })
+      .where(and(eq(registrations.id, payment.registrationId), eq(registrations.status, 'PAYMENT_PENDING')))
+  }
+
+  if (registration?.status === 'PAYMENT_PENDING' && !holdExpired) {
     await tx
       .update(payments)
       .set({ status: 'PAID', providerPaymentId: event.providerPaymentId, updatedAt: now })
@@ -295,7 +326,7 @@ async function applyEvent(
     .set({
       status: 'PAID',
       providerPaymentId: event.providerPaymentId,
-      ...raiseException(payment, PAYMENT_EXCEPTION_REASONS.paymentAfterHoldExpired, now),
+      ...raiseException(payment, PAYMENT_EXCEPTION_REASONS.paymentAfterHoldExpired, event, now),
       updatedAt: now,
     })
     .where(eq(payments.id, payment.id))

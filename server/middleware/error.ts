@@ -5,6 +5,7 @@ import { ONBOARDING_ERRORS } from '@/lib/actions/organizer-onboarding'
 import { ORGANIZER_OPS_ERROR_STATUS } from '@/lib/actions/organizer-ops-errors'
 import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
 import { MFA_ERRORS } from '@/lib/actions/staff-mfa'
+import { MODULE_LOCKED_PATTERN } from '@/lib/lifecycle/module-completion'
 import { reportRequestError } from '../lib/report-error'
 import type { AppVariables } from '../src/types'
 
@@ -20,6 +21,7 @@ export type ErrorCode =
   | 'VALIDATION_FAILED'
   | 'RATE_LIMITED'
   | 'UNAVAILABLE'
+  | 'MFA_UNAVAILABLE'
   | 'INTERNAL'
 
 export interface ApiErrorBody {
@@ -96,7 +98,11 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   if (message === MFA_ERRORS.staffOnly) {
     return { status: 403, code: 'FORBIDDEN', message }
   }
-  if (message === MFA_ERRORS.alreadyEnrolled || message === MFA_ERRORS.notEnrolled) {
+  if (
+    message === MFA_ERRORS.alreadyEnrolled ||
+    message === MFA_ERRORS.notEnrolled ||
+    message === MFA_ERRORS.notConfirmed
+  ) {
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
   if (message === MFA_ERRORS.invalidCode) {
@@ -107,6 +113,9 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   }
   if (message === MFA_ERRORS.tooManyAttempts) {
     return { status: 429, code: 'RATE_LIMITED', message }
+  }
+  if (message === MFA_ERRORS.unavailable) {
+    return { status: 503, code: 'MFA_UNAVAILABLE', message }
   }
 
   if (message === APPLICATION_PENDING) {
@@ -125,6 +134,7 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     message === 'Expected start date must be a valid date' ||
     /^Maximum expected delegates must be a whole number from 1 to \d+$/.test(message) ||
     /^Description must be at least \d+ characters$/.test(message) ||
+    /^Organization must be at most \d+ characters$/.test(message) ||
     message === 'Website must be a full URL, including https://' ||
     message === 'UPI ID must look like name@bank' ||
     message === 'You must accept the organizer agreement to continue' ||
@@ -216,11 +226,11 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
 
   // lib/lifecycle/module-completion.ts#assertModuleNotLocked and
   // organizer-confirmation.ts#submitFinalConfirmation — previously 500s.
-  if (/^The ".+" module is locked while this mun is under MUNHub review/.test(message)) {
+  if (MODULE_LOCKED_PATTERN.test(message)) {
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
 
-  if (/^Cannot (submit|publish|transition|confirm|queue)/.test(message)) {
+  if (/^Cannot (submit|publish|transition|confirm|queue|withdraw)/.test(message)) {
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
 
@@ -316,8 +326,7 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'MUN title is required', status: 400, code: 'VALIDATION_FAILED' },
   { message: APPLICATION_PENDING, status: 409, code: 'CONFLICT_DUPLICATE' },
   {
-    message:
-      'The "PORTFOLIOS" module is locked while this mun is under MUNHub review (current status: VERIFICATION) — changes to this module are blocked until review completes. Contact MUNHub support if this is urgent.',
+    message: 'Portfolios is locked while MUN Hub reviews this MUN. You can edit it again if a reviewer sends it back.',
     status: 409,
     code: 'CONFLICT_STATE',
   },
@@ -368,7 +377,9 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: MFA_ERRORS.staffOnly, status: 403, code: 'FORBIDDEN' },
   { message: MFA_ERRORS.alreadyEnrolled, status: 409, code: 'CONFLICT_STATE' },
   { message: MFA_ERRORS.notEnrolled, status: 409, code: 'CONFLICT_STATE' },
+  { message: MFA_ERRORS.notConfirmed, status: 409, code: 'CONFLICT_STATE' },
   { message: MFA_ERRORS.invalidCode, status: 401, code: 'UNAUTHORIZED' },
   { message: MFA_ERRORS.expired, status: 400, code: 'VALIDATION_FAILED' },
   { message: MFA_ERRORS.tooManyAttempts, status: 429, code: 'RATE_LIMITED' },
+  { message: MFA_ERRORS.unavailable, status: 503, code: 'MFA_UNAVAILABLE' },
 ]

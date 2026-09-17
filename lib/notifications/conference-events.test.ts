@@ -37,7 +37,7 @@ async function makeMunWithRegistrations() {
 }
 
 describe('notifyConferenceCancelled', () => {
-  it('emails every CONFIRMED delegate and the organizer when an admin cancelled, with the reason', async () => {
+  it('emails every CONFIRMED delegate and the organizer when an admin cancelled', async () => {
     const { organizer, mun, confirmedDelegate1, confirmedDelegate2, pendingDelegate } = await makeMunWithRegistrations()
     const admin = await makeUser('ADMIN', 'Admin')
     await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: admin.id, action: 'CANCELLED', notes: 'Venue fell through' })
@@ -54,11 +54,30 @@ describe('notifyConferenceCancelled', () => {
 
     const organizerCall = send.mock.calls.find((call) => call[0].to === organizer.email)
     expect(organizerCall?.[0].subject).toContain(mun.name)
-    expect(organizerCall?.[0].body).toContain('Venue fell through')
+    expect(organizerCall?.[0].body).toContain('The MUN Hub team made this decision.')
   })
 
-  it('does not notify the organizer when the organizer cancelled it themselves', async () => {
-    const { organizer, mun } = await makeMunWithRegistrations()
+  // The admin cancel dialog records the reason as an internal audit note, so
+  // it can hold findings (fraud, failed KYC) that must never reach delegates
+  // or the organizer, and it must never be credited to the organizer.
+  it("never emails an admin's cancel reason, to delegates or to the organizer", async () => {
+    const { organizer, mun, confirmedDelegate1 } = await makeMunWithRegistrations()
+    const admin = await makeUser('ADMIN', 'Admin')
+    const internalNote = 'Organizer failed bank verification — suspected fraudulent account'
+    await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: admin.id, action: 'CANCELLED', notes: internalNote })
+
+    const { adapter, send } = mockAdapter()
+    await notifyConferenceCancelled(mun.id, adapter)
+
+    expect(send.mock.calls.map((call) => call[0].to)).toEqual(expect.arrayContaining([confirmedDelegate1.email, organizer.email]))
+    for (const [payload] of send.mock.calls) {
+      expect(payload.body).not.toContain(internalNote)
+      expect(payload.body).not.toContain('The organizer gave this reason')
+    }
+  })
+
+  it("quotes the organizer's own reason to delegates and does not notify the organizer", async () => {
+    const { organizer, mun, confirmedDelegate1 } = await makeMunWithRegistrations()
     await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: organizer.id, action: 'CANCELLED', notes: 'Changed plans' })
 
     const { adapter, send } = mockAdapter()
@@ -66,6 +85,8 @@ describe('notifyConferenceCancelled', () => {
 
     const recipients = send.mock.calls.map((call) => call[0].to)
     expect(recipients).not.toContain(organizer.email)
+    const delegateCall = send.mock.calls.find((call) => call[0].to === confirmedDelegate1.email)
+    expect(delegateCall?.[0].body).toContain('The organizer gave this reason: Changed plans.')
   })
 
   it('never promises a refund — only "payments are final" and a link to /legal/refunds', async () => {
@@ -89,10 +110,9 @@ describe('notifyConferenceCancelled', () => {
     }
   })
 
-  it('omits the reason line when no reason was recorded', async () => {
-    const { mun } = await makeMunWithRegistrations()
-    const admin = await makeUser('ADMIN', 'Admin')
-    await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: admin.id, action: 'CANCELLED', notes: null })
+  it('omits the reason line when the organizer recorded no reason', async () => {
+    const { organizer, mun } = await makeMunWithRegistrations()
+    await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: organizer.id, action: 'CANCELLED', notes: '   ' })
 
     const { adapter, send } = mockAdapter()
     await notifyConferenceCancelled(mun.id, adapter)

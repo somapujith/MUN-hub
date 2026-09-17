@@ -9,11 +9,13 @@ import { hashPassword, verifyPassword } from '@/lib/auth/password'
 import { createSession } from '@/lib/auth/session'
 import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
+import { getRuntimeEnv } from '@/lib/runtime-env'
 import { STAFF_ROLES } from './admin-staff'
 import type { Session } from '@/lib/auth/adapter'
 import type { Role } from '@/lib/db/schema-enums'
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+type Executor = Tx | typeof db
 
 // -----------------------------------------------------------------------------
 // Staff TOTP two-factor auth — OPERATIONS/ADMIN/SUPER_ADMIN only.
@@ -45,9 +47,11 @@ export const MFA_ERRORS = {
   staffOnly: 'Two-factor authentication is only available for staff accounts',
   alreadyEnrolled: 'Two-factor authentication is already set up for this account',
   notEnrolled: 'Start two-factor authentication setup first',
+  notConfirmed: 'Confirm two-factor authentication setup before managing recovery codes',
   invalidCode: 'Invalid verification code',
   expired: 'This sign-in attempt has expired — sign in again',
   tooManyAttempts: 'Too many incorrect attempts — sign in again',
+  unavailable: "Two-factor authentication isn't available yet",
 } as const
 
 function isStaffRole(role: string): role is (typeof STAFF_ROLES)[number] {
@@ -89,10 +93,17 @@ export interface MfaSetupResult {
  * it unconfirmed. Calling this again before confirming replaces the pending
  * secret — the old QR code simply stops working, which is the safe direction
  * for an abandoned setup. Throws `alreadyEnrolled` once confirmed; disabling
- * first (SUPER_ADMIN `resetStaffMfa`) is required to re-enroll.
+ * first (SUPER_ADMIN `resetStaffMfa`) is required to re-enroll. Throws
+ * `unavailable` if TOTP_FIELD_KEY isn't configured — checked up front here
+ * rather than surfacing field-encryption.ts's generic missing-key error as a
+ * raw 500. Nothing else in this file needs the same check: confirming,
+ * challenging, disabling and regenerating codes are only reachable once a
+ * row already exists, which is only possible if the key was present when
+ * this function ran.
  */
 export async function beginMfaEnrollment(session: Session): Promise<MfaSetupResult> {
   assertStaff(session)
+  if (!getRuntimeEnv('TOTP_FIELD_KEY')) throw new Error(MFA_ERRORS.unavailable)
 
   const [existing] = await db.select({ confirmedAt: userMfa.confirmedAt }).from(userMfa).where(eq(userMfa.userId, session.userId)).limit(1)
   if (existing?.confirmedAt) throw new Error(MFA_ERRORS.alreadyEnrolled)
@@ -227,8 +238,8 @@ export async function completeMfaChallenge(
 }
 
 /** The id of the first unused recovery code that verifies against `code`, or null. */
-async function matchRecoveryCode(tx: Tx, userId: string, code: string): Promise<string | null> {
-  const candidates = await tx
+async function matchRecoveryCode(executor: Executor, userId: string, code: string): Promise<string | null> {
+  const candidates = await executor
     .select({ id: mfaRecoveryCodes.id, codeHash: mfaRecoveryCodes.codeHash })
     .from(mfaRecoveryCodes)
     .where(and(eq(mfaRecoveryCodes.userId, userId), isNull(mfaRecoveryCodes.usedAt)))
@@ -237,6 +248,60 @@ async function matchRecoveryCode(tx: Tx, userId: string, code: string): Promise<
     if (await verifyPassword(code, candidate.codeHash)) return candidate.id
   }
   return null
+}
+
+/**
+ * Self-service: mints a fresh set of 10 recovery codes, replacing the old
+ * ones, for an already-confirmed account. Requires a *current TOTP code*
+ * specifically (not a recovery code) — regenerating is about to invalidate
+ * every recovery code anyway, so spending one here to do it would be an odd,
+ * wasteful path when the authenticator app is right there.
+ */
+export async function regenerateMfaRecoveryCodes(code: string, session: Session): Promise<{ recoveryCodes: string[] }> {
+  assertStaff(session)
+
+  const [row] = await db.select().from(userMfa).where(eq(userMfa.userId, session.userId)).limit(1)
+  if (!row?.confirmedAt) throw new Error(MFA_ERRORS.notConfirmed)
+
+  const secret = decryptField(row.totpSecretCiphertext, TOTP_KEY_NAMES)
+  const matchedStep = verifyTotp(secret, code.trim(), { lastUsedStep: row.lastUsedStep })
+  if (matchedStep === null) throw new Error(MFA_ERRORS.invalidCode)
+
+  const recoveryCodes = Array.from({ length: RECOVERY_CODE_COUNT }, generateRecoveryCode)
+  const codeHashes = await Promise.all(recoveryCodes.map((recoveryCode) => hashPassword(recoveryCode)))
+
+  await db.transaction(async (tx) => {
+    await tx.update(userMfa).set({ lastUsedStep: matchedStep }).where(eq(userMfa.userId, session.userId))
+    await tx.delete(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, session.userId))
+    await tx.insert(mfaRecoveryCodes).values(codeHashes.map((codeHash) => ({ userId: session.userId, codeHash })))
+  })
+
+  return { recoveryCodes }
+}
+
+/**
+ * Self-service: turns MFA off for the caller's own account — a TOTP or
+ * recovery code proves it's really them (not just whoever currently holds
+ * the session cookie) before the safety net comes down. Throws
+ * `notConfirmed` if there's nothing confirmed to disable.
+ */
+export async function disableMfa(code: string, session: Session): Promise<void> {
+  assertStaff(session)
+
+  const [row] = await db.select().from(userMfa).where(eq(userMfa.userId, session.userId)).limit(1)
+  if (!row?.confirmedAt) throw new Error(MFA_ERRORS.notConfirmed)
+
+  const trimmedCode = code.trim()
+  const matchedStep = /^\d{6}$/.test(trimmedCode)
+    ? verifyTotp(decryptField(row.totpSecretCiphertext, TOTP_KEY_NAMES), trimmedCode, { lastUsedStep: row.lastUsedStep })
+    : null
+  const recoveryCodeId = matchedStep === null ? await matchRecoveryCode(db, session.userId, trimmedCode) : null
+  if (matchedStep === null && !recoveryCodeId) throw new Error(MFA_ERRORS.invalidCode)
+
+  await db.transaction(async (tx) => {
+    await tx.delete(userMfa).where(eq(userMfa.userId, session.userId))
+    await tx.delete(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, session.userId))
+  })
 }
 
 /**

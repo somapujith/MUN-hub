@@ -142,6 +142,13 @@ function mediaUrlSql(kind: 'COVER' | 'LOGO') {
 }
 
 /**
+ * Who delegates see as the host: the organizer's organization (school,
+ * college or society, kept in `users.institution` and asked for in organizer
+ * onboarding), else the organizer's own name.
+ */
+const hostNameSql = sql<string | null>`coalesce(nullif(trim(${users.institution}), ''), ${users.name})`
+
+/**
  * Text match: every term has to hit at least one of the mun's name, city,
  * country or theme, or the organizer's name or institution.
  */
@@ -240,7 +247,7 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
       registrationDeadline: muns.registrationDeadline,
       status: muns.status,
       minPrice: priceSq.minPrice,
-      organizerName: users.name,
+      organizerName: hostNameSql,
       coverImage: mediaUrlSql('COVER'),
     })
     .from(muns)
@@ -360,7 +367,7 @@ async function loadPublicMunDetail(where: SQL): Promise<PublicMunDetail | null> 
   const [row] = await db
     .select({
       ...PUBLIC_MUN_COLUMNS,
-      organizerName: users.name,
+      organizerName: hostNameSql,
       coverImage: mediaUrlSql('COVER'),
       logo: mediaUrlSql('LOGO'),
     })

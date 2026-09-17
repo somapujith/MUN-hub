@@ -33,6 +33,7 @@ interface SeedOptions {
   provider?: string
   amount?: number
   exceptionReason?: string | null
+  expiresAt?: Date
 }
 
 async function seed(options: SeedOptions = {}) {
@@ -60,7 +61,7 @@ async function seed(options: SeedOptions = {}) {
       munId: mun.id,
       registrationProductId: product.id,
       status: options.registrationStatus ?? 'PAYMENT_PENDING',
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      expiresAt: options.expiresAt ?? new Date(Date.now() + 15 * 60 * 1000),
     })
     .returning()
   const [payment] = await db
@@ -197,6 +198,35 @@ describe('processPaymentWebhook — captures', () => {
     expect(onRegistrationConfirmed).not.toHaveBeenCalled()
   })
 
+  it('treats a capture after an expired hold as a payment exception even before the sweep releases it', async () => {
+    const { registration, payment } = await seed({ expiresAt: new Date(Date.now() - 60_000) })
+    const eventId = `evt_${crypto.randomUUID()}`
+    const result = await deliver(simulatePaymentOutcome(orderOf(payment), 'success', { eventId, providerPaymentId: 'pay_after_expiry' }))
+
+    expect(result).toMatchObject({ ok: true, body: { ok: true, exception: true } })
+    const after = await reload(registration.id, payment.id)
+    expect(after.registration.status).toBe('CANCELLED')
+    expect(after.payment.status).toBe('PAID')
+    expect(after.payment.exceptionReason).toBe('PAYMENT_AFTER_HOLD_EXPIRED')
+    expect(onRegistrationConfirmed).not.toHaveBeenCalled()
+  })
+
+  it('still confirms a capture that happened inside the hold when the webhook arrives after it expired', async () => {
+    const { registration, payment } = await seed({ expiresAt: new Date(Date.now() - 60_000) })
+    const result = await deliver(
+      simulatePaymentOutcome(orderOf(payment), 'success', {
+        eventId: `evt_${crypto.randomUUID()}`,
+        providerPaymentId: 'pay_in_time',
+        occurredAt: new Date(Date.now() - 2 * 60_000),
+      }),
+    )
+
+    expect(result).toMatchObject({ ok: true, body: { ok: true, confirmed: true } })
+    const after = await reload(registration.id, payment.id)
+    expect(after.registration.status).toBe('CONFIRMED')
+    expect(after.payment.exceptionReason).toBeNull()
+  })
+
   it.each([
     ['amount', { amount: 1 }],
     ['currency', { currency: 'USD' }],
@@ -223,6 +253,28 @@ describe('processPaymentWebhook — captures', () => {
     const after = await reload(registration.id, payment.id)
     expect(after.payment.status).toBe('PAID')
     expect(after.payment.exceptionReason).toBe('AMOUNT_MISMATCH')
+  })
+
+  // The payment row has no column for the charge behind an exception, so the
+  // log line is the only record of which charge to return.
+  it('logs the payment id and amount of the charge behind every exception', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { payment } = await seed()
+    await deliver(simulatePaymentOutcome(orderOf(payment), 'success', { amount: 1, providerPaymentId: 'pay_odd' }))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('AMOUNT_MISMATCH for charge pay_odd (1 INR)'))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining(payment.providerOrderId))
+
+    // A second bad charge while that exception is open changes no column, so
+    // it must still be named in the log.
+    await deliver(simulatePaymentOutcome(orderOf(payment), 'success', { amount: 2, providerPaymentId: 'pay_odd_2' }))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('already has open exception AMOUNT_MISMATCH'))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('charge pay_odd_2 (2 INR)'))
+
+    const paid = await seed()
+    await deliver(simulatePaymentOutcome(orderOf(paid.payment), 'success', { providerPaymentId: 'pay_first' }))
+    await deliver(simulatePaymentOutcome(orderOf(paid.payment), 'success', { providerPaymentId: 'pay_second' }))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('DUPLICATE_PAYMENT for charge pay_second (1499 INR)'))
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('payment on file pay_first'))
   })
 
   it('treats a legacy REFUNDED (late-payment) row as already captured', async () => {

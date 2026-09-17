@@ -42,6 +42,8 @@ export interface OrganizerOnboarding {
     firstName: string | null
     lastName: string | null
     contactPhone: string | null
+    /** Shown to delegates as the host. */
+    organization: string | null
     munName: string | null
     munCity: string | null
     /** ISO date (YYYY-MM-DD) */
@@ -79,15 +81,29 @@ function stepsDone(row: ProfileRow | undefined): OnboardingStep[] {
   return done
 }
 
-function toOnboarding(row: ProfileRow | undefined, fallbackName: string | null): OrganizerOnboarding {
+/** A signup phone in the wizard's 10-digit form, or null if it isn't one. */
+function signupPhone(phone: string | null | undefined): string | null {
+  const digits = (phone ?? '').replace(/[\s-]/g, '').replace(/^\+?91(?=\d{10}$)/, '')
+  return PHONE_PATTERN.test(digits) ? digits : null
+}
+
+interface AccountFields {
+  name: string | null
+  phone: string | null
+  institution: string | null
+}
+
+function toOnboarding(row: ProfileRow | undefined, account: AccountFields | undefined): OrganizerOnboarding {
   const completedSteps = stepsDone(row)
-  // Pre-fill the name step from the name given at signup.
-  const [first, ...rest] = (fallbackName ?? '').trim().split(/\s+/)
+  // Pre-fill the name and phone from what was given at signup.
+  const [first, ...rest] = (account?.name ?? '').trim().split(/\s+/)
+  const contactPhone = row?.contactPhone ?? signupPhone(account?.phone)
   return {
     profile: {
       firstName: row?.firstName ?? (first || null),
       lastName: row?.lastName ?? (rest.join(' ') || null),
-      contactPhone: row?.contactPhone ?? null,
+      contactPhone,
+      organization: account?.institution?.trim() || null,
       munName: row?.munName ?? null,
       munCity: row?.munCity ?? null,
       munStartDate: row?.munStartDate ? row.munStartDate.toISOString().slice(0, 10) : null,
@@ -96,7 +112,8 @@ function toOnboarding(row: ProfileRow | undefined, fallbackName: string | null):
       previousEditions: row?.previousEditions ?? null,
       websiteUrl: row?.websiteUrl ?? null,
       upiId: row?.upiId ?? null,
-      upiPhone: row?.upiPhone ?? null,
+      // Most organizers take payouts on the number they gave us.
+      upiPhone: row?.upiPhone ?? contactPhone ?? null,
     },
     completedSteps,
     nextStep: ONBOARDING_STEPS.find((step) => !completedSteps.includes(step)) ?? null,
@@ -113,8 +130,12 @@ async function loadRow(userId: string): Promise<ProfileRow | undefined> {
 
 export async function getOrganizerOnboarding(session: Session | null): Promise<OrganizerOnboarding> {
   assertOrganizer(session)
-  const [user] = await db.select({ name: users.name }).from(users).where(eq(users.id, session.userId)).limit(1)
-  return toOnboarding(await loadRow(session.userId), user?.name ?? null)
+  const [user] = await db
+    .select({ name: users.name, phone: users.phone, institution: users.institution })
+    .from(users)
+    .where(eq(users.id, session.userId))
+    .limit(1)
+  return toOnboarding(await loadRow(session.userId), user)
 }
 
 /** Whether `userId` has finished onboarding — the gate on applying to host. */
@@ -160,8 +181,16 @@ function normalizePhone(value: string, label: string): string {
   return digits
 }
 
+export const MAX_ORGANIZATION_LENGTH = 120
+
 export async function saveOrganizerProfileStep(
-  input: { firstName: string; lastName: string; contactPhone: string },
+  input: {
+    firstName: string
+    lastName: string
+    contactPhone: string
+    /** The school, college or society hosting the MUN; shown to delegates as the host. */
+    organization?: string
+  },
   session: Session | null,
 ): Promise<OrganizerOnboarding> {
   assertOrganizer(session)
@@ -169,6 +198,10 @@ export async function saveOrganizerProfileStep(
   const firstName = requiredText(input.firstName, 'First name')
   const lastName = requiredText(input.lastName, 'Last name')
   const contactPhone = normalizePhone(input.contactPhone, 'Contact number')
+  const organization = input.organization === undefined ? undefined : requiredText(input.organization, 'Organization')
+  if (organization && organization.length > MAX_ORGANIZATION_LENGTH) {
+    throw new Error(`Organization must be at most ${MAX_ORGANIZATION_LENGTH} characters`)
+  }
 
   await db.transaction(async (tx) => {
     const now = new Date()
@@ -179,13 +212,37 @@ export async function saveOrganizerProfileStep(
         target: organizerProfiles.userId,
         set: { firstName, lastName, contactPhone, updatedAt: now },
       })
-    // Keep the account's own name and phone in step with the profile.
+    // Keep the account's own name and phone in step with the profile. The
+    // organization lives on the account too (users.institution), where the
+    // marketplace reads the host name from.
     await tx
       .update(users)
-      .set({ name: `${firstName} ${lastName}`, phone: contactPhone })
+      .set({
+        name: `${firstName} ${lastName}`,
+        phone: contactPhone,
+        ...(organization !== undefined ? { institution: organization } : {}),
+      })
       .where(eq(users.id, session.userId))
   })
   return getOrganizerOnboarding(session)
+}
+
+/**
+ * Changes the organization delegates see as the host, at any time (also after
+ * onboarding is complete). An empty value clears it, so the organizer's own
+ * name is shown instead.
+ */
+export async function updateOrganizerOrganization(
+  organization: string,
+  session: Session | null,
+): Promise<{ organization: string | null }> {
+  assertOrganizer(session)
+  const value = organization.trim() || null
+  if (value && value.length > MAX_ORGANIZATION_LENGTH) {
+    throw new Error(`Organization must be at most ${MAX_ORGANIZATION_LENGTH} characters`)
+  }
+  await db.update(users).set({ institution: value }).where(eq(users.id, session.userId))
+  return { organization: value }
 }
 
 export async function saveOrganizerMunStep(

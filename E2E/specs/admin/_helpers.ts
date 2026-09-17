@@ -1,7 +1,8 @@
 import { expect, request, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { API_ORIGIN, WEB_URL } from '../../env'
-import { signUpOrganizerViaApi, type ApiSession } from '../../fixtures/api'
+import { newApiContext, signInViaApi, signUpOrganizerViaApi, type ApiSession } from '../../fixtures/api'
+import { createStaffUser, type StaffRole } from '../../fixtures/fixture-db'
 import { uniqueEmail } from '../../fixtures/data'
 import { STORAGE_STATE } from '../../paths'
 
@@ -84,6 +85,76 @@ export async function findRowAcrossPages(page: Page, text: string, maxPages = 30
   }
   await expect(row, `row "${text}" not found on any page`).toHaveCount(1)
   return row
+}
+
+/** API context authenticated as the seeded organizer (who owns every fixture MUN). */
+export async function fixtureOwnerApi(): Promise<APIRequestContext> {
+  return request.newContext({
+    baseURL: `${API_ORIGIN}/api/v1/`,
+    extraHTTPHeaders: { Origin: WEB_URL },
+    storageState: STORAGE_STATE.organizer,
+  })
+}
+
+/** A MUN's status as staff see it. */
+export async function staffMunStatus(api: APIRequestContext, munId: string): Promise<string> {
+  const response = await api.get(`admin/muns/${munId}/review`)
+  expect(response.status(), await response.text()).toBe(200)
+  return ((await response.json()) as { status: string }).status
+}
+
+/** Status code of the public MUN page's API read (200 when live, 404 otherwise). */
+export async function publicMunStatusCode(slug: string): Promise<number> {
+  const anon = await newApiContext()
+  const response = await anon.get(`muns/${slug}`)
+  await anon.dispose()
+  return response.status()
+}
+
+/**
+ * Takes a ready-to-submit fixture MUN (recreateReadyMun) from ONBOARDING to
+ * VERIFICATION the way its organizer would: submit, preview, attest.
+ */
+export async function submitForReview(owner: APIRequestContext, admin: APIRequestContext, munId: string): Promise<void> {
+  const submitted = await owner.post(`muns/${munId}/actions/submit-for-review`)
+  expect(submitted.status(), await submitted.text()).toBe(200)
+  expect(await submitted.json()).toMatchObject({ passed: true })
+  expect((await owner.get(`muns/${munId}/confirmation-preview`)).status()).toBe(200)
+  const confirmed = await owner.post(`muns/${munId}/actions/submit-final-confirmation`, { data: { attested: true } })
+  expect(confirmed.status(), await confirmed.text()).toBe(200)
+  expect(await staffMunStatus(admin, munId)).toBe('VERIFICATION')
+}
+
+/** Accepts the next `window.confirm`, checking its text. */
+export function acceptConfirm(page: Page, message: string | RegExp): void {
+  page.once('dialog', (dialog) => {
+    expect(dialog.type()).toBe('confirm')
+    if (typeof message === 'string') expect(dialog.message()).toContain(message)
+    else expect(dialog.message()).toMatch(message)
+    void dialog.accept()
+  })
+}
+
+/** A sonner toast. */
+export function toast(page: Page, text: string | RegExp): Locator {
+  return page.getByRole('region', { name: /notifications/i }).getByText(text)
+}
+
+export interface StaffSession extends ApiSession {
+  name: string
+}
+
+/**
+ * A fresh OPERATIONS / ADMIN / SUPER_ADMIN account (local DB insert) signed in
+ * through the real login endpoint. Remember its email and pass it to
+ * retireStaffUsers() in afterAll.
+ */
+export async function createStaffSession(role: StaffRole): Promise<StaffSession> {
+  const name = uniqueName(`E2E ${role}`)
+  const user = await createStaffUser(role, { email: uniqueEmail(`staff-${role.toLowerCase()}`), name })
+  const session = await signInViaApi(user.email, user.password)
+  expect(session.role).toBe(role)
+  return { ...session, name }
 }
 
 export function heading(page: Page, name: string | RegExp): Locator {

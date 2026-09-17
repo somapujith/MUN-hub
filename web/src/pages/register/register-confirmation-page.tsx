@@ -11,7 +11,7 @@ import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
 import { fetchRegistrationById } from "@/api/registration";
 import { NotFoundPage } from "@/pages/not-found-page";
-import type { RegistrationStatus } from "@/types/enums";
+import type { PaymentStatus, RegistrationStatus } from "@/types/enums";
 
 const STATUS_LABEL: Record<RegistrationStatus, string> = {
   PENDING: "Awaiting payment",
@@ -19,7 +19,7 @@ const STATUS_LABEL: Record<RegistrationStatus, string> = {
   CONFIRMED: "Confirmed",
   CANCELLED: "Cancelled",
   // Legacy status (no refunds on MUN Hub); see components/dashboard/registration-status.ts.
-  REFUNDED: "Payment returned",
+  REFUNDED: "Payment exception",
   ATTENDED: "Attended",
   NO_SHOW: "Marked as no-show",
 };
@@ -76,7 +76,7 @@ export function RegisterConfirmationPage() {
       <Helmet><title>Registration status</title></Helmet>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-xl px-lg py-xxl sm:px-xl">
-        {renderStatus(registration.status, slug, receipt, registrationId, Boolean(payment))}
+        {renderStatus(registration.status, slug, receipt, registrationId, payment?.status)}
       </main>
       <SiteFooter />
     </div>
@@ -88,7 +88,8 @@ function renderStatus(
   slug: string,
   receipt: ReactNode,
   registrationId: string,
-  paid: boolean,
+  /** Undefined when the pass was free (no payment row). */
+  paymentStatus: PaymentStatus | undefined,
 ) {
   switch (status) {
     case "CONFIRMED":
@@ -96,7 +97,7 @@ function renderStatus(
         <RegistrationNotice
           tone="success"
           title="You're registered"
-          message={paid ? "Payment went through and your seat is confirmed." : "Your seat is confirmed."}
+          message={paymentStatus ? "Payment went through and your seat is confirmed." : "Your seat is confirmed."}
           detail={receipt}
         >
           <Button render={<Link to={`/mun/${slug}`} />}>Back to conference</Button>
@@ -109,9 +110,34 @@ function renderStatus(
         </RegistrationNotice>
       );
     case "CANCELLED":
+      // A cancelled registration can mean three different things for the
+      // delegate's money; never say "didn't go through" when it did.
+      // Money taken after the seat hold ended (PAID with an exception, or a
+      // legacy REFUNDED row) is returned by staff by hand — there are no
+      // automatic refunds — so paying again would charge the delegate twice.
+      if (paymentStatus === "PAID" || paymentStatus === "REFUNDED") {
+        return (
+          <RegistrationNotice
+            tone="warning"
+            title="Payment received after your seat hold ended"
+            message="Your payment reached us after the 15-minute seat hold had expired, so this registration couldn't be confirmed. Please don't pay again. Our team has been alerted and will return the full amount to your original payment method. If you have questions, contact support and quote the reference below."
+            detail={receipt}
+          >
+            <Button render={<Link to="/support/new" />}>Contact support</Button>
+            <Button variant="outline" render={<Link to={`/mun/${slug}`} />}>Back to conference</Button>
+          </RegistrationNotice>
+        );
+      }
+      if (paymentStatus === "FAILED") {
+        return (
+          <RegistrationNotice tone="error" title="Payment didn't go through" message="No money was taken, and your seat has been released." detail={receipt}>
+            <Button render={<Link to={`/register/${slug}`} />}>Try again</Button>
+          </RegistrationNotice>
+        );
+      }
       return (
-        <RegistrationNotice tone="error" title="Payment didn't go through" message="Your seat has been released." detail={receipt}>
-          <Button render={<Link to={`/register/${slug}`} />}>Try again</Button>
+        <RegistrationNotice tone="error" title="Your seat hold expired" message="The 15-minute hold ran out before payment was completed, so the seat was released." detail={receipt}>
+          <Button render={<Link to={`/register/${slug}`} />}>Start again</Button>
         </RegistrationNotice>
       );
     case "PAYMENT_PENDING":

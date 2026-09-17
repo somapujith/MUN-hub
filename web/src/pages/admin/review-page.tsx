@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardListIcon } from "lucide-react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { getMunForReview, getReviewQueue, reviewMunApplication } from "@/api/admin-review";
 import { queryKeys } from "@/api/query-keys";
@@ -150,7 +151,11 @@ export function AdminReviewPage() {
             <tbody>
               {results.map((row) => (
                 <tr key={row.id} className="border-b border-border last:border-0">
-                  <td className="px-md py-sm font-medium text-ink">{row.name}</td>
+                  <td className="px-md py-sm font-medium">
+                    <Link to={`/admin/muns/${row.id}`} className="text-link hover:text-link-active">
+                      {row.name}
+                    </Link>
+                  </td>
                   <td className="px-md py-sm text-muted-foreground">
                     {[row.city, row.country].filter(Boolean).join(", ") || "—"}
                   </td>
@@ -204,8 +209,8 @@ export function AdminReviewPage() {
           if (!open) closeDialog();
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-          <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-lg">
+        <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-lg">
+          <form onSubmit={handleSubmit} noValidate className="flex min-h-0 flex-1 flex-col gap-lg">
             <DialogHeader>
               <DialogTitle>Review {reviewTarget?.name}</DialogTitle>
               <DialogDescription>
@@ -213,6 +218,9 @@ export function AdminReviewPage() {
               </DialogDescription>
             </DialogHeader>
 
+            {/* Only this middle section scrolls — the header and the footer's
+                submit/cancel buttons stay on screen at any dialog height. */}
+            <div className="flex min-h-0 flex-1 flex-col gap-lg overflow-y-auto">
             {detailQuery.isLoading ? (
               <Skeleton className="h-24 w-full" />
             ) : detailQuery.data ? (
@@ -335,6 +343,7 @@ export function AdminReviewPage() {
                 onChange={(event) => setInternalNotes(event.target.value)}
                 placeholder="Never shown to the organizer"
               />
+            </div>
             </div>
 
             <DialogFooter>
