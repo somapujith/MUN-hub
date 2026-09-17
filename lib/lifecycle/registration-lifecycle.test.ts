@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { asc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
+  achievements,
   munPaymentSettings,
   munSubmissions,
   muns,
@@ -474,6 +475,51 @@ describe('complete', () => {
     expect(result.status).toBe('COMPLETED')
   })
 
+  // Completing from RESULTS_UNDER_REVIEW is the results-review decision, so it
+  // must have the same effect as results.ts's `reviewResults('APPROVE')`.
+  // Otherwise "Mark completed" left every award permanently 'unverified':
+  // COMPLETED locks results and `reviewResults` only accepts
+  // RESULTS_UNDER_REVIEW.
+  it('marks the awards verified when staff complete from results review', async () => {
+    const owner = await makeUser()
+    const ops = await makeUser('OPERATIONS')
+    const delegate = await makeUser('STUDENT')
+    const { mun, passes } = await makeMun(owner.id, { status: 'RESULTS_UNDER_REVIEW' })
+    const [registration] = await db
+      .insert(registrations)
+      .values({ userId: delegate.id, munId: mun.id, registrationProductId: passes[0].id, status: 'ATTENDED' })
+      .returning()
+    const [award] = await db
+      .insert(achievements)
+      .values({ userId: delegate.id, munId: mun.id, registrationId: registration.id, award: 'Best Delegate' })
+      .returning()
+    expect(award.verificationStatus).toBe('unverified')
+
+    await runLifecycleAction(mun.id, 'complete', {}, sessionFor(ops), NOW)
+
+    const [after] = await db.select().from(achievements).where(eq(achievements.id, award.id))
+    expect(after.verificationStatus).toBe('verified')
+  })
+
+  it('leaves awards unverified when a conference completes without results review', async () => {
+    const owner = await makeUser()
+    const delegate = await makeUser('STUDENT')
+    const { mun, passes } = await makeMun(owner.id, { status: 'CONFERENCE_ACTIVE' })
+    const [registration] = await db
+      .insert(registrations)
+      .values({ userId: delegate.id, munId: mun.id, registrationProductId: passes[0].id, status: 'ATTENDED' })
+      .returning()
+    const [award] = await db
+      .insert(achievements)
+      .values({ userId: delegate.id, munId: mun.id, registrationId: registration.id, award: 'Honourable Mention' })
+      .returning()
+
+    await runLifecycleAction(mun.id, 'complete', {}, sessionFor(owner), conferenceCompletableAt(END))
+
+    const [after] = await db.select().from(achievements).where(eq(achievements.id, award.id))
+    expect(after.verificationStatus).toBe('unverified')
+  })
+
   it('rejects a mun that is not in progress', async () => {
     const admin = await makeUser('ADMIN')
     const owner = await makeUser()
@@ -730,6 +776,28 @@ describe('runScheduledLifecycleTransitions', () => {
     await expect(runScheduledLifecycleTransitions(NOW, '', { munIds: [] })).rejects.toThrow(/system actor/)
   })
 
+  // verification_logs.reviewer_id is a NOT NULL FK, so a SYSTEM_ACTOR_USER_ID
+  // that doesn't resolve fails every transition. Caught once up front instead
+  // of once per mun, and loudly instead of as an info-level "skipped" line.
+  it('refuses a system actor id that does not exist', async () => {
+    await expect(
+      runScheduledLifecycleTransitions(NOW, `missing-${crypto.randomUUID()}`, { munIds: ['anything'] }),
+    ).rejects.toThrow(/does not exist/)
+  })
+
+  it('keeps a failed precondition in `skipped`, separate from `failed`', async () => {
+    const actor = await makeSystemActor()
+    const owner = await makeUser()
+    const { mun } = await makeMun(owner.id, { passes: [] })
+
+    const result = await runScheduledLifecycleTransitions(NOW, actor.id, { munIds: [mun.id] })
+
+    expect(result.skipped).toEqual([
+      { munId: mun.id, action: 'open-registration', reason: LIFECYCLE_ERRORS.noActivePass },
+    ])
+    expect(result.failed).toEqual([])
+  })
+
   it('does nothing for an empty scope', async () => {
     const actor = await makeSystemActor()
     expect(await runScheduledLifecycleTransitions(NOW, actor.id, { munIds: [] })).toEqual({
@@ -737,6 +805,7 @@ describe('runScheduledLifecycleTransitions', () => {
       closed: [],
       started: [],
       skipped: [],
+      failed: [],
     })
   })
 
@@ -776,7 +845,7 @@ describe('runScheduledLifecycleTransitions', () => {
       munIds: [pastDeadline.mun.id, stillOpen.mun.id],
     })
 
-    expect(result).toEqual({ opened: [], closed: [pastDeadline.mun.id], started: [], skipped: [] })
+    expect(result).toEqual({ opened: [], closed: [pastDeadline.mun.id], started: [], skipped: [], failed: [] })
     expect(await statusOf(pastDeadline.mun.id)).toBe('REGISTRATION_CLOSED')
     expect(await statusOf(stillOpen.mun.id)).toBe('REGISTRATION_OPEN')
   })
@@ -792,6 +861,7 @@ describe('runScheduledLifecycleTransitions', () => {
       closed: [],
       started: [],
       skipped: [],
+      failed: [],
     })
     expect(await statusOf(mun.id)).toBe('REGISTRATION_CLOSED')
 
@@ -812,7 +882,7 @@ describe('runScheduledLifecycleTransitions', () => {
 
     const result = await runScheduledLifecycleTransitions(startDay, actor.id, { munIds: [mun.id] })
 
-    expect(result).toEqual({ opened: [], closed: [mun.id], started: [mun.id], skipped: [] })
+    expect(result).toEqual({ opened: [], closed: [mun.id], started: [mun.id], skipped: [], failed: [] })
     expect(await statusOf(mun.id)).toBe('CONFERENCE_ACTIVE')
   })
 
@@ -829,7 +899,7 @@ describe('runScheduledLifecycleTransitions', () => {
     expect([...first.skipped, ...second.skipped]).toEqual([])
 
     const third = await runScheduledLifecycleTransitions(NOW, actor.id, { munIds: [mun.id] })
-    expect(third).toEqual({ opened: [], closed: [], started: [], skipped: [] })
+    expect(third).toEqual({ opened: [], closed: [], started: [], skipped: [], failed: [] })
     expect((await logsOf(mun.id)).map((log) => log.action)).toEqual(['REGISTRATION_OPEN'])
   })
 
@@ -842,7 +912,7 @@ describe('runScheduledLifecycleTransitions', () => {
     const result = await runScheduledLifecycleTransitions(farFuture, actor.id, {
       munIds: [active.mun.id, completed.mun.id],
     })
-    expect(result).toEqual({ opened: [], closed: [], started: [], skipped: [] })
+    expect(result).toEqual({ opened: [], closed: [], started: [], skipped: [], failed: [] })
     expect(await statusOf(active.mun.id)).toBe('CONFERENCE_ACTIVE')
     expect(await statusOf(completed.mun.id)).toBe('COMPLETED')
   })

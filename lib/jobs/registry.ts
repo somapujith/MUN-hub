@@ -38,12 +38,35 @@ export const scheduledLifecycleTransitionsJob: ScheduledJob = {
         skipped: result.skipped,
       })
     }
-    return {
+    if (result.failed.length) {
+      console.error({
+        level: 'error',
+        event: 'scheduled_lifecycle.failed',
+        failed: result.failed,
+      })
+    }
+    const counts = {
       opened: result.opened.length,
       closed: result.closed.length,
       started: result.started.length,
       skipped: result.skipped.length,
+      failed: result.failed.length,
     }
+    // Thrown after the whole batch has been processed, so the muns that could
+    // be transitioned still were — but the run is reported as failed and
+    // `onError` (error tracker / failed-cron signal) fires. An unexpected
+    // exception here is systemic far more often than it is per-mun: a
+    // SYSTEM_ACTOR_USER_ID that doesn't resolve to a user makes every audit
+    // row's NOT NULL foreign key fail, silently stranding every auto-open,
+    // auto-close and auto-start.
+    if (result.failed.length) {
+      throw new Error(
+        `runScheduledLifecycleTransitions: ${result.failed.length} transition(s) failed — ${result.failed
+          .map((entry) => `${entry.munId} (${entry.action}): ${entry.reason}`)
+          .join('; ')}`,
+      )
+    }
+    return counts
   },
 }
 
