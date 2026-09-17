@@ -106,3 +106,8 @@ payout execution.
   link (`35cd296`). DEPLOY: `munhub-api` needs secret TOTP_FIELD_KEY (fresh 32-byte base64, not
   PAYMENT_FIELD_KEY); REQUIRE_STAFF_2FA stays unset until the user enrolls. New ratelimit
   bindings RL_MFA_VERIFY_IP/TOKEN (namespace ids 1015/1016). 4b now on MFA web UI + admin UX pass.
+- 10:05 Lanes workflow finished: wiring commits `f8ea0a9` `9942dc7` `69c7664` `2dfca00`; unit suite
+  1,556/1,556, all typechecks/lints/build/dry-run clean. Launched: `followups` agent (slot 0035 +
+  wiring leftovers), `munhub-integrated-review` workflow (9 areas, verify, fix, merge), and the
+  delegate/visitor UX walkthrough agent. f1 = organizer UX pass, 4b = MFA web UI + admin UX pass.
+  Deploy-time vars/secrets list: see the wiring report section in lane change logs + RUNBOOK.
