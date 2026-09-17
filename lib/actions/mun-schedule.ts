@@ -5,6 +5,7 @@ import type { ScheduleItemKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 
 // -----------------------------------------------------------------------------
 // mun-schedule — SCHEDULE module (PRD Section 21)
@@ -122,6 +123,8 @@ export async function updateScheduleItem(
     .returning()
   if (!updated) throw new Error('Schedule item not found')
 
+  // Real before/after snapshots — `onModuleDataChanged` cannot diff for us.
+  await triggerReverificationIfNeeded('SCHEDULE', existing, updated, existing.munId, session!.userId)
   await onModuleDataChanged(existing.munId, 'SCHEDULE', session!.userId)
 
   return updated

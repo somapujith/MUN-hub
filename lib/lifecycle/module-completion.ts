@@ -1,4 +1,5 @@
 import { and, eq, inArray } from 'drizzle-orm'
+import { fireAndForget } from '@/lib/background-tasks'
 import { db } from '@/lib/db/client'
 import { muns, munModuleVerifications, verificationIssues } from '@/lib/db/schema'
 import type { MunModule, MunStatus, ModuleCompletionStatus, ModuleVerificationState } from '@/lib/db/schema-enums'
@@ -8,7 +9,7 @@ import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recip
 import { getModuleDefinition, TRACKED_MODULES } from './module-registry'
 import { getModuleVerificationState } from './module-verification'
 import { transitionMun } from './mun-state-machine'
-import { isHighImpactModule, triggerReverificationIfNeeded } from './reverification'
+import { isHighImpactModule } from './reverification'
 import { loadValidationContext, type MunValidationContext, type ModuleValidationResult } from './validation'
 
 // -----------------------------------------------------------------------------
@@ -390,22 +391,22 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
  *      review, verified, published, live, etc.) — this is a hard safety
  *      boundary enforced by an exact 3-element membership check, not an
  *      exclusion list.
- *   4. Call the existing `triggerReverificationIfNeeded` for the
- *      post-verification high-impact-change path.
+ *
+ * It does NOT trigger re-verification — see the note at the end of `run()`
+ * for why the no-op call that used to live there was removed, and where that
+ * responsibility actually sits.
  *
  * Runs inside `tx` when the caller already has an open transaction, otherwise
- * opens its own. **All four steps — including step 1's row lazy-create
- * (`getModuleVerificationState`) and step 4's re-verification writes
- * (`triggerReverificationIfNeeded`, and the `transitionMun` call inside it)
- * — run against that same transaction handle**, so every write this function
- * makes commits atomically with the caller's own write and rolls back
- * together if the caller's transaction rolls back. (Fixed after initial
- * landing: `getModuleVerificationState` and `triggerReverificationIfNeeded`
+ * opens its own. **All three steps — including step 1's row lazy-create
+ * (`getModuleVerificationState`) — run against that same transaction
+ * handle**, so every write this function makes commits atomically with the
+ * caller's own write and rolls back together if the caller's transaction
+ * rolls back. (Fixed after initial landing: `getModuleVerificationState`
  * previously had no `tx` parameter at all and always ran against the
- * module-level `db` singleton, so when called from here they silently ran on
+ * module-level `db` singleton, so when called from here it silently ran on
  * a separate connection outside any caller's transaction — a real atomicity
  * gap, latent only because no caller yet wrapped `onModuleDataChanged` in an
- * outer transaction. Both functions now accept and honor an optional `tx`.)
+ * outer transaction.)
  *
  * Step 1's `computeModuleCompletion` call below does NOT pass a pre-loaded
  * context, unlike step 2's `recomputeMunProgress` — the two loads are
@@ -507,20 +508,19 @@ export async function onModuleDataChanged(munId: string, moduleKey: MunModule, a
       }
     }
 
-    // 4. Existing high-impact-change re-verification path. `before`/`after`
-    // are intentionally empty here — the actual before/after field diff
-    // already happens at each mutation's own `triggerReverificationIfNeeded`
-    // call site (mun-config.ts, etc.) using the real row snapshots. This
-    // choke point exists so that Task-5/6 module files which do NOT yet call
-    // `triggerReverificationIfNeeded` directly still get the post-
-    // verification high-impact path exercised for whichever modules
-    // Task 12 later gives a non-empty `HIGH_IMPACT_FIELDS` entry; modules
-    // with no entry yet (empty list default) are correctly no-ops via
-    // `detectHighImpactChange`'s `fields.some(...)` over an empty array.
-    // `transaction` threaded through so its reads/writes (and its own
-    // `transitionMun` call, if any) participate in this transaction instead
-    // of running on a separate one.
-    await triggerReverificationIfNeeded(moduleKey, {}, {}, munId, actorId, transaction)
+    // NOTE — re-verification is deliberately NOT triggered from here.
+    //
+    // This used to call `triggerReverificationIfNeeded(moduleKey, {}, {}, ...)`,
+    // which reads as a safety net but is a guaranteed no-op: with an empty
+    // `after` snapshot `detectHighImpactChange` returns false for every field,
+    // so nothing ever flipped and nothing ever reset
+    // `mun_payment_settings.verificationState`. Worse, downstream code (e.g.
+    // go-live.ts's `openRepublishSubmission`) assumed it *did* protect every
+    // module. Removed rather than left in place so the real requirement is
+    // unambiguous: a module-mutation action that needs re-verification must
+    // call `triggerReverificationIfNeeded` itself with the real before/after
+    // row snapshots — mun-config.ts, accommodation.ts, executive-board.ts,
+    // mun-schedule.ts, mun-contact.ts and payment-settlement.ts all do.
   }
 
   if (tx) {
@@ -536,15 +536,19 @@ export async function onModuleDataChanged(munId: string, moduleKey: MunModule, a
     // Fired here, after the transaction above has actually committed — same
     // fire-and-forget-with-logging convention as go-live.ts's
     // `notifyAfterCommit` (a notification failure must never surface as a
-    // failure of the module write that triggered it).
+    // failure of the module write that triggered it), and registered with
+    // `executionCtx.waitUntil` through lib/background-tasks.ts so Workers
+    // doesn't cancel the send when the response goes out.
     if (justBecameReadyForSubmission) {
-      resolveMunNotificationContext(munId)
-        .then((context) =>
-          notifyPipelineEvent({ type: 'READY_FOR_SUBMISSION', munId, organizerEmail: context.organizerEmail, munName: context.munName }),
-        )
-        .catch((error) => {
-          console.error('[module-completion] pipeline notification failed', error)
+      fireAndForget('module-completion', async () => {
+        const context = await resolveMunNotificationContext(munId)
+        await notifyPipelineEvent({
+          type: 'READY_FOR_SUBMISSION',
+          munId,
+          organizerEmail: context.organizerEmail,
+          munName: context.munName,
         })
+      })
     }
   }
 }
