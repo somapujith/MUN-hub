@@ -10,6 +10,8 @@ import {
   users,
 } from '@/lib/db/schema'
 import type { MunStatus } from '@/lib/db/schema-enums'
+import type { Session } from '@/lib/auth/adapter'
+import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import type {
   MunSummary,
   PublicCommittee,
@@ -333,6 +335,28 @@ const PUBLIC_PRODUCT_COLUMNS = {
  * slug.
  */
 export async function getMunBySlug(slug: string): Promise<PublicMunDetail | null> {
+  return loadPublicMunDetail(and(eq(muns.slug, slug), inArray(muns.status, [...PUBLICLY_VISIBLE_STATUSES]))!)
+}
+
+/**
+ * The public detail page's data for a mun that may not be live yet, so its
+ * organizer can see what delegates will see. Same allowlisted shape as
+ * `getMunBySlug`, without the publication filter. Owning organizer or staff
+ * only; anyone else gets `Error('Forbidden')`.
+ */
+export async function getMunPreview(munId: string, session: Session | null): Promise<PublicMunDetail> {
+  if (!session) throw new Error('Forbidden')
+  if (!(PREVIEW_STAFF_ROLES as readonly string[]).includes(session.role)) {
+    await assertOwnsOrAdmin(munId, session)
+  }
+  const detail = await loadPublicMunDetail(eq(muns.id, munId))
+  if (!detail) throw new Error('Mun not found')
+  return detail
+}
+
+const PREVIEW_STAFF_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
+
+async function loadPublicMunDetail(where: SQL): Promise<PublicMunDetail | null> {
   const [row] = await db
     .select({
       ...PUBLIC_MUN_COLUMNS,
@@ -342,7 +366,7 @@ export async function getMunBySlug(slug: string): Promise<PublicMunDetail | null
     })
     .from(muns)
     .leftJoin(users, eq(users.id, muns.organizerId))
-    .where(and(eq(muns.slug, slug), inArray(muns.status, [...PUBLICLY_VISIBLE_STATUSES])))
+    .where(where)
     .limit(1)
 
   if (!row) {

@@ -129,6 +129,27 @@ describe('GET /api/v1/muns/:munId/products (by id)', () => {
   })
 })
 
+describe('GET /api/v1/organizer/muns/:munId/preview', () => {
+  it('serves the owner the public shape of an unpublished MUN, and refuses everyone else', async () => {
+    const organizer = await makeUser()
+    const mun = await makeMun(organizer.id)
+
+    const own = await app.request(`/api/v1/organizer/muns/${mun.id}/preview`, { headers: await authHeaders(organizer.id) })
+    expect(own.status).toBe(200)
+    expect(own.headers.get('Cache-Control')).toBe('no-store')
+    const body = (await own.json()) as Record<string, unknown>
+    expect(body).toMatchObject({ id: mun.id, slug: mun.slug, status: 'ONBOARDING' })
+    expect(body).not.toHaveProperty('organizerId')
+
+    const stranger = await makeUser()
+    const other = await app.request(`/api/v1/organizer/muns/${mun.id}/preview`, { headers: await authHeaders(stranger.id) })
+    expect(other.status).toBe(403)
+    expect((await app.request(`/api/v1/organizer/muns/${mun.id}/preview`)).status).toBe(401)
+    // The public route still hides it.
+    expect((await app.request(`/api/v1/muns/${mun.slug}`)).status).toBe(404)
+  })
+})
+
 describe('POST /api/v1/committees/:committeeId/portfolios/bulk', () => {
   const postBulk = (committeeId: string, body: unknown, headers: Record<string, string>) =>
     app.request(`/api/v1/committees/${committeeId}/portfolios/bulk`, {

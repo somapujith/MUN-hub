@@ -176,6 +176,22 @@ export async function getMunBySlug(slug: string): Promise<MunDetail | null> {
   }
 }
 
+/**
+ * The public page's data for a MUN that may not be live yet — `GET
+ * /organizer/muns/:munId/preview`, owner and staff only. Always sends the
+ * session cookie: the preview lives on the organizer host, never a slug host.
+ */
+export async function getMunPreview(munId: string): Promise<MunDetail> {
+  const response = await fetch(`${API_BASE_URL}/organizer/muns/${encodeURIComponent(munId)}/preview`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+    throw new MarketplaceApiError(body?.error?.message ?? `Request failed (${response.status})`, response.status);
+  }
+  return normalizeMunDetail((await response.json()) as RawMunDetail);
+}
+
 export interface ProductAvailability {
   capacity: number;
   taken: number;

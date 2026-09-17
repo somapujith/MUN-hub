@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { EyeIcon } from "lucide-react";
 import { Link, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { SiteHeader } from "@/components/layout/site-header";
@@ -33,6 +34,7 @@ import {
 } from "@/components/ui/signature-card";
 import {
   getMunBySlug,
+  getMunPreview,
   getProductsAvailability,
   listPublicAccommodation,
   listPublicDocuments,
@@ -41,7 +43,9 @@ import {
   listPublicMedia,
   listPublicSchedule,
 } from "@/api/marketplace";
+import { listMunFaqsForOrganizer } from "@/api/mun-faq";
 import { queryKeys } from "@/api/query-keys";
+import { munSectionHref } from "@/lib/organizer/nav-config";
 import { absoluteHttpUrl, buildMunEventJsonLd, metaDescription } from "@/lib/seo";
 import { cn } from "cn";
 import { NotFoundPage } from "@/pages/not-found-page";
@@ -98,13 +102,20 @@ function useSection<T>(munId: string | undefined, section: string, fetcher: (mun
   });
 }
 
-export function MunDetailPage({ slugOverride }: { slugOverride?: string } = {}) {
+export function MunDetailPage({
+  slugOverride,
+  previewMunId,
+}: {
+  slugOverride?: string;
+  /** Organizer preview: load this MUN whatever its status, and turn registration off. */
+  previewMunId?: string;
+} = {}) {
   const { slug: slugParam } = useParams<{ slug: string }>();
-  const slug = slugOverride ?? slugParam;
+  const slug = previewMunId ? previewMunId : (slugOverride ?? slugParam);
 
   const munQuery = useQuery({
-    queryKey: queryKeys.mun(slug ?? ""),
-    queryFn: () => getMunBySlug(slug!),
+    queryKey: previewMunId ? queryKeys.munPreview(previewMunId) : queryKeys.mun(slug ?? ""),
+    queryFn: () => (previewMunId ? getMunPreview(previewMunId) : getMunBySlug(slug!)),
     enabled: Boolean(slug),
   });
 
@@ -122,7 +133,8 @@ export function MunDetailPage({ slugOverride }: { slugOverride?: string } = {}) 
   const documentsQuery = useSection(munId, "documents", listPublicDocuments);
   const accommodationQuery = useSection(munId, "accommodation", listPublicAccommodation);
   const mediaQuery = useSection(munId, "media", listPublicMedia);
-  const faqsQuery = useSection(munId, "faqs", listPublicFaqs);
+  // The public FAQ route only serves live MUNs; the preview reads the organizer's list.
+  const faqsQuery = useSection(munId, previewMunId ? "faqs-preview" : "faqs", previewMunId ? listMunFaqsForOrganizer : listPublicFaqs);
 
   if (!slug) {
     return <NotFoundPage />;
@@ -157,7 +169,7 @@ export function MunDetailPage({ slugOverride }: { slugOverride?: string } = {}) 
     return <NotFoundPage />;
   }
 
-  const canRegister = mun.status === "REGISTRATION_OPEN";
+  const canRegister = !previewMunId && mun.status === "REGISTRATION_OPEN";
   const products = mun.registrationProducts;
   const availability = new Map(Object.entries(availabilityQuery.data ?? {}));
   const soldOutProductIds = new Set(
@@ -205,7 +217,19 @@ export function MunDetailPage({ slugOverride }: { slugOverride?: string } = {}) 
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
-      <MunPageMeta mun={mun} soldOutProductIds={soldOutProductIds} />
+      {previewMunId ? (
+        <PageMeta
+          title={`Preview: ${mun.name} | MUN Hub`}
+          description={`How ${mun.name} will look to delegates on MUN Hub.`}
+          path={`/organizer/muns/${previewMunId}/preview`}
+          noindex
+          omitCanonical
+        />
+      ) : (
+        <MunPageMeta mun={mun} soldOutProductIds={soldOutProductIds} />
+      )}
+
+      {previewMunId && <PreviewBanner munId={previewMunId} munName={mun.name} status={mun.status} />}
 
       <SiteHeader />
 
@@ -412,6 +436,31 @@ export function MunDetailPage({ slugOverride }: { slugOverride?: string } = {}) 
       </main>
 
       <SiteFooter />
+    </div>
+  );
+}
+
+/** Strip above the organizer preview, so it's never mistaken for the live page. */
+function PreviewBanner({ munId, munName, status }: { munId: string; munName: string; status: MunDetail["status"] }) {
+  const live = status === "PUBLISHED" || status === "REGISTRATION_OPEN";
+  return (
+    <div
+      role="status"
+      data-testid="preview-banner"
+      className="border-b border-warning/40 bg-warning/15 text-warning-text"
+    >
+      <div className="content-container flex flex-wrap items-center gap-x-md gap-y-xxs py-xs text-body-md">
+        <EyeIcon className="size-4 shrink-0" aria-hidden />
+        <p className="min-w-0 flex-1">
+          <span className="font-medium">Preview of {munName}.</span>{" "}
+          {live
+            ? "This is how delegates see your MUN. Registration is turned off in this preview."
+            : "This is how delegates will see your MUN once it's live. It isn't public yet, and registration is turned off."}
+        </p>
+        <Link to={munSectionHref(munId, "setup")} className="shrink-0 font-medium underline underline-offset-2">
+          Back to MUN Setup
+        </Link>
+      </div>
     </div>
   );
 }

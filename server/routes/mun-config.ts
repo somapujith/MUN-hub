@@ -19,6 +19,7 @@ import {
   updatePortfolio,
   updateRegistrationProduct,
 } from '@/lib/actions/mun-config'
+import { getMunPreview } from '@/lib/actions/marketplace'
 import {
   assertMunReadable,
   findMunIdForCommittee,
@@ -162,6 +163,13 @@ export const munConfigRoutes = new Hono<{ Variables: AppVariables }>()
 munConfigRoutes.get('/organizer/muns/:munId/details', requireAuth, async (c) => {
   const mun = await getMunDetails(c.req.param('munId'), c.get('session'))
   return c.json(mun)
+})
+
+// "Preview as a delegate": the public page's data before the MUN is live.
+// Owner and staff only.
+munConfigRoutes.get('/organizer/muns/:munId/preview', requireAuth, async (c) => {
+  c.header('Cache-Control', 'no-store')
+  return c.json(await getMunPreview(c.req.param('munId'), c.get('session')))
 })
 
 // Published MUNs for anyone; unpublished ones for the owner and staff only (404 otherwise).

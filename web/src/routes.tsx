@@ -37,6 +37,7 @@ import { OrganizerWelcomePage } from "@/pages/organizer/organizer-welcome-page";
 import { OrganizerOnboardingPage } from "@/pages/organizer/organizer-onboarding-page";
 import { OrganizerApplyPage } from "@/pages/organizer/organizer-apply-page";
 import { OrganizerSupportPage } from "@/pages/organizer/support-page";
+import { OrganizerMunPreviewPage } from "@/pages/organizer/mun-preview-page";
 import { MunIndexRedirect } from "@/pages/organizer/dashboard/mun-index-redirect";
 import { OrganizerMunsPage } from "@/pages/organizer/dashboard/muns-page";
 import { OrganizerOverviewPage } from "@/pages/organizer/dashboard/overview-page";
@@ -151,6 +152,7 @@ export const router = createBrowserRouter([
         element: <OrganizerApplySubmittedPage />,
       },
       { path: "organizer/support", element: <OrganizerSupportPage /> },
+      { path: "organizer/muns/:munId/preview", element: <OrganizerMunPreviewPage /> },
       {
         path: "organizer/dashboard",
         children: [

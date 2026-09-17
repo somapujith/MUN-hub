@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
-import { AlertTriangle, CheckCircle2, LockIcon, Save, ShieldCheck } from "lucide-react";
-import { useParams } from "react-router";
+import { AlertTriangle, CheckCircle2, Eye, LockIcon, Save, ShieldCheck } from "lucide-react";
+import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { getMunProgress, getMunReviewFeedback, submitMunForReview } from "@/api/go-live";
 import { getMunDetails, updateMunDetails } from "@/api/mun-config";
@@ -184,7 +184,21 @@ export function OrganizerSetupPage() {
       <WorkspacePage
         title="MUN Setup"
         description="Your conference's core record — how it's named, when it runs, and where delegates are going."
-        actions={mun && <MunStatusBadge status={mun.status} />}
+        actions={
+          mun && (
+            <>
+              <MunStatusBadge status={mun.status} />
+              <Button
+                size="sm"
+                variant="outline"
+                render={<Link to={`/organizer/muns/${munId}/preview`} target="_blank" rel="noopener" />}
+              >
+                <Eye aria-hidden />
+                Preview as a delegate
+              </Button>
+            </>
+          )
+        }
       >
         {detailsQuery.isLoading ? (
           <Skeleton className="h-[420px] w-full rounded-md" />

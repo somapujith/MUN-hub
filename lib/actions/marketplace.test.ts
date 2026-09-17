@@ -7,6 +7,7 @@ import {
   clipToPublicStatuses,
   getMarketplaceFacets,
   getMunBySlug,
+  getMunPreview,
   listPublicMunSlugs,
   searchMuns,
 } from './marketplace'
@@ -390,6 +391,37 @@ describe('marketplace actions', () => {
     it('returns null for a nonexistent slug', async () => {
       const detail = await getMunBySlug('does-not-exist-slug')
       expect(detail).toBeNull()
+    })
+  })
+
+  describe('getMunPreview', () => {
+    it("shows the owner their draft in the public shape, without the organizer id", async () => {
+      const preview = await getMunPreview(draftMunId, { userId: organizerId, role: 'ORGANIZER' })
+      expect(preview.id).toBe(draftMunId)
+      expect(preview.slug).toBe(draftMunSlug)
+      expect(preview.status).toBe('DRAFT')
+      expect(Array.isArray(preview.committees)).toBe(true)
+      expect(Object.keys(preview)).not.toContain('organizerId')
+      expect(JSON.stringify(preview)).not.toContain(organizerId)
+    })
+
+    it('lets staff preview any mun, and refuses other organizers, students and anonymous callers', async () => {
+      const [ops] = await db
+        .insert(users)
+        .values({ name: 'Ops', email: `ops-preview-${suffix}@test.com`, role: 'OPERATIONS' })
+        .returning()
+      await expect(getMunPreview(draftMunId, { userId: ops.id, role: 'OPERATIONS' })).resolves.toMatchObject({
+        id: draftMunId,
+      })
+      await expect(getMunPreview(draftMunId, { userId: societyOrganizerId, role: 'ORGANIZER' })).rejects.toThrow(
+        'Forbidden',
+      )
+      const [student] = await db
+        .insert(users)
+        .values({ name: 'Student', email: `student-preview-${suffix}@test.com`, role: 'STUDENT' })
+        .returning()
+      await expect(getMunPreview(draftMunId, { userId: student.id, role: 'STUDENT' })).rejects.toThrow('Forbidden')
+      await expect(getMunPreview(draftMunId, null)).rejects.toThrow('Forbidden')
     })
   })
 
