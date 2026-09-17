@@ -141,6 +141,19 @@ describe('LOCKED enforcement wired into action files', () => {
     })
   })
 
+  it('mun-config.ts updateMunDetails: a sent-back Dates & Venue is editable while Basic Info stays locked', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'VERIFICATION')
+    await db.insert(munModuleVerifications).values({ munId: mun.id, moduleName: 'DATES_VENUE', state: 'CHANGES_REQUESTED' })
+    const session = sessionFor(organizer)
+
+    // The setup form sends unchanged Basic Info fields along with the fix.
+    await expect(
+      updateMunDetails(mun.id, { name: mun.name, venue: 'Fixed Venue Hall' }, session),
+    ).resolves.toMatchObject({ venue: 'Fixed Venue Hall' })
+    await expect(updateMunDetails(mun.id, { name: 'Sneaky Rename' }, session)).rejects.toThrow(/"BASIC_INFO" module is locked/)
+  })
+
   it('mun-config.ts createCommittee: rejects organizer, allows admin, during CONTENT_SUBMITTED', async () => {
     const organizer = await makeUser('ORGANIZER')
     const admin = await makeUser('ADMIN')

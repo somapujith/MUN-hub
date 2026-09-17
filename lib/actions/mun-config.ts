@@ -374,6 +374,22 @@ export async function getMunDetails(munId: string, session: Session | null): Pro
   return mun
 }
 
+/** `muns` columns tracked by BASIC_INFO; every other details field is DATES_VENUE. */
+const BASIC_INFO_FIELDS = new Set<string>(['name', 'edition', 'theme', 'description'])
+
+function changedDetailFields(existing: Mun, input: UpdateMunDetailsInput): string[] {
+  return Object.entries(input)
+    .filter(([key, value]) => {
+      if (value === undefined) return false
+      const current = existing[key as keyof Mun] ?? null
+      if (value instanceof Date || current instanceof Date) {
+        return (value instanceof Date ? value.getTime() : value) !== (current instanceof Date ? current.getTime() : current)
+      }
+      return value !== current
+    })
+    .map(([key]) => key)
+}
+
 /**
  * Registration eligibility enforces the window, so an inverted one silently
  * closes registration. Checked only when this write touches one of the three
@@ -401,13 +417,20 @@ export async function updateMunDetails(
   session: Session | null,
 ): Promise<Mun> {
   await assertOwnsOrAdmin(munId, session)
-  // BASIC_INFO and DATES_VENUE both back onto this same `muns` table update —
-  // lock-check both, since either could be the reason this write is blocked.
-  await assertModuleNotLocked(munId, 'BASIC_INFO', session)
-  await assertModuleNotLocked(munId, 'DATES_VENUE', session)
 
   const [existing] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
   if (!existing) throw new Error('Mun not found')
+
+  // BASIC_INFO and DATES_VENUE both back onto this same `muns` table update.
+  // Lock-check only the module whose values actually change: the setup form
+  // sends every field, and a reviewer may have sent back just one of the two.
+  const changed = changedDetailFields(existing, input)
+  if (changed.some((field) => BASIC_INFO_FIELDS.has(field))) {
+    await assertModuleNotLocked(munId, 'BASIC_INFO', session)
+  }
+  if (changed.some((field) => !BASIC_INFO_FIELDS.has(field))) {
+    await assertModuleNotLocked(munId, 'DATES_VENUE', session)
+  }
   assertRegistrationWindow(existing, input)
 
   const [updated] = await db

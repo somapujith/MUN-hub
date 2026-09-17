@@ -235,13 +235,12 @@ export async function seedFullGoLiveModules({
     console.log('    - Seeded payment settlement (VERIFIED, fake ciphertext)')
   }
 
-  // --- RULES_DOCUMENTS: RULES, CODE_OF_CONDUCT, REFUND_POLICY --------------
+  // --- RULES_DOCUMENTS: RULES, CODE_OF_CONDUCT (no refunds, so no refund policy)
   const [existingDoc] = await db.select({ id: munDocuments.id }).from(munDocuments).where(eq(munDocuments.munId, munId)).limit(1)
   if (!existingDoc) {
-    const docSeeds: { kind: 'RULES' | 'CODE_OF_CONDUCT' | 'REFUND_POLICY'; title: string }[] = [
+    const docSeeds: { kind: 'RULES' | 'CODE_OF_CONDUCT'; title: string }[] = [
       { kind: 'RULES', title: 'Rules of Procedure' },
       { kind: 'CODE_OF_CONDUCT', title: 'Delegate Code of Conduct' },
-      { kind: 'REFUND_POLICY', title: 'Refund Policy' },
     ]
     await db.insert(munDocuments).values(
       docSeeds.map((docSeed) => ({

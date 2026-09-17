@@ -129,13 +129,15 @@ async function assertCanReadMunReview(munId: string, session: Session | null): P
 export interface MunReviewFeedback {
   /** Gate 1: the organizer application for this mun. */
   application: { status: ApplicationStatus; reviewNotes: string | null; submittedAt: Date } | null
-  /** Gate 2: the latest content-review submission round. */
+  /**
+   * Gate 2: the latest content-review submission round. `rejectionReason` is
+   * left out on purpose: `reviewSubmission` files it as an internal note.
+   */
   submission: {
     status: string
     versionNumber: number
     submittedAt: Date | null
     decidedAt: Date | null
-    rejectionReason: string | null
   } | null
   /** Notes staff attached to status changes, newest first. Internal notes are never included. */
   reviewerNotes: { id: string; status: string; notes: string; createdAt: Date }[]
@@ -174,7 +176,6 @@ export async function getMunReviewFeedback(munId: string, session: Session | nul
       versionNumber: munSubmissions.versionNumber,
       submittedAt: munSubmissions.submittedAt,
       decidedAt: munSubmissions.decidedAt,
-      rejectionReason: munSubmissions.rejectionReason,
     })
     .from(munSubmissions)
     .where(eq(munSubmissions.munId, munId))

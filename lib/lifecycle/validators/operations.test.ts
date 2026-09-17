@@ -65,29 +65,29 @@ function issue(overrides: Partial<{ severity: string; resolved: boolean }> = {})
 }
 
 describe('validateRulesDocuments', () => {
-  it('passes when RULES, CODE_OF_CONDUCT, and REFUND_POLICY are all present', () => {
-    const ctx = makeContext({ documents: [document('RULES'), document('CODE_OF_CONDUCT'), document('REFUND_POLICY')] })
+  it('passes when RULES and CODE_OF_CONDUCT are present', () => {
+    const ctx = makeContext({ documents: [document('RULES'), document('CODE_OF_CONDUCT')] })
     const result = validateRulesDocuments(ctx)
     expect(result.moduleKey).toBe('RULES_DOCUMENTS')
     expect(result.passed).toBe(true)
   })
 
-  it('fails when RULES is missing', () => {
-    const ctx = makeContext({ documents: [document('CODE_OF_CONDUCT'), document('REFUND_POLICY')] })
+  it('fails when RULES is missing, and says which document to upload', () => {
+    const ctx = makeContext({ documents: [document('CODE_OF_CONDUCT')] })
     const result = validateRulesDocuments(ctx)
     expect(result.passed).toBe(false)
+    expect(result.checks[0].message).toBe('Upload your rules of procedure.')
   })
 
   it('fails when CODE_OF_CONDUCT is missing', () => {
-    const ctx = makeContext({ documents: [document('RULES'), document('REFUND_POLICY')] })
+    const ctx = makeContext({ documents: [document('RULES')] })
     const result = validateRulesDocuments(ctx)
     expect(result.passed).toBe(false)
   })
 
-  it('fails when REFUND_POLICY is missing', () => {
+  it('does not require a refund policy (MUN Hub has no refunds)', () => {
     const ctx = makeContext({ documents: [document('RULES'), document('CODE_OF_CONDUCT')] })
-    const result = validateRulesDocuments(ctx)
-    expect(result.passed).toBe(false)
+    expect(validateRulesDocuments(ctx).checks.map((check) => check.label).join(' ')).not.toMatch(/refund/i)
   })
 
   it('fails when no documents exist at all', () => {

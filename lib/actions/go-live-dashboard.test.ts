@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { db } from '@/lib/db/client'
 import {
   munPaymentSettings,
+  munSubmissions,
   muns,
   organizerApplications,
   users,
@@ -134,10 +135,20 @@ describe('getMunReviewFeedback', () => {
       { munId: mun.id, moduleName: 'BRANDING', severity: 'BLOCKER', reason: 'Logo missing', raisedBy: organizer.id, source: 'AUTOMATED' },
     ])
 
+    await db.insert(munSubmissions).values({
+      munId: mun.id,
+      submittedBy: organizer.id,
+      versionNumber: 1,
+      status: 'REJECTED',
+      slaDeadline: new Date('2027-01-05T00:00:00Z'),
+      rejectionReason: 'internal rejection reason',
+    })
+
     const feedback = await getMunReviewFeedback(mun.id, sessionFor(organizer))
 
     expect(feedback.application).toMatchObject({ status: 'CHANGES_REQUESTED', reviewNotes: 'Tell us about your previous editions' })
-    expect(feedback.submission).toBeNull()
+    expect(feedback.submission).toMatchObject({ status: 'REJECTED', versionNumber: 1 })
+    expect(JSON.stringify(feedback)).not.toContain('internal rejection reason')
     expect(feedback.reviewerNotes.map((note) => note.notes)).toEqual(['Committee agendas are missing'])
     expect(feedback.issues).toHaveLength(1)
     expect(feedback.issues[0]).toMatchObject({ moduleName: 'COMMITTEES', moduleLabel: expect.any(String), resolved: false })

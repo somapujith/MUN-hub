@@ -10,20 +10,24 @@ import type { MunDocumentKind } from '@/lib/db/schema-enums'
 // architecture note (no I/O, no await, no direct clock reads).
 // -----------------------------------------------------------------------------
 
-const REQUIRED_DOCUMENT_KINDS: MunDocumentKind[] = ['RULES', 'CODE_OF_CONDUCT', 'REFUND_POLICY']
+// MUN Hub has no refunds, so a refund policy is not a required document.
+const REQUIRED_DOCUMENTS: { kind: MunDocumentKind; label: string }[] = [
+  { kind: 'RULES', label: 'Rules of procedure' },
+  { kind: 'CODE_OF_CONDUCT', label: 'Code of conduct' },
+]
 
 export function validateRulesDocuments(ctx: MunValidationContext): ModuleValidationResult {
   const presentKinds = new Set(ctx.documents.map((d) => d.kind))
-  const missingKinds = REQUIRED_DOCUMENT_KINDS.filter((kind) => !presentKinds.has(kind))
-  const allPresent = missingKinds.length === 0
+  const missing = REQUIRED_DOCUMENTS.filter((doc) => !presentKinds.has(doc.kind))
+  const allPresent = missing.length === 0
 
   const checks: ValidationCheck[] = [
     {
       key: 'required_documents_present',
-      label: 'Rules, Code of Conduct, and Refund Policy documents are all uploaded',
+      label: 'Rules of procedure and code of conduct are uploaded',
       passed: allPresent,
       severity: 'BLOCKER',
-      message: allPresent ? undefined : `Missing document(s): ${missingKinds.join(', ')}.`,
+      message: allPresent ? undefined : `Upload your ${missing.map((doc) => doc.label.toLowerCase()).join(' and ')}.`,
     },
   ]
 
