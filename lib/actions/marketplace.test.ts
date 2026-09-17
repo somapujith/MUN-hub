@@ -273,6 +273,17 @@ describe('marketplace actions', () => {
       expect(total).toBe(3)
     })
 
+    it('still returns the true total when the requested page itself is empty (offset past the last match)', async () => {
+      // `total` is read off a `count(*) over ()` window column on the same
+      // query as the page of rows (see searchMuns) — a page with zero rows
+      // has no window-function value to read, so this must fall back to a
+      // real COUNT(*) query rather than silently reporting 0. Regression
+      // test for that fallback: offset (100) is well past the 3 UK matches.
+      const { results, total } = await searchMuns({ query: `${suffix}`, country: 'UK', limit: 10, offset: 100 })
+      expect(results).toEqual([])
+      expect(total).toBe(3)
+    })
+
     it('matches the theme, the country, and the organizer name and institution', async () => {
       const byTheme = await searchMuns({ query: `tidewater ${suffix}` })
       expect(byTheme.results.map((m) => m.slug)).toEqual([publishedMunSlug])
