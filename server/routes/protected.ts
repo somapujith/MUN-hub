@@ -6,6 +6,7 @@ import { adminReviewRoutes } from './admin-review'
 import { adminSearchRoutes } from './admin-search'
 import { auditHistoryRoutes } from './audit-history'
 import { certificatesRoutes } from './certificates'
+import { checkInRoutes } from './check-in'
 import { executiveBoardRoutes } from './executive-board'
 import { goLiveDashboardRoutes } from './go-live-dashboard'
 import { moduleVerificationRoutes } from './module-verification'
@@ -17,6 +18,7 @@ import { munDocumentsRoutes } from './mun-documents'
 import { munScheduleRoutes } from './mun-schedule'
 import { organizerAdminRoutes } from './organizer-admin'
 import { organizerApplicationRoutes } from './organizer-application'
+import { organizerCommunicationsRoutes } from './organizer-communications'
 import { organizerConfirmationRoutes } from './organizer-confirmation'
 import { organizerDashboardRoutes } from './organizer-dashboard'
 import { organizerOnboardingRoutes } from './organizer-onboarding'
@@ -60,6 +62,8 @@ protectedRoutes.route('/', organizerApplicationRoutes)
 protectedRoutes.route('/', organizerOnboardingRoutes)
 protectedRoutes.route('/', munAnalyticsRoutes)
 protectedRoutes.route('/', resultsRoutes)
+protectedRoutes.route('/', checkInRoutes)
+protectedRoutes.route('/', organizerCommunicationsRoutes)
 
 export { adminReviewRoutes } from './admin-review'
 export { organizerAdminRoutes } from './organizer-admin'
