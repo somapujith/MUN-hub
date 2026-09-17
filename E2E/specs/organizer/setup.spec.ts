@@ -111,6 +111,71 @@ test.describe('MUN setup UI', () => {
     expect((await details()).name).toBe(SANDBOX.name)
   })
 
+  test('address, map link and registration window can be set from the page (87d7102)', async ({ page }) => {
+    const local = (days: number, hour: number) => {
+      const d = new Date(Date.now() + days * 86_400_000)
+      const pad = (n: number) => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(hour)}:00`
+    }
+    const tag = uid()
+    try {
+      await openSetup(page)
+      const form = main(page).locator('form')
+      await expect(form.getByLabel('Conference name')).toHaveValue(SANDBOX.name)
+      const save = form.getByRole('button', { name: 'Save changes' })
+      // Skip the browser's own URL check so the page's message is what's tested.
+      await form.evaluate((el) => el.setAttribute('novalidate', ''))
+
+      // Client-side checks first.
+      await form.getByLabel('Map link').fill('maps.example.com/no-scheme')
+      await save.click()
+      await expect(toast(page, 'Map link must be a full URL, including https://')).toBeVisible()
+      await form.getByLabel('Map link').fill('https://maps.example.com/e2e')
+
+      await form.getByLabel('Registration opens').fill(local(20, 10))
+      await form.getByLabel('Registration closes').fill(local(10, 10))
+      await save.click()
+      await expect(toast(page, 'Registration deadline must be after registration opens')).toBeVisible()
+
+      await form.getByLabel('Registration closes').fill(local(200, 10))
+      await save.click()
+      await expect(toast(page, 'Registration deadline must be before the conference starts')).toBeVisible()
+
+      await form.getByLabel('Address line').fill(`E2E Hall ${tag}, Road No. 2`)
+      await form.getByLabel('State').fill('Telangana')
+      await form.getByLabel('Postal code').fill('500034')
+      await form.getByLabel('Registration opens').fill(local(5, 9))
+      await form.getByLabel('Registration closes').fill(local(30, 18))
+      await save.click()
+      await expect(toast(page, 'Conference details saved')).toBeVisible()
+
+      const saved = await (await api.patch(`muns/${munId}`, { data: {} })).json()
+      expect(saved).toMatchObject({
+        addressLine1: `E2E Hall ${tag}, Road No. 2`,
+        addressState: 'Telangana',
+        postalCode: '500034',
+        mapUrl: 'https://maps.example.com/e2e',
+      })
+      expect(saved.registrationOpensAt).toBeTruthy()
+      expect(saved.registrationDeadline).toBeTruthy()
+
+      await page.reload()
+      await expect(form.getByLabel('Address line')).toHaveValue(`E2E Hall ${tag}, Road No. 2`)
+      await expect(form.getByLabel('Registration closes')).toHaveValue(local(30, 18))
+    } finally {
+      await api.patch(`muns/${munId}`, {
+        data: {
+          addressLine1: null,
+          addressState: null,
+          postalCode: null,
+          mapUrl: null,
+          registrationOpensAt: null,
+          registrationDeadline: null,
+        },
+      })
+    }
+  })
+
   test('the go-live progress panel lists every module', async ({ page }) => {
     await openSetup(page)
     const progress = await (await api.get(`muns/${munId}/progress`)).json()

@@ -69,6 +69,14 @@ export const FIXTURE_MUNS = {
     products: [{ name: 'E2E Review Pass', price: 1100, capacity: 120, status: 'active', displayOrder: 0 }],
   },
 
+  /** Same as review, for the organizer's submission UI (specs/organizer/submission.spec.ts). */
+  confirm: {
+    slug: 'e2e-confirm-mun',
+    name: 'E2E Confirm MUN',
+    committees: [{ name: 'E2E Confirm Committee', capacity: 60, portfolios: ['Ghana'] }],
+    products: [{ name: 'E2E Confirm Pass', price: 950, capacity: 90, status: 'active', displayOrder: 0 }],
+  },
+
   /** Same as review, for the suspend/reinstate path (a reinstated MUN goes back to verification). */
   suspend: {
     slug: 'e2e-suspend-mun',
@@ -81,6 +89,7 @@ export const FIXTURE_MUNS = {
 export const OPEN = FIXTURE_MUNS.open
 export const REVIEW = FIXTURE_MUNS.review
 export const SUSPEND = FIXTURE_MUNS.suspend
+export const CONFIRM = FIXTURE_MUNS.confirm
 export const LIFECYCLE = FIXTURE_MUNS.lifecycle
 export const SANDBOX = FIXTURE_MUNS.sandbox
 export const CLOSED = FIXTURE_MUNS.closed

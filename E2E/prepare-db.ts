@@ -181,7 +181,7 @@ async function deleteMunBySlug(tx: Tx, slug: string): Promise<void> {
 async function recreateReadyToSubmitMun(
   tx: Tx,
   ownerId: string,
-  def: (typeof FIXTURE_MUNS)['review'] | (typeof FIXTURE_MUNS)['suspend'],
+  def: (typeof FIXTURE_MUNS)['review' | 'suspend' | 'confirm'],
 ): Promise<void> {
   await deleteMunBySlug(tx, def.slug)
   const munId = await upsertMun(tx, ownerId, def, 'ONBOARDING')
@@ -306,10 +306,10 @@ async function main(): Promise<void> {
     await wipeRegistrations(tx, lifecycleId)
     await ensureVerifiedPaymentAccount(tx, lifecycleId)
 
-    for (const def of [FIXTURE_MUNS.review, FIXTURE_MUNS.suspend]) await recreateReadyToSubmitMun(tx, ownerId, def)
+    for (const def of [FIXTURE_MUNS.review, FIXTURE_MUNS.suspend, FIXTURE_MUNS.confirm]) await recreateReadyToSubmitMun(tx, ownerId, def)
 
     console.log(
-      `[e2e] fixtures ready: ${FIXTURE_MUNS.review.slug} + ${FIXTURE_MUNS.suspend.slug} (recreated, all modules filled), ` +
+      `[e2e] fixtures ready: ${FIXTURE_MUNS.review.slug} + ${FIXTURE_MUNS.suspend.slug} + ${FIXTURE_MUNS.confirm.slug} (recreated, all modules filled), ` +
         `${FIXTURE_MUNS.open.slug} (open, ${wiped} old registrations wiped), ` +
         `${FIXTURE_MUNS.sandbox.slug} (onboarding), ${FIXTURE_MUNS.closed.slug} (published, not open), ` +
         `${FIXTURE_MUNS.lifecycle.slug} (published, ready to open)`,
