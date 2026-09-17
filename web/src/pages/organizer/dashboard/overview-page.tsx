@@ -2,6 +2,7 @@ import { Helmet } from "react-helmet-async";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRightIcon, PlusIcon } from "lucide-react";
+import { HostNameCard } from "@/components/organizer/host-name-card";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
 import { Button } from "@/components/ui/button";
 import { MunStatusBadge } from "@/components/mun/mun-status-badge";
@@ -117,6 +118,7 @@ export function OrganizerOverviewPage() {
         )}
         {totals && (
           <>
+            <HostNameCard />
             <div className="grid grid-cols-2 gap-sm lg:grid-cols-4">
               {[
                 { label: "Registrations", value: totals.registrations },

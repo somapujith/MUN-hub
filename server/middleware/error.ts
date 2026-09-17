@@ -125,6 +125,7 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     message === 'Expected start date must be a valid date' ||
     /^Maximum expected delegates must be a whole number from 1 to \d+$/.test(message) ||
     /^Description must be at least \d+ characters$/.test(message) ||
+    /^Organization must be at most \d+ characters$/.test(message) ||
     message === 'Website must be a full URL, including https://' ||
     message === 'UPI ID must look like name@bank' ||
     message === 'You must accept the organizer agreement to continue' ||

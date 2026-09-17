@@ -287,6 +287,14 @@ describe('marketplace actions', () => {
       expect(byCountry.total).toBe(3)
     })
 
+    it("shows the organizer's organization as the host, else their name", async () => {
+      const { results } = await searchMuns({ query: `${suffix}`, country: 'UK', limit: 10 })
+      const bySlug = new Map(results.map((mun) => [mun.slug, mun.organizerName]))
+      expect(bySlug.get(`cheap-city-${suffix}`)).toBe(`Quillfield Institute ${suffix}`)
+      expect(bySlug.get(publishedMunSlug)).toBe('Test Organizer')
+      expect((await getMunBySlug(`cheap-city-${suffix}`))?.organizerName).toBe(`Quillfield Institute ${suffix}`)
+    })
+
     it('requires every search term to match somewhere', async () => {
       const { results } = await searchMuns({ query: `expensiveville nonexistentword ${suffix}` })
       expect(results).toEqual([])
