@@ -1,6 +1,8 @@
 import { Hono, type Context } from 'hono'
+import { handleTelegramUpdate } from '@/lib/actions/telegram'
 import { getPaymentsAdapter } from '@/lib/payments/registry'
 import { processPaymentWebhook, type ProcessWebhookResult, type WebhookErrorCode } from '@/lib/payments/webhook'
+import { getRuntimeEnv } from '@/lib/runtime-env'
 import type { AppVariables } from '../src/types'
 
 const WEBHOOK_ERROR_STATUS: Record<WebhookErrorCode, 400 | 404> = {
@@ -48,4 +50,28 @@ export const webhooks = new Hono<{ Variables: AppVariables }>().post('/payments'
   const rawBody = await c.req.text()
   const result = await processPaymentWebhook(adapter, rawBody, c.req.raw.headers)
   return webhookResponse(c, result)
+})
+
+/**
+ * Telegram bot webhook. Verified with the secret token Telegram echoes back
+ * on every request once set via `setWebhook`'s `secret_token` param
+ * (`TELEGRAM_WEBHOOK_SECRET`) — Telegram's own recommended alternative to
+ * signature verification, since update payloads aren't signed. With no
+ * secret configured the endpoint refuses every request rather than accepting
+ * unauthenticated Telegram-shaped POSTs from anyone who finds the URL.
+ * Always answers 200 (never a retriable error) so a payload we can't parse
+ * doesn't spin Telegram's automatic retries.
+ */
+webhooks.post('/telegram', async (c) => {
+  const secret = getRuntimeEnv('TELEGRAM_WEBHOOK_SECRET')
+  if (!secret) return c.json({ error: 'Telegram webhook is not configured' }, 404)
+  if (c.req.header('x-telegram-bot-api-secret-token') !== secret) {
+    return c.json({ error: 'Forbidden' }, 403)
+  }
+
+  const update: unknown = await c.req.json().catch(() => null)
+  keepAlive(c, handleTelegramUpdate(update).catch((error: unknown) => {
+    console.error('[telegram webhook] handling failed', error)
+  }))
+  return c.json({ ok: true })
 })

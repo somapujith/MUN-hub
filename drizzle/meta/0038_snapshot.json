@@ -1,6 +1,6 @@
 {
-  "id": "8696ad4c-a52c-424a-ac47-bea8e38053ea",
-  "prevId": "1a239fe5-15b9-44bd-8e75-8dfc853f9d10",
+  "id": "bd193d98-459b-42b5-90bc-815f0785034e",
+  "prevId": "8696ad4c-a52c-424a-ac47-bea8e38053ea",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4303,11 +4303,11 @@
           "method": "btree",
           "with": {}
         },
-        "registrations_registration_group_id_idx": {
-          "name": "registrations_registration_group_id_idx",
+        "registrations_created_at_idx": {
+          "name": "registrations_created_at_idx",
           "columns": [
             {
-              "expression": "registration_group_id",
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -4318,11 +4318,11 @@
           "method": "btree",
           "with": {}
         },
-        "registrations_created_at_idx": {
-          "name": "registrations_created_at_idx",
+        "registrations_registration_group_id_idx": {
+          "name": "registrations_registration_group_id_idx",
           "columns": [
             {
-              "expression": "created_at",
+              "expression": "registration_group_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5129,6 +5129,107 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.telegram_links": {
+      "name": "telegram_links",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "link_token": {
+          "name": "link_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "link_token_expires_at": {
+          "name": "link_token_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linked_at": {
+          "name": "linked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "telegram_links_link_token_idx": {
+          "name": "telegram_links_link_token_idx",
+          "columns": [
+            {
+              "expression": "link_token",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "telegram_links_user_id_users_id_fk": {
+          "name": "telegram_links_user_id_users_id_fk",
+          "tableFrom": "telegram_links",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "telegram_links_user_id_unique": {
+          "name": "telegram_links_user_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

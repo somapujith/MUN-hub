@@ -2,7 +2,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   AwardIcon,
   BadgeCheckIcon,
-  BanknoteIcon,
   BedDoubleIcon,
   CalendarCheck2Icon,
   ChartNoAxesColumnIcon,
@@ -45,7 +44,6 @@ export const MUN_NAV_SECTIONS: readonly MunNavSection[] = [
   { segment: "form", label: "Registration Form", icon: ListChecksIcon, group: "Delegates" },
   { segment: "accommodation", label: "Accommodation", icon: BedDoubleIcon, group: "Delegates" },
   { segment: "registrations", label: "Registrations", icon: UsersIcon, group: "Delegates" },
-  { segment: "finance", label: "Payments & Finance", icon: BanknoteIcon, group: "Delegates" },
   { segment: "communications", label: "Communications", icon: MegaphoneIcon, group: "Operations" },
   { segment: "documents", label: "Documents & Media", icon: FolderOpenIcon, group: "Operations" },
   { segment: "conference-day", label: "Conference Day", icon: CalendarCheck2Icon, group: "Operations" },

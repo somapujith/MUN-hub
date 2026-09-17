@@ -7,6 +7,7 @@ import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
 import { runInBackground } from '@/lib/background-tasks'
 import { notifySupportReply } from '@/lib/notifications/support-reply-email'
+import { notifyStaffNewTicket, notifyStaffTicketReply } from './telegram'
 import {
   supportCategoryEnum,
   type Role,
@@ -418,6 +419,16 @@ async function insertConversation(
       .returning()
 
     return { ticket, message }
+  }).then(async (result) => {
+    const [requester] = await db.select({ name: users.name }).from(users).where(eq(users.id, session.userId)).limit(1)
+    runInBackground('telegram new ticket notification', () =>
+      notifyStaffNewTicket({
+        ticketId: result.ticket.id,
+        subject: result.ticket.subject,
+        requesterName: requester?.name ?? 'A user',
+      }),
+    )
+    return result
   })
 }
 
@@ -786,6 +797,17 @@ export async function sendMessage(
     // be dropped silently; `runInBackground` hands it to the request's
     // waitUntil so the email survives without the caller waiting on it.
     runInBackground('support reply notification', () => notifySupportReply(ticketId))
+  } else {
+    // The requester replied — ping linked staff Telegram chats, the mirror
+    // image of the email above.
+    runInBackground('telegram reply notification', async () => {
+      const [requester] = await db.select({ name: users.name }).from(users).where(eq(users.id, session.userId)).limit(1)
+      await notifyStaffTicketReply({
+        ticketId,
+        subject: result.ticket.subject,
+        requesterName: requester?.name ?? 'A user',
+      })
+    })
   }
 
   return result

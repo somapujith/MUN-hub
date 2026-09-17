@@ -51,7 +51,6 @@ import { OrganizerCommunicationsPage } from "@/pages/organizer/dashboard/section
 import { OrganizerConferenceDayPage } from "@/pages/organizer/dashboard/sections/conference_day-page";
 import { OrganizerDocumentsPage } from "@/pages/organizer/dashboard/sections/documents-page";
 import { OrganizerExecutiveBoardPage } from "@/pages/organizer/dashboard/sections/executive_board-page";
-import { OrganizerFinancePage } from "@/pages/organizer/dashboard/sections/finance-page";
 import { OrganizerFormPage } from "@/pages/organizer/dashboard/sections/form-page";
 import { OrganizerProductsPage } from "@/pages/organizer/dashboard/sections/products-page";
 import { OrganizerRegistrationsPage } from "@/pages/organizer/dashboard/sections/registrations-page";
@@ -211,7 +210,7 @@ export const router = createBrowserRouter([
               { path: "form", element: <OrganizerFormPage /> },
               { path: "accommodation", element: <OrganizerAccommodationPage /> },
               { path: "registrations", element: <OrganizerRegistrationsPage /> },
-              { path: "finance", element: <OrganizerFinancePage /> },
+              { path: "finance", element: <Navigate to="../settings" replace /> },
               { path: "communications", element: <OrganizerCommunicationsPage /> },
               { path: "documents", element: <OrganizerDocumentsPage /> },
               { path: "conference-day", element: <OrganizerConferenceDayPage /> },

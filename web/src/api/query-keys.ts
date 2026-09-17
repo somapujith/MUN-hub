@@ -61,6 +61,7 @@ export const queryKeys = {
   conversation: (ticketId: string) => ["support", "conversation", ticketId] as const,
   unreadConversationCount: () => ["support", "unread-count"] as const,
   adminUnreadConversationCount: () => ["admin", "support", "unread-count"] as const,
+  adminTelegramLink: () => ["admin", "support", "telegram"] as const,
   // Gate 2 publish queue (getGoLiveQueue) — never the organizer-facing
   // per-mun progress key (munProgress) above.
   adminGoLiveQueue: (params: Record<string, unknown>) => ["admin", "go-live-queue", params] as const,

@@ -1364,6 +1364,43 @@ export const supportMessagesRelations = relations(supportMessages, ({ one }) => 
 }))
 
 // ---------------------------------------------------------------------------
+// telegram_links — one row per staff member (OPERATIONS/ADMIN/SUPER_ADMIN)
+// who has linked their own Telegram chat to receive a ping when a new
+// support ticket is raised, or a requester replies. Linking is a two-step
+// handshake (lib/actions/telegram.ts): starting a link generates a
+// single-use `linkToken` and inserts a row with `chatId` still null; the
+// staff member opens the bot's deep link and sends /start <token>, and the
+// webhook (server/routes/webhooks.ts) fills in `chatId` and clears the
+// token. `chatId` null = pending or never completed; non-null = linked.
+// ---------------------------------------------------------------------------
+
+export const telegramLinks = pgTable(
+  'telegram_links',
+  {
+    id: id(),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    chatId: text('chat_id'),
+    linkToken: text('link_token'),
+    linkTokenExpiresAt: timestamp('link_token_expires_at', { withTimezone: true }),
+    linkedAt: timestamp('linked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // The webhook looks up a pending link by token alone (it has no
+    // authenticated session — Telegram is the caller).
+    index('telegram_links_link_token_idx').on(table.linkToken),
+  ],
+)
+
+export const telegramLinksRelations = relations(telegramLinks, ({ one }) => ({
+  user: one(users, { fields: [telegramLinks.userId], references: [users.id] }),
+}))
+
+// ---------------------------------------------------------------------------
 // Onboarding go-live pipeline — Task 4 net-new module tables (7 tables).
 // See docs/superpowers/specs/2026-09-14-onboarding-go-live-pipeline-design.md
 // Section 2.3. No actions/CRUD land in this task — Tasks 5-6 write the

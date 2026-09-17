@@ -17,6 +17,7 @@ import {
   startConversation,
   updateTicketStatus,
 } from '@/lib/actions/support'
+import { getTelegramLinkStatus, startTelegramLink, unlinkTelegram } from '@/lib/actions/telegram'
 import { supportCategoryEnum, supportPriorityEnum, supportStatusEnum } from '@/lib/db/schema-enums'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
@@ -182,3 +183,20 @@ supportRoutes.patch(
     return c.json(ticket)
   },
 )
+
+// --- Telegram notifications (per-staff-member link/unlink) ------------------
+
+supportRoutes.get('/admin/support/telegram', requireAuth, requireRole(staffRoles), async (c) => {
+  const status = await getTelegramLinkStatus(c.get('session'))
+  return c.json(status)
+})
+
+supportRoutes.post('/admin/support/telegram/link', requireAuth, requireRole(staffRoles), async (c) => {
+  const result = await startTelegramLink(c.get('session'))
+  return c.json(result)
+})
+
+supportRoutes.post('/admin/support/telegram/unlink', requireAuth, requireRole(staffRoles), async (c) => {
+  await unlinkTelegram(c.get('session'))
+  return c.json({ ok: true })
+})

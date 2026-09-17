@@ -1,7 +1,7 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
-import { Ban, CalendarClock, Save } from "lucide-react";
+import { Ban, CalendarClock, CircleCheck, Save, Wallet } from "lucide-react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { getMunContact, upsertMunContact } from "@/api/mun-contact";
@@ -13,6 +13,7 @@ import {
   type LifecycleActionOption,
   type MunLifecycleOverview,
 } from "@/api/mun-lifecycle";
+import { getOrganizerOnboarding, savePaymentStep } from "@/api/organizer-onboarding";
 import { queryKeys } from "@/api/query-keys";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -477,6 +478,109 @@ function LifecycleCard({ munId }: { munId: string }) {
   );
 }
 
+const UPI_PATTERN = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,63}$/;
+
+/**
+ * Payout details for this organizer account (not per-MUN): a UPI ID plus the
+ * mobile number linked to it, set once during onboarding
+ * (lib/actions/organizer-onboarding.ts#saveOrganizerPaymentStep). That step
+ * locks once onboarding completes, so once set this only shows a
+ * confirmation, never the stored value — changing it goes through support.
+ */
+function PaymentDetailsCard() {
+  const [upiId, setUpiId] = useState("");
+  const [upiPhone, setUpiPhone] = useState("");
+
+  const onboardingQuery = useQuery({
+    queryKey: queryKeys.organizerOnboarding(),
+    queryFn: getOrganizerOnboarding,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: () => savePaymentStep({ upiId: upiId.trim(), upiPhone: upiPhone.trim() }),
+    onSuccess: async () => {
+      toast.success("Payment details added");
+      await onboardingQuery.refetch();
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to save payment details"),
+  });
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!UPI_PATTERN.test(upiId.trim())) {
+      toast.error("UPI ID must look like name@bank");
+      return;
+    }
+    if (!upiPhone.trim()) {
+      toast.error("Mobile number is required");
+      return;
+    }
+    saveMutation.mutate();
+  };
+
+  const hasPaymentDetails = Boolean(onboardingQuery.data?.profile.upiId);
+
+  return (
+    <Card className="max-w-2xl">
+      <CardHeader>
+        <CardTitle>Payments</CardTitle>
+        <CardDescription>Where MUNHub sends your payout once the conference is settled.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-md">
+        {onboardingQuery.isLoading ? (
+          <Skeleton className="h-24 w-full rounded-md" />
+        ) : onboardingQuery.isError ? (
+          <p className="text-body-md text-destructive">{onboardingQuery.error.message}</p>
+        ) : hasPaymentDetails ? (
+          <div className="flex items-center gap-sm rounded-md border border-border bg-card px-md py-sm">
+            <CircleCheck aria-hidden className="size-5 shrink-0 text-success" />
+            <div>
+              <p className="text-body-md font-medium text-ink">Payment details on file</p>
+              <p className="text-body-md text-muted-foreground">
+                To change your UPI ID or mobile number, contact MUNHub support.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <form className="flex flex-col gap-md" onSubmit={handleSubmit}>
+            <div className="grid gap-md sm:grid-cols-2">
+              <div className="flex flex-col gap-xs">
+                <Label htmlFor="payment-upi-id">UPI ID</Label>
+                <Input
+                  id="payment-upi-id"
+                  placeholder="name@bank"
+                  value={upiId}
+                  onChange={(event) => setUpiId(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-xs">
+                <Label htmlFor="payment-upi-phone">Mobile number linked to it</Label>
+                <Input
+                  id="payment-upi-phone"
+                  type="tel"
+                  value={upiPhone}
+                  onChange={(event) => setUpiPhone(event.target.value)}
+                  required
+                />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button type="submit" size="sm" disabled={saveMutation.isPending}>
+                <Wallet aria-hidden />
+                {saveMutation.isPending ? "Saving..." : "Add payment details"}
+              </Button>
+            </div>
+          </form>
+        )}
+        <p className="border-t border-border pt-md text-body-md text-muted-foreground">
+          Transactions and invoices are settled after your MUN is completed.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function OrganizerSettingsPage() {
   const { munId = "" } = useParams();
   const queryClient = useQueryClient();
@@ -529,6 +633,7 @@ export function OrganizerSettingsPage() {
         description="Registration and conference status, plus the official contact details shown to delegates and MUNHub reviewers."
       >
         <LifecycleCard munId={munId} />
+        <PaymentDetailsCard />
         {contactQuery.isLoading ? (
           <Skeleton className="h-[420px] w-full max-w-2xl rounded-md" />
         ) : contactQuery.isError ? (

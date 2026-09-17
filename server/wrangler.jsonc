@@ -36,7 +36,11 @@
     // registration price, plus 18% GST on that fee — both included in the
     // listed price and non-refundable. User-set rate, confirmed 2026-09-17.
     "PLATFORM_FEE_BPS": "500",
-    "PLATFORM_FEE_TAX_BPS": "1800"
+    "PLATFORM_FEE_TAX_BPS": "1800",
+    // Telegram support notifications (lib/actions/telegram.ts) — the bot's
+    // @username, used to build the "Link Telegram" deep link. The bot token
+    // and webhook secret are secrets (`wrangler secret put`), not here.
+    "TELEGRAM_BOT_USERNAME": "munhub_bot"
   },
   // Workers Rate Limiting bindings, one per limit in
   // server/middleware/rate-limit.ts's LIMITERS (same name, limit and period —

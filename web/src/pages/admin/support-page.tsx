@@ -8,19 +8,26 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ExternalLinkIcon,
   LifeBuoyIcon,
+  Link2Icon,
   Loader2Icon,
   LockIcon,
   RotateCcwIcon,
   RotateCwIcon,
   SearchIcon,
+  SendIcon,
+  Unlink2Icon,
   UserPlusIcon,
   XIcon,
 } from "lucide-react";
 import {
   assignSupportTicketToSelf,
   getAdminUnreadConversationCount,
+  getTelegramLinkStatus,
   listStaffSupportTickets,
+  startTelegramLink,
+  unlinkTelegram,
   updateSupportTicketStatus,
 } from "@/api/support";
 import { queryKeys } from "@/api/query-keys";
@@ -47,6 +54,7 @@ import {
 } from "@/components/support/use-support";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -158,6 +166,101 @@ function useQueueState() {
   return { status, category, priority, assignee, q, page, selectedId, update, apiParams, filtered };
 }
 
+/**
+ * Per-staff Telegram link: click "Link Telegram" to get the bot's deep link,
+ * send /start there, and the webhook (server/routes/webhooks.ts) completes
+ * it — this card just polls the status until that happens. Unlinking is
+ * immediate. Every linked staff member gets pinged on a new ticket or a
+ * requester reply (lib/actions/telegram.ts).
+ */
+function TelegramLinkCard() {
+  const queryClient = useQueryClient();
+  const [deepLink, setDeepLink] = React.useState<string | null>(null);
+
+  const statusQuery = useQuery({
+    queryKey: queryKeys.adminTelegramLink(),
+    queryFn: getTelegramLinkStatus,
+    // Only worth polling while a link is pending — otherwise this is a
+    // one-off check on page load.
+    refetchInterval: (query) => (query.state.data?.pending ? 3000 : false),
+  });
+
+  const linkMutation = useMutation({
+    mutationFn: startTelegramLink,
+    onSuccess: ({ deepLink }) => {
+      setDeepLink(deepLink);
+      window.open(deepLink, "_blank", "noopener,noreferrer");
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminTelegramLink() });
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't start the Telegram link"),
+  });
+
+  const unlinkMutation = useMutation({
+    mutationFn: unlinkTelegram,
+    onSuccess: () => {
+      setDeepLink(null);
+      queryClient.setQueryData(queryKeys.adminTelegramLink(), { linked: false, pending: false });
+      toast.success("Telegram unlinked");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't unlink Telegram"),
+  });
+
+  const status = statusQuery.data;
+
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-xs text-body-md">
+          <SendIcon className="size-4 text-muted-foreground" aria-hidden />
+          Telegram notifications
+        </CardTitle>
+        <CardDescription>Get a Telegram message when a new ticket comes in or a requester replies.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap items-center gap-sm">
+        {statusQuery.isLoading ? (
+          <span className="text-body-md text-muted-foreground">Checking...</span>
+        ) : statusQuery.isError ? (
+          <span className="text-body-md text-destructive">{statusQuery.error.message}</span>
+        ) : status?.linked ? (
+          <>
+            <Badge variant="success">Linked</Badge>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={unlinkMutation.isPending}
+              onClick={() => unlinkMutation.mutate()}
+            >
+              {unlinkMutation.isPending ? (
+                <Loader2Icon className="animate-spin" aria-hidden />
+              ) : (
+                <Unlink2Icon aria-hidden />
+              )}
+              Unlink
+            </Button>
+          </>
+        ) : (
+          <>
+            {status?.pending && deepLink ? (
+              <>
+                <Badge variant="warning">Waiting for /start in Telegram</Badge>
+                <Button size="sm" variant="outline" render={<a href={deepLink} target="_blank" rel="noopener noreferrer" />}>
+                  <ExternalLinkIcon aria-hidden />
+                  Reopen Telegram
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" disabled={linkMutation.isPending} onClick={() => linkMutation.mutate()}>
+                {linkMutation.isPending ? <Loader2Icon className="animate-spin" aria-hidden /> : <Link2Icon aria-hidden />}
+                Link Telegram
+              </Button>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function AdminSupportPage() {
   const state = useQueueState();
   const { data: session } = useSession();
@@ -197,6 +300,8 @@ export function AdminSupportPage() {
       title="Support"
       description="Conversations from delegates and organizers, most recent activity first. Take a ticket, reply, and resolve it with a note the requester can read."
     >
+      <TelegramLinkCard />
+
       <div className="flex flex-col gap-sm">
         <div className="grid gap-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))]">
           <div className="flex flex-col gap-xs sm:col-span-2 lg:col-span-1">

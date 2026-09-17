@@ -144,3 +144,24 @@ export function updateSupportTicketStatus(
     body: JSON.stringify(resolutionNotes === undefined ? { status } : { status, resolutionNotes }),
   });
 }
+
+// --- Telegram (per-staff-member link/unlink) --------------------------------
+
+export interface TelegramLinkStatus {
+  linked: boolean;
+  pending: boolean;
+}
+
+/** Whether the signed-in staff member has linked (or has a pending link to) Telegram. */
+export function getTelegramLinkStatus() {
+  return request<TelegramLinkStatus>("/admin/support/telegram");
+}
+
+/** Starts a link: returns the bot deep link to open in Telegram and send /start. */
+export function startTelegramLink() {
+  return request<{ deepLink: string }>("/admin/support/telegram/link", { method: "POST" });
+}
+
+export function unlinkTelegram() {
+  return request<{ ok: true }>("/admin/support/telegram/unlink", { method: "POST" });
+}
