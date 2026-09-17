@@ -88,7 +88,9 @@ async function deliverVerificationEmail(
  * address has no account, is already verified, got a link in the last
  * minute, or got three in the last hour — silently, so the caller can't
  * tell these cases apart (same stance as requestPasswordReset). The HTTP
- * layer adds per-IP and per-email request limits on top.
+ * layer adds per-IP and per-email request limits on top, and the route
+ * hands this work to `waitUntil` so response time doesn't leak it either
+ * (server/routes/email-verification.ts).
  *
  * Otherwise every still-usable earlier link is expired on the spot (kept,
  * not deleted, so it still counts toward the hourly cap) and a fresh one is
@@ -98,9 +100,11 @@ async function deliverVerificationEmail(
 export async function resendVerificationEmail(
   email: string,
   appUrl: string,
-  adapter?: NotificationsAdapter,
+  adapter: NotificationsAdapter = getNotificationsAdapter(),
 ): Promise<void> {
   const issued = await db.transaction(async (tx) => {
+    // Row lock on the user serializes concurrent resends for one account, so
+    // the throttle below can't be raced past.
     const [user] = await tx
       .select({ id: users.id, email: users.email, name: users.name, emailVerifiedAt: users.emailVerifiedAt })
       .from(users)
@@ -143,7 +147,7 @@ export async function resendVerificationEmail(
   })
 
   if (!issued) return
-  await deliverVerificationEmail(issued.user, issued.rawToken, appUrl, adapter ?? getNotificationsAdapter())
+  await deliverVerificationEmail(issued.user, issued.rawToken, appUrl, adapter)
 }
 
 /**

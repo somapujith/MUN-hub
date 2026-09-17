@@ -31,7 +31,7 @@ Staging runs the same code as production on Cloudflare, on `workers.dev` hostnam
 
 `vars`, `hyperdrive` and `ratelimits` are the opposite: wrangler never inherits them into a named environment, so `env.staging` repeats each one. The rate-limit bindings matter most — without them the publicly reachable staging API would fall back to a per-isolate in-memory counter, and its Neon branch is forked from production. A test (`server/middleware/rate-limit.test.ts`) checks that every named environment declares the same bindings with the same limits and its own namespace ids.
 
-The staging web bundle's CSP follows `VITE_API_URL`: `web/vite.config.ts` rewrites `connect-src` in `dist/_headers` at build time, so the staging SPA is allowed to call the staging API (`web/build/security-headers.ts`). Nothing to patch by hand.
+The staging web bundle's CSP follows `VITE_API_URL`: `web/vite.config.ts` rewrites `connect-src` in `dist/_headers` at build time, so the staging SPA is allowed to call the staging API (`web/vite-plugins/api-origin-csp.ts`). Nothing to patch by hand.
 
 ### One-time setup
 

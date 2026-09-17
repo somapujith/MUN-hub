@@ -372,7 +372,7 @@ describe('disableMfa', () => {
     const { recoveryCodes } = await enrollAndConfirm(admin)
     vi.mocked(verifyPassword).mockClear()
 
-    for (const code of ['not-a-code', 'AAAAAAAAAAA', recoveryCodes[0].toLowerCase(), `${recoveryCodes[0]}0`, '1234567']) {
+    for (const code of ['not-a-code', 'AAAAAAAAAAA', `${recoveryCodes[0]}0`, '1234567']) {
       await expect(disableMfa(code, sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
     }
     expect(verifyPassword).not.toHaveBeenCalled()
@@ -381,6 +381,101 @@ describe('disableMfa', () => {
     await expect(disableMfa('00000-00000', sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
     expect(verifyPassword).toHaveBeenCalled()
     expect(await hasConfirmedMfa(admin.id)).toBe(true)
+  })
+
+  // canonicalRecoveryCode (staff-mfa.ts) normalizes case, spaces and the
+  // dash before comparing, so a correctly copied code still verifies however
+  // it was typed back.
+  it('accepts a recovery code typed in lowercase', async () => {
+    const admin = await makeUser('ADMIN')
+    const { recoveryCodes } = await enrollAndConfirm(admin)
+
+    await disableMfa(recoveryCodes[0].toLowerCase(), sess(admin))
+
+    expect(await hasConfirmedMfa(admin.id)).toBe(false)
+  })
+})
+
+describe('per-account guess budget', () => {
+  /** Spends one challenge's full MFA_MAX_ATTEMPTS on wrong codes. */
+  async function burnOneChallenge(userId: string) {
+    const { pendingToken } = await beginMfaChallenge(userId)
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(completeMfaChallenge(pendingToken, '000000')).rejects.toThrow()
+    }
+  }
+
+  it('a fresh challenge cannot keep buying more guesses', async () => {
+    const admin = await makeUser('ADMIN')
+    const { secret } = await enrollAndConfirm(admin)
+
+    // Two challenges' worth of wrong codes is the whole per-account budget.
+    await burnOneChallenge(admin.id)
+    await burnOneChallenge(admin.id)
+
+    // Before this was counted per account, signing in again (the password is
+    // already known in this scenario) minted a third challenge with five more
+    // guesses, and so on indefinitely.
+    await expect(beginMfaChallenge(admin.id)).rejects.toThrow(MFA_ERRORS.lockedOut)
+
+    // Not even a correct code gets through while the budget is spent.
+    await expect(regenerateMfaRecoveryCodes(totp(secret, new Date(Date.now() + 30_000)), sess(admin))).rejects.toThrow(
+      MFA_ERRORS.lockedOut,
+    )
+  })
+
+  it('counts wrong codes from disableMfa and regenerate in the same budget', async () => {
+    const admin = await makeUser('ADMIN')
+    await enrollAndConfirm(admin)
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(disableMfa('000000', sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
+      await expect(regenerateMfaRecoveryCodes('000000', sess(admin))).rejects.toThrow(MFA_ERRORS.invalidCode)
+    }
+
+    // Ten wrong codes later, every code-checking path is closed for the
+    // window — including the one that would hand out fresh recovery codes.
+    await expect(disableMfa('000000', sess(admin))).rejects.toThrow(MFA_ERRORS.lockedOut)
+    await expect(regenerateMfaRecoveryCodes('000000', sess(admin))).rejects.toThrow(MFA_ERRORS.lockedOut)
+    await expect(beginMfaChallenge(admin.id)).rejects.toThrow(MFA_ERRORS.lockedOut)
+  })
+
+  it('leaves other accounts alone', async () => {
+    const locked = await makeUser('ADMIN')
+    await enrollAndConfirm(locked)
+    await burnOneChallenge(locked.id)
+    await burnOneChallenge(locked.id)
+    await expect(beginMfaChallenge(locked.id)).rejects.toThrow(MFA_ERRORS.lockedOut)
+
+    const other = await makeUser('ADMIN')
+    const { secret } = await enrollAndConfirm(other)
+    const { pendingToken } = await beginMfaChallenge(other.id)
+    await expect(completeMfaChallenge(pendingToken, totp(secret, new Date(Date.now() + 30_000)))).resolves.toMatchObject({
+      userId: other.id,
+    })
+  })
+})
+
+describe('recovery-code formatting', () => {
+  it('accepts a code typed without its dash, in lowercase, with stray spaces', async () => {
+    const admin = await makeUser('ADMIN')
+    const { recoveryCodes } = await enrollAndConfirm(admin)
+    const typed = ` ${recoveryCodes[0].replace('-', '').toLowerCase()} `
+
+    const { pendingToken } = await beginMfaChallenge(admin.id)
+
+    // A phone keyboard sends lowercase whatever the field displays, and the
+    // dash is easy to drop — neither should burn one of five attempts at the
+    // moment the user has already lost their authenticator.
+    await expect(completeMfaChallenge(pendingToken, typed)).resolves.toMatchObject({ userId: admin.id })
+  })
+
+  it('still rejects a code that is merely code-shaped', async () => {
+    const admin = await makeUser('ADMIN')
+    await enrollAndConfirm(admin)
+    const { pendingToken } = await beginMfaChallenge(admin.id)
+
+    await expect(completeMfaChallenge(pendingToken, 'abcde12345')).rejects.toThrow(MFA_ERRORS.invalidCode)
   })
 })
 

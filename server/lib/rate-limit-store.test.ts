@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { getClientIp } from './rate-limit-store'
+import { getClientIp, rateLimitIpKey } from './rate-limit-store'
 
 const app = new Hono()
 app.get('/ip', (c) => c.text(getClientIp(c)))
@@ -56,5 +56,37 @@ describe('getClientIp', () => {
   it("falls back to 'unknown' when there is no socket (app.request test helper)", async () => {
     const res = await app.request('/ip', { headers: SPOOFED })
     expect(await res.text()).toBe('unknown')
+  })
+})
+
+describe('rateLimitIpKey', () => {
+  it('leaves IPv4 addresses and non-addresses alone', () => {
+    expect(rateLimitIpKey('198.51.100.20')).toBe('198.51.100.20')
+    expect(rateLimitIpKey('unknown')).toBe('unknown')
+    expect(rateLimitIpKey('not an address')).toBe('not an address')
+  })
+
+  it('groups two addresses in one /64 onto the same key', () => {
+    // A VPS is routinely handed a whole /64 (2^64 addresses), so without this
+    // it could present a fresh source address per request and start every
+    // per-IP limit from zero each time.
+    const first = rateLimitIpKey('2001:db8:abcd:0012:0000:0000:0000:0001')
+    const second = rateLimitIpKey('2001:db8:abcd:12::beef')
+    expect(first).toBe(second)
+    expect(first).toBe('2001:db8:abcd:12::/64')
+  })
+
+  it('keeps different /64s apart', () => {
+    expect(rateLimitIpKey('2001:db8:abcd:12::1')).not.toBe(rateLimitIpKey('2001:db8:abcd:13::1'))
+  })
+
+  it('handles compressed, bracketed and zone-suffixed forms', () => {
+    expect(rateLimitIpKey('::1')).toBe('0:0:0:0::/64')
+    expect(rateLimitIpKey('[2606:4700:3030::6815:5e92]')).toBe('2606:4700:3030:0::/64')
+    expect(rateLimitIpKey('fe80::1%eth0')).toBe('fe80:0:0:0::/64')
+  })
+
+  it('leaves an IPv4-mapped address alone (it already names one host)', () => {
+    expect(rateLimitIpKey('::ffff:198.51.100.20')).toBe('::ffff:198.51.100.20')
   })
 })

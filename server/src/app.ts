@@ -11,6 +11,7 @@ import { rateLimitMiddleware } from '../middleware/rate-limit'
 import { runtimeEnvMiddleware } from '../middleware/runtime-env'
 import { securityHeadersMiddleware } from '../middleware/security-headers'
 import { sessionMiddleware } from '../middleware/session'
+import { staffMfaGateMiddleware } from '../middleware/staff-mfa-gate'
 import { storageMiddleware } from '../middleware/storage'
 import { waitUntilMiddleware } from '../middleware/wait-until'
 import { filesRoutes } from '../routes/files'
@@ -27,7 +28,7 @@ import type { AppVariables } from './types'
  * background-task keep-alive → storage bindings → waitUntil bridge →
  * request-id → security headers → logger → CORS →
  * body limit → session → [webhooks outside CSRF] → CSRF → rate-limit →
- * /api/v1/files + /api/v1 routes → JSON 404 / error handler
+ * staff-2FA gate → /api/v1/files + /api/v1 routes → JSON 404 / error handler
  */
 export function createApp() {
   const app = new Hono<{ Variables: AppVariables }>()
@@ -69,6 +70,10 @@ export function createApp() {
   // CSRF + rate-limit scoped to /api/v1 only
   app.use('/api/v1/*', csrfMiddleware)
   app.use('/api/v1/*', rateLimitMiddleware)
+  // REQUIRE_STAFF_2FA, applied to the whole API rather than route by route —
+  // many staff powers live behind requireAuth-only routes. No-op (one string
+  // comparison) while the flag is unset.
+  app.use('/api/v1/*', staffMfaGateMiddleware)
   // Public uploaded files (logos, covers, PDFs) — server/routes/files.ts
   app.route('/api/v1/files', filesRoutes)
   app.route('/api/v1', apiV1)

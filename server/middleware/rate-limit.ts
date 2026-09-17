@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono'
-import { consumeRateLimit, getClientIp, positiveIntEnv, type LimiterSpec } from '../lib/rate-limit-store'
+import { consumeRateLimit, getClientIp, positiveIntEnv, rateLimitIpKey, type LimiterSpec } from '../lib/rate-limit-store'
 import type { AppVariables } from '../src/types'
 
 /**
@@ -12,9 +12,9 @@ import type { AppVariables } from '../src/types'
 export const LIMITERS = {
   /**
    * Per-IP cap on every /api/v1 request, including those that also match a
-   * route rule below. The in-memory fallback can be replaced with
-   * RATE_LIMIT_GLOBAL_PER_MINUTE (e.g. the E2E suite, where every request
-   * comes from one address).
+   * route rule below — except uploaded-file reads (`filesIp`). The in-memory
+   * fallback can be replaced with RATE_LIMIT_GLOBAL_PER_MINUTE (e.g. the E2E
+   * suite, where every request comes from one address).
    */
   globalIp: {
     binding: 'RL_GLOBAL_IP',
@@ -56,14 +56,6 @@ export const LIMITERS = {
   // codes until MFA comes off the account. Keyed per user: more addresses
   // must not buy more guesses.
   mfaManageUser: { binding: 'RL_MFA_MANAGE_USER', limit: 5, periodSeconds: 60, perIp: false },
-  // Uploaded files (logos, covers, PDFs) are fetched by the browser as <img>
-  // sources — one marketplace page is two dozen of them. They get their own,
-  // much higher per-IP budget INSTEAD of the global API one (`replacesGlobal`
-  // below): a shared campus NAT address would otherwise spend the whole
-  // 300/min API budget on cover images and 429 every API call behind it. Safe
-  // to set high — the keys are unguessable, the bytes are immutable, and the
-  // responses carry a one-year immutable cache.
-  filesIp: { binding: 'RL_FILES_IP', limit: 600, periodSeconds: 60, perIp: true },
   // Organizer email-code sign-in. lib/actions/organizer-otp.ts also enforces a
   // per-address resend cooldown and hourly cap, and a per-code attempt limit.
   // The per-IP cap bounds how many different addresses one IP can send codes to.
@@ -81,9 +73,26 @@ export const LIMITERS = {
   accountDeleteUser: { binding: 'RL_ACCOUNT_DELETE_USER', limit: 5, periodSeconds: 60, perIp: false },
   availabilityIp: { binding: 'RL_AVAILABILITY_IP', limit: 60, periodSeconds: 60, perIp: true },
   munsListIp: { binding: 'RL_MUNS_LIST_IP', limit: 120, periodSeconds: 60, perIp: true },
+  // Uploaded files (logos, covers, PDFs) are fetched by the browser as <img>
+  // sources — one marketplace page is two dozen of them. They get their own,
+  // much higher per-IP budget INSTEAD of the global API one (`replacesGlobal`
+  // below): a shared campus NAT address would otherwise spend the whole
+  // 300/min API budget on cover images and 429 every API call behind it. Safe
+  // to set high — the keys are unguessable, the bytes are immutable, and the
+  // responses carry a one-year immutable cache. Covers both GET and HEAD —
+  // Hono answers a HEAD request with the GET handler but keeps HEAD as the
+  // request method, so a rule matching only GET would miss it and let it fall
+  // through to (and exhaust) the much smaller global budget instead.
+  filesIp: { binding: 'RL_FILES_IP', limit: 1200, periodSeconds: 60, perIp: true },
 } satisfies Record<string, LimiterSpec>
 
 type RequestFacts = {
+  /**
+   * The client's rate-limit bucket — not always its exact address. An IPv6
+   * client counts against its /64 prefix (server/lib/rate-limit-store.ts
+   * #rateLimitIpKey): one machine normally owns a whole /64, and could
+   * otherwise start every per-IP limit from zero on each request.
+   */
   ip: string
   sessionUserId: string | null
   /** Lower-cased `email` from the JSON body, for rules that set `readsEmail`. */
@@ -95,22 +104,22 @@ type RequestFacts = {
 type Check = { limiter: LimiterSpec; key: string }
 
 type LimitRule = {
-  method: string
-  /** Exact path under /api/v1, or a pattern for paths with parameters. */
+  /** HTTP methods this rule matches. */
+  methods: readonly string[]
+  /**
+   * Exact path under /api/v1, or a pattern for paths with parameters. A
+   * string path is matched as a prefix rather than exactly when `prefix` is
+   * set (e.g. `/files/` + a storage key).
+   */
   path: string | RegExp
-  /**
-   * Match a string `path` as a prefix rather than exactly (e.g. `/files/` + a
-   * storage key). Ignored when `path` is a RegExp.
-   */
   prefix?: boolean
-  /**
-   * Count the request against this rule's own limits INSTEAD of the global
-   * per-IP cap. Only for routes a browser fetches many of per page; every
-   * other rule stacks on top of the global cap.
-   */
-  replacesGlobal?: boolean
   readsEmail?: boolean
   readsPendingToken?: boolean
+  /**
+   * The rule's checks replace the global per-IP cap instead of adding to it.
+   * Only for cheap, static reads that a single page loads many of.
+   */
+  replacesGlobal?: boolean
   checks: (facts: RequestFacts) => Check[]
 }
 
@@ -123,14 +132,25 @@ function perUser(limiter: LimiterSpec, sessionUserId: string | null): Check[] {
   return sessionUserId ? [{ limiter, key: `user:${sessionUserId}` }] : []
 }
 
-function matchesPath(rule: LimitRule, path: string): boolean {
+/**
+ * Keys a signed-in user's own budget; a signed-out caller is keyed by IP
+ * instead of being skipped — unlike `perUser`, this is for routes (MFA
+ * management, password change) that are still a real guessing surface with
+ * just a stolen session cookie, so the check must run either way.
+ */
+function userKey({ ip, sessionUserId }: RequestFacts): string {
+  return sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}`
+}
+
+function ruleMatches(rule: LimitRule, method: string, path: string): boolean {
+  if (!rule.methods.includes(method)) return false
   if (typeof rule.path !== 'string') return rule.path.test(path)
   return rule.prefix ? path.startsWith(rule.path) : rule.path === path
 }
 
 const RULES: LimitRule[] = [
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/auth/session',
     readsEmail: true,
     checks: ({ ip, email }) => [
@@ -139,19 +159,17 @@ const RULES: LimitRule[] = [
     ],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/auth/users',
     checks: ({ ip }) => [{ limiter: LIMITERS.signupIp, key: `ip:${ip}` }],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/auth/session/password',
-    checks: ({ ip, sessionUserId }) => [
-      { limiter: LIMITERS.changePasswordUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
-    ],
+    checks: (facts) => [{ limiter: LIMITERS.changePasswordUser, key: userKey(facts) }],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/password-reset/request',
     readsEmail: true,
     checks: ({ ip, email }) => [
@@ -160,7 +178,12 @@ const RULES: LimitRule[] = [
     ],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
+    path: '/password-reset/confirm',
+    checks: ({ ip }) => [{ limiter: LIMITERS.resetConfirmIp, key: `ip:${ip}` }],
+  },
+  {
+    methods: ['POST'],
     path: '/verify-email/resend',
     readsEmail: true,
     checks: ({ ip, email }) => [
@@ -169,12 +192,7 @@ const RULES: LimitRule[] = [
     ],
   },
   {
-    method: 'POST',
-    path: '/password-reset/confirm',
-    checks: ({ ip }) => [{ limiter: LIMITERS.resetConfirmIp, key: `ip:${ip}` }],
-  },
-  {
-    method: 'POST',
+    methods: ['POST'],
     path: '/auth/session/mfa',
     readsPendingToken: true,
     checks: ({ ip, pendingToken }) => [
@@ -182,18 +200,19 @@ const RULES: LimitRule[] = [
       ...(pendingToken ? [{ limiter: LIMITERS.mfaVerifyToken, key: `token:${pendingToken}` }] : []),
     ],
   },
-  // One budget shared by both routes, so alternating between them doesn't double it.
-  ...['/auth/mfa/disable', '/auth/mfa/recovery-codes'].map(
-    (path): LimitRule => ({
-      method: 'POST',
-      path,
-      checks: ({ ip, sessionUserId }) => [
-        { limiter: LIMITERS.mfaManageUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
-      ],
-    }),
-  ),
+  // Same key for both routes, so alternating between them doesn't double the budget.
   {
-    method: 'POST',
+    methods: ['POST'],
+    path: '/auth/mfa/disable',
+    checks: (facts) => [{ limiter: LIMITERS.mfaManageUser, key: userKey(facts) }],
+  },
+  {
+    methods: ['POST'],
+    path: '/auth/mfa/recovery-codes',
+    checks: (facts) => [{ limiter: LIMITERS.mfaManageUser, key: userKey(facts) }],
+  },
+  {
+    methods: ['POST'],
     path: '/auth/organizers/code',
     readsEmail: true,
     checks: ({ ip, email }) => [
@@ -202,7 +221,7 @@ const RULES: LimitRule[] = [
     ],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/auth/organizers/session',
     readsEmail: true,
     checks: ({ ip, email }) => [
@@ -210,7 +229,7 @@ const RULES: LimitRule[] = [
     ],
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/registrations',
     checks: ({ sessionUserId }) => [
       { limiter: LIMITERS.registrationsUser, key: `session:${sessionUserId ?? 'anon'}` },
@@ -218,39 +237,41 @@ const RULES: LimitRule[] = [
   },
   // Both routes open a new support ticket and share one budget.
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/support/tickets',
     checks: ({ sessionUserId }) => perUser(LIMITERS.supportTicketUser, sessionUserId),
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/support/conversations',
     checks: ({ sessionUserId }) => perUser(LIMITERS.supportTicketUser, sessionUserId),
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: /^\/support\/conversations\/[^/]+\/messages$/,
     checks: ({ sessionUserId }) => perUser(LIMITERS.supportMessageUser, sessionUserId),
   },
   {
-    method: 'POST',
+    methods: ['POST'],
     path: '/account/delete',
     checks: ({ sessionUserId }) => perUser(LIMITERS.accountDeleteUser, sessionUserId),
   },
   {
-    method: 'GET',
+    methods: ['GET'],
     path: '/products/availability',
     checks: ({ ip }) => [{ limiter: LIMITERS.availabilityIp, key: `ip:${ip}` }],
   },
   {
-    method: 'GET',
+    methods: ['GET'],
     path: '/muns',
     checks: ({ ip }) => [{ limiter: LIMITERS.munsListIp, key: `ip:${ip}` }],
   },
   // Uploaded-file reads (server/routes/files.ts): their own, much larger
-  // per-IP budget instead of the global API one — see LIMITERS.filesIp.
+  // per-IP budget instead of the global API one — see LIMITERS.filesIp. Hono
+  // answers HEAD with the GET handler but keeps HEAD as the request method,
+  // so both methods are listed here.
   {
-    method: 'GET',
+    methods: ['GET', 'HEAD'],
     path: '/files/',
     prefix: true,
     replacesGlobal: true,
@@ -289,10 +310,10 @@ async function readBodyPendingToken(c: Context): Promise<string | undefined> {
 export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   const path = c.req.path.replace(/^\/api\/v1/, '') || '/'
   const method = c.req.method
-  const matched = RULES.filter((rule) => rule.method === method && matchesPath(rule, path))
+  const matched = RULES.filter((rule) => ruleMatches(rule, method, path))
 
   const facts: RequestFacts = {
-    ip: getClientIp(c),
+    ip: rateLimitIpKey(getClientIp(c)),
     sessionUserId: c.get('session')?.userId ?? null,
   }
   if (matched.some((rule) => rule.readsEmail)) {

@@ -380,7 +380,13 @@ export const mfaRecoveryCodesRelations = relations(mfaRecoveryCodes, ({ one }) =
 // The "password verified, TOTP still pending" step — mirrors
 // password_reset_tokens/sessions: only the SHA-256 of the presented token is
 // stored (lib/auth/opaque-token.ts), never the raw value. `attempts` mirrors
-// email_login_codes' per-code guess counter.
+// email_login_codes' per-code guess counter — and summed across a user's
+// recent rows it is also the *per-account* guess budget, so
+// lib/actions/staff-mfa.ts writes a row here for a wrong code submitted on a
+// path with no challenge of its own (disable / regenerate recovery codes).
+// Those marker rows are written already-expired and already-consumed with a
+// random token hash: they can never be redeemed, only counted. So a row here
+// is not always a live sign-in attempt.
 export const mfaPendingChallenges = pgTable(
   'mfa_pending_challenges',
   {

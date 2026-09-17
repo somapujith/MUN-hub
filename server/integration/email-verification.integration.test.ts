@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { emailVerificationTokens, users } from '@/lib/db/schema'
@@ -62,6 +62,23 @@ describe('email verification REST routes', () => {
 
     const [updatedUser] = await db.select({ emailVerifiedAt: users.emailVerifiedAt }).from(users).where(eq(users.id, user.id))
     expect(updatedUser.emailVerifiedAt).not.toBeNull()
+  })
+
+  it('does the work after the response on Workers, so response time reveals nothing either', async () => {
+    // Awaiting inline leaks what the flat 204 hides: a registered address
+    // costs a token write plus a mail-provider round-trip, an unknown one a
+    // single indexed lookup.
+    const waitUntil = vi.fn()
+    const res = await app.request(
+      '/api/v1/verify-email/resend',
+      { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ email: 'nobody-here@test.dev' }) },
+      {},
+      { waitUntil, passThroughOnException: () => {}, props: {} },
+    )
+
+    expect(res.status).toBe(204)
+    expect(waitUntil).toHaveBeenCalledOnce()
+    expect(waitUntil.mock.calls[0][0]).toBeInstanceOf(Promise)
   })
 
   it('POST /verify-email with a bogus token returns 400 VALIDATION_FAILED, not 500', async () => {

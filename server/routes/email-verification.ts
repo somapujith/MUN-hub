@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { resendVerificationEmail, verifyEmail } from '@/lib/actions/email-verification'
+import { runAfterResponse } from '../lib/after-response'
 import type { AppVariables } from '../src/types'
 import { resolveResetAppUrl } from './password-reset'
 
@@ -32,10 +33,14 @@ emailVerificationRoutes.post('/verify-email', async (c) => {
 // Also unauthenticated (the "enter your email" resend form) and always
 // resolves 204 regardless of whether `email` matches an account —
 // lib/actions/email-verification.ts#resendVerificationEmail never reveals
-// whether an account exists for a given address.
+// whether an account exists for a given address. The lookup, token write and
+// mail-provider call all happen after the response (runAfterResponse) so
+// response time doesn't reveal it either. Abuse limits: per-IP and per-email
+// in server/middleware/rate-limit.ts, per-account cooldown + hourly cap in
+// the action itself.
 emailVerificationRoutes.post('/verify-email/resend', async (c) => {
   const body = resendBodySchema.parse(await c.req.json())
-  await resendVerificationEmail(body.email, resolveAppUrl(c))
+  await runAfterResponse(c, resendVerificationEmail(body.email, resolveAppUrl(c)), 'email-verification')
 
   return c.body(null, 204)
 })
