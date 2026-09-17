@@ -36,7 +36,21 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
  */
 const HIGH_IMPACT_FIELDS: Record<MunModule, string[]> = {
   BASIC_INFO: ['name', 'edition'],
-  DATES_VENUE: ['startDate', 'endDate', 'venue', 'city', 'country', 'registrationDeadline'],
+  // Everything a delegate reads to decide when and where to go: the public
+  // MUN page shows the full address and links to mapUrl.
+  DATES_VENUE: [
+    'startDate',
+    'endDate',
+    'venue',
+    'addressLine1',
+    'addressState',
+    'postalCode',
+    'city',
+    'country',
+    'mapUrl',
+    'registrationOpensAt',
+    'registrationDeadline',
+  ],
   BRANDING: [],
   COMMITTEES: ['name', 'capacity', 'agenda'],
   PORTFOLIOS: ['name', 'availability'],

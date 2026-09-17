@@ -501,9 +501,10 @@ export async function updateMunDetails(
   if (!updated) throw new Error('Mun not found')
 
   // PRD keys, not the legacy 'mun_details' key — see file header comment.
-  // BASIC_INFO (name/edition) and DATES_VENUE (startDate/endDate/venue/
-  // city/country/registrationDeadline) both back onto this same table, so
-  // both are checked against the real before/after diff.
+  // BASIC_INFO (name/edition) and DATES_VENUE (dates, venue, address, map
+  // link, registration window — see HIGH_IMPACT_FIELDS in reverification.ts)
+  // both back onto this same table, so both are checked against the real
+  // before/after diff.
   await triggerReverificationIfNeeded('BASIC_INFO', existing, updated, munId, session!.userId)
   await triggerReverificationIfNeeded('DATES_VENUE', existing, updated, munId, session!.userId)
 
