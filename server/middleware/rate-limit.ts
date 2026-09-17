@@ -37,6 +37,12 @@ export const LIMITERS = {
   resetRequestEmail: { binding: 'RL_RESET_REQUEST_EMAIL', limit: 3, periodSeconds: 60, perIp: false },
   resetConfirmIp: { binding: 'RL_RESET_CONFIRM_IP', limit: 10, periodSeconds: 60, perIp: true },
   changePasswordUser: { binding: 'RL_CHANGE_PASSWORD_USER', limit: 5, periodSeconds: 60, perIp: false },
+  // Self-service account deletion re-checks the account password with scrypt
+  // (~32MB and tens of ms of CPU per call, lib/auth/password.ts). Without a
+  // rule of its own only the 300/min global cap applied, so a stolen session
+  // could guess passwords 15x faster than at sign-in, and any delegate could
+  // make the isolate run 300 scrypt hashes a minute.
+  accountDeleteUser: { binding: 'RL_ACCOUNT_DELETE_USER', limit: 5, periodSeconds: 60, perIp: false },
   // Staff TOTP sign-in challenge (lib/actions/staff-mfa.ts). The pending
   // token itself is single-use and already caps guesses per attempt
   // (MFA_MAX_ATTEMPTS in staff-mfa.ts); these bound spraying across many
@@ -93,6 +99,13 @@ const RULES: LimitRule[] = [
     path: '/auth/session/password',
     checks: ({ ip, sessionUserId }) => [
       { limiter: LIMITERS.changePasswordUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
+    ],
+  },
+  {
+    method: 'POST',
+    path: '/account/delete',
+    checks: ({ ip, sessionUserId }) => [
+      { limiter: LIMITERS.accountDeleteUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
     ],
   },
   {

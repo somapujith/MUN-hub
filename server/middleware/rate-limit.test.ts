@@ -154,6 +154,24 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
     expect(otherUser.status).toBe(200)
   })
 
+  // Deletion re-checks the password with scrypt, so it needs its own cap:
+  // the global 300/min per IP alone let a stolen session guess passwords far
+  // faster than sign-in allows, and burn ~32MB of isolate memory per attempt.
+  it('limits account deletions per signed-in user, not per address', async () => {
+    const user = `user-${crypto.randomUUID()}`
+    const result = await statuses(LIMITERS.accountDeleteUser.limit + 1, () =>
+      send('/account/delete', { ip: freshIp(), user, body: { confirmation: 'DELETE', password: 'guess' } }),
+    )
+    expect(result).toEqual(allowedThenBlocked(LIMITERS.accountDeleteUser.limit))
+
+    const otherUser = await send('/account/delete', {
+      ip: freshIp(),
+      user: `user-${crypto.randomUUID()}`,
+      body: { confirmation: 'DELETE', password: 'guess' },
+    })
+    expect(otherUser.status).toBe(200)
+  })
+
   it('keeps the organizer code limits: per IP+email and per IP', async () => {
     const ip = freshIp()
     const email = freshEmail('org-code')
