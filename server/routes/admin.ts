@@ -8,6 +8,7 @@ import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
 import type { AppVariables } from '../src/types'
 import { adminMunsRoutes } from './admin-muns'
+import { adminReportingRoutes } from './admin-reporting'
 import { adminStaffRoutes } from './admin-staff'
 
 const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
@@ -91,6 +92,8 @@ adminRoutes.get(
   },
 )
 
-// Staff management and the conferences console live in their own files.
+// Staff management, the conferences console and the reporting suite live in
+// their own files.
 adminRoutes.route('/', adminStaffRoutes)
 adminRoutes.route('/', adminMunsRoutes)
+adminRoutes.route('/', adminReportingRoutes)
