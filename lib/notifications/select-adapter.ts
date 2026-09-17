@@ -12,33 +12,25 @@ import type { NotificationsAdapter } from './adapter'
  * external system). Call this fresh at each send site rather than caching
  * its result — env can change between cold starts.
  *
- * **Production security guard** (audit finding: "console adapter logs OTP/
- * reset links"): in production (`process.env.NODE_ENV === 'production'` —
- * read directly, not via `getRuntimeEnv`, since `NODE_ENV` is the one var
- * Workers' bundler DOES statically replace, same as
- * server/lib/boot-guard.ts's identical check), a missing `ZEPTOMAIL_TOKEN`
- * throws instead of silently falling back to the console adapter — a
- * misconfigured deployment would otherwise print OTP codes and password-
- * reset links to server logs, which are far more widely readable than the
- * intended recipient's inbox. Every real call site of this function is
- * fire-and-forget (wrapped in a `.catch(...)` by its caller — see
- * pipeline-events.ts / go-live.ts's file header for the convention), and a
- * thrown default-parameter expression inside an `async function` becomes a
- * rejected promise, not a synchronous throw, so this can never crash the
- * action that triggered the notification — it only ever surfaces as a
- * logged delivery failure, same as a real network error would. Local dev
- * and every test run are unaffected: `NODE_ENV` is never `'production'`
- * there.
+ * **No token is not an error, on any environment.** An earlier version threw
+ * here when `process.env.NODE_ENV === 'production'`, to stop a misconfigured
+ * deployment printing OTP codes and password-reset links into server logs.
+ * That guard was removed because (a) it fired far more widely than intended
+ * — Wrangler statically replaces `process.env.NODE_ENV` with `'production'`
+ * in *every* deployed bundle, staging included, so a documented no-token
+ * staging deploy (docs/operations/ENVIRONMENTS.md step 3, RUNBOOK.md's
+ * configuration table) had every send fail: organizer sign-in codes 503'd
+ * and each cron run reported a failure; and (b) the leak it guarded against
+ * is already closed at the source — `consoleNotificationsAdapter` redacts
+ * the message body (and masks the recipient) whenever `isProductionRuntime()`
+ * is true, which covers Workers and `NODE_ENV=production` alike. The
+ * remaining log line is a masked recipient plus a subject, which is exactly
+ * the "mail is written to the Worker log" behaviour the operations docs
+ * promise. Do not reintroduce a throw here without also changing those docs:
+ * `getNotificationsAdapter()` is evaluated as a default parameter by the
+ * cron jobs (reminder-job.ts, organizer-digest-job.ts) and awaited directly
+ * by organizer-otp.ts, which turns a throw into a user-visible 503.
  */
 export function getNotificationsAdapter(): NotificationsAdapter {
-  if (getRuntimeEnv('ZEPTOMAIL_TOKEN')) return zeptoMailNotificationsAdapter
-
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'Refusing to fall back to the console notifications adapter in production — ZEPTOMAIL_TOKEN is not configured. ' +
-        'Set it before deploying; the console adapter would otherwise leak OTP codes and password-reset links into server logs.',
-    )
-  }
-
-  return consoleNotificationsAdapter
+  return getRuntimeEnv('ZEPTOMAIL_TOKEN') ? zeptoMailNotificationsAdapter : consoleNotificationsAdapter
 }
