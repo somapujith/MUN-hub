@@ -28,7 +28,7 @@ interface MunSectionShellProps {
 export function MunSectionShell({ segment }: MunSectionShellProps) {
   const section = getMunNavSection(segment);
   const title = section?.title ?? section?.label ?? segment;
-  const description = SECTION_DESCRIPTIONS[segment] ?? "Organizer workspace section (mock shell).";
+  const description = SECTION_DESCRIPTIONS[segment] ?? "Organizer workspace section.";
 
   return (
     <>
@@ -36,7 +36,7 @@ export function MunSectionShell({ segment }: MunSectionShellProps) {
       <WorkspacePage title={title} description={description}>
         <div className="rounded-md border border-dashed border-border bg-surface-soft/60 p-lg dark:bg-card">
           <p className="text-body-md text-muted-foreground">
-            Presentational shell — API wiring deferred to Phase 5.2+. Mock data only.
+            This section isn&apos;t available yet. For now, only the account that owns this conference can manage it.
           </p>
         </div>
       </WorkspacePage>

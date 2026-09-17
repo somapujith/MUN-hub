@@ -87,6 +87,7 @@ export function OrganizerProductsPage() {
   const [editing, setEditing] = useState<RegistrationProduct | null>(null);
   const [form, setForm] = useState<ProductFormState>(EMPTY_FORM);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [reordering, setReordering] = useState(false);
 
   const productsQuery = useQuery({
     queryKey: queryKeys.registrationProducts(munId),
@@ -138,13 +139,28 @@ export function OrganizerProductsPage() {
     setIsFormOpen(true);
   };
 
-  const move = (product: RegistrationProduct, direction: -1 | 1) => {
-    const other = products[products.indexOf(product) + direction];
-    if (!other) return;
-    updateRegistrationProduct(product.id, { displayOrder: other.displayOrder })
-      .then(() => updateRegistrationProduct(other.id, { displayOrder: product.displayOrder }))
-      .then(refresh)
-      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Unable to reorder products"));
+  const move = async (product: RegistrationProduct, direction: -1 | 1) => {
+    const index = products.indexOf(product);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= products.length) return;
+    const reordered = [...products];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    // Renumber the whole list rather than swapping the two values: products
+    // often share a displayOrder (every new product defaults to one), and
+    // swapping two equal values changes nothing.
+    setReordering(true);
+    try {
+      for (const [position, item] of reordered.entries()) {
+        if (item.displayOrder !== position) {
+          await updateRegistrationProduct(item.id, { displayOrder: position });
+        }
+      }
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Unable to reorder products");
+    } finally {
+      await refresh();
+      setReordering(false);
+    }
   };
 
   const validate = (): string | null => {
@@ -225,8 +241,8 @@ export function OrganizerProductsPage() {
                       variant="ghost"
                       size="icon-xs"
                       aria-label="Move product up"
-                      disabled={index === 0}
-                      onClick={() => move(product, -1)}
+                      disabled={index === 0 || reordering}
+                      onClick={() => void move(product, -1)}
                     >
                       <ArrowUp aria-hidden />
                     </Button>
@@ -234,8 +250,8 @@ export function OrganizerProductsPage() {
                       variant="ghost"
                       size="icon-xs"
                       aria-label="Move product down"
-                      disabled={index === products.length - 1}
-                      onClick={() => move(product, 1)}
+                      disabled={index === products.length - 1 || reordering}
+                      onClick={() => void move(product, 1)}
                     >
                       <ArrowDown aria-hidden />
                     </Button>
