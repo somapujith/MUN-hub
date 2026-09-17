@@ -1,34 +1,40 @@
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { munMedia } from '@/lib/db/schema'
+import { munMedia, muns } from '@/lib/db/schema'
 import type { MunMediaKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
-import { mockStorageAdapter } from '@/lib/storage/mock-adapter'
-import type { StorageAdapter } from '@/lib/storage/adapter'
+import { deleteStoredObjectQuietly, selectStorageAdapter } from '@/lib/storage/select-adapter'
+import { validateUpload, type UploadPurpose } from '@/lib/storage/validate'
 
 // -----------------------------------------------------------------------------
 // mun-branding — BRANDING module (PRD Section 11, design doc Section 2.3)
 // -----------------------------------------------------------------------------
 //
-// Upload validation happens in THIS file, before the storage adapter is ever
-// touched (design doc Section 8, invariant #6): content-type allowlist, size
-// cap, and a server-generated storage key. The key is never derived from the
+// Upload validation happens before the storage adapter is ever touched
+// (design doc Section 8, invariant #6): content-type allowlist, size cap and
+// file signature (lib/storage/validate.ts, called below), and a
+// server-generated storage key. The key is never derived from the
 // caller-supplied filename — that would let a crafted filename escape the
 // mun's storage prefix (path traversal). LOGO and COVER are upsert-by-kind:
 // at most one row of each kind may exist per mun, enforced here (not a DB
 // constraint — see design doc Section 2.3) by deleting any existing row of
-// that kind, and its storage object, before inserting the new one, all
-// inside one transaction so a concurrent upload of the same kind can't leave
-// two rows or delete the winner's storage object out from under it.
-
-const storage: StorageAdapter = mockStorageAdapter
-
-const ALLOWED_CONTENT_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
-const MAX_SIZE_BYTES = 5 * 1024 * 1024 // 5 MB
+// that kind before inserting the new one, inside one transaction that
+// row-locks the mun so two concurrent uploads of the same kind can't both
+// see "no existing row" and leave two. The replaced rows' storage objects are
+// deleted after that transaction commits.
 
 const UPSERT_KINDS: MunMediaKind[] = ['LOGO', 'COVER']
+
+/** Size/type rules per media kind (lib/storage/validate.ts): logos 2MB, covers and gallery images 5MB. */
+const UPLOAD_PURPOSE: Record<MunMediaKind, UploadPurpose> = {
+  LOGO: 'LOGO',
+  ORGANIZER_LOGO: 'LOGO',
+  SPONSOR: 'LOGO',
+  COVER: 'COVER',
+  GALLERY: 'IMAGE',
+}
 
 export interface MunMediaItem {
   id: string
@@ -50,28 +56,18 @@ export interface UploadMunMediaInput {
   displayOrder?: number
 }
 
-function validateUpload(file: Buffer, contentType: string): void {
-  if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
-    throw new Error(
-      `Unsupported content type "${contentType}" — allowed types are image/png, image/jpeg, image/webp`,
-    )
-  }
-  if (file.byteLength > MAX_SIZE_BYTES) {
-    throw new Error(`File too large (${file.byteLength} bytes) — maximum allowed size is 5MB`)
-  }
-}
-
 /**
  * Uploads a branding asset (logo, cover, gallery image, sponsor logo, or
- * organizer logo). Validates content-type and size BEFORE touching storage.
- * For LOGO/COVER kinds, replaces any existing row of that kind (upsert
- * semantics) — the delete-then-insert is wrapped in a transaction so it
- * can't race with itself.
+ * organizer logo). Validates type, size and contents BEFORE touching
+ * storage. For LOGO/COVER kinds, replaces any existing row of that kind
+ * (upsert semantics) — the delete-then-insert is wrapped in a transaction
+ * that locks the mun row, so it can't race with itself.
  */
 export async function uploadMunMedia(input: UploadMunMediaInput, session: Session | null): Promise<MunMediaItem> {
   await assertOwnsOrAdmin(input.munId, session)
-  validateUpload(input.file, input.contentType)
+  validateUpload(input.file, input.contentType, UPLOAD_PURPOSE[input.kind])
 
+  const storage = selectStorageAdapter()
   const key = `muns/${input.munId}/branding/${crypto.randomUUID()}`
   const { url } = await storage.upload(input.file, key, input.contentType)
 
@@ -86,51 +82,45 @@ export async function uploadMunMedia(input: UploadMunMediaInput, session: Sessio
   }
 
   let created: MunMediaItem
+  let replacedKeys: string[] = []
 
-  if (!UPSERT_KINDS.includes(input.kind)) {
-    ;[created] = await db.insert(munMedia).values(values).returning()
-  } else {
-    created = await db.transaction(async (tx) => {
-      const existingOfKind = await tx
-        .select({ id: munMedia.id, storageKey: munMedia.storageKey })
-        .from(munMedia)
-        .where(and(eq(munMedia.munId, input.munId), eq(munMedia.kind, input.kind)))
+  // Storage can't take part in the SQL transaction, so the order is chosen
+  // to fail safe:
+  //   - the new object is written first (above); if the DB write below
+  //     fails, nothing references it, so it is deleted again here;
+  //   - replaced objects are deleted only after the transaction commits, so
+  //     a rollback never leaves a row pointing at a deleted object.
+  // Both deletes are best effort (logged, not thrown): a leftover object
+  // costs storage, not correctness.
+  try {
+    if (!UPSERT_KINDS.includes(input.kind)) {
+      ;[created] = await db.insert(munMedia).values(values).returning()
+    } else {
+      const result = await db.transaction(async (tx) => {
+        await tx.select({ id: muns.id }).from(muns).where(eq(muns.id, input.munId)).for('update')
 
-      for (const row of existingOfKind) {
-        await tx.delete(munMedia).where(eq(munMedia.id, row.id))
-      }
+        const existingOfKind = await tx
+          .select({ id: munMedia.id, storageKey: munMedia.storageKey })
+          .from(munMedia)
+          .where(and(eq(munMedia.munId, input.munId), eq(munMedia.kind, input.kind)))
 
-      const [insertedRow] = await tx.insert(munMedia).values(values).returning()
+        for (const row of existingOfKind) {
+          await tx.delete(munMedia).where(eq(munMedia.id, row.id))
+        }
 
-      // storage.delete() of the OLD key runs here, inside the SQL transaction
-      // callback, after the new row's insert but before the callback returns
-      // (i.e. before Postgres commits). It is NOT part of the SQL transaction
-      // itself — storage operations can't participate in a Postgres COMMIT/
-      // ROLLBACK — so this ordering only changes what happens on failure, not
-      // real atomicity between the DB and the storage backend:
-      //   - If storage.delete() throws, this callback throws too, so Drizzle
-      //     rolls back the delete+insert above. The DB then stays consistent
-      //     with the OLD row and OLD storage key — not exploitable, just an
-      //     upload that has to be retried.
-      //   - The real orphan risk runs the OTHER way: storage.upload() of the
-      //     NEW file (above, outside/before this transaction even starts) has
-      //     already happened by this point. If anything from here on throws —
-      //     including this storage.delete() call failing — the transaction
-      //     rolls back the DB insert, but the newly-uploaded object already
-      //     exists in storage with no DB row referencing it. That NEW object
-      //     is the one left orphaned, not the old one being deleted here.
-      // Accepted for now: the mock adapter's upload()/delete() never throw, so
-      // this path isn't exercised today. A real StorageAdapter (e.g. R2) should
-      // either move the upload as late as possible (immediately before this
-      // insert, minimizing the exposure window) or add an out-of-band orphan
-      // sweep — don't copy this ordering into Task 6+ uploads without
-      // addressing that.
-      for (const row of existingOfKind) {
-        await storage.delete(row.storageKey)
-      }
+        const [insertedRow] = await tx.insert(munMedia).values(values).returning()
+        return { insertedRow, replacedKeys: existingOfKind.map((row) => row.storageKey) }
+      })
+      created = result.insertedRow
+      replacedKeys = result.replacedKeys
+    }
+  } catch (error) {
+    await deleteStoredObjectQuietly(storage, key, 'uploadMunMedia rollback')
+    throw error
+  }
 
-      return insertedRow
-    })
+  for (const replacedKey of replacedKeys) {
+    await deleteStoredObjectQuietly(storage, replacedKey, `uploadMunMedia replacing ${input.kind}`)
   }
 
   await onModuleDataChanged(input.munId, 'BRANDING', session!.userId)
@@ -143,7 +133,11 @@ export async function listMunMedia(munId: string): Promise<MunMediaItem[]> {
   return db.select().from(munMedia).where(eq(munMedia.munId, munId)).orderBy(asc(munMedia.displayOrder))
 }
 
-/** Deletes a media row and its underlying storage object. Owning organizer or admin only. */
+/**
+ * Deletes a media row, then its storage object. Owning organizer or admin
+ * only. The object delete is best effort (logged, not thrown), as in
+ * deleteMunDocument.
+ */
 export async function deleteMunMedia(id: string, session: Session | null): Promise<void> {
   const [existing] = await db
     .select({ munId: munMedia.munId, storageKey: munMedia.storageKey })
@@ -154,7 +148,7 @@ export async function deleteMunMedia(id: string, session: Session | null): Promi
   await assertOwnsOrAdmin(existing.munId, session)
 
   await db.delete(munMedia).where(eq(munMedia.id, id))
-  await storage.delete(existing.storageKey)
+  await deleteStoredObjectQuietly(selectStorageAdapter(), existing.storageKey, 'deleteMunMedia')
 
   await onModuleDataChanged(existing.munId, 'BRANDING', session!.userId)
 }

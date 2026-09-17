@@ -5,25 +5,22 @@ import type { MunDocumentKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
-import { mockStorageAdapter } from '@/lib/storage/mock-adapter'
-import type { StorageAdapter } from '@/lib/storage/adapter'
+import { deleteStoredObjectQuietly, selectStorageAdapter } from '@/lib/storage/select-adapter'
+import { validateUpload } from '@/lib/storage/validate'
 
 // -----------------------------------------------------------------------------
 // mun-documents — RULES_DOCUMENTS module (PRD Section 20)
 // -----------------------------------------------------------------------------
 //
-// Same upload pattern as mun-branding.ts: validate content-type + size in
-// this file, before touching storage; storage key is always a server-
-// generated UUID under muns/{munId}/documents/, never derived from the
-// caller-supplied filename.
+// Same upload pattern as mun-branding.ts: validate content type, size and
+// file signature (lib/storage/validate.ts) before touching storage; storage
+// key is always a server-generated UUID under muns/{munId}/documents/, never
+// derived from the caller-supplied filename. Storage comes from
+// selectStorageAdapter() on every call (R2/KV in production, the filesystem
+// in local dev, the mock in tests).
 //
 // RULES_DOCUMENTS is a high-impact module (Task 12) — every mutation here
 // calls `assertModuleNotLocked` right after the ownership check.
-
-const storage: StorageAdapter = mockStorageAdapter
-
-const ALLOWED_CONTENT_TYPE = 'application/pdf'
-const MAX_SIZE_BYTES = 20 * 1024 * 1024 // 20 MB
 
 export interface MunDocumentItem {
   id: string
@@ -45,39 +42,38 @@ export interface UploadMunDocumentInput {
   contentType: string
 }
 
-function validateUpload(file: Buffer, contentType: string): void {
-  if (contentType !== ALLOWED_CONTENT_TYPE) {
-    throw new Error(`Unsupported content type "${contentType}" — only application/pdf is allowed`)
-  }
-  if (file.byteLength > MAX_SIZE_BYTES) {
-    throw new Error(`File too large (${file.byteLength} bytes) — maximum allowed size is 20MB`)
-  }
-}
-
-/** Uploads a rules/policy document. Validates content-type and size BEFORE touching storage. */
+/** Uploads a rules/policy document. Validates type, size and contents BEFORE touching storage. */
 export async function uploadMunDocument(
   input: UploadMunDocumentInput,
   session: Session | null,
 ): Promise<MunDocumentItem> {
   await assertOwnsOrAdmin(input.munId, session)
   await assertModuleNotLocked(input.munId, 'RULES_DOCUMENTS', session)
-  validateUpload(input.file, input.contentType)
+  validateUpload(input.file, input.contentType, 'DOCUMENT')
 
+  const storage = selectStorageAdapter()
   const key = `muns/${input.munId}/documents/${crypto.randomUUID()}`
   const { url } = await storage.upload(input.file, key, input.contentType)
 
-  const [created] = await db
-    .insert(munDocuments)
-    .values({
-      munId: input.munId,
-      kind: input.kind,
-      title: input.title,
-      url,
-      storageKey: key,
-      contentType: input.contentType,
-      sizeBytes: input.file.byteLength,
-    })
-    .returning()
+  let created: MunDocumentItem
+  try {
+    ;[created] = await db
+      .insert(munDocuments)
+      .values({
+        munId: input.munId,
+        kind: input.kind,
+        title: input.title,
+        url,
+        storageKey: key,
+        contentType: input.contentType,
+        sizeBytes: input.file.byteLength,
+      })
+      .returning()
+  } catch (error) {
+    // No row points at the new object, so don't leave it behind.
+    await deleteStoredObjectQuietly(storage, key, 'uploadMunDocument rollback')
+    throw error
+  }
 
   await onModuleDataChanged(input.munId, 'RULES_DOCUMENTS', session!.userId)
 
@@ -89,7 +85,12 @@ export async function listMunDocuments(munId: string): Promise<MunDocumentItem[]
   return db.select().from(munDocuments).where(eq(munDocuments.munId, munId))
 }
 
-/** Deletes a document row and its underlying storage object. Owning organizer or admin only. */
+/**
+ * Deletes a document row, then its storage object. Owning organizer or
+ * admin only. The object delete is best effort: once the row is gone the
+ * file is no longer listed anywhere, so a storage failure is logged instead
+ * of failing the request.
+ */
 export async function deleteMunDocument(id: string, session: Session | null): Promise<void> {
   const [existing] = await db
     .select({ munId: munDocuments.munId, storageKey: munDocuments.storageKey })
@@ -101,7 +102,7 @@ export async function deleteMunDocument(id: string, session: Session | null): Pr
   await assertModuleNotLocked(existing.munId, 'RULES_DOCUMENTS', session)
 
   await db.delete(munDocuments).where(eq(munDocuments.id, id))
-  await storage.delete(existing.storageKey)
+  await deleteStoredObjectQuietly(selectStorageAdapter(), existing.storageKey, 'deleteMunDocument')
 
   await onModuleDataChanged(existing.munId, 'RULES_DOCUMENTS', session!.userId)
 }
