@@ -79,7 +79,7 @@ Tests for features the PRDs require but the app doesn't have yet are marked `tes
 | `E2E_BROWSER_CHANNEL` | `chrome` | Set to `chromium` to use Playwright's bundled browser |
 | `E2E_VIDEO` | unset | Record videos of failures (needs `npx playwright install ffmpeg`) |
 | `E2E_SHOW_KNOWN_BUGS` | unset | Turn off `test.fail` markers |
-| `E2E_SKIP_DB_PREPARE` | unset | Skip migrate/seed/reset. Only for running several suites side by side on different ports against an already-prepared database |
+| `E2E_SKIP_DB_PREPARE` | unset | Skip migrate/seed/reset. Only for running several suites side by side on different ports against an already-prepared database. After pulling new migrations, first run `DATABASE_URL=postgresql://mun_hub:mun_hub_dev@localhost:5432/mun_hub npx tsx lib/db/migrate.ts`; otherwise the API fails on missing columns |
 | `E2E_AUTH_DIR`, `E2E_OUTPUT_DIR`, `E2E_REPORT_DIR` | inside `E2E/` | Keep parallel runs from overwriting each other. Paths are relative to `E2E/`, so use a bare name such as `test-results-2` |
 
 ## Rate limits
