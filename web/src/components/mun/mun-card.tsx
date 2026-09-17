@@ -102,7 +102,7 @@ export function MunCard({ mun }: MunCardProps) {
         </dl>
 
         <div className="mt-auto flex flex-wrap items-center gap-x-xs gap-y-xxs pt-xs">
-          <MunStatusBadge status={mun.status} />
+          <MunStatusBadge status={mun.status} audience="public" />
           {closesAt && (
             <span className="text-body-md text-muted-foreground">
               Closes <time dateTime={closesAt.toISOString()}>{formatShortDate(closesAt)}</time>

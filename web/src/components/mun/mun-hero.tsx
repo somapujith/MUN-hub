@@ -66,7 +66,7 @@ export function MunHero({ mun, fromPrice }: MunHeroProps) {
                   className="size-12 rounded-md border border-border bg-white object-contain p-xxs"
                 />
               )}
-              <MunStatusBadge status={mun.status} />
+              <MunStatusBadge status={mun.status} audience="public" />
               {mun.edition && (
                 <span className="text-caption text-muted-foreground">
                   Edition {mun.edition}

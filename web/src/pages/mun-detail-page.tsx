@@ -314,7 +314,7 @@ export function MunDetailPage({
               ) : (scheduleQuery.data ?? []).length === 0 ? (
                 <SectionEmpty>The day-by-day schedule hasn&apos;t been published yet.</SectionEmpty>
               ) : (
-                <ScheduleByDay items={scheduleQuery.data ?? []} committees={committeeRefs} />
+                <ScheduleByDay items={scheduleQuery.data ?? []} committees={committeeRefs} startDate={mun.startDate} />
               )}
             </MunPageSection>
 
