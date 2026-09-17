@@ -106,23 +106,91 @@ describe('verifyEmail', () => {
 })
 
 describe('resendVerificationEmail', () => {
+  /** Moves every token of `userId` back in time, as if it had been sent `ms` ago. */
+  async function backdateTokens(userId: string, ms: number) {
+    await db
+      .update(emailVerificationTokens)
+      .set({ createdAt: new Date(Date.now() - ms) })
+      .where(eq(emailVerificationTokens.userId, userId))
+  }
+
   it('invalidates the prior unused token and issues a new one', async () => {
     const user = await makeUser()
     const { adapter: adapter1, send: send1 } = mockAdapter()
     await sendVerificationEmail(user.id, APP_URL, adapter1)
     const firstToken = extractToken(send1.mock.calls[0][0].body)
+    await backdateTokens(user.id, 2 * 60 * 1000)
 
-    await resendVerificationEmail(user.email, APP_URL)
+    const { adapter: adapter2, send: send2 } = mockAdapter()
+    await resendVerificationEmail(user.email, APP_URL, adapter2)
 
-    // Old token no longer resolves — it was deleted, not just superseded.
+    expect(send2).toHaveBeenCalledTimes(1)
+    expect(send2.mock.calls[0][0].to).toBe(user.email)
+    const secondToken = extractToken(send2.mock.calls[0][0].body)
+
+    // The earlier link stops working as soon as a new one is sent.
     await expect(verifyEmail(firstToken)).rejects.toThrow('invalid or has expired')
-
-    const rows = await db.select().from(emailVerificationTokens).where(eq(emailVerificationTokens.userId, user.id))
-    expect(rows).toHaveLength(1)
+    await verifyEmail(secondToken)
+    expect(await isEmailVerified(user.id)).toBe(true)
   })
 
   it('resolves successfully for an email that does not match any account (no enumeration)', async () => {
     await expect(resendVerificationEmail('nobody-here@test.dev', APP_URL)).resolves.toBeUndefined()
+  })
+
+  // Regression: the public resend route could be used to email-bomb any
+  // registered address, verified or not.
+  it('sends nothing to an account that is already verified', async () => {
+    const user = await makeUser()
+    await db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, user.id))
+    const { adapter, send } = mockAdapter()
+
+    await expect(resendVerificationEmail(user.email, APP_URL, adapter)).resolves.toBeUndefined()
+
+    expect(send).not.toHaveBeenCalled()
+    expect(await db.select().from(emailVerificationTokens).where(eq(emailVerificationTokens.userId, user.id))).toEqual([])
+  })
+
+  it('sends at most one link a minute and leaves the latest link working', async () => {
+    const user = await makeUser()
+    const { adapter, send } = mockAdapter()
+
+    await resendVerificationEmail(user.email, APP_URL, adapter)
+    await resendVerificationEmail(user.email.toUpperCase(), APP_URL, adapter)
+
+    expect(send).toHaveBeenCalledTimes(1)
+    await verifyEmail(extractToken(send.mock.calls[0][0].body))
+    expect(await isEmailVerified(user.id)).toBe(true)
+  })
+
+  it('sends at most three links an hour', async () => {
+    const user = await makeUser()
+    const { adapter, send } = mockAdapter()
+
+    for (let i = 0; i < 3; i += 1) {
+      await resendVerificationEmail(user.email, APP_URL, adapter)
+      await backdateTokens(user.id, 2 * 60 * 1000)
+    }
+    expect(send).toHaveBeenCalledTimes(3)
+
+    await resendVerificationEmail(user.email, APP_URL, adapter)
+    expect(send).toHaveBeenCalledTimes(3)
+
+    // Once the earlier sends are more than an hour old, a resend goes out again.
+    await backdateTokens(user.id, 61 * 60 * 1000)
+    await resendVerificationEmail(user.email, APP_URL, adapter)
+    expect(send).toHaveBeenCalledTimes(4)
+  })
+
+  it('sends only one link when resends for the same account race', async () => {
+    const user = await makeUser()
+    const { adapter, send } = mockAdapter()
+
+    await Promise.all(Array.from({ length: 5 }, () => resendVerificationEmail(user.email, APP_URL, adapter)))
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const rows = await db.select().from(emailVerificationTokens).where(eq(emailVerificationTokens.userId, user.id))
+    expect(rows).toHaveLength(1)
   })
 })
 

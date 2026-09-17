@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test'
-import { WEB_URL } from '../../env'
+import postgres from 'postgres'
+import { DATABASE_URL, WEB_URL, assertLocalDatabase } from '../../env'
 import { newApiContext, signUpViaApi } from '../../fixtures/api'
 import { uniqueEmail } from '../../fixtures/data'
-import { expectNoEmail, linkIn, waitForEmail } from '../../fixtures/outbox'
+import { emailsTo, expectNoEmail, linkIn, waitForEmail } from '../../fixtures/outbox'
 import { pageHeading, watchForCrashes } from '../../fixtures/ui'
 
 /**
@@ -67,9 +68,23 @@ test('opening the page without a token shows the resend form', async ({ page }) 
   await expect(page.getByRole('main').getByRole('button', { name: 'Resend verification email' })).toBeVisible()
 })
 
+/** Moves an account's verification links back past the one-a-minute resend cooldown. */
+async function backdateVerificationLinks(email: string) {
+  assertLocalDatabase()
+  const sql = postgres(DATABASE_URL, { max: 1, prepare: false, onnotice: () => {} })
+  try {
+    await sql`
+      update email_verification_tokens set created_at = created_at - interval '2 minutes'
+      where user_id = (select id from users where email = ${email.trim().toLowerCase()})`
+  } finally {
+    await sql.end()
+  }
+}
+
 test('a newer link replaces the older one', async () => {
   const student = await signUpViaApi()
   const first = await requestLink(student.email)
+  await backdateVerificationLinks(student.email)
   const second = await requestLink(student.email)
   expect(second.token).not.toBe(first.token)
 
@@ -77,6 +92,19 @@ test('a newer link replaces the older one', async () => {
   expect((await api.post('verify-email', { data: { token: first.token } })).status()).toBe(400)
   expect((await api.post('verify-email', { data: { token: second.token } })).status()).toBe(204)
   await api.dispose()
+})
+
+test('a second resend inside a minute sends nothing but still answers 204', async () => {
+  const student = await signUpViaApi()
+  await requestLink(student.email)
+  const since = new Date()
+
+  const api = await newApiContext()
+  expect((await api.post('verify-email/resend', { data: { email: student.email } })).status()).toBe(204)
+  await api.dispose()
+  await new Promise((resolve) => setTimeout(resolve, 2_000))
+  const later = (await emailsTo(student.email)).filter((mail) => mail.subject === SUBJECT && new Date(mail.sentAt) >= since)
+  expect(later).toEqual([])
 })
 
 test('resending never reveals whether an address has an account', async () => {

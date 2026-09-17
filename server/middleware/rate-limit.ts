@@ -36,6 +36,11 @@ export const LIMITERS = {
   resetRequestIp: { binding: 'RL_RESET_REQUEST_IP', limit: 10, periodSeconds: 60, perIp: true },
   resetRequestEmail: { binding: 'RL_RESET_REQUEST_EMAIL', limit: 3, periodSeconds: 60, perIp: false },
   resetConfirmIp: { binding: 'RL_RESET_CONFIRM_IP', limit: 10, periodSeconds: 60, perIp: true },
+  // Verification-email resends (public form): per IP and per address, like
+  // forgot-password. lib/actions/email-verification.ts additionally sends an
+  // unverified account at most one link a minute and three an hour.
+  verifyResendIp: { binding: 'RL_VERIFY_RESEND_IP', limit: 10, periodSeconds: 60, perIp: true },
+  verifyResendEmail: { binding: 'RL_VERIFY_RESEND_EMAIL', limit: 3, periodSeconds: 60, perIp: false },
   changePasswordUser: { binding: 'RL_CHANGE_PASSWORD_USER', limit: 5, periodSeconds: 60, perIp: false },
   // Staff TOTP sign-in challenge (lib/actions/staff-mfa.ts). The pending
   // token itself is single-use and already caps guesses per attempt
@@ -102,6 +107,15 @@ const RULES: LimitRule[] = [
     checks: ({ ip, email }) => [
       { limiter: LIMITERS.resetRequestIp, key: `ip:${ip}` },
       ...(email ? [{ limiter: LIMITERS.resetRequestEmail, key: `email:${email}` }] : []),
+    ],
+  },
+  {
+    method: 'POST',
+    path: '/verify-email/resend',
+    readsEmail: true,
+    checks: ({ ip, email }) => [
+      { limiter: LIMITERS.verifyResendIp, key: `ip:${ip}` },
+      ...(email ? [{ limiter: LIMITERS.verifyResendEmail, key: `email:${email}` }] : []),
     ],
   },
   {
