@@ -57,3 +57,7 @@ mun-hub-62 does not run E2E itself. This session is the only one that runs the s
 | run 1 | e3bacdd | Legal deep links land correctly after 31a5058; content pages must carry the "\| MUN Hub" title |
 | run 1 | e999ae2 | New `student/account-privacy.spec.ts`, 11 tests covering data export and account deletion. README notes that skip-prepare runs need a manual migrate |
 | run 1 | 2da635c | Email outbox wired in (`fixtures/outbox.ts`, `EMAIL_OUTBOX_FILE`, `APP_URL`). New `security/email-delivery.spec.ts`, 10 tests |
+| run 1 | 33782ae | New `organizer/lifecycle.spec.ts`, 10 tests. New `e2e-lifecycle-mun` fixture with a verified payment account |
+| run 1 | ff45aeb | New `auth/email-verification.spec.ts`, 6 tests |
+| run 1 | 0949420 | New `admin/content-review.spec.ts`, 17 tests covering Gate 2, publish, unpublish and suspension, on the recreated `e2e-review-mun` and `e2e-suspend-mun`. prepare-db now resets the seeded logins. Drift fixes for f6fcb7b, the setup checklist, the documents label and the home row. Known issue: an unpublished MUN can't be queued again (reported to mun-hub-62) |
+| run 1 | (ci) | CI e2e job: failure artifacts now include `E2E/.outbox`; removed the duplicate mock-payments env line |
