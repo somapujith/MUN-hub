@@ -1,7 +1,8 @@
 import { useNavigate, useSearchParams } from "react-router";
-import { useCallback, useState, useTransition } from "react";
+import { useCallback, useId, useState, useTransition } from "react";
 import { CheckIcon, SlidersHorizontalIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -9,6 +10,15 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { PRICE_OPTIONS, STATUS_OPTIONS } from "@/lib/home-filters";
+import {
+  addDays,
+  DATE_PRESETS,
+  matchingDatePreset,
+  parseDateParam,
+  SORT_OPTIONS,
+  toDateParam,
+} from "@/lib/marketplace-filters";
 import { cn } from "cn";
 
 /**
@@ -19,9 +29,11 @@ import { cn } from "cn";
  * count badge. No boxed panel, no card chrome: the rail is type + whitespace
  * on the page floor, separated from results by a single hairline.
  *
- * Behaviour is unchanged from the previous implementation — every choice writes
- * a URLSearchParam and pushes to /muns, so the server component re-runs
- * `searchMuns` with the new params. This is a re-skin, not new logic.
+ * Every choice writes a URLSearchParam (vocabulary in
+ * lib/marketplace-filters.ts) and navigates, so the page re-runs `searchMuns`
+ * with the new params and any filtered view is a shareable link. Changing a
+ * filter always drops `page` — page 3 of the old result set means nothing in
+ * the new one.
  */
 
 interface FilterSidebarProps {
@@ -30,11 +42,10 @@ interface FilterSidebarProps {
   resultCount?: number;
 }
 
-const SORT_OPTIONS = [
-  { value: "date", label: "Conference date" },
-  { value: "price", label: "Lowest fee" },
-  { value: "newest", label: "Newly listed" },
-] as const;
+// text-body-md is applied outside cn(): cn drops a custom text-* size token
+// when a text colour class follows it.
+const OPTION_BASE =
+  "group flex w-full items-center gap-xs rounded-sm px-xs py-[6px] text-left transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background";
 
 /** A single selectable row in the rail. Active row gets ink type + a count badge. */
 function RailOption({
@@ -53,15 +64,13 @@ function RailOption({
       <button
         type="button"
         onClick={onSelect}
-        aria-current={active ? "true" : undefined}
-        className={cn(
-          "group flex w-full items-center gap-xs rounded-sm px-xs py-[6px] text-left text-body-md",
-          "transition-colors duration-150 outline-none",
-          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+        aria-pressed={active}
+        className={`text-body-md ${cn(
+          OPTION_BASE,
           active
             ? "bg-surface-soft font-medium text-ink"
             : "text-body hover:bg-surface-soft hover:text-ink dark:text-muted-foreground dark:hover:text-foreground",
-        )}
+        )}`}
       >
         <CheckIcon
           aria-hidden
@@ -90,9 +99,10 @@ function RailGroup({
   heading: string;
   children: React.ReactNode;
 }) {
+  const headingId = useId();
   return (
-    <div className="flex flex-col gap-xs">
-      <h3 className="px-xs text-caption uppercase tracking-[0.16px] text-muted-foreground">
+    <div role="group" aria-labelledby={headingId} className="flex flex-col gap-xs">
+      <h3 id={headingId} className="px-xs text-caption uppercase tracking-[0.16px] text-muted-foreground">
         {heading}
       </h3>
       <ul className="flex flex-col gap-px">{children}</ul>
@@ -157,39 +167,165 @@ function CollapsibleOptions({
   );
 }
 
+/** A committed date must be a real calendar day in a sensible year range. */
+function isCommittableDate(value: string): boolean {
+  const date = parseDateParam(value);
+  return date !== null && date.getFullYear() >= 2000 && date.getFullYear() <= 2100;
+}
+
+/**
+ * Native date input that keeps its own draft while the visitor types (a
+ * half-typed year like 0002 is not a date yet) and commits only a complete,
+ * plausible date — or an empty value — to the URL.
+ */
+function DateField({
+  label,
+  value,
+  min,
+  max,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  min?: string;
+  max?: string;
+  onCommit: (value: string) => void;
+}) {
+  const id = useId();
+  const [draft, setDraft] = useState(value);
+  const [syncedValue, setSyncedValue] = useState(value);
+  if (value !== syncedValue) {
+    // The URL changed underneath us (preset, chip removal, back button).
+    setSyncedValue(value);
+    setDraft(value);
+  }
+
+  return (
+    <div className="flex flex-col gap-xxs">
+      {/* Plain <label>: <Label> routes classes through cn(), which would drop
+          the text-caption size token next to a colour. */}
+      <label htmlFor={id} className="text-caption text-muted-foreground">
+        {label}
+      </label>
+      <Input
+        id={id}
+        type="date"
+        value={draft}
+        min={min}
+        max={max}
+        onChange={(event) => {
+          const next = event.target.value;
+          setDraft(next);
+          if (next === "" || isCommittableDate(next)) onCommit(next);
+        }}
+        className="h-9 px-xs"
+      />
+    </div>
+  );
+}
+
+/** Date presets plus a custom from/to pair. */
+function DateRangeControls({
+  from,
+  to,
+  onChange,
+}: {
+  from: string;
+  to: string;
+  onChange: (next: { from: string; to: string }) => void;
+}) {
+  const today = new Date();
+  const activePreset = matchingDatePreset(from || null, to || null, today);
+  const hasRange = Boolean(from || to);
+
+  return (
+    <>
+      <RailOption label="Any dates" active={!hasRange} onSelect={() => onChange({ from: "", to: "" })} />
+      {DATE_PRESETS.map((preset) => (
+        <RailOption
+          key={preset.value}
+          label={preset.label}
+          active={activePreset === preset.value}
+          onSelect={() =>
+            onChange({ from: toDateParam(today), to: toDateParam(addDays(today, preset.days)) })
+          }
+        />
+      ))}
+      {/* Stacked: two native date inputs side by side don't fit the 240px rail. */}
+      <li className="mt-xs grid grid-cols-1 gap-xs px-xs">
+        <DateField label="From" value={from} max={to || undefined} onCommit={(next) => onChange({ from: next, to })} />
+        <DateField label="To" value={to} min={from || undefined} onCommit={(next) => onChange({ from, to: next })} />
+      </li>
+    </>
+  );
+}
+
+const dateChipFormatter = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" });
+
+function dateChipLabel(from: string, to: string): string {
+  const fromDate = parseDateParam(from);
+  const toDate = parseDateParam(to);
+  if (fromDate && toDate) return `${dateChipFormatter.format(fromDate)} – ${dateChipFormatter.format(toDate)}`;
+  if (fromDate) return `From ${dateChipFormatter.format(fromDate)}`;
+  if (toDate) return `Until ${dateChipFormatter.format(toDate)}`;
+  return "Dates";
+}
+
 export function FilterSidebar({ countries, resultCount }: FilterSidebarProps) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  const setParam = useCallback(
-    (key: string, value: string) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (value) {
-        params.set(key, value);
-      } else {
-        params.delete(key);
+  const setParams = useCallback(
+    (updates: Record<string, string>) => {
+      // Start from the live URL, not the render-time `searchParams`: while an
+      // earlier filter's navigation is still pending (it runs in a
+      // transition) the hook value is stale, and a quick second click would
+      // silently drop the first filter.
+      const params = new URLSearchParams(window.location.search);
+      for (const [key, value] of Object.entries(updates)) {
+        if (value) {
+          params.set(key, value);
+        } else {
+          params.delete(key);
+        }
       }
+      params.delete("page");
       const qs = params.toString();
       startTransition(() => {
         navigate(qs ? `/muns?${qs}` : "/muns");
       });
     },
-    [navigate, searchParams],
+    [navigate],
   );
+
+  const setParam = useCallback((key: string, value: string) => setParams({ [key]: value }), [setParams]);
 
   const selectedCity = searchParams.get("city") ?? "";
   const selectedCountry = searchParams.get("country") ?? "";
+  const selectedStatus = searchParams.get("status") ?? "";
+  const selectedPrice = searchParams.get("price") ?? "";
+  const selectedFrom = parseDateParam(searchParams.get("from")) ? (searchParams.get("from") ?? "") : "";
+  const selectedTo = parseDateParam(searchParams.get("to")) ? (searchParams.get("to") ?? "") : "";
   const selectedSort = searchParams.get("sortBy") ?? "date";
+  const query = searchParams.get("q");
+
+  const statusLabel = STATUS_OPTIONS.find((option) => option.value === selectedStatus)?.label;
+  const priceLabel = PRICE_OPTIONS.find((option) => option.value === selectedPrice)?.label;
 
   const activeFilters = [
-    selectedCity && { key: "city", label: selectedCity },
-    selectedCountry && { key: "country", label: selectedCountry },
-    searchParams.get("q") && { key: "q", label: `"${searchParams.get("q")}"` },
-  ].filter(Boolean) as { key: string; label: string }[];
+    query && { keys: ["q"], label: `"${query}"` },
+    selectedCity && { keys: ["city"], label: selectedCity },
+    selectedCountry && { keys: ["country"], label: selectedCountry },
+    statusLabel && { keys: ["status"], label: statusLabel },
+    priceLabel && { keys: ["price"], label: priceLabel },
+    (selectedFrom || selectedTo) && { keys: ["from", "to"], label: dateChipLabel(selectedFrom, selectedTo) },
+  ].filter(Boolean) as { keys: string[]; label: string }[];
 
   const hasFilters = activeFilters.length > 0 || searchParams.get("sortBy") !== null;
+
+  const clearKeys = (keys: string[]) => setParams(Object.fromEntries(keys.map((key) => [key, ""])));
 
   const rail = (
     <div
@@ -198,23 +334,58 @@ export function FilterSidebar({ countries, resultCount }: FilterSidebarProps) {
         isPending && "opacity-60",
       )}
     >
+      <RailGroup heading="Registration">
+        <RailOption
+          label="Any status"
+          active={!statusLabel}
+          count={!statusLabel ? resultCount : undefined}
+          onSelect={() => setParam("status", "")}
+        />
+        {STATUS_OPTIONS.map((option) => (
+          <RailOption
+            key={option.value}
+            label={option.label}
+            active={selectedStatus === option.value}
+            count={selectedStatus === option.value ? resultCount : undefined}
+            onSelect={() => setParam("status", option.value)}
+          />
+        ))}
+      </RailGroup>
+
+      <RailGroup heading="Conference dates">
+        <DateRangeControls
+          from={selectedFrom}
+          to={selectedTo}
+          onChange={({ from, to }) => setParams({ from, to })}
+        />
+      </RailGroup>
+
+      <RailGroup heading="Delegate fee">
+        <RailOption label="Any fee" active={!priceLabel} onSelect={() => setParam("price", "")} />
+        {PRICE_OPTIONS.map((option) => (
+          <RailOption
+            key={option.value}
+            label={option.label}
+            active={selectedPrice === option.value}
+            onSelect={() => setParam("price", option.value)}
+          />
+        ))}
+      </RailGroup>
+
       <RailGroup heading="Country">
         <CollapsibleOptions
           values={countries}
           allLabel="All countries"
           selected={selectedCountry}
-          resultCount={resultCount}
           onSelect={(v) => setParam("country", v)}
         />
       </RailGroup>
 
       {/* No City group here. The nav bar's compact city picker (see
-          `components/layout/site-header.tsx`) is now the single authoritative
-          city control on every browse surface, and this rail used to render a
-          second one that wrote the same `?city=` param — two controls for one
-          param, disagreeing about which is canonical. The rail keeps the facets
-          the nav does NOT carry. The active city still appears as a removable
-          chip on mobile, read from the URL rather than from a `cities` prop. */}
+          `components/layout/site-header.tsx`) is the single authoritative
+          city control on every browse surface; a second one in this rail
+          would write the same `?city=` param. The active city still appears
+          as a removable chip, read from the URL. */}
 
       <RailGroup heading="Sort by">
         {SORT_OPTIONS.map((option) => (
@@ -271,9 +442,9 @@ export function FilterSidebar({ countries, resultCount }: FilterSidebarProps) {
 
         {activeFilters.map((filter) => (
           <button
-            key={filter.key}
+            key={filter.keys.join("-")}
             type="button"
-            onClick={() => setParam(filter.key, "")}
+            onClick={() => clearKeys(filter.keys)}
             className="inline-flex items-center gap-xxs rounded-pill border border-border bg-background px-sm py-[5px] text-body-md text-body transition-colors duration-150 outline-none hover:bg-surface-soft hover:text-ink focus-visible:ring-2 focus-visible:ring-ring"
           >
             {filter.label}
@@ -288,7 +459,9 @@ export function FilterSidebar({ countries, resultCount }: FilterSidebarProps) {
         aria-label="Filter MUNs"
         className="hidden w-[240px] shrink-0 border-r border-border pr-xl lg:block"
       >
-        <div className="sticky top-24">{rail}</div>
+        {/* Capped to the viewport so the lower groups stay reachable while
+            the rail is stuck. */}
+        <div className="sticky top-24 -mx-1 max-h-[calc(100dvh-7rem)] overflow-y-auto px-1 pb-md">{rail}</div>
       </aside>
     </>
   );

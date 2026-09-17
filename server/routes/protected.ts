@@ -14,6 +14,7 @@ import { munBrandingRoutes } from './mun-branding'
 import { munConfigRoutes } from './mun-config'
 import { munContactRoutes } from './mun-contact'
 import { munDocumentsRoutes } from './mun-documents'
+import { munFaqRoutes } from './mun-faq'
 import { munScheduleRoutes } from './mun-schedule'
 import { organizerAdminRoutes } from './organizer-admin'
 import { organizerApplicationRoutes } from './organizer-application'
@@ -39,6 +40,7 @@ protectedRoutes.route('/', munScheduleRoutes)
 protectedRoutes.route('/', munContactRoutes)
 protectedRoutes.route('/', munBrandingRoutes)
 protectedRoutes.route('/', munDocumentsRoutes)
+protectedRoutes.route('/', munFaqRoutes)
 protectedRoutes.route('/', executiveBoardRoutes)
 protectedRoutes.route('/', certificatesRoutes)
 protectedRoutes.route('/', registrationFormRoutes)

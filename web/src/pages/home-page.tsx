@@ -1,11 +1,12 @@
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Helmet } from "react-helmet-async";
 import { useQuery } from "@tanstack/react-query";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { MunAdCarousel } from "@/components/mun/mun-ad-carousel";
 import { HomeFilterSidebar } from "@/components/mun/home-filter-sidebar";
 import { MunRow } from "@/components/mun/mun-row";
+import { PageMeta } from "@/components/seo/page-meta";
 import { Button } from "@/components/ui/button";
 import {
   SignatureCard,
@@ -18,15 +19,38 @@ import { useListYourMunHref } from "@/hooks/use-list-your-mun-href";
 import { resolvePriceBand, resolveStatusFilter } from "@/lib/home-filters";
 import { getMarketplaceFacets, searchMuns, type MunSearchParams } from "@/api/marketplace";
 import { queryKeys } from "@/api/query-keys";
+import { DEFAULT_DESCRIPTION } from "@/lib/seo";
 import type { MunSearchResult, MunSummary } from "@/types";
 
-const CLOSING_SOON_DAYS = 42;
+/**
+ * "Closing soon": the registration deadline falls within this many days. A MUN
+ * with no deadline set closes when the conference starts, so its start date
+ * stands in.
+ */
+const CLOSING_SOON_DAYS = 21;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const FEATURED_LIMIT = 5;
 const ROW_LIMIT = 12;
 const EMPTY_RESULT: MunSearchResult = { results: [], total: 0 };
 
-function seeAllHref(city: string): string {
-  return city ? `/muns?city=${encodeURIComponent(city)}` : "/muns";
+/** The /muns view that continues a shelf — same city and fee band, plus the shelf's own status/sort. */
+function seeAllHref(filters: { city: string; price: string | null }, shelf: { status?: string; sortBy?: string }): string {
+  const params = new URLSearchParams();
+  if (filters.city) params.set("city", filters.city);
+  if (filters.price) params.set("price", filters.price);
+  if (shelf.status) params.set("status", shelf.status);
+  if (shelf.sortBy) params.set("sortBy", shelf.sortBy);
+  const qs = params.toString();
+  return qs ? `/muns?${qs}` : "/muns";
+}
+
+function closesAt(mun: MunSummary): Date | null {
+  return mun.registrationDeadline ?? mun.startDate;
+}
+
+function isClosingSoon(mun: MunSummary, now: number): boolean {
+  const close = closesAt(mun)?.getTime();
+  return close !== undefined && close >= now && close <= now + CLOSING_SOON_DAYS * DAY_MS;
 }
 
 export function HomePage() {
@@ -95,14 +119,13 @@ export function HomePage() {
     (wantsPublished && publishedQuery.isLoading) ||
     (wantsClosed && closedQuery.isLoading);
 
-  const now = Date.now();
-  const closingSoonCutoff = now + CLOSING_SOON_DAYS * 24 * 60 * 60 * 1000;
-  const closingSoon = openNow.results.filter(
-    (mun) =>
-      mun.startDate !== null &&
-      mun.startDate.getTime() >= now &&
-      mun.startDate.getTime() <= closingSoonCutoff,
-  );
+  const [now] = useState(() => Date.now());
+  // isClosingSoon guarantees a close date, so the sort never sees null.
+  const closingSoon = openNow.results
+    .filter((mun) => isClosingSoon(mun, now))
+    .sort((a, b) => (closesAt(a)?.getTime() ?? 0) - (closesAt(b)?.getTime() ?? 0));
+  const priceParam = priceBand ? searchParams.get("price") : null;
+  const shelfFilters = { city, price: priceParam };
 
   const featured: MunSummary[] = [...openNow.results, ...publishedOnly.results]
     .filter((mun) => mun.startDate === null || mun.startDate.getTime() >= now)
@@ -121,15 +144,11 @@ export function HomePage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <Helmet>
-        <title>
-          MUN Hub — Discover and Register for Model United Nations Conferences
-        </title>
-        <meta
-          name="description"
-          content="Browse reviewed Model United Nations conferences, compare committees and fees, and register for your next MUN in minutes."
-        />
-      </Helmet>
+      <PageMeta
+        title="MUN Hub — Discover and Register for Model United Nations Conferences"
+        description={DEFAULT_DESCRIPTION}
+        path="/"
+      />
 
       <SiteHeader cities={facets.cities} selectedCity={city} />
 
@@ -166,25 +185,25 @@ export function HomePage() {
                       title="Registration open now"
                       description="Accepting delegates today — soonest conference first."
                       muns={openNow.results}
-                      seeAllHref={seeAllHref(city)}
+                      seeAllHref={seeAllHref(shelfFilters, { status: "REGISTRATION_OPEN" })}
                     />
                     <MunRow
                       title="Closing soon"
-                      description={`Registration is open, but the conference starts within ${CLOSING_SOON_DAYS} days.`}
+                      description={`Registration closes within ${CLOSING_SOON_DAYS} days — soonest deadline first.`}
                       muns={closingSoon}
-                      seeAllHref={seeAllHref(city)}
+                      seeAllHref={seeAllHref(shelfFilters, { status: "REGISTRATION_OPEN", sortBy: "deadline" })}
                     />
                     <MunRow
                       title="Opening soon"
                       description="Listed and reviewed — registration hasn't opened yet."
                       muns={publishedOnly.results}
-                      seeAllHref={seeAllHref(city)}
+                      seeAllHref={seeAllHref(shelfFilters, { status: "PUBLISHED" })}
                     />
                     <MunRow
                       title="Registration closed"
                       description="No longer accepting delegates — listed for reference."
                       muns={closed.results}
-                      seeAllHref={seeAllHref(city)}
+                      seeAllHref={seeAllHref(shelfFilters, { status: "REGISTRATION_CLOSED" })}
                     />
                   </div>
                 ) : (

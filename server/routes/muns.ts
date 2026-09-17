@@ -8,14 +8,19 @@ import type { AppVariables } from '../src/types'
 
 const munStatusSchema = z.enum(munStatusEnum.enumValues)
 
+// Any status value is accepted here, but searchMuns clips the list to the
+// publicly visible statuses — `?status=DRAFT` answers with no results, never
+// with draft muns.
 const searchQuerySchema = z
   .object({
-    query: z.string().optional(),
-    city: z.string().optional(),
-    country: z.string().optional(),
-    minPrice: z.coerce.number().optional(),
-    maxPrice: z.coerce.number().optional(),
-    sortBy: z.enum(['date', 'price', 'newest']).optional(),
+    query: z.string().max(200).optional(),
+    city: z.string().max(120).optional(),
+    country: z.string().max(120).optional(),
+    minPrice: z.coerce.number().min(0).optional(),
+    maxPrice: z.coerce.number().min(0).optional(),
+    dateFrom: z.coerce.date().optional(),
+    dateTo: z.coerce.date().optional(),
+    sortBy: z.enum(['date', 'deadline', 'price', 'newest']).optional(),
     status: z
       .union([munStatusSchema, z.array(munStatusSchema)])
       .optional()
@@ -31,8 +36,13 @@ const slugParamSchema = z
   })
   .strict()
 
+/** Empty query-string values (`?city=`) mean "no filter", not an empty-string match. */
+function presentOrUndefined(value: string | undefined): string | undefined {
+  return value === undefined || value.trim() === '' ? undefined : value
+}
+
 function pickSearchQuery(query: Record<string, string>) {
-  const statusRaw = query.status
+  const statusRaw = presentOrUndefined(query.status)
   const status =
     statusRaw === undefined
       ? undefined
@@ -41,15 +51,17 @@ function pickSearchQuery(query: Record<string, string>) {
         : statusRaw
 
   return {
-    query: query.query,
-    city: query.city,
-    country: query.country,
-    minPrice: query.minPrice,
-    maxPrice: query.maxPrice,
-    sortBy: query.sortBy,
+    query: presentOrUndefined(query.query),
+    city: presentOrUndefined(query.city),
+    country: presentOrUndefined(query.country),
+    minPrice: presentOrUndefined(query.minPrice),
+    maxPrice: presentOrUndefined(query.maxPrice),
+    dateFrom: presentOrUndefined(query.dateFrom),
+    dateTo: presentOrUndefined(query.dateTo),
+    sortBy: presentOrUndefined(query.sortBy),
     status,
-    limit: query.limit,
-    offset: query.offset,
+    limit: presentOrUndefined(query.limit),
+    offset: presentOrUndefined(query.offset),
   }
 }
 

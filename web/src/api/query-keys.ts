@@ -3,6 +3,9 @@ export const queryKeys = {
   marketplaceFacets: () => ["marketplace", "facets"] as const,
   muns: (params: Record<string, unknown>) => ["muns", "search", params] as const,
   mun: (slug: string) => ["muns", "detail", slug] as const,
+  // Public MUN page sections read by id (schedule, documents, faqs, ...).
+  publicMunSection: (munId: string, section: string) =>
+    ["muns", "public", munId, section] as const,
   dashboardUpcoming: () => ["dashboard", "upcoming"] as const,
   dashboardPast: () => ["dashboard", "past"] as const,
   userProfile: (userId: string) => ["user", "profile", userId] as const,

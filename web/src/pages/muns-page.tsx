@@ -1,4 +1,3 @@
-import { Helmet } from "react-helmet-async";
 import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
@@ -7,17 +6,17 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { MunCardGrid, MunCardGridSkeleton } from "@/components/mun/mun-card-grid";
 import { SearchBar } from "@/components/marketplace/search-bar";
 import { FilterSidebar } from "@/components/marketplace/filter-sidebar";
+import { PageMeta } from "@/components/seo/page-meta";
 import { Button } from "@/components/ui/button";
-import { getMarketplaceFacets, searchMuns, type MunSearchParams } from "@/api/marketplace";
+import { getMarketplaceFacets, searchMuns } from "@/api/marketplace";
 import { queryKeys } from "@/api/query-keys";
+import { FILTER_PARAM_KEYS, resolveMarketplaceSearch } from "@/lib/marketplace-filters";
 
 const PAGE_SIZE = 24;
 
-function pageHref(params: Record<string, string | undefined>, page: number): string {
-  const next = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value && key !== "page") next.set(key, value);
-  }
+function pageHref(searchParams: URLSearchParams, page: number): string {
+  const next = new URLSearchParams(searchParams);
+  next.delete("page");
   if (page > 1) next.set("page", String(page));
   const qs = next.toString();
   return qs ? `/muns?${qs}` : "/muns";
@@ -25,28 +24,19 @@ function pageHref(params: Record<string, string | undefined>, page: number): str
 
 export function MunsPage() {
   const [searchParams] = useSearchParams();
-  const params = Object.fromEntries(searchParams.entries()) as Record<string, string | undefined>;
 
-  const parsedPage = Number.parseInt(params.page ?? "1", 10);
+  const parsedPage = Number.parseInt(searchParams.get("page") ?? "1", 10);
   const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
 
-  const sortBy =
-    params.sortBy === "price" || params.sortBy === "newest" || params.sortBy === "date"
-      ? params.sortBy
-      : undefined;
-
-  const searchQueryParams: MunSearchParams = {
-    query: params.q || undefined,
-    city: params.city || undefined,
-    country: params.country || undefined,
-    sortBy,
+  const searchQueryParams = resolveMarketplaceSearch(searchParams, {
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
-  };
+  });
 
   const munsQuery = useQuery({
     queryKey: queryKeys.muns(searchQueryParams),
     queryFn: () => searchMuns(searchQueryParams),
+    placeholderData: (previous) => previous,
   });
   const facetsQuery = useQuery({
     queryKey: queryKeys.marketplaceFacets(),
@@ -59,19 +49,25 @@ export function MunsPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(page * PAGE_SIZE, total);
-  const locationLabel = [params.city, params.country].filter(Boolean).join(", ");
+  const city = searchParams.get("city") ?? "";
+  const country = searchParams.get("country") ?? "";
+  const query = searchQueryParams.query;
+  const locationLabel = [city, country].filter(Boolean).join(", ");
+  const hasFilters = FILTER_PARAM_KEYS.some((key) => key !== "sortBy" && searchParams.get(key));
+
+  const preserved = Object.fromEntries(FILTER_PARAM_KEYS.map((key) => [key, searchParams.get(key) ?? undefined]));
 
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
-      <Helmet>
-        <title>Browse MUNs | MUN Hub</title>
-        <meta
-          name="description"
-          content="Search and filter Model United Nations conferences by city, country, date, and registration fee."
-        />
-      </Helmet>
+      <PageMeta
+        title={
+          locationLabel ? `Model UN conferences in ${locationLabel} | MUN Hub` : "Browse MUNs | MUN Hub"
+        }
+        description="Search and filter reviewed Model United Nations conferences by city, country, dates, registration status and delegate fee."
+        path="/muns"
+      />
 
-      <SiteHeader cities={facets.cities} selectedCity={params.city ?? ""} />
+      <SiteHeader cities={facets.cities} selectedCity={city} />
 
       <main className="flex-1">
         <div className="border-b border-border">
@@ -90,14 +86,7 @@ export function MunsPage() {
             </div>
 
             <div className="max-w-2xl">
-              <SearchBar
-                defaultValue={params.q}
-                preserve={{
-                  city: params.city,
-                  country: params.country,
-                  sortBy: params.sortBy,
-                }}
-              />
+              <SearchBar defaultValue={query} preserve={preserved} />
             </div>
           </div>
         </div>
@@ -105,19 +94,24 @@ export function MunsPage() {
         <div className="content-container flex flex-col gap-lg pt-xl pb-section lg:flex-row lg:gap-xxl">
           <FilterSidebar countries={facets.countries} resultCount={total} />
 
-          <section aria-label="Search results" className="min-w-0 flex-1">
+          <section aria-label="Search results" aria-busy={munsQuery.isFetching} className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline justify-between gap-xs border-b border-border pb-sm">
-              <h2 className="font-display text-title-sm font-medium tracking-[-0.006em] text-ink">
-                {total === 0
-                  ? "No conferences"
-                  : `${total} ${total === 1 ? "conference" : "conferences"}`}
+              <h2
+                aria-live="polite"
+                className="font-display text-title-sm font-medium tracking-[-0.006em] text-ink"
+              >
+                {munsQuery.isLoading
+                  ? "Searching…"
+                  : total === 0
+                    ? "No conferences"
+                    : `${total} ${total === 1 ? "conference" : "conferences"}`}
                 {locationLabel && (
                   <span className="font-normal text-muted-foreground"> in {locationLabel}</span>
                 )}
-                {params.q && (
+                {query && (
                   <span className="font-normal text-muted-foreground">
                     {" "}
-                    matching &ldquo;{params.q}&rdquo;
+                    matching &ldquo;{query}&rdquo;
                   </span>
                 )}
               </h2>
@@ -132,18 +126,26 @@ export function MunsPage() {
               {munsQuery.isLoading ? (
                 <MunCardGridSkeleton />
               ) : munsQuery.isError ? (
-                <p className="text-body-md text-destructive">
-                  {munsQuery.error instanceof Error
-                    ? munsQuery.error.message
-                    : "Unable to load conferences right now."}
-                </p>
+                <div className="flex flex-col items-start gap-sm">
+                  <p className="text-body-md text-destructive-text">
+                    {munsQuery.error instanceof Error
+                      ? munsQuery.error.message
+                      : "Unable to load conferences right now."}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => void munsQuery.refetch()}>
+                    Try again
+                  </Button>
+                </div>
               ) : (
                 <MunCardGrid
                   muns={results}
+                  className={munsQuery.isPlaceholderData ? "opacity-60 transition-opacity" : undefined}
                   emptyMessage={
-                    params.q
-                      ? `Nothing matched "${params.q}". Try a shorter phrase, or clear your location filters.`
-                      : undefined
+                    query
+                      ? `Nothing matched "${query}". Try a shorter phrase, or clear some filters.`
+                      : hasFilters
+                        ? "Nothing matches this combination of filters. Widen the dates or fee band, or clear a filter."
+                        : undefined
                   }
                 />
               )}
@@ -158,7 +160,7 @@ export function MunsPage() {
                   variant="outline"
                   size="sm"
                   disabled={page <= 1}
-                  render={page > 1 ? <Link to={pageHref(params, page - 1)} /> : undefined}
+                  render={page > 1 ? <Link to={pageHref(searchParams, page - 1)} /> : undefined}
                 >
                   <ChevronLeftIcon aria-hidden />
                   Previous
@@ -173,7 +175,7 @@ export function MunsPage() {
                   size="sm"
                   disabled={page >= totalPages}
                   render={
-                    page < totalPages ? <Link to={pageHref(params, page + 1)} /> : undefined
+                    page < totalPages ? <Link to={pageHref(searchParams, page + 1)} /> : undefined
                   }
                 >
                   Next

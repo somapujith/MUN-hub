@@ -118,7 +118,10 @@ export function HomeFilterSidebar({ resultCount }: HomeFilterSidebarProps) {
 
   const setParam = useCallback(
     (key: string, value: string) => {
-      const params = new URLSearchParams(searchParams.toString());
+      // The live URL, not the render-time `searchParams`: that value is stale
+      // while a previous filter's navigation transition is still pending, and
+      // a quick second click would drop the first filter.
+      const params = new URLSearchParams(window.location.search);
       if (value) {
         params.set(key, value);
       } else {
@@ -131,7 +134,7 @@ export function HomeFilterSidebar({ resultCount }: HomeFilterSidebarProps) {
         navigate(qs ? `/?${qs}` : "/");
       });
     },
-    [navigate, searchParams],
+    [navigate],
   );
 
   const selectedStatus = searchParams.get("status") ?? "";
@@ -192,7 +195,7 @@ export function HomeFilterSidebar({ resultCount }: HomeFilterSidebarProps) {
               // Clears this rail's params only — the city lives in the nav bar
               // now, and a "clear filters" here must not reach up and undo a
               // control the user set somewhere else.
-              const params = new URLSearchParams(searchParams.toString());
+              const params = new URLSearchParams(window.location.search);
               params.delete("status");
               params.delete("price");
               const qs = params.toString();

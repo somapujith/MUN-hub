@@ -1,15 +1,29 @@
-import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql } from 'drizzle-orm'
+import { and, asc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { committees, muns, portfolios, registrationProducts, users } from '@/lib/db/schema'
+import {
+  committees,
+  munContacts,
+  munMedia,
+  muns,
+  portfolios,
+  registrationProducts,
+  users,
+} from '@/lib/db/schema'
 import type { MunStatus } from '@/lib/db/schema-enums'
-import type { MunDetail, MunSummary } from '@/lib/types'
+import type {
+  MunSummary,
+  PublicCommittee,
+  PublicMunDetail,
+  PublicPortfolio,
+} from '@/lib/types'
 import { listFormFields } from './registration-form'
 
 /**
- * Statuses visible to the public marketplace by default. Every other status
- * (DRAFT, SUBMITTED, UNDER_REVIEW, REJECTED, CHANGES_REQUESTED, ONBOARDING,
- * CONTENT_SUBMITTED, VERIFICATION) is an internal/pre-publication state and
- * must never be shown to anonymous visitors.
+ * Statuses the public marketplace lists by default. Every status outside
+ * `PUBLICLY_VISIBLE_STATUSES` (DRAFT, SUBMITTED, UNDER_REVIEW, REJECTED,
+ * CHANGES_REQUESTED, ONBOARDING, the whole Gate-2 content pipeline,
+ * UNPUBLISHED, SUSPENDED, CANCELLED, ...) is an internal state and must never
+ * be shown to anonymous visitors.
  */
 const DEFAULT_PUBLIC_STATUSES: MunStatus[] = [
   'PUBLISHED',
@@ -17,23 +31,71 @@ const DEFAULT_PUBLIC_STATUSES: MunStatus[] = [
   'REGISTRATION_CLOSED',
 ]
 
-/** Statuses considered "publicly visible" for getMunBySlug (PUBLISHED and later lifecycle states). */
-export const PUBLIC_DETAIL_STATUSES: MunStatus[] = [
+/**
+ * Every status in which a mun is publicly visible: PUBLISHED and the later
+ * lifecycle states it moves through while staying live (registration, the
+ * conference itself, results, completion, archive). getMunBySlug serves
+ * exactly these, and searchMuns clips any caller-requested status list to
+ * them.
+ */
+export const PUBLICLY_VISIBLE_STATUSES: readonly MunStatus[] = [
   'PUBLISHED',
   'REGISTRATION_OPEN',
   'REGISTRATION_CLOSED',
   'CONFERENCE_ACTIVE',
+  'RESULTS_PENDING',
+  'RESULTS_UNDER_REVIEW',
   'COMPLETED',
   'ARCHIVED',
 ]
 
+/**
+ * The same set under its older name, still used by `mun-read-access.ts` for
+ * the published-or-owner by-id reads, so those reads and the slug page agree.
+ */
+export const PUBLIC_DETAIL_STATUSES = PUBLICLY_VISIBLE_STATUSES
+
+export function isPubliclyVisibleStatus(status: MunStatus): boolean {
+  return PUBLICLY_VISIBLE_STATUSES.includes(status)
+}
+
+/**
+ * Narrows a caller-supplied status list to publicly visible statuses. An
+ * absent list means "the default listing"; a list with nothing public left in
+ * it stays empty (the search then returns nothing) rather than widening back
+ * to the default.
+ */
+export function clipToPublicStatuses(requested: readonly MunStatus[] | undefined): MunStatus[] {
+  if (requested === undefined) return [...DEFAULT_PUBLIC_STATUSES]
+  return [...new Set(requested)].filter(isPubliclyVisibleStatus)
+}
+
+/**
+ * Throws `Mun not found` unless `munId` names a publicly visible mun. For
+ * public by-id reads (e.g. FAQs) — a hidden mun answers exactly like a
+ * missing one.
+ */
+export async function assertMunPubliclyVisible(munId: string): Promise<void> {
+  const [mun] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).limit(1)
+  if (!mun || !isPubliclyVisibleStatus(mun.status)) {
+    throw new Error('Mun not found')
+  }
+}
+
+export type MunSortBy = 'date' | 'deadline' | 'price' | 'newest'
+
 export interface MunSearchParams {
+  /** Free text; every whitespace-separated term must match at least one searchable field. */
   query?: string
   city?: string
   country?: string
   minPrice?: number
   maxPrice?: number
-  sortBy?: 'date' | 'price' | 'newest'
+  /** Only muns whose conference dates overlap [dateFrom, dateTo] (either bound optional). */
+  dateFrom?: Date
+  dateTo?: Date
+  sortBy?: MunSortBy
+  /** Clipped to PUBLICLY_VISIBLE_STATUSES — see clipToPublicStatuses. */
   status?: MunStatus[]
   limit?: number
   offset?: number
@@ -42,6 +104,13 @@ export interface MunSearchParams {
 export interface MunSearchResult {
   results: MunSummary[]
   total: number
+}
+
+const MAX_QUERY_TERMS = 8
+
+/** Escapes LIKE metacharacters so a user's `%` or `_` matches literally. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`)
 }
 
 /**
@@ -60,20 +129,56 @@ function minPriceSubquery() {
     .as('min_price_sq')
 }
 
+/** URL of a mun's first media item of `kind`, as a correlated subquery on `muns.id`. */
+function mediaUrlSql(kind: 'COVER' | 'LOGO') {
+  return sql<string | null>`(
+    select ${munMedia.url} from ${munMedia}
+    where ${munMedia.munId} = ${muns.id} and ${munMedia.kind} = ${kind}
+    order by ${munMedia.displayOrder} asc, ${munMedia.createdAt} asc
+    limit 1
+  )`
+}
+
 /**
- * Searches publicly-visible MUNs with text/city/country/price filters,
- * pagination, and sorting. Never returns DRAFT/SUBMITTED/etc rows unless the
- * caller explicitly overrides `status` (internal use only — no caller in the
- * public marketplace UI should ever pass a non-public status).
+ * Text match: every term has to hit at least one of the mun's name, city,
+ * country or theme, or the organizer's name or institution.
+ */
+function textMatchCondition(query: string): SQL | undefined {
+  const terms = query.trim().split(/\s+/).filter(Boolean).slice(0, MAX_QUERY_TERMS)
+  if (terms.length === 0) return undefined
+
+  return and(
+    ...terms.map((term) => {
+      const pattern = `%${escapeLikePattern(term)}%`
+      return or(
+        ilike(muns.name, pattern),
+        ilike(muns.city, pattern),
+        ilike(muns.country, pattern),
+        ilike(muns.theme, pattern),
+        ilike(users.name, pattern),
+        ilike(users.institution, pattern),
+      )
+    }),
+  )
+}
+
+/**
+ * Searches publicly-visible MUNs with text/city/country/price/date filters,
+ * pagination, and sorting. Never returns a non-public mun: any `status` the
+ * caller passes is clipped to PUBLICLY_VISIBLE_STATUSES first.
  */
 export async function searchMuns(params: MunSearchParams): Promise<MunSearchResult> {
-  const statuses = params.status ?? DEFAULT_PUBLIC_STATUSES
+  const statuses = clipToPublicStatuses(params.status)
+  if (statuses.length === 0) {
+    return { results: [], total: 0 }
+  }
+
   const limit = params.limit ?? 20
   const offset = params.offset ?? 0
 
   const priceSq = minPriceSubquery()
 
-  const conditions = [inArray(muns.status, statuses)]
+  const conditions: (SQL | undefined)[] = [inArray(muns.status, statuses)]
 
   if (params.city) {
     conditions.push(eq(muns.city, params.city))
@@ -82,10 +187,7 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
     conditions.push(eq(muns.country, params.country))
   }
   if (params.query) {
-    const pattern = `%${params.query}%`
-    conditions.push(
-      or(ilike(muns.name, pattern), ilike(muns.city, pattern)) ?? sql`true`,
-    )
+    conditions.push(textMatchCondition(params.query))
   }
   if (params.minPrice !== undefined) {
     conditions.push(gte(priceSq.minPrice, params.minPrice))
@@ -93,15 +195,35 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
   if (params.maxPrice !== undefined) {
     conditions.push(lte(priceSq.minPrice, params.maxPrice))
   }
+  // Overlap test on [startDate, coalesce(endDate, startDate)]. A mun with no
+  // dates yet never matches a date filter.
+  if (params.dateFrom) {
+    // Raw sql params skip drizzle's column encoder, so the Date is serialized here.
+    conditions.push(
+      sql`coalesce(${muns.endDate}, ${muns.startDate}) >= ${params.dateFrom.toISOString()}::timestamptz`,
+    )
+  }
+  if (params.dateTo) {
+    conditions.push(lte(muns.startDate, params.dateTo))
+  }
 
   const whereClause = and(...conditions)
 
-  const orderByClause =
+  const byStartDate = sql`${muns.startDate} asc nulls last`
+  const orderByClause: SQL[] =
     params.sortBy === 'price'
-      ? [asc(priceSq.minPrice)]
+      ? [sql`${priceSq.minPrice} asc nulls last`, byStartDate]
       : params.sortBy === 'newest'
-        ? [desc(muns.createdAt)]
-        : [asc(muns.startDate)]
+        ? [sql`coalesce(${muns.publishedAt}, ${muns.createdAt}) desc`]
+        : params.sortBy === 'deadline'
+          ? [
+              // Closing soonest: deadlines still ahead first (nearest first),
+              // then muns with no deadline or one already passed.
+              sql`(${muns.registrationDeadline} is null or ${muns.registrationDeadline} < now()) asc`,
+              sql`${muns.registrationDeadline} asc nulls last`,
+              byStartDate,
+            ]
+          : [byStartDate]
 
   const rows = await db
     .select({
@@ -112,15 +234,19 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
       country: muns.country,
       startDate: muns.startDate,
       endDate: muns.endDate,
+      registrationOpensAt: muns.registrationOpensAt,
+      registrationDeadline: muns.registrationDeadline,
       status: muns.status,
       minPrice: priceSq.minPrice,
       organizerName: users.name,
+      coverImage: mediaUrlSql('COVER'),
     })
     .from(muns)
     .leftJoin(priceSq, eq(priceSq.munId, muns.id))
     .leftJoin(users, eq(users.id, muns.organizerId))
     .where(whereClause)
-    .orderBy(...orderByClause)
+    // id last: a stable tiebreaker so paging never repeats or skips a row.
+    .orderBy(...orderByClause, asc(muns.id))
     .limit(limit)
     .offset(offset)
 
@@ -128,6 +254,7 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
     .select({ count: sql<number>`count(*)::int` })
     .from(muns)
     .leftJoin(priceSq, eq(priceSq.munId, muns.id))
+    .leftJoin(users, eq(users.id, muns.organizerId))
     .where(whereClause)
 
   const results: MunSummary[] = rows.map((row) => ({
@@ -138,10 +265,11 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
     country: row.country,
     startDate: row.startDate,
     endDate: row.endDate,
+    registrationOpensAt: row.registrationOpensAt,
+    registrationDeadline: row.registrationDeadline,
     status: row.status,
     minPrice: row.minPrice ?? null,
-    // No cover-image column exists on `muns` yet — see final report note.
-    coverImage: null,
+    coverImage: row.coverImage ?? null,
     organizerName: row.organizerName ?? null,
   }))
 
@@ -149,49 +277,146 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
 }
 
 /**
- * Full MUN detail for the public MUN detail page: mun row, committees with
- * nested portfolios, active registration products, organizer name. Returns
- * null if the slug doesn't exist OR the mun is in an internal/pre-publication
- * state (DRAFT, SUBMITTED, UNDER_REVIEW, REJECTED, CHANGES_REQUESTED,
- * ONBOARDING, CONTENT_SUBMITTED, VERIFICATION) — those must never be visible
- * to the public even if someone knows the slug.
+ * The `muns` columns getMunBySlug may return — mirrors `PublicMun` in
+ * lib/types/mun.ts. Never spread `getTableColumns(muns)` here: that would
+ * publish `organizerId` and any column added later.
  */
-export async function getMunBySlug(slug: string): Promise<MunDetail | null> {
-  const [mun] = await db.select().from(muns).where(eq(muns.slug, slug)).limit(1)
+const PUBLIC_MUN_COLUMNS = {
+  id: muns.id,
+  name: muns.name,
+  slug: muns.slug,
+  edition: muns.edition,
+  theme: muns.theme,
+  description: muns.description,
+  startDate: muns.startDate,
+  endDate: muns.endDate,
+  venue: muns.venue,
+  addressLine1: muns.addressLine1,
+  city: muns.city,
+  addressState: muns.addressState,
+  postalCode: muns.postalCode,
+  country: muns.country,
+  mapUrl: muns.mapUrl,
+  conferenceType: muns.conferenceType,
+  targetParticipantType: muns.targetParticipantType,
+  registrationOpensAt: muns.registrationOpensAt,
+  registrationDeadline: muns.registrationDeadline,
+  accommodationProvided: muns.accommodationProvided,
+  status: muns.status,
+}
 
-  if (!mun || !PUBLIC_DETAIL_STATUSES.includes(mun.status)) {
+const PUBLIC_PRODUCT_COLUMNS = {
+  id: registrationProducts.id,
+  munId: registrationProducts.munId,
+  name: registrationProducts.name,
+  price: registrationProducts.price,
+  currency: registrationProducts.currency,
+  capacity: registrationProducts.capacity,
+  deadline: registrationProducts.deadline,
+  status: registrationProducts.status,
+  registrationType: registrationProducts.registrationType,
+  earlyBirdPrice: registrationProducts.earlyBirdPrice,
+  earlyBirdDeadline: registrationProducts.earlyBirdDeadline,
+  description: registrationProducts.description,
+  allowsIndividual: registrationProducts.allowsIndividual,
+  allowsDelegation: registrationProducts.allowsDelegation,
+  displayOrder: registrationProducts.displayOrder,
+  eligibility: registrationProducts.eligibility,
+}
+
+/**
+ * Public MUN detail by slug: the allowlisted mun columns, committees with
+ * nested portfolios, active registration products, the organizer's name,
+ * cover/logo URLs, the official contact channels and the registration form.
+ * Returns null if the slug doesn't exist OR the mun isn't publicly visible —
+ * an internal-state mun must never be served, even to someone who knows its
+ * slug.
+ */
+export async function getMunBySlug(slug: string): Promise<PublicMunDetail | null> {
+  const [row] = await db
+    .select({
+      ...PUBLIC_MUN_COLUMNS,
+      organizerName: users.name,
+      coverImage: mediaUrlSql('COVER'),
+      logo: mediaUrlSql('LOGO'),
+    })
+    .from(muns)
+    .leftJoin(users, eq(users.id, muns.organizerId))
+    .where(and(eq(muns.slug, slug), inArray(muns.status, [...PUBLICLY_VISIBLE_STATUSES])))
+    .limit(1)
+
+  if (!row) {
     return null
   }
 
-  const [organizer, committeeRows, activeProducts, formFields] = await Promise.all([
-    db.select({ name: users.name }).from(users).where(eq(users.id, mun.organizerId)).limit(1),
-    db.select().from(committees).where(eq(committees.munId, mun.id)),
+  const [committeeRows, activeProducts, contactRows, formFields] = await Promise.all([
     db
-      .select()
+      .select({
+        id: committees.id,
+        munId: committees.munId,
+        name: committees.name,
+        agenda: committees.agenda,
+        description: committees.description,
+        capacity: committees.capacity,
+        committeeType: committees.committeeType,
+        portfoliosEnabled: committees.portfoliosEnabled,
+      })
+      .from(committees)
+      .where(eq(committees.munId, row.id))
+      .orderBy(asc(committees.createdAt), asc(committees.id)),
+    db
+      .select(PUBLIC_PRODUCT_COLUMNS)
       .from(registrationProducts)
-      .where(and(eq(registrationProducts.munId, mun.id), eq(registrationProducts.status, 'active'))),
-    listFormFields(mun.id),
+      .where(and(eq(registrationProducts.munId, row.id), eq(registrationProducts.status, 'active')))
+      .orderBy(asc(registrationProducts.displayOrder), asc(registrationProducts.createdAt)),
+    db
+      .select({
+        officialEmail: munContacts.officialEmail,
+        phone: munContacts.phone,
+        website: munContacts.website,
+      })
+      .from(munContacts)
+      .where(eq(munContacts.munId, row.id))
+      .limit(1),
+    listFormFields(row.id),
   ])
 
   const committeeIds = committeeRows.map((c) => c.id)
-  const portfolioRows = committeeIds.length
-    ? await db.select().from(portfolios).where(inArray(portfolios.committeeId, committeeIds))
+  const portfolioRows: PublicPortfolio[] = committeeIds.length
+    ? await db
+        .select({
+          id: portfolios.id,
+          committeeId: portfolios.committeeId,
+          name: portfolios.name,
+          type: portfolios.type,
+          availability: portfolios.availability,
+          description: portfolios.description,
+          restrictions: portfolios.restrictions,
+        })
+        .from(portfolios)
+        .where(inArray(portfolios.committeeId, committeeIds))
+        .orderBy(asc(portfolios.createdAt), asc(portfolios.id))
     : []
 
-  const portfoliosByCommittee = new Map<string, typeof portfolioRows>()
+  const portfoliosByCommittee = new Map<string, PublicPortfolio[]>()
   for (const portfolio of portfolioRows) {
     const existing = portfoliosByCommittee.get(portfolio.committeeId) ?? []
     portfoliosByCommittee.set(portfolio.committeeId, [...existing, portfolio])
   }
 
+  const publicCommittees: PublicCommittee[] = committeeRows.map((committee) => ({
+    ...committee,
+    portfolios: portfoliosByCommittee.get(committee.id) ?? [],
+  }))
+
   return {
-    ...mun,
-    committees: committeeRows.map((committee) => ({
-      ...committee,
-      portfolios: portfoliosByCommittee.get(committee.id) ?? [],
-    })),
+    ...row,
+    organizerName: row.organizerName ?? null,
+    coverImage: row.coverImage ?? null,
+    logo: row.logo ?? null,
+    committees: publicCommittees,
     registrationProducts: activeProducts,
-    organizerName: organizer[0]?.name ?? null,
+    contact: contactRows[0] ?? null,
     formFields,
   }
 }
