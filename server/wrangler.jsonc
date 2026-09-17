@@ -13,7 +13,8 @@
     // via `wrangler secret put <NAME>`, never committed here.
     "COOKIE_DOMAIN": ".munhub.in",
     "CORS_ORIGINS": "http://localhost:5173,http://localhost:5174,http://localhost:3000",
-    "ZEPTOMAIL_FROM_ADDRESS": "noreply@munhub.in"
+    "ZEPTOMAIL_FROM_ADDRESS": "noreply@munhub.in",
+    "APP_URL": "https://munhub.in"
   },
   // Hyperdrive config "munhub-db", created 2026-09-17 against the production
   // Neon instance. Pools/terminates Postgres connections at Cloudflare's edge

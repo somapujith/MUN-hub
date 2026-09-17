@@ -1,6 +1,7 @@
 import { eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, users } from '@/lib/db/schema'
+import { getRuntimeEnv } from '@/lib/runtime-env'
 
 // -----------------------------------------------------------------------------
 // resolve-recipients — Task 12 Step 5 support helpers for wiring
@@ -62,11 +63,16 @@ export async function resolveMunNotificationContext(munId: string): Promise<MunN
 }
 
 /**
- * Builds the public marketplace URL for a mun, matching the exact pattern
- * `app/sitemap.ts` already uses (`NEXT_PUBLIC_APP_URL` env var, falling back
- * to localhost for dev) — kept in one place so the two never drift apart.
+ * Builds the public marketplace URL for a mun, reading `APP_URL` via
+ * `getRuntimeEnv` (falls back to localhost for dev) rather than
+ * `process.env` directly — Workers never populate custom vars into
+ * `process.env`, same reason every other env read in this codebase goes
+ * through `getRuntimeEnv` (see lib/crypto/field-encryption.ts). Note:
+ * `server/routes/sitemap.ts` still reads `process.env.NEXT_PUBLIC_APP_URL`
+ * directly — a pre-existing Next-era leftover outside this lane, flagged to
+ * mun-hub-62 rather than fixed here.
  */
 export function buildPublicMunUrl(slug: string): string {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+  const baseUrl = getRuntimeEnv('APP_URL') ?? 'http://localhost:3000'
   return `${baseUrl}/mun/${slug}`
 }
