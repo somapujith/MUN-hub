@@ -155,10 +155,11 @@ test.describe('registration products UI', () => {
 
   test('reorder passes with the move buttons', async ({ page }) => {
     const tag = uid()
-    // Retired passes from earlier runs stay listed, so put the pair after everything else to keep them adjacent.
+    // Retired passes from earlier runs stay listed, so put the pair well after
+    // everything else (including passes added meanwhile) to keep them adjacent.
     const last = Math.max(0, ...(await allProducts()).map((p) => p.displayOrder))
-    const first = await createProduct({ name: `E2E Order A ${tag}`, price: 1, capacity: 1, displayOrder: last + 1 })
-    const second = await createProduct({ name: `E2E Order B ${tag}`, price: 1, capacity: 1, displayOrder: last + 2 })
+    const first = await createProduct({ name: `E2E Order A ${tag}`, price: 1, capacity: 1, displayOrder: last + 1000 })
+    const second = await createProduct({ name: `E2E Order B ${tag}`, price: 1, capacity: 1, displayOrder: last + 1001 })
     await openProducts(page)
 
     const names = main(page).getByRole('region', { name: REGION }).getByRole('heading', { level: 2 })
@@ -173,14 +174,15 @@ test.describe('registration products UI', () => {
     const tag = uid()
     const last = Math.max(0, ...(await allProducts()).map((p) => p.displayOrder))
     // Same displayOrder: the list falls back to name order (A, B).
-    const first = await createProduct({ name: `E2E Tie A ${tag}`, price: 1, capacity: 1, displayOrder: last + 1 })
-    const second = await createProduct({ name: `E2E Tie B ${tag}`, price: 1, capacity: 1, displayOrder: last + 1 })
+    const first = await createProduct({ name: `E2E Tie A ${tag}`, price: 1, capacity: 1, displayOrder: last + 1000 })
+    const second = await createProduct({ name: `E2E Tie B ${tag}`, price: 1, capacity: 1, displayOrder: last + 1000 })
     await openProducts(page)
 
     const names = main(page).getByRole('region', { name: REGION }).getByRole('heading', { level: 2 })
     await expect(names.filter({ hasText: tag })).toHaveText([first.name, second.name])
     await cardFor(page, REGION, second.name).getByRole('button', { name: 'Move product up' }).click()
-    await expect(names.filter({ hasText: tag })).toHaveText([second.name, first.name])
+    // A tie renumbers every pass on the sandbox, one request each.
+    await expect(names.filter({ hasText: tag })).toHaveText([second.name, first.name], { timeout: 30_000 })
     const saved = (await allProducts()).filter((p) => p.name.includes(tag))
     const orderOf = (name: string) => saved.find((p) => p.name === name)!.displayOrder
     expect(orderOf(second.name)).toBeLessThan(orderOf(first.name))

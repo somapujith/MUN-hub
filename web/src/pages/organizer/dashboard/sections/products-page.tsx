@@ -143,16 +143,21 @@ export function OrganizerProductsPage() {
     const index = products.indexOf(product);
     const target = index + direction;
     if (index < 0 || target < 0 || target >= products.length) return;
-    const reordered = [...products];
-    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
-    // Renumber the whole list rather than swapping the two values: products
-    // often share a displayOrder (every new product defaults to one), and
-    // swapping two equal values changes nothing.
+    const other = products[target];
     setReordering(true);
     try {
-      for (const [position, item] of reordered.entries()) {
-        if (item.displayOrder !== position) {
-          await updateRegistrationProduct(item.id, { displayOrder: position });
+      if (product.displayOrder !== other.displayOrder) {
+        await updateRegistrationProduct(product.id, { displayOrder: other.displayOrder });
+        await updateRegistrationProduct(other.id, { displayOrder: product.displayOrder });
+      } else {
+        // Products often share a displayOrder (new ones default to 0), and
+        // swapping two equal values changes nothing — renumber the list instead.
+        const reordered = [...products];
+        [reordered[index], reordered[target]] = [other, product];
+        for (const [position, item] of reordered.entries()) {
+          if (item.displayOrder !== position) {
+            await updateRegistrationProduct(item.id, { displayOrder: position });
+          }
         }
       }
     } catch (error: unknown) {
