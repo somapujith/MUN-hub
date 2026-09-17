@@ -1,4 +1,4 @@
-import { consoleNotificationsAdapter } from './console-adapter'
+import { getNotificationsAdapter } from './select-adapter'
 import type { NotificationsAdapter } from './adapter'
 
 export type PipelineEvent =
@@ -144,10 +144,16 @@ export function renderPipelineNotification(event: PipelineEvent): RenderedNotifi
  * recipient (the adapter's NotificationPayload.to is a single string).
  * Delivery failures are caught and logged, never thrown — a notification
  * failure must never fail the pipeline transition that triggered it.
+ *
+ * `adapter` defaults to `getNotificationsAdapter()`, re-evaluated on every
+ * call (a default parameter expression runs each time the arg is omitted,
+ * not once at import time) so it always reflects the current environment —
+ * real ZeptoMail delivery once `ZEPTOMAIL_TOKEN` is configured, console/mock
+ * otherwise. Tests pass an explicit adapter and never hit this default.
  */
 export async function notifyPipelineEvent(
   event: PipelineEvent,
-  adapter: NotificationsAdapter = consoleNotificationsAdapter,
+  adapter: NotificationsAdapter = getNotificationsAdapter(),
 ): Promise<void> {
   const rendered = renderPipelineNotification(event)
 

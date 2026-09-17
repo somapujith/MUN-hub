@@ -3,18 +3,18 @@ import { and, eq, gt, isNull } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { passwordResetTokens, sessions, users } from '@/lib/db/schema'
 import { hashPassword } from '@/lib/auth/password'
-import { consoleNotificationsAdapter } from '@/lib/notifications/console-adapter'
+import { getNotificationsAdapter } from '@/lib/notifications/select-adapter'
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000 // 1 hour
 const MIN_PASSWORD_LENGTH = 8
 
 /**
  * Starts a "forgot password" reset: if `email` matches an account, creates a
- * single-use, 1-hour token and emails a reset link (via the console/mock
- * notifications adapter — no real email delivery in this environment) built
- * from `appUrl` (caller-supplied so this file stays framework-agnostic —
- * never imports `next/headers`; the Next.js layer resolves the request's own
- * origin and passes it in).
+ * single-use, 1-hour token and emails a reset link via whichever adapter
+ * `getNotificationsAdapter()` selects (real delivery through ZeptoMail when
+ * configured, console/mock otherwise — see lib/notifications/select-adapter.ts)
+ * built from `appUrl` (caller-supplied so this file stays framework-agnostic;
+ * the Hono layer resolves the request's own origin and passes it in).
  *
  * Always resolves successfully whether or not the email matched — never
  * reveals whether an account exists for a given address.
@@ -38,7 +38,7 @@ export async function requestPasswordReset(email: string, appUrl: string): Promi
   const resetUrl = `${appUrl}/reset-password?token=${token}`
 
   try {
-    await consoleNotificationsAdapter.send({
+    await getNotificationsAdapter().send({
       to: user.email,
       subject: 'Reset your MUN Hub password',
       body:
