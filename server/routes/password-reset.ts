@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requestPasswordReset, resetPassword } from '@/lib/actions/password-reset'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import { isProductionRuntime } from '@/lib/runtime-platform'
+import { runAfterResponse } from '../lib/after-response'
 import type { AppVariables } from '../src/types'
 
 const requestResetBodySchema = z
@@ -54,10 +55,13 @@ export const passwordResetRoutes = new Hono<{ Variables: AppVariables }>()
 // Signed-out "forgot password" flow — deliberately unauthenticated (there is
 // no session yet). Always resolves 204 regardless of whether `email` matches
 // an account; lib/actions/password-reset.ts#requestPasswordReset never
-// reveals whether an account exists for a given address.
+// reveals whether an account exists for a given address. The work runs after
+// the response (runAfterResponse) so response time doesn't reveal it either:
+// a registered address costs a token write plus a mail-provider round-trip,
+// an unknown one costs one indexed lookup.
 passwordResetRoutes.post('/password-reset/request', async (c) => {
   const body = requestResetBodySchema.parse(await c.req.json())
-  await requestPasswordReset(body.email, resolveAppUrl(c))
+  await runAfterResponse(c, requestPasswordReset(body.email, resolveAppUrl(c)), 'password-reset')
 
   return c.body(null, 204)
 })

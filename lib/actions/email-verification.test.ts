@@ -7,6 +7,7 @@ import {
   isEmailVerified,
   resendVerificationEmail,
   sendVerificationEmail,
+  VERIFICATION_RESENDS_PER_HOUR,
   verifyEmail,
 } from './email-verification'
 import type { NotificationsAdapter } from '@/lib/notifications/adapter'
@@ -32,6 +33,16 @@ function extractToken(body: string): string {
   if (!match) throw new Error('no token found in email body')
   return match[1]
 }
+
+/** Ages every token this user has, to step out of the rolling hour without waiting one. */
+async function ageTokens(userId: string, byMs: number) {
+  await db
+    .update(emailVerificationTokens)
+    .set({ createdAt: new Date(Date.now() - byMs) })
+    .where(eq(emailVerificationTokens.userId, userId))
+}
+
+const PAST_THE_HOUR_MS = 61 * 60 * 1000
 
 describe('sendVerificationEmail', () => {
   it('stores only a hash, never the raw token, and emails a verify link', async () => {
@@ -112,17 +123,55 @@ describe('resendVerificationEmail', () => {
     await sendVerificationEmail(user.id, APP_URL, adapter1)
     const firstToken = extractToken(send1.mock.calls[0][0].body)
 
-    await resendVerificationEmail(user.email, APP_URL)
+    const { adapter, send } = mockAdapter()
+    await resendVerificationEmail(user.email, APP_URL, adapter)
+    expect(send).toHaveBeenCalledTimes(1)
 
-    // Old token no longer resolves — it was deleted, not just superseded.
+    // The old link stops working the moment a new one is issued.
     await expect(verifyEmail(firstToken)).rejects.toThrow('invalid or has expired')
 
+    // Spent, not deleted: the throttle below counts issued tokens, and
+    // deleting them would reset the budget on every call.
     const rows = await db.select().from(emailVerificationTokens).where(eq(emailVerificationTokens.userId, user.id))
-    expect(rows).toHaveLength(1)
+    expect(rows).toHaveLength(2)
+    expect(rows.filter((row) => row.usedAt === null)).toHaveLength(1)
+
+    // …and the new one does work.
+    await verifyEmail(extractToken(send.mock.calls[0][0].body))
+    expect(await isEmailVerified(user.id)).toBe(true)
   })
 
   it('resolves successfully for an email that does not match any account (no enumeration)', async () => {
     await expect(resendVerificationEmail('nobody-here@test.dev', APP_URL)).resolves.toBeUndefined()
+  })
+
+  it(`sends at most ${VERIFICATION_RESENDS_PER_HOUR} an hour, so it can't be used to flood an inbox`, async () => {
+    const user = await makeUser()
+    const { adapter, send } = mockAdapter()
+
+    for (let attempt = 0; attempt < VERIFICATION_RESENDS_PER_HOUR + 5; attempt += 1) {
+      // Silently ignored past the cap — an error would tell the caller this
+      // address has an account.
+      await expect(resendVerificationEmail(user.email, APP_URL, adapter)).resolves.toBeUndefined()
+    }
+    expect(send).toHaveBeenCalledTimes(VERIFICATION_RESENDS_PER_HOUR)
+
+    // The budget is a rolling hour, not a permanent limit.
+    await ageTokens(user.id, PAST_THE_HOUR_MS)
+    await resendVerificationEmail(user.email, APP_URL, adapter)
+    expect(send).toHaveBeenCalledTimes(VERIFICATION_RESENDS_PER_HOUR + 1)
+  })
+
+  it('sends nothing for an address that is already verified', async () => {
+    const user = await makeUser()
+    const { adapter, send } = mockAdapter()
+    await sendVerificationEmail(user.id, APP_URL, adapter)
+    await verifyEmail(extractToken(send.mock.calls[0][0].body))
+    send.mockClear()
+
+    await resendVerificationEmail(user.email, APP_URL, adapter)
+
+    expect(send).not.toHaveBeenCalled()
   })
 })
 
