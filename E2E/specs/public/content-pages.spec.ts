@@ -26,7 +26,7 @@ for (const { path, title, heading } of PAGES) {
     const crashes = watchForCrashes(page)
     await page.goto(path)
     await expect(pageHeading(page)).toHaveText(heading)
-    await expect(page).toHaveTitle(new RegExp(`^${title}( \\| MUN Hub)?$`))
+    await expect(page).toHaveTitle(`${title} | MUN Hub`)
     await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /\S{20,}|.{40,}/)
     await expect(page.getByRole('banner')).toBeVisible()
     await expect(footer(page)).toBeVisible()
@@ -106,14 +106,19 @@ test('a deep link to a curation section scrolls to it', async ({ page }) => {
   await expect(page.locator('#review-process')).toBeInViewport()
 })
 
-test('a deep link to a legal section scrolls to it', async ({ page }) => {
-  test.fail(
-    !process.env.E2E_SHOW_KNOWN_BUGS,
-    'BUG: loading /legal/terms#no-refunds directly lands ~270px past the section (its top ends at -268px, scrollY 3457) — the page scrolls, then content above it grows',
-  )
-  await page.goto('/legal/terms#no-refunds')
-  await expect(page.locator('#no-refunds')).toBeInViewport()
-})
+for (const target of ['/legal/terms#no-refunds', '/legal/privacy#cookies', '/legal/refunds#platform-fee']) {
+  test(`a cold deep link to ${target} lands on the section, just under the header`, async ({ page }) => {
+    await page.goto(target)
+    const id = target.split('#')[1]
+    // The page re-scrolls once web fonts settle; the section's top sits at its
+    // scroll-margin below the sticky header.
+    await expect
+      .poll(async () => page.evaluate((sectionId) => document.getElementById(sectionId)?.getBoundingClientRect().top ?? null, id))
+      .toBeGreaterThanOrEqual(0)
+    const top = await page.evaluate((sectionId) => document.getElementById(sectionId)!.getBoundingClientRect().top, id)
+    expect(top).toBeLessThanOrEqual(120)
+  })
+}
 
 test.describe('"List your MUN" on the About page', () => {
   test('a signed-out visitor is pointed at organizer signup', async ({ page }) => {
