@@ -14,4 +14,10 @@ export const adminQueryKeys = {
   staffAll: () => ["admin", "staff"] as const,
   analytics: () => ["admin", "analytics"] as const,
   mfaStatus: () => ["admin", "mfa-status"] as const,
+  reportingTrends: (params: Record<string, unknown>) => ["admin", "reporting", "trends", params] as const,
+  reportingFunnel: (params: Record<string, unknown>) => ["admin", "reporting", "funnel", params] as const,
+  reportingTopConferences: (params: Record<string, unknown>) => ["admin", "reporting", "top-conferences", params] as const,
+  reportingOrganizers: (params: Record<string, unknown>) => ["admin", "reporting", "organizers", params] as const,
+  reportingGeography: (params: Record<string, unknown>) => ["admin", "reporting", "geography", params] as const,
+  reportingFees: (params: Record<string, unknown>) => ["admin", "reporting", "fees", params] as const,
 };
