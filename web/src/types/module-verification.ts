@@ -26,6 +26,10 @@ export interface ModuleReviewQueueResult {
 }
 
 export interface ModuleReviewQueueParams {
+  /** Default 'PENDING_REVIEW' (pending). */
+  status?: ModuleVerificationState;
+  /** Matches the MUN name. */
+  q?: string;
   limit?: number;
   offset?: number;
 }

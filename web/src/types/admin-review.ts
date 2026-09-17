@@ -26,7 +26,14 @@ export interface ReviewQueueResult {
   total: number;
 }
 
+/** Gate-1 application decision status — mirrors `lib/db/schema-enums.ts#applicationStatusEnum`. */
+export type ApplicationStatus = "SUBMITTED" | "APPROVED" | "REJECTED" | "CHANGES_REQUESTED";
+
 export interface ReviewQueueParams {
+  /** Default 'SUBMITTED' (pending). */
+  status?: ApplicationStatus;
+  /** Matches the MUN name or the organizer's name/email. */
+  q?: string;
   limit?: number;
   offset?: number;
 }

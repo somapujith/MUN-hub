@@ -124,3 +124,21 @@ payout execution.
   pending merge; notifications `1cab522…67fc63f` merged; payments `7dd1c47` `bb65b07` `5014559`
   merged). Review confirmed 43 findings (2 high: staff TOTP brute force; bank-detail change leaves
   payout VERIFIED). Workflow scripts saved under `.claude/workflows/`.
+
+## RECOVERY NOTE (if usage limit hits mid-merge)
+
+If you're reading this because everything stopped: `main` may be sitting mid-merge
+(`.git/MERGE_HEAD` exists) from the `munhub-integrated-review` workflow's serialized
+merge step. To resume safely:
+1. `git status` — if `.git/MERGE_HEAD` exists and there are `<<<<<<<` conflict markers
+   in any file, resolve them by hand (check both sides' intent — usually one side is a
+   newer/superseding version, see the pattern used to resolve the admin-search.ts
+   conflict in commit `6cc3f7d` as an example) then `git add <file> && git commit --no-edit`.
+2. If it looks abandoned with NO conflict markers (clean auto-merge, just uncommitted):
+   `git commit --no-edit` to finish it.
+3. Only use `git merge --abort` as a last resort if the merge looks corrupted — this
+   discards the incoming branch's changes, so check `git worktree list` first for the
+   branch name and re-merge it fresh instead if possible.
+4. Then re-invoke the review workflow with `resumeFromRunId` (see the tool result from
+   when it was launched, or search this file for `wf_9c79e016-ace`) — completed
+   agents/merges replay from cache, only the interrupted step re-runs.

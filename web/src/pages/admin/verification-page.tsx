@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { PlusIcon, ShieldCheckIcon, Trash2Icon } from "lucide-react";
+import { PlusIcon, SearchIcon, ShieldCheckIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { getModuleReviewQueue, reviewModule } from "@/api/module-verification";
 import { queryKeys } from "@/api/query-keys";
@@ -18,7 +18,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MODULE_LABELS, SEVERITY_OPTIONS } from "@/lib/admin/module-labels";
+import { adminSelectClassName } from "@/lib/admin/styles";
 import type { ModuleReviewDecision, ModuleReviewQueueRow, VerificationIssueInput } from "@/types/module-verification";
+import type { ModuleVerificationState } from "@/types/enums";
 
 const PAGE_SIZE = 20;
 
@@ -26,6 +28,14 @@ const DECISION_OPTIONS: Array<{ value: ModuleReviewDecision; label: string }> = 
   { value: "VERIFIED", label: "Verify" },
   { value: "CHANGES_REQUESTED", label: "Request changes" },
   { value: "REJECTED", label: "Reject" },
+];
+
+const STATUS_OPTIONS: Array<{ value: ModuleVerificationState; label: string }> = [
+  { value: "PENDING_REVIEW", label: "Pending review" },
+  { value: "VERIFIED", label: "Verified" },
+  { value: "CHANGES_REQUESTED", label: "Changes requested" },
+  { value: "REJECTED", label: "Rejected" },
+  { value: "NOT_SUBMITTED", label: "Not submitted" },
 ];
 
 const EMPTY_ISSUE: VerificationIssueInput = { severity: "MEDIUM", reason: "" };
@@ -51,11 +61,22 @@ function formatDate(value: string | null): string {
 export function AdminVerificationPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
+  const [status, setStatus] = useState<ModuleVerificationState>("PENDING_REVIEW");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [reviewTarget, setReviewTarget] = useState<ModuleReviewQueueRow | null>(null);
   const [decision, setDecision] = useState<ModuleReviewDecision>("VERIFIED");
   const [issues, setIssues] = useState<VerificationIssueInput[]>([]);
 
-  const params = { limit: PAGE_SIZE, offset: page * PAGE_SIZE };
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  const params = { status, q: search || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE };
   const queueQuery = useQuery({
     queryKey: queryKeys.adminModuleReviewQueue(params),
     queryFn: () => getModuleReviewQueue(params),
@@ -124,6 +145,49 @@ export function AdminVerificationPage() {
       title="Verification"
       description="Gate 2 — module-level content-verification console. Deciding here checks whether one part of a MUN's content is accurate enough to publish; it does not decide whether the organizer is approved to run a MUN (see Applications)."
     >
+      <div className="flex flex-wrap items-end gap-md">
+        <div className="flex w-full max-w-md flex-col gap-xs">
+          <label htmlFor="verification-search" className="text-body-md font-medium text-ink">
+            Search
+          </label>
+          <div className="relative w-full">
+            <SearchIcon
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 left-md size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              id="verification-search"
+              type="search"
+              placeholder="MUN name"
+              className="pl-xxl"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+            />
+          </div>
+        </div>
+        <div className="flex flex-col gap-xs">
+          <Label htmlFor="verification-status">Status</Label>
+          <select
+            id="verification-status"
+            className={adminSelectClassName}
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value as ModuleVerificationState);
+              setPage(0);
+            }}
+          >
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="text-body-md text-muted-foreground">
+          {total === 0 ? "No modules" : `${total} module${total === 1 ? "" : "s"}`}
+        </p>
+      </div>
+
       {queueQuery.isLoading ? (
         <div className="flex flex-col gap-sm">
           {Array.from({ length: 5 }).map((_, index) => (
@@ -139,9 +203,15 @@ export function AdminVerificationPage() {
       ) : results.length === 0 ? (
         <div className="flex flex-col items-center gap-sm rounded-md border border-dashed border-border bg-card px-lg py-xxl text-center">
           <ShieldCheckIcon className="size-8 text-muted-foreground" strokeWidth={1.25} aria-hidden />
-          <p className="font-display text-title-md text-ink">No modules pending review.</p>
+          <p className="font-display text-title-md text-ink">
+            {status === "PENDING_REVIEW" ? "No modules pending review." : "No modules match."}
+          </p>
           <p className="max-w-sm text-body-md text-muted-foreground">
-            Modules land here once an organizer confirms them for review.
+            {search
+              ? "Try a different MUN name."
+              : status === "PENDING_REVIEW"
+                ? "Modules land here once an organizer confirms them for review."
+                : "Try a different status."}
           </p>
         </div>
       ) : (
@@ -208,8 +278,8 @@ export function AdminVerificationPage() {
           if (!open) closeDialog();
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-          <form onSubmit={handleSubmit} className="flex flex-col gap-lg">
+        <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-xl">
+          <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-lg">
             <DialogHeader>
               <DialogTitle>
                 {reviewTarget && (MODULE_LABELS[reviewTarget.moduleName] ?? reviewTarget.moduleName)} — {reviewTarget?.munName}
@@ -218,6 +288,11 @@ export function AdminVerificationPage() {
                 Gate 2 decision — verifies this module's content only, not the organizer's overall application.
               </DialogDescription>
             </DialogHeader>
+
+            {/* Only this middle section scrolls (the issues list can grow) —
+                the footer's submit/cancel buttons stay on screen at any
+                dialog height. */}
+            <div className="flex min-h-0 flex-1 flex-col gap-lg overflow-y-auto">
 
             <div className="flex flex-col gap-xs">
               <Label htmlFor="module-decision">Decision</Label>
@@ -298,6 +373,8 @@ export function AdminVerificationPage() {
                   </div>
                 </div>
               ))}
+            </div>
+
             </div>
 
             <DialogFooter>

@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardListIcon } from "lucide-react";
+import { ClipboardListIcon, SearchIcon } from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { getMunForReview, getReviewQueue, reviewMunApplication } from "@/api/admin-review";
@@ -16,9 +16,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ReviewDecision, ReviewQueueRow } from "@/types/admin-review";
+import { adminSelectClassName } from "@/lib/admin/styles";
+import type { ApplicationStatus, ReviewDecision, ReviewQueueRow } from "@/types/admin-review";
 
 const PAGE_SIZE = 20;
 
@@ -26,6 +28,13 @@ const DECISION_OPTIONS: Array<{ value: ReviewDecision; label: string }> = [
   { value: "APPROVED", label: "Approve" },
   { value: "CHANGES_REQUESTED", label: "Request changes" },
   { value: "REJECTED", label: "Reject" },
+];
+
+const STATUS_OPTIONS: Array<{ value: ApplicationStatus; label: string }> = [
+  { value: "SUBMITTED", label: "Pending" },
+  { value: "APPROVED", label: "Approved" },
+  { value: "REJECTED", label: "Rejected" },
+  { value: "CHANGES_REQUESTED", label: "Changes requested" },
 ];
 
 function formatDate(value: string): string {
@@ -45,13 +54,24 @@ function formatDate(value: string): string {
 export function AdminReviewPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
+  const [status, setStatus] = useState<ApplicationStatus>("SUBMITTED");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [reviewTarget, setReviewTarget] = useState<ReviewQueueRow | null>(null);
   const [decision, setDecision] = useState<ReviewDecision>("APPROVED");
   const [notes, setNotes] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
   const [showReasonError, setShowReasonError] = useState(false);
 
-  const params = { limit: PAGE_SIZE, offset: page * PAGE_SIZE };
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  const params = { status, q: search || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE };
   const queueQuery = useQuery({
     queryKey: queryKeys.adminReviewQueue(params),
     queryFn: () => getReviewQueue(params),
@@ -118,6 +138,49 @@ export function AdminReviewPage() {
       title="Applications"
       description="Gate 1 — organizer application approval queue. Deciding here approves or rejects the organization's right to run this MUN; it does not review the MUN's content (see Verification)."
     >
+      <div className="flex flex-wrap items-end gap-md">
+        <div className="flex w-full max-w-md flex-col gap-xs">
+          <label htmlFor="applications-search" className="text-body-md font-medium text-ink">
+            Search
+          </label>
+          <div className="relative w-full">
+            <SearchIcon
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 left-md size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              id="applications-search"
+              type="search"
+              placeholder="MUN name, organizer name or email"
+              className="pl-xxl"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+            />
+          </div>
+        </div>
+        <div className="flex flex-col gap-xs">
+          <Label htmlFor="applications-status">Status</Label>
+          <select
+            id="applications-status"
+            className={adminSelectClassName}
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value as ApplicationStatus);
+              setPage(0);
+            }}
+          >
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="text-body-md text-muted-foreground">
+          {total === 0 ? "No applications" : `${total} application${total === 1 ? "" : "s"}`}
+        </p>
+      </div>
+
       {queueQuery.isLoading ? (
         <div className="flex flex-col gap-sm">
           {Array.from({ length: 5 }).map((_, index) => (
@@ -131,9 +194,15 @@ export function AdminReviewPage() {
       ) : results.length === 0 ? (
         <div className="flex flex-col items-center gap-sm rounded-md border border-dashed border-border bg-card px-lg py-xxl text-center">
           <ClipboardListIcon className="size-8 text-muted-foreground" strokeWidth={1.25} aria-hidden />
-          <p className="font-display text-title-md text-ink">Nothing waiting on a decision.</p>
+          <p className="font-display text-title-md text-ink">
+            {status === "SUBMITTED" ? "Nothing waiting on a decision." : "No applications match."}
+          </p>
           <p className="max-w-sm text-body-md text-muted-foreground">
-            New organizer applications land here once they're submitted for review.
+            {search
+              ? "Try a different name or email."
+              : status === "SUBMITTED"
+                ? "New organizer applications land here once they're submitted for review."
+                : "Try a different status."}
           </p>
         </div>
       ) : (
