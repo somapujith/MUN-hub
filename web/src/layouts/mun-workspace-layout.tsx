@@ -1,5 +1,6 @@
 import { Link, Navigate, Outlet, useParams } from "react-router";
 import { RequireOrganizer } from "@/guards/require-organizer";
+import { ReviewLockBanner } from "@/components/organizer/go-live/review-lock-banner";
 import { WorkspaceShell } from "@/components/organizer/workspace-shell";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -64,6 +65,7 @@ function MunWorkspace() {
 
   return (
     <WorkspaceShell muns={muns} currentMun={currentMun} role={role}>
+      <ReviewLockBanner mun={currentMun} />
       <Outlet />
     </WorkspaceShell>
   );

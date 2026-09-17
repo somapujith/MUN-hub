@@ -40,6 +40,72 @@ export interface MunGoLiveProgress {
 }
 
 /**
+ * Shape returned by `GET /muns/:munId/review-feedback`
+ * (lib/actions/go-live-dashboard.ts#getMunReviewFeedback). Everything MUN Hub
+ * reviewers told the organizer, across Gate 1 and Gate 2. Never internal notes.
+ */
+export interface MunReviewFeedback {
+  application: {
+    status: "DRAFT" | "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "CHANGES_REQUESTED";
+    reviewNotes: string | null;
+    submittedAt: string;
+  } | null;
+  submission: {
+    status: SubmissionStatus;
+    versionNumber: number;
+    submittedAt: string | null;
+    decidedAt: string | null;
+  } | null;
+  reviewerNotes: { id: string; status: string; notes: string; createdAt: string }[];
+  issues: {
+    id: string;
+    moduleName: string;
+    moduleLabel: string;
+    severity: ValidationCheck["severity"];
+    reason: string;
+    resolved: boolean;
+    createdAt: string;
+  }[];
+}
+
+type Row = Record<string, unknown>;
+
+/**
+ * Shape returned by `GET /muns/:munId/confirmation-preview`
+ * (lib/actions/go-live-dashboard.ts#getConfirmationPreview): the Gate-3
+ * snapshot plus the attestation text the organizer agrees to. Only the fields
+ * the summary reads are typed; payment ciphertext is never included.
+ */
+export interface ConfirmationPreview {
+  attestation: string;
+  snapshot: {
+    mun: {
+      name: string;
+      edition: string | null;
+      startDate: string | null;
+      endDate: string | null;
+      venue: string | null;
+      city: string | null;
+      country: string | null;
+      registrationOpensAt: string | null;
+      registrationDeadline: string | null;
+      accommodationProvided: "PROVIDED" | "NOT_PROVIDED" | null;
+    } | null;
+    committees: Row[];
+    portfolios: Row[];
+    registrationProducts: { id: string; name: string; price: number; capacity: number }[];
+    media: { kind: string }[];
+    executiveBoard: Row[];
+    formFields: Row[];
+    paymentSettings: { accountHolderName: string | null; bankName: string | null; accountNumberLast4: string | null } | null;
+    documents: { kind: string; title: string }[];
+    scheduleItems: Row[];
+    contact: { officialEmail: string | null; phone: string | null } | null;
+    accommodationOptions: Row[];
+  };
+}
+
+/**
  * Shape returned by `POST /muns/:munId/actions/submit-for-review`
  * (lib/lifecycle/go-live.ts#submitMunForReview). HTTP 200 either way — a
  * failed automated validation run is a normal result, not a thrown error.

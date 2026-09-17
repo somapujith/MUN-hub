@@ -1,4 +1,4 @@
-import type { MunSetupDetails } from "@/types/mun-config";
+import type { MunMediaItem, UploadMunMediaInput } from "@/types/mun-branding";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -18,15 +18,19 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-/**
- * Wraps lib/lifecycle/organizer-confirmation.ts#submitFinalConfirmation —
- * PRD Gate 3. Snapshots the submission and advances the mun from
- * CONTENT_SUBMITTED/ORGANIZER_CONFIRMATION to VERIFICATION. Organizer
- * (owning) or admin only. The API refuses unless `attested` is true.
- */
-export function submitFinalConfirmation(munId: string, attested: boolean) {
-  return request<MunSetupDetails>(`/muns/${munId}/actions/submit-final-confirmation`, {
+/** Wraps lib/actions/mun-branding.ts#listMunMedia. Unpublished MUNs: owner and staff only. */
+export function listMunMedia(munId: string) {
+  return request<MunMediaItem[]>(`/muns/${munId}/media`);
+}
+
+/** Wraps lib/actions/mun-branding.ts#uploadMunMedia. A new LOGO or COVER replaces the old one. */
+export function uploadMunMedia(munId: string, input: UploadMunMediaInput) {
+  return request<MunMediaItem>(`/muns/${munId}/media`, {
     method: "POST",
-    body: JSON.stringify({ attested }),
+    body: JSON.stringify(input),
   });
+}
+
+export function deleteMunMedia(mediaId: string) {
+  return request<void>(`/media/${mediaId}`, { method: "DELETE" });
 }

@@ -1,7 +1,9 @@
 import type {
+  ConfirmationPreview,
   GoLiveQueueParams,
   GoLiveQueueResult,
   MunGoLiveProgress,
+  MunReviewFeedback,
   MunSubmissionRow,
   PublishFromQueueResult,
   SubmitMunForReviewResult,
@@ -28,6 +30,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 /** Wraps lib/actions/go-live-dashboard.ts#getMunProgress — owning organizer or OPERATIONS/ADMIN/SUPER_ADMIN. */
 export function getMunProgress(munId: string) {
   return request<MunGoLiveProgress>(`/muns/${munId}/progress`);
+}
+
+/** Wraps lib/actions/go-live-dashboard.ts#getMunReviewFeedback — reviewer notes and issues from Gate 1 and Gate 2. */
+export function getMunReviewFeedback(munId: string) {
+  return request<MunReviewFeedback>(`/muns/${munId}/review-feedback`);
+}
+
+/** Wraps lib/actions/go-live-dashboard.ts#getConfirmationPreview — the Gate-3 summary and attestation text. */
+export function getConfirmationPreview(munId: string) {
+  return request<ConfirmationPreview>(`/muns/${munId}/confirmation-preview`);
 }
 
 /**

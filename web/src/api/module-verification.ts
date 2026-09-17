@@ -39,6 +39,17 @@ export function getModuleReviewQueue(params: ModuleReviewQueueParams = {}) {
 }
 
 /**
+ * Organizer's per-module "send for review" (`POST
+ * /muns/:munId/modules/:moduleName/actions/confirm`, wrapping `confirmModule`).
+ * Legal only from NOT_SUBMITTED or CHANGES_REQUESTED.
+ */
+export function confirmModule(munId: string, moduleName: MunModule) {
+  return request<ModuleVerificationRow>(`/muns/${munId}/modules/${moduleName}/actions/confirm`, {
+    method: "POST",
+  });
+}
+
+/**
  * Gate 2 reviewer decision on one module (`POST
  * /muns/:munId/modules/:moduleName/actions/review`, wrapping `reviewModule`).
  * Never route a Gate 1 application decision through this — use

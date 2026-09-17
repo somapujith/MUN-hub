@@ -1,7 +1,7 @@
 import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
-import { Download, FileText, Trash2, Upload } from "lucide-react";
+import { CheckCircle2, Circle, Download, FileText, Trash2, Upload } from "lucide-react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
 import { deleteMunDocument, listMunDocuments, uploadMunDocument } from "@/api/mun-documents";
@@ -11,47 +11,45 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BrandingUploads } from "@/components/organizer/branding-uploads";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
+import { readFileAsBase64 } from "@/lib/read-file-as-base64";
 import type { MunDocumentKind } from "@/types/mun-documents";
 
 // Mirrors lib/actions/mun-documents.ts's validateUpload — client-side check
 // only, the server is the source of truth and re-validates independently.
 const ALLOWED_CONTENT_TYPE = "application/pdf";
-const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
+const MAX_SIZE_MB = 10;
+const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
 
-const KIND_OPTIONS: Array<{ value: MunDocumentKind; label: string }> = [
-  { value: "RULES", label: "Rules of procedure" },
-  { value: "CODE_OF_CONDUCT", label: "Code of conduct" },
-  { value: "REFUND_POLICY", label: "Refund policy" },
-  { value: "BROCHURE", label: "Brochure" },
-  { value: "HANDBOOK", label: "Handbook" },
-  { value: "DELEGATE_GUIDE", label: "Delegate guide" },
-  { value: "POSITION_PAPER", label: "Position paper" },
-  { value: "OTHER", label: "Other" },
-];
+const KIND_LABELS: Record<MunDocumentKind, string> = {
+  RULES: "Rules of procedure",
+  CODE_OF_CONDUCT: "Code of conduct",
+  REFUND_POLICY: "Refund policy",
+  BROCHURE: "Brochure",
+  HANDBOOK: "Handbook",
+  DELEGATE_GUIDE: "Delegate guide",
+  POSITION_PAPER: "Position paper",
+  OTHER: "Other",
+};
+
+// MUN Hub has no refunds, so organizers can't upload a new refund policy.
+// Older uploads still show with their label.
+const KIND_OPTIONS = (Object.keys(KIND_LABELS) as MunDocumentKind[])
+  .filter((kind) => kind !== "REFUND_POLICY")
+  .map((value) => ({ value, label: KIND_LABELS[value] }));
+
+/** Required before submitting for review (lib/lifecycle/validators/operations.ts). */
+const REQUIRED_KINDS: MunDocumentKind[] = ["RULES", "CODE_OF_CONDUCT"];
 
 function kindLabel(kind: MunDocumentKind): string {
-  return KIND_OPTIONS.find((option) => option.value === kind)?.label ?? kind;
+  return KIND_LABELS[kind] ?? kind;
 }
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** Reads a File as raw base64 (strips the "data:...;base64," prefix the server doesn't want). */
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const commaIndex = result.indexOf(",");
-      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("Unable to read file"));
-    reader.readAsDataURL(file);
-  });
 }
 
 export function OrganizerDocumentsPage() {
@@ -68,7 +66,11 @@ export function OrganizerDocumentsPage() {
     enabled: Boolean(munId),
   });
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.munDocuments(munId) });
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.munDocuments(munId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.munProgress(munId) }),
+    ]);
 
   const resetForm = () => {
     setTitle("");
@@ -112,7 +114,7 @@ export function OrganizerDocumentsPage() {
       return;
     }
     if (file && file.size > MAX_SIZE_BYTES) {
-      toast.error("File too large — maximum allowed size is 20MB");
+      toast.error(`File too large — maximum allowed size is ${MAX_SIZE_MB}MB`);
       event.target.value = "";
       setSelectedFile(null);
       return;
@@ -135,13 +137,31 @@ export function OrganizerDocumentsPage() {
 
   return (
     <>
-      <Helmet title="Documents" />
+      <Helmet title="Documents & Media" />
       <WorkspacePage
-        title="Documents"
-        description="Background guides, rules of procedure, and other reference materials for delegates."
+        title="Documents & Media"
+        description="Your logo and cover image, plus rules of procedure, guides and other reference materials for delegates."
       >
+        <BrandingUploads munId={munId} />
         <div className="grid gap-lg xl:grid-cols-[minmax(0,1fr)_22rem]">
           <section aria-label="Uploaded documents" className="flex flex-col gap-md">
+            <div className="flex flex-wrap items-center gap-x-md gap-y-xxs text-body-md" data-testid="required-documents">
+              <span className="text-muted-foreground">Required to go live:</span>
+              {REQUIRED_KINDS.map((requiredKind) => {
+                const done = documents.some((document) => document.kind === requiredKind);
+                return (
+                  <span key={requiredKind} className="inline-flex items-center gap-xxs text-ink">
+                    {done ? (
+                      <CheckCircle2 className="size-4 text-success-text" aria-hidden />
+                    ) : (
+                      <Circle className="size-4 text-muted-foreground" aria-hidden />
+                    )}
+                    {kindLabel(requiredKind)}
+                    <span className="sr-only">{done ? " (uploaded)" : " (missing)"}</span>
+                  </span>
+                );
+              })}
+            </div>
             {documentsQuery.isLoading && (
               <p className="text-body-md text-muted-foreground">Loading documents...</p>
             )}
@@ -227,7 +247,7 @@ export function OrganizerDocumentsPage() {
                   </select>
                 </div>
                 <div className="flex flex-col gap-xs">
-                  <Label htmlFor="doc-file">PDF file (max 20MB)</Label>
+                  <Label htmlFor="doc-file">PDF file (max {MAX_SIZE_MB}MB)</Label>
                   <Input
                     id="doc-file"
                     ref={fileInputRef}
