@@ -14,6 +14,29 @@ export const RESET_REQUEST_COOLDOWN_MS = 60 * 1000
 /** …and at most this many per rolling hour. */
 export const RESET_REQUESTS_PER_HOUR = 3
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+type Executor = Tx | typeof db
+
+/**
+ * Stores a new single-use token for `userId` that `resetPassword` will
+ * accept until `expiresAt`, and returns the raw token to put in a
+ * `/reset-password?token=` link. Only the token's SHA-256 is stored, so
+ * the returned value is the one and only copy — any code minting reset or
+ * set-password links must go through here rather than inserting into
+ * `password_reset_tokens` itself. Pass a transaction as `executor` to write
+ * it atomically with other changes.
+ */
+export async function insertPasswordResetToken(
+  executor: Executor,
+  userId: string,
+  expiresAt: Date,
+  createdAt: Date = new Date(),
+): Promise<string> {
+  const token = generateOpaqueToken()
+  await executor.insert(passwordResetTokens).values({ userId, token: hashOpaqueToken(token), expiresAt, createdAt })
+  return token
+}
+
 /**
  * Starts a "forgot password" reset: if `email` matches an account, creates a
  * single-use, 1-hour token and emails a reset link via whichever adapter
@@ -36,9 +59,8 @@ export const RESET_REQUESTS_PER_HOUR = 3
  */
 export async function requestPasswordReset(email: string, appUrl: string): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase()
-  const token = generateOpaqueToken()
 
-  const recipient = await db.transaction(async (tx) => {
+  const issued = await db.transaction(async (tx) => {
     // Row lock on the user serializes concurrent requests for one account,
     // so the throttle below can't be raced past.
     const [user] = await tx
@@ -68,16 +90,12 @@ export async function requestPasswordReset(email: string, appUrl: string): Promi
       return null
     }
 
-    await tx.insert(passwordResetTokens).values({
-      userId: user.id,
-      token: hashOpaqueToken(token),
-      expiresAt: new Date(now.getTime() + RESET_TOKEN_TTL_MS),
-      createdAt: now,
-    })
-    return user
+    const token = await insertPasswordResetToken(tx, user.id, new Date(now.getTime() + RESET_TOKEN_TTL_MS), now)
+    return { recipient: user, token }
   })
 
-  if (!recipient) return
+  if (!issued) return
+  const { recipient, token } = issued
 
   const resetUrl = `${appUrl}/reset-password?token=${token}`
 

@@ -11,6 +11,7 @@ import { signIn } from './auth'
 import {
   RESET_REQUESTS_PER_HOUR,
   RESET_REQUEST_COOLDOWN_MS,
+  insertPasswordResetToken,
   requestPasswordReset,
   resetPassword,
 } from './password-reset'
@@ -117,6 +118,22 @@ describe('requestPasswordReset', () => {
     await ageTokens(user.id, 60 * 60 * 1000)
     await requestPasswordReset(user.email, 'http://localhost:3000')
     expect(await tokenRowsFor(user.id)).toHaveLength(RESET_REQUESTS_PER_HOUR + 1)
+  })
+})
+
+describe('insertPasswordResetToken', () => {
+  it('returns a raw token that resetPassword accepts, storing only its hash (also inside a transaction)', async () => {
+    const user = await createTestUser('original-password-1')
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+
+    const token = await db.transaction((tx) => insertPasswordResetToken(tx, user.id, expiresAt))
+
+    const [row] = await tokenRowsFor(user.id)
+    expect(row.token).toBe(hashOpaqueToken(token))
+    expect(row.expiresAt.getTime()).toBe(expiresAt.getTime())
+
+    await resetPassword(token, 'set-by-link-password')
+    await expect(signIn(user.email, 'set-by-link-password')).resolves.toMatchObject({ userId: user.id })
   })
 })
 
