@@ -14,9 +14,11 @@ import {
   munScheduleItems,
   munPaymentSettings,
   organizerApplications,
+  munModuleVerifications,
+  verificationIssues,
 } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
-import { submitFinalConfirmation } from './organizer-confirmation'
+import { and, eq } from 'drizzle-orm'
+import { ORGANIZER_ATTESTATION, submitFinalConfirmation } from './organizer-confirmation'
 
 async function makeUser(role: 'ORGANIZER' | 'STUDENT') {
   const [user] = await db
@@ -221,6 +223,69 @@ describe('submitFinalConfirmation', () => {
 
     const [unchanged] = await db.select().from(muns).where(eq(muns.id, mun.id)).limit(1)
     expect(unchanged.status).toBe('CONTENT_SUBMITTED')
+  })
+
+  it('refuses when the organizer has not ticked the attestation', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const { mun } = await makeCompleteMun(organizer.id, 'ORGANIZER_CONFIRMATION')
+
+    await expect(
+      submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' }, { attested: false }),
+    ).rejects.toThrow('You must confirm the submission is accurate and complete')
+
+    const [unchanged] = await db.select().from(muns).where(eq(muns.id, mun.id)).limit(1)
+    expect(unchanged.status).toBe('ORGANIZER_CONFIRMATION')
+  })
+
+  it('stores the attestation text and numbers each confirmation after the latest one', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const { mun } = await makeCompleteMun(organizer.id, 'ORGANIZER_CONFIRMATION')
+    await db.insert(organizerConfirmations).values([
+      { munId: mun.id, confirmingUserId: organizer.id, versionNumber: 1, snapshotJson: {} },
+      { munId: mun.id, confirmingUserId: organizer.id, versionNumber: 2, snapshotJson: {} },
+    ])
+
+    await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' }, { attested: true })
+
+    const rows = await db
+      .select()
+      .from(organizerConfirmations)
+      .where(and(eq(organizerConfirmations.munId, mun.id), eq(organizerConfirmations.versionNumber, 3)))
+    expect(rows).toHaveLength(1)
+    expect((rows[0].snapshotJson as { attestation: string }).attestation).toBe(ORGANIZER_ATTESTATION)
+  })
+
+  it('sends every module the organizer had not sent for review, and answers reviewer issues on them', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const { mun } = await makeCompleteMun(organizer.id, 'ORGANIZER_CONFIRMATION')
+    await db.insert(munModuleVerifications).values([
+      { munId: mun.id, moduleName: 'BASIC_INFO', state: 'NOT_SUBMITTED' },
+      { munId: mun.id, moduleName: 'COMMITTEES', state: 'CHANGES_REQUESTED' },
+      { munId: mun.id, moduleName: 'CONTACT', state: 'VERIFIED' },
+    ])
+    await db.insert(verificationIssues).values([
+      { munId: mun.id, moduleName: 'COMMITTEES', severity: 'HIGH', reason: 'Add the agenda', raisedBy: organizer.id, source: 'REVIEWER' },
+      { munId: mun.id, moduleName: 'CONTACT', severity: 'LOW', reason: 'Old note', raisedBy: organizer.id, source: 'REVIEWER' },
+    ])
+
+    await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' }, { attested: true })
+
+    const states = await db
+      .select({ moduleName: munModuleVerifications.moduleName, state: munModuleVerifications.state })
+      .from(munModuleVerifications)
+      .where(eq(munModuleVerifications.munId, mun.id))
+    const stateOf = Object.fromEntries(states.map((row) => [row.moduleName, row.state]))
+    expect(stateOf.BASIC_INFO).toBe('PENDING_REVIEW')
+    expect(stateOf.COMMITTEES).toBe('PENDING_REVIEW')
+    expect(stateOf.CONTACT).toBe('VERIFIED')
+
+    const issues = await db
+      .select({ moduleName: verificationIssues.moduleName, resolved: verificationIssues.resolved })
+      .from(verificationIssues)
+      .where(eq(verificationIssues.munId, mun.id))
+    const resolvedOf = Object.fromEntries(issues.map((row) => [row.moduleName, row.resolved]))
+    expect(resolvedOf.COMMITTEES).toBe(true)
+    expect(resolvedOf.CONTACT).toBe(false)
   })
 })
 

@@ -107,6 +107,26 @@ describe('confirmModule', () => {
     await expect(confirmModule(mun.id, 'PORTFOLIOS', { userId: stranger.id, role: 'ORGANIZER' })).rejects.toThrow('Forbidden')
   })
 
+  it("re-confirming after changes were requested resolves the reviewer's issues on that module only", async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const reviewer = await makeUser('OPERATIONS')
+    const mun = await makeMun(organizer.id)
+    const organizerSession = { userId: organizer.id, role: 'ORGANIZER' as const }
+    const reviewerSession = { userId: reviewer.id, role: 'OPERATIONS' as const }
+
+    await confirmModule(mun.id, 'COMMITTEES', organizerSession)
+    await reviewModule(mun.id, 'COMMITTEES', 'CHANGES_REQUESTED', [{ severity: 'BLOCKER', reason: 'Add agendas' }], reviewerSession)
+    await confirmModule(mun.id, 'CONTACT', organizerSession)
+    await reviewModule(mun.id, 'CONTACT', 'CHANGES_REQUESTED', [{ severity: 'HIGH', reason: 'Fix phone' }], reviewerSession)
+
+    const result = await confirmModule(mun.id, 'COMMITTEES', organizerSession)
+    expect(result.state).toBe('PENDING_REVIEW')
+
+    const issues = await db.select().from(verificationIssues).where(eq(verificationIssues.munId, mun.id))
+    const byModule = Object.fromEntries(issues.map((issue) => [issue.moduleName, issue.resolved]))
+    expect(byModule).toEqual({ COMMITTEES: true, CONTACT: false })
+  })
+
   it('rejects confirming a module that is already PENDING_REVIEW', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id)

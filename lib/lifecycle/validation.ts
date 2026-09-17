@@ -115,8 +115,11 @@ export interface MunValidationContext {
  * treat a `null` as "not submitted," which is itself often the failing
  * check (e.g. PAYMENT_SETTLEMENT's "details submitted" BLOCKER).
  */
-export async function loadValidationContext(munId: string): Promise<MunValidationContext> {
-  const [mun] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
+/** A drizzle client or an open transaction — reads go through whichever the caller is using. */
+export type ValidationReader = Pick<typeof db, 'select'>
+
+export async function loadValidationContext(munId: string, client: ValidationReader = db): Promise<MunValidationContext> {
+  const [mun] = await client.select().from(muns).where(eq(muns.id, munId)).limit(1)
   if (!mun) {
     throw new Error(`Mun "${munId}" not found`)
   }
@@ -136,12 +139,12 @@ export async function loadValidationContext(munId: string): Promise<MunValidatio
     moduleRows,
     unresolvedIssues,
   ] = await Promise.all([
-    db.select().from(organizerApplications).where(eq(organizerApplications.munId, munId)).limit(1),
-    db.select().from(committees).where(eq(committees.munId, munId)),
-    db.select().from(registrationProducts).where(eq(registrationProducts.munId, munId)),
-    db.select().from(munExecutiveBoard).where(eq(munExecutiveBoard.munId, munId)),
-    db.select().from(munFormFields).where(eq(munFormFields.munId, munId)),
-    db
+    client.select().from(organizerApplications).where(eq(organizerApplications.munId, munId)).limit(1),
+    client.select().from(committees).where(eq(committees.munId, munId)),
+    client.select().from(registrationProducts).where(eq(registrationProducts.munId, munId)),
+    client.select().from(munExecutiveBoard).where(eq(munExecutiveBoard.munId, munId)),
+    client.select().from(munFormFields).where(eq(munFormFields.munId, munId)),
+    client
       .select({
         id: munPaymentSettings.id,
         munId: munPaymentSettings.munId,
@@ -174,13 +177,13 @@ export async function loadValidationContext(munId: string): Promise<MunValidatio
       .from(munPaymentSettings)
       .where(eq(munPaymentSettings.munId, munId))
       .limit(1),
-    db.select().from(munDocuments).where(eq(munDocuments.munId, munId)),
-    db.select().from(munScheduleItems).where(eq(munScheduleItems.munId, munId)),
-    db.select().from(munContacts).where(eq(munContacts.munId, munId)).limit(1),
-    db.select().from(munMedia).where(eq(munMedia.munId, munId)),
-    db.select().from(accommodationOptions).where(eq(accommodationOptions.munId, munId)),
-    db.select().from(munModuleVerifications).where(eq(munModuleVerifications.munId, munId)),
-    db
+    client.select().from(munDocuments).where(eq(munDocuments.munId, munId)),
+    client.select().from(munScheduleItems).where(eq(munScheduleItems.munId, munId)),
+    client.select().from(munContacts).where(eq(munContacts.munId, munId)).limit(1),
+    client.select().from(munMedia).where(eq(munMedia.munId, munId)),
+    client.select().from(accommodationOptions).where(eq(accommodationOptions.munId, munId)),
+    client.select().from(munModuleVerifications).where(eq(munModuleVerifications.munId, munId)),
+    client
       .select()
       .from(verificationIssues)
       .where(and(eq(verificationIssues.munId, munId), eq(verificationIssues.resolved, false))),
@@ -195,10 +198,10 @@ export async function loadValidationContext(munId: string): Promise<MunValidatio
 
   const [portfolioRows, accommodationOptionFieldRows] = await Promise.all([
     committeeIds.length > 0
-      ? db.select().from(portfolios).where(inArray(portfolios.committeeId, committeeIds))
+      ? client.select().from(portfolios).where(inArray(portfolios.committeeId, committeeIds))
       : Promise.resolve([]),
     accommodationOptionIds.length > 0
-      ? db
+      ? client
           .select()
           .from(accommodationOptionFields)
           .where(inArray(accommodationOptionFields.optionId, accommodationOptionIds))
@@ -276,8 +279,10 @@ export function modulePassed(checks: ValidationCheck[]): boolean {
 export async function validateMunForSubmission(
   munId: string,
   opts?: ValidateMunForSubmissionOptions,
+  /** Pass the caller's transaction so validation sees writes it hasn't committed yet. */
+  client: ValidationReader = db,
 ): Promise<MunValidationResult> {
-  const baseCtx = await loadValidationContext(munId)
+  const baseCtx = await loadValidationContext(munId, client)
   const ctx: MunValidationContext = { ...baseCtx, stage: opts?.stage ?? 'SUBMIT' }
 
   const modules = MODULE_REGISTRY.map((moduleDefinition) => moduleDefinition.validate(ctx))

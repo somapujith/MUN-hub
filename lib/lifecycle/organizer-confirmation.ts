@@ -1,6 +1,8 @@
-import { eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
+  munModuleVerifications,
+  verificationIssues,
   muns,
   committees,
   portfolios,
@@ -127,6 +129,14 @@ export async function buildSnapshot(munId: string) {
 const CONFIRMABLE_STATUSES = ['CONTENT_SUBMITTED', 'ORGANIZER_CONFIRMATION'] as const
 
 /**
+ * What the organizer attests to at Gate 3. Stored inside the confirmation
+ * snapshot, so a later change to this wording never rewrites what an
+ * earlier organizer actually agreed to.
+ */
+export const ORGANIZER_ATTESTATION =
+  'I confirm that everything in this submission is accurate and complete, that I am authorized to publish this conference on MUN Hub, and that I will keep these details up to date. I understand MUN Hub will review every section before it goes live.'
+
+/**
  * Organizer Final Confirmation (PRD Section 14, Gate 3): the organizer
  * reviews a complete summary of their submission and confirms it's accurate,
  * complete, and authorized for publication. Snapshots the current mun + all
@@ -146,8 +156,16 @@ const CONFIRMABLE_STATUSES = ['CONTENT_SUBMITTED', 'ORGANIZER_CONFIRMATION'] as 
  * A validation regression here throws — the transaction never opens, no
  * transition is attempted, nothing is left half-confirmed.
  */
-export async function submitFinalConfirmation(munId: string, session: Session | null): Promise<Mun> {
+export async function submitFinalConfirmation(
+  munId: string,
+  session: Session | null,
+  /** The HTTP route always passes this; `attested` must be true when it's given. */
+  opts?: { attested: boolean },
+): Promise<Mun> {
   if (!session) throw new Error('Forbidden')
+  if (opts && opts.attested !== true) {
+    throw new Error('You must confirm the submission is accurate and complete')
+  }
 
   const [mun] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
   if (!mun) throw new Error('Mun not found')
@@ -168,16 +186,52 @@ export async function submitFinalConfirmation(munId: string, session: Session | 
     .select({ versionNumber: organizerConfirmations.versionNumber })
     .from(organizerConfirmations)
     .where(eq(organizerConfirmations.munId, munId))
-    .orderBy(organizerConfirmations.versionNumber)
+    .orderBy(desc(organizerConfirmations.versionNumber))
+    .limit(1)
 
   const nextVersion = (priorConfirmation?.versionNumber ?? 0) + 1
   const snapshot = await buildSnapshot(munId)
 
-  await db.insert(organizerConfirmations).values({
-    munId,
-    confirmingUserId: session.userId,
-    versionNumber: nextVersion,
-    snapshotJson: snapshot,
+  await db.transaction(async (tx) => {
+    await tx.insert(organizerConfirmations).values({
+      munId,
+      confirmingUserId: session.userId,
+      versionNumber: nextVersion,
+      snapshotJson: { ...snapshot, attestation: ORGANIZER_ATTESTATION },
+    })
+
+    // The whole-submission attestation covers every module, so any module the
+    // organizer hadn't individually sent for review (or that a reviewer sent
+    // back and they've since fixed) goes to PENDING_REVIEW now. Reviewers can
+    // then act on each one. Their feedback on those modules is answered.
+    const now = new Date()
+    const sentBack = await tx
+      .select({ moduleName: munModuleVerifications.moduleName })
+      .from(munModuleVerifications)
+      .where(
+        and(
+          eq(munModuleVerifications.munId, munId),
+          inArray(munModuleVerifications.state, ['NOT_SUBMITTED', 'CHANGES_REQUESTED']),
+        ),
+      )
+    if (sentBack.length > 0) {
+      const moduleNames = sentBack.map((row) => row.moduleName)
+      await tx
+        .update(munModuleVerifications)
+        .set({ state: 'PENDING_REVIEW', organizerConfirmedAt: now, updatedAt: now })
+        .where(and(eq(munModuleVerifications.munId, munId), inArray(munModuleVerifications.moduleName, moduleNames)))
+      await tx
+        .update(verificationIssues)
+        .set({ resolved: true, resolvedAt: now })
+        .where(
+          and(
+            eq(verificationIssues.munId, munId),
+            inArray(verificationIssues.moduleName, moduleNames),
+            eq(verificationIssues.source, 'REVIEWER'),
+            eq(verificationIssues.resolved, false),
+          ),
+        )
+    }
   })
 
   // Skip the redundant transition when submitMunForReview already moved the

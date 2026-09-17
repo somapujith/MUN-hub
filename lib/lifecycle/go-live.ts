@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { adminActions, muns, munSubmissions, munVersions, verificationIssues } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
@@ -127,6 +127,16 @@ export async function submitMunForReview(munId: string, session: Session | null)
       throw new Error(`Cannot submit mun for review from status ${mun.status}`)
     }
 
+    // A submission a reviewer sent back (CHANGES_REQUESTED) is still "active"
+    // by the partial unique index's predicate, which used to make every
+    // resubmission fail with 409. Resubmitting closes that round: the old row
+    // becomes WITHDRAWN and a new versioned row is opened below.
+    const closedAt = new Date()
+    await tx
+      .update(munSubmissions)
+      .set({ status: 'WITHDRAWN', slaState: 'COMPLETED', decidedAt: closedAt, updatedAt: closedAt })
+      .where(and(eq(munSubmissions.munId, munId), eq(munSubmissions.status, 'CHANGES_REQUESTED')))
+
     // Friendly pre-check mirroring the partial unique index's predicate
     // exactly. Not the primary defense (see docstring) — under a real race
     // the mun row lock above already serializes concurrent callers of THIS
@@ -162,23 +172,32 @@ export async function submitMunForReview(munId: string, session: Session | null)
     // Step 3: AUTOMATED_VALIDATION (audit-logged — brief, PRD-observable state).
     await transitionMun(munId, 'AUTOMATED_VALIDATION', session.userId, 'Running automated validation', undefined, tx)
 
-    // Step 4: run the Task 9 validation engine (stage defaults to SUBMIT).
-    const validationResult = await validateMunForSubmission(munId)
-
-    // Step 5: mark PRIOR unresolved AUTOMATED-source issues resolved BEFORE
-    // inserting new ones, so a resubmission doesn't accumulate stale machine
-    // issues. REVIEWER-sourced issues are untouched — only a human reviewer
-    // clears those.
+    // Step 4: close out the previous round's issues BEFORE validating, and
+    // validate inside this transaction so the validator sees that:
+    //   - prior AUTOMATED issues are re-derived from scratch on every run, so
+    //     they're resolved first (previously they were resolved only after
+    //     validation, so FINAL_REVIEW always counted the last round's stale
+    //     blockers and no resubmission could ever pass);
+    //   - REVIEWER feedback on the submission as a whole (FINAL_REVIEW) is
+    //     answered by resubmitting. Module-level reviewer issues are answered
+    //     by re-confirming that module (confirmModule).
+    const resolvedAt = new Date()
     await tx
       .update(verificationIssues)
-      .set({ resolved: true, resolvedAt: new Date() })
+      .set({ resolved: true, resolvedAt })
       .where(
         and(
           eq(verificationIssues.munId, munId),
-          eq(verificationIssues.source, 'AUTOMATED'),
           eq(verificationIssues.resolved, false),
+          or(
+            eq(verificationIssues.source, 'AUTOMATED'),
+            and(eq(verificationIssues.source, 'REVIEWER'), eq(verificationIssues.moduleName, 'FINAL_REVIEW')),
+          ),
         ),
       )
+
+    // Step 5: run the Task 9 validation engine (stage defaults to SUBMIT).
+    const validationResult = await validateMunForSubmission(munId, undefined, tx)
 
     if (validationResult.blockers.length > 0) {
       await tx.insert(verificationIssues).values(

@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, munModuleVerifications, verificationIssues } from '@/lib/db/schema'
 import type { MunModule, MunStatus, ModuleCompletionStatus, ModuleVerificationState } from '@/lib/db/schema-enums'
@@ -277,15 +277,18 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
 
     // Single batched read for this whole aggregation pass — see this
     // function's docstring.
-    const validationContext = await loadValidationContext(munId)
+    // Read through this transaction so the context matches the rows it writes.
+    const validationContext = await loadValidationContext(munId, transaction)
 
     const moduleProgress: ModuleProgressRow[] = []
+    const failingKeysByModule = new Map<string, Set<string>>()
 
     for (const moduleKey of TRACKED_MODULES) {
       const existingRow = rowsByModule.get(moduleKey)
       const isRequired = existingRow ? existingRow.isRequired : getModuleDefinition(moduleKey).defaultRequired
 
       const result = await computeModuleCompletion(munId, moduleKey, validationContext)
+      failingKeysByModule.set(moduleKey, new Set(result.issues.map((issue) => issue.key)))
       await persistModuleCompletion(transaction, munId, moduleKey, result, mun.status)
 
       moduleProgress.push({
@@ -296,6 +299,23 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
         isRequired,
         verificationState: existingRow?.state ?? 'NOT_SUBMITTED',
       })
+    }
+
+    // An AUTOMATED issue is a failed check from a submission attempt; once
+    // that check passes again the issue is stale, so resolve it here rather
+    // than leaving the dashboard counting blockers the organizer already fixed.
+    // FINAL_REVIEW is skipped: its one check counts the other open issues.
+    const openAutomated = validationContext.unresolvedIssues.filter(
+      (issue) => issue.source === 'AUTOMATED' && issue.code != null && issue.moduleName !== 'FINAL_REVIEW',
+    )
+    const fixedIssueIds = openAutomated
+      .filter((issue) => !failingKeysByModule.get(issue.moduleName)?.has(issue.code!))
+      .map((issue) => issue.id)
+    if (fixedIssueIds.length > 0) {
+      await transaction
+        .update(verificationIssues)
+        .set({ resolved: true, resolvedAt: new Date() })
+        .where(and(inArray(verificationIssues.id, fixedIssueIds), eq(verificationIssues.resolved, false)))
     }
 
     const requiredModules = moduleProgress.filter((m) => m.isRequired)

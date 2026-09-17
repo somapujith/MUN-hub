@@ -369,6 +369,33 @@ describe('mun-config actions', () => {
       expect(datesVenue.completionStatus).toBe('COMPLETE')
     })
 
+    it('refuses a registration window that would close registration by accident', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const mun = await makeMun(organizer.id, { status: 'ONBOARDING' })
+      const session = sessionFor(organizer)
+
+      await expect(
+        updateMunDetails(
+          mun.id,
+          { registrationOpensAt: new Date('2027-03-01'), registrationDeadline: new Date('2027-01-01') },
+          session,
+        ),
+      ).rejects.toThrow('Registration deadline must be after registration opens')
+
+      await updateMunDetails(
+        mun.id,
+        { startDate: new Date('2027-03-10'), registrationOpensAt: new Date('2027-01-01'), registrationDeadline: new Date('2027-03-01') },
+        session,
+      )
+      // Moving only the start date before the saved deadline is checked against the saved deadline.
+      await expect(updateMunDetails(mun.id, { startDate: new Date('2027-02-15') }, session)).rejects.toThrow(
+        'Registration deadline must be before the conference starts',
+      )
+      // Clearing the deadline is allowed.
+      const cleared = await updateMunDetails(mun.id, { registrationDeadline: null }, session)
+      expect(cleared.registrationDeadline).toBeNull()
+    })
+
     it('rejects a non-owning organizer', async () => {
       const owner = await makeUser('ORGANIZER')
       const stranger = await makeUser('ORGANIZER')

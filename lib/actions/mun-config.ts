@@ -374,6 +374,26 @@ export async function getMunDetails(munId: string, session: Session | null): Pro
   return mun
 }
 
+/**
+ * Registration eligibility enforces the window, so an inverted one silently
+ * closes registration. Checked only when this write touches one of the three
+ * dates, against the values the row will have afterwards.
+ */
+function assertRegistrationWindow(existing: Mun, input: UpdateMunDetailsInput): void {
+  const touched = ['registrationOpensAt', 'registrationDeadline', 'startDate'].some((key) => key in input)
+  if (!touched) return
+  const opensAt = 'registrationOpensAt' in input ? input.registrationOpensAt : existing.registrationOpensAt
+  const deadline = 'registrationDeadline' in input ? input.registrationDeadline : existing.registrationDeadline
+  const startDate = 'startDate' in input ? input.startDate : existing.startDate
+  if (!deadline) return
+  if (opensAt && opensAt.getTime() >= deadline.getTime()) {
+    throw new Error('Registration deadline must be after registration opens')
+  }
+  if (startDate && deadline.getTime() >= startDate.getTime()) {
+    throw new Error('Registration deadline must be before the conference starts')
+  }
+}
+
 /** Updates the mun's own editable fields. Organizer-only (or admin) — never touches status. */
 export async function updateMunDetails(
   munId: string,
@@ -388,6 +408,7 @@ export async function updateMunDetails(
 
   const [existing] = await db.select().from(muns).where(eq(muns.id, munId)).limit(1)
   if (!existing) throw new Error('Mun not found')
+  assertRegistrationWindow(existing, input)
 
   const [updated] = await db
     .update(muns)

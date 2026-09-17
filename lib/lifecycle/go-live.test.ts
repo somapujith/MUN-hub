@@ -21,6 +21,7 @@ import {
 } from '@/lib/db/schema'
 import { enqueueForGoLive, getGoLiveQueue, publishFromQueue, reviewSubmission, submitMunForReview } from './go-live'
 import { submitFinalConfirmation } from './organizer-confirmation'
+import { updateMunDetails } from '@/lib/actions/mun-config'
 
 async function makeUser(role: 'ORGANIZER' | 'ADMIN' = 'ORGANIZER') {
   const [user] = await db
@@ -232,6 +233,64 @@ describe('submitMunForReview', () => {
     // rounds, but only the second round's rows remain unresolved.
     expect(resolved.length).toBe(firstCount)
     expect(unresolved.length).toBe(second.blockers.length)
+  })
+
+  it('a resubmission passes once the organizer fixes what failed (stale blockers no longer count)', async () => {
+    const organizer = await makeUser()
+    const session = { userId: organizer.id, role: 'ORGANIZER' as const }
+    const mun = await makeCompleteMun(organizer.id)
+    await db.update(muns).set({ venue: null }).where(eq(muns.id, mun.id))
+
+    const first = await submitMunForReview(mun.id, session)
+    expect(first.passed).toBe(false)
+    expect(first.blockers.map((b) => b.key)).toEqual(['venue_present'])
+
+    await db.update(muns).set({ venue: 'Convention Centre' }).where(eq(muns.id, mun.id))
+    const second = await submitMunForReview(mun.id, session)
+    expect(second).toMatchObject({ passed: true, blockers: [] })
+  })
+
+  it('fixing a failed check resolves its automated issue on the next progress recompute', async () => {
+    const organizer = await makeUser()
+    const mun = await makeCompleteMun(organizer.id)
+    await db.update(muns).set({ venue: null }).where(eq(muns.id, mun.id))
+    await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
+
+    await updateMunDetails(mun.id, { venue: 'Convention Centre' }, { userId: organizer.id, role: 'ORGANIZER' })
+
+    const open = await db
+      .select()
+      .from(verificationIssues)
+      .where(and(eq(verificationIssues.munId, mun.id), eq(verificationIssues.resolved, false)))
+    expect(open.filter((issue) => issue.code === 'venue_present')).toHaveLength(0)
+  })
+
+  it('after Gate-2 changes are requested, the organizer can resubmit and the old round is closed', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun, submissionId } = await makeMunAtVerification(organizer)
+    await reviewSubmission(
+      mun.id,
+      'CHANGES_REQUESTED',
+      { notes: 'Please double-check the schedule', issues: [{ severity: 'BLOCKER', reason: 'Schedule looks wrong' }] },
+      { userId: admin.id, role: 'ADMIN' },
+    )
+
+    const resubmitted = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
+    expect(resubmitted.passed).toBe(true)
+    expect(resubmitted.isResubmission).toBe(true)
+
+    const [oldRound] = await db.select().from(munSubmissions).where(eq(munSubmissions.id, submissionId))
+    expect(oldRound.status).toBe('WITHDRAWN')
+    const [newRound] = await db.select().from(munSubmissions).where(eq(munSubmissions.id, resubmitted.submissionId!))
+    expect(newRound).toMatchObject({ status: 'SUBMITTED', versionNumber: 2 })
+
+    const reviewerIssues = await db
+      .select()
+      .from(verificationIssues)
+      .where(and(eq(verificationIssues.munId, mun.id), eq(verificationIssues.source, 'REVIEWER')))
+    expect(reviewerIssues).toHaveLength(1)
+    expect(reviewerIssues[0].resolved).toBe(true)
   })
 
   it('succeeds for a complete mun: returns passed, opens a submission row with a future SLA deadline in ON_TRACK state', async () => {

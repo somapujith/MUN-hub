@@ -126,11 +126,27 @@ export async function confirmModule(munId: string, moduleName: MunModule, sessio
       throw new Error(`Module "${moduleName}" cannot be confirmed from its current state (${current.state})`)
     }
 
+    const now = new Date()
     const [updated] = await tx
       .update(munModuleVerifications)
-      .set({ state: 'PENDING_REVIEW', organizerConfirmedAt: new Date(), updatedAt: new Date() })
+      .set({ state: 'PENDING_REVIEW', organizerConfirmedAt: now, updatedAt: now })
       .where(eq(munModuleVerifications.id, current.id))
       .returning()
+
+    // Re-confirming a module is the organizer's answer to the reviewer's
+    // feedback on it: close those issues so they stop blocking FINAL_REVIEW.
+    // The rows stay (resolved, with a timestamp) as review history.
+    await tx
+      .update(verificationIssues)
+      .set({ resolved: true, resolvedAt: now })
+      .where(
+        and(
+          eq(verificationIssues.munId, munId),
+          eq(verificationIssues.moduleName, moduleName),
+          eq(verificationIssues.source, 'REVIEWER'),
+          eq(verificationIssues.resolved, false),
+        ),
+      )
     return updated
   })
 }
