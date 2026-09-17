@@ -31,22 +31,26 @@ Default port: **3001** (`PORT` env overrides).
 | Variable | Default | Purpose |
 |---|---|---|
 | `PORT` | `3001` | HTTP listen port |
-| `CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed origins, exact match. In addition, any `https://*.munhub.in` origin is always allowed (role + per-MUN wildcard subdomains — see `docs/superpowers/specs/2026-09-17-subdomain-architecture-design.md`) |
+| `CORS_ORIGINS` | *(empty)* | Extra trusted origins, comma-separated, exact match. `https://munhub.in`, `www.`, `app.`, `publish.`, `organize.` and `admin.munhub.in` are always trusted (credentialed CORS + CSRF). Per-MUN slug hosts (`<slug>.munhub.in`) only get non-credentialed CORS on GET/HEAD — see `server/lib/origins.ts` |
+| `ALLOW_LOCALHOST_ORIGINS` | *(unset)* | `true` trusts `http://localhost:<port>` and `http://127.0.0.1:<port>` — local dev/tests only, never in a deployed environment |
 | `COOKIE_DOMAIN` | *(unset = host-only cookie)* | Set to `.munhub.in` in production so the session cookie is shared across `app.`/`organize.`/`admin.munhub.in` |
 | `AUTH_ADAPTER` | *(unset = mock)* | Must be non-`mock` when `NODE_ENV=production` |
 | `NODE_ENV` | `development` | Production triggers auth boot-guard |
 
 ## Middleware order
 
-1. request-id
-2. logger
-3. CORS
-4. session (`mun_hub_session` → `getSessionByToken`)
-5. **Webhooks** at `/webhooks/*` (outside CSRF)
-6. CSRF (Origin/Referer on POST/PATCH/PUT/DELETE under `/api/v1`)
-7. rate-limit (spec Section 4.6)
-8. `/api/v1` routes
-9. error handler (spec Section 3.4)
+1. runtime-env + hyperdrive bridges (Workers)
+2. request-id
+3. security headers (HSTS, nosniff, `default-src 'none'` CSP, …)
+4. logger
+5. CORS (`server/middleware/cors.ts`)
+6. body limit (1 MB; 30 MB for document/media uploads; JSON 413)
+7. session (`mun_hub_session` → `getSessionByToken`)
+8. **Webhooks** at `/webhooks/*` (outside CSRF)
+9. CSRF (Origin/Referer on POST/PATCH/PUT/DELETE under `/api/v1`, trusted origins only)
+10. rate-limit (spec Section 4.6)
+11. `/api/v1` routes
+12. JSON 404 + error handler (spec Section 3.4)
 
 ## Mount points for route modules
 
