@@ -13,6 +13,8 @@ export default defineConfig({
     testTimeout: 15000,
     // E2E/ holds Playwright specs (run via `npm run test:e2e`), which
     // Vitest's default *.spec.ts glob would otherwise try to execute.
-    exclude: [...configDefaults.exclude, 'E2E/**'],
+    // .claude/ holds agent git worktrees whose test files import code that
+    // only exists on their own branches.
+    exclude: [...configDefaults.exclude, 'E2E/**', '.claude/**'],
   },
 })
