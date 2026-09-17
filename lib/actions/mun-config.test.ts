@@ -449,6 +449,61 @@ describe('mun-config actions', () => {
       expect(cleared.registrationDeadline).toBeNull()
     })
 
+    describe('on a live MUN', () => {
+      const liveVenue = {
+        startDate: new Date('2027-03-10'),
+        endDate: new Date('2027-03-12'),
+        venue: 'Convention Centre',
+        addressLine1: '12 Lake Road',
+        addressState: 'Telangana',
+        postalCode: '500001',
+        city: 'Hyderabad',
+        country: 'India',
+        mapUrl: 'https://maps.example/venue',
+        registrationOpensAt: new Date('2027-01-01'),
+        registrationDeadline: new Date('2027-03-01'),
+      }
+
+      async function statusAfter(input: Parameters<typeof updateMunDetails>[1]) {
+        const organizer = await makeUser('ORGANIZER')
+        const mun = await makeMun(organizer.id, { status: 'PUBLISHED', ...liveVenue })
+        await db.insert(munModuleVerifications).values({ munId: mun.id, moduleName: 'DATES_VENUE', state: 'VERIFIED' })
+
+        await updateMunDetails(mun.id, input, sessionFor(organizer))
+        const [datesVenue] = await db
+          .select({ state: munModuleVerifications.state })
+          .from(munModuleVerifications)
+          .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'DATES_VENUE')))
+        const [after] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+        return { status: after.status, moduleState: datesVenue.state }
+      }
+
+      it.each([
+        ['addressLine1', { addressLine1: '99 Other Street' }],
+        ['addressLine1 cleared', { addressLine1: null }],
+        ['addressState', { addressState: 'Karnataka' }],
+        ['postalCode', { postalCode: '560001' }],
+        ['mapUrl', { mapUrl: 'https://attacker.example/pin' }],
+        ['venue', { venue: 'Another Hall' }],
+      ] as const)('sends it back to review when %s changes', async (_label, input) => {
+        expect(await statusAfter(input)).toEqual({ status: 'VERIFICATION', moduleState: 'PENDING_REVIEW' })
+      })
+
+      it('keeps it live when the setup form re-sends unchanged venue details or edits the theme', async () => {
+        expect(await statusAfter({ ...liveVenue, theme: 'A fresh theme' })).toEqual({
+          status: 'PUBLISHED',
+          moduleState: 'VERIFIED',
+        })
+      })
+
+      it('keeps it live when only registrationOpensAt changes — moving it earlier is the documented remedy for a not-yet-open live MUN', async () => {
+        expect(await statusAfter({ registrationOpensAt: new Date('2027-01-15') })).toEqual({
+          status: 'PUBLISHED',
+          moduleState: 'VERIFIED',
+        })
+      })
+    })
+
     it('rejects a non-owning organizer', async () => {
       const owner = await makeUser('ORGANIZER')
       const stranger = await makeUser('ORGANIZER')

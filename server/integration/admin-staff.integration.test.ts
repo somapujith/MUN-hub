@@ -146,13 +146,14 @@ describe('staff writes', () => {
   // The MFA reset lives in staff-mfa.ts but is a staff write like any other:
   // clearing your own MFA here would sidestep the code /auth/mfa/disable asks
   // for, and an arbitrary id would answer 204 for students or unknown users.
-  it('the MFA reset refuses your own account (409), a non-staff target and an unknown id (404)', async () => {
+  it('resets another staff member’s 2FA (204), but not your own (409) or a non-staff/unknown account (404)', async () => {
     const superAdmin = await makeUser('SUPER_ADMIN')
     const student = await makeUser('STUDENT')
     const target = await makeUser('ADMIN')
 
     const self = await call(superAdmin.id, 'POST', `/admin/staff/${superAdmin.id}/mfa/reset`)
     expect(self.status).toBe(409)
+    expect((await self.json()).error.code).toBe('CONFLICT_STATE')
 
     const notStaff = await call(superAdmin.id, 'POST', `/admin/staff/${student.id}/mfa/reset`)
     expect(notStaff.status).toBe(404)

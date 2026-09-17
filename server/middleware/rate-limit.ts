@@ -123,11 +123,6 @@ function perUser(limiter: LimiterSpec, sessionUserId: string | null): Check[] {
   return sessionUserId ? [{ limiter, key: `user:${sessionUserId}` }] : []
 }
 
-/** Both self-service MFA management routes share one per-user budget. */
-function mfaManageChecks({ ip, sessionUserId }: RequestFacts): Check[] {
-  return [{ limiter: LIMITERS.mfaManageUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` }]
-}
-
 function matchesPath(rule: LimitRule, path: string): boolean {
   if (typeof rule.path !== 'string') return rule.path.test(path)
   return rule.prefix ? path.startsWith(rule.path) : rule.path === path
@@ -187,16 +182,16 @@ const RULES: LimitRule[] = [
       ...(pendingToken ? [{ limiter: LIMITERS.mfaVerifyToken, key: `token:${pendingToken}` }] : []),
     ],
   },
-  {
-    method: 'POST',
-    path: '/auth/mfa/disable',
-    checks: mfaManageChecks,
-  },
-  {
-    method: 'POST',
-    path: '/auth/mfa/recovery-codes',
-    checks: mfaManageChecks,
-  },
+  // One budget shared by both routes, so alternating between them doesn't double it.
+  ...['/auth/mfa/disable', '/auth/mfa/recovery-codes'].map(
+    (path): LimitRule => ({
+      method: 'POST',
+      path,
+      checks: ({ ip, sessionUserId }) => [
+        { limiter: LIMITERS.mfaManageUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
+      ],
+    }),
+  ),
   {
     method: 'POST',
     path: '/auth/organizers/code',

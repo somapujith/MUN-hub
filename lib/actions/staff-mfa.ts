@@ -152,6 +152,9 @@ export async function confirmMfaEnrollment(code: string, session: Session): Prom
   return { recoveryCodes }
 }
 
+/** The only shape `generateRecoveryCode` produces. */
+const RECOVERY_CODE_PATTERN = /^[0-9A-F]{5}-[0-9A-F]{5}$/
+
 /** `XXXXX-XXXXX` (10 uppercase hex chars from crypto.randomBytes) — easy to read back, 40 bits of entropy. */
 function generateRecoveryCode(): string {
   const raw = crypto.randomBytes(5).toString('hex').toUpperCase()
@@ -250,8 +253,13 @@ export async function completeMfaChallenge(
   return { userId: outcome.userId, role: outcome.role, token, expiresAt }
 }
 
-/** The id of the first unused recovery code that verifies against `code`, or null. */
+/**
+ * The id of the first unused recovery code that verifies against `code`, or
+ * null. Each stored code costs a scrypt run to check, so input that can't be
+ * a recovery code is refused before any hashing.
+ */
 async function matchRecoveryCode(executor: Executor, userId: string, code: string): Promise<string | null> {
+  if (!RECOVERY_CODE_PATTERN.test(code)) return null
   const candidates = await executor
     .select({ id: mfaRecoveryCodes.id, codeHash: mfaRecoveryCodes.codeHash })
     .from(mfaRecoveryCodes)
@@ -296,7 +304,9 @@ export async function regenerateMfaRecoveryCodes(code: string, session: Session)
  * Self-service: turns MFA off for the caller's own account — a TOTP or
  * recovery code proves it's really them (not just whoever currently holds
  * the session cookie) before the safety net comes down. Throws
- * `notConfirmed` if there's nothing confirmed to disable.
+ * `notConfirmed` if there's nothing confirmed to disable. Guesses here and in
+ * `regenerateMfaRecoveryCodes` are capped per account by the API's
+ * RL_MFA_MANAGE_USER rate limit (server/middleware/rate-limit.ts).
  */
 export async function disableMfa(code: string, session: Session): Promise<void> {
   assertStaff(session)

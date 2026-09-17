@@ -8,6 +8,14 @@ import type { NotificationsAdapter } from '@/lib/notifications/adapter'
 
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 
+/** A resend is ignored when the account got a verification link within this window… */
+export const VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000
+/** …or already got this many in the last hour. */
+export const VERIFICATION_EMAILS_PER_HOUR = 3
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+type Executor = Tx | typeof db
+
 /**
  * SHA-256, not lib/auth/password.ts's scrypt — the raw token is a 32-byte
  * crypto.randomBytes value (256 bits of entropy on its own), not a
@@ -42,15 +50,7 @@ export async function sendVerificationEmail(
   await deliverVerificationEmail({ id: userId, ...user }, rawToken, appUrl, adapter)
 }
 
-/** A resend is ignored when the account got a verification link within this window… */
-export const VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000
-/** …or already got this many in the last hour. */
-export const VERIFICATION_EMAILS_PER_HOUR = 3
-
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
-type Executor = Tx | typeof db
-
-/** Stores the hash of a new token and returns the raw token, which exists only in the email. */
+/** Stores the hash of a fresh token for `userId` and returns the raw token, which is the only copy. */
 async function insertVerificationToken(executor: Executor, userId: string, now: Date): Promise<string> {
   const rawToken = crypto.randomBytes(32).toString('hex')
   await executor.insert(emailVerificationTokens).values({
@@ -69,13 +69,12 @@ async function deliverVerificationEmail(
   adapter: NotificationsAdapter,
 ): Promise<void> {
   const verifyUrl = `${appUrl}/verify-email?token=${rawToken}`
-
   try {
     await adapter.send({
       to: user.email,
       subject: 'Verify your MUN Hub email',
       body:
-        `Hi ${user.name},\n\n` +
+        `Hi,\n\n` +
         `Please verify your email address to finish setting up your MUN Hub account. This link expires in 24 hours:\n${verifyUrl}\n\n` +
         `If you didn't create this account, you can ignore this email.`,
     })

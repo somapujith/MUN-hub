@@ -144,6 +144,8 @@ export async function mintSetPasswordLink(
  * demoting or suspending each other at the same moment serialize on this
  * lock: the second one re-reads the rows after the first commits, no longer
  * matches role = SUPER_ADMIN (or is suspended), and gets Forbidden.
+ *
+ * Exported for the other SUPER_ADMIN staff write, staff-mfa.ts#resetStaffMfa.
  */
 export async function lockSuperAdmins(tx: Tx, actorId: string): Promise<void> {
   const rows = await tx
