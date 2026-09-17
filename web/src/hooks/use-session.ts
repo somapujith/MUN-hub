@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/api/query-keys";
 import { getSession } from "@/api/auth";
+import { apiCredentialsMode } from "@/lib/host-routing";
 
 /**
  * Who's signed in, straight from the API (`GET /auth/session`), resolving to
@@ -17,6 +18,9 @@ export function useSession() {
   return useQuery({
     queryKey: queryKeys.session(),
     queryFn: async () => {
+      // A per-MUN slug host never sends the session cookie (and the API
+      // wouldn't let it read the answer), so it is always signed out.
+      if (apiCredentialsMode() === "omit") return null;
       try {
         return await getSession();
       } catch {

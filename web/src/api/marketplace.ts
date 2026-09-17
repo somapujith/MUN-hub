@@ -1,4 +1,5 @@
 import type { MunDetail, MunSearchResult, MunSummary, RegistrationProduct } from "@/types";
+import { apiCredentialsMode } from "@/lib/host-routing";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -18,7 +19,8 @@ export class MarketplaceApiError extends Error {
 }
 
 async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, { credentials: "include" });
+  // "omit" on a per-MUN slug host, which the API only serves anonymously.
+  const response = await fetch(`${API_BASE_URL}${path}`, { credentials: apiCredentialsMode() });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
     throw new MarketplaceApiError(
