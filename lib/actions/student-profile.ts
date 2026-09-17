@@ -97,6 +97,14 @@ export async function completeStudentProfile(
   // Everything below is optional (PRD §9-14) — normalize blanks to null
   // rather than storing empty strings, but never require them.
   const optionalFields = buildOptionalProfileFields(input)
+  // An edit only touches the optional fields it actually sent: the profile
+  // form edits a subset of what signup captured (gender, academic details,
+  // bio, …), and nulling everything it didn't send silently erased them.
+  const optionalUpdates = Object.fromEntries(
+    Object.entries(optionalFields).filter(
+      ([key]) => (input as unknown as Record<string, unknown>)[key] !== undefined,
+    ),
+  ) as Partial<typeof optionalFields>
 
   const [profile] = await db.transaction(async (tx) => {
     await tx
@@ -132,7 +140,7 @@ export async function completeStudentProfile(
           munExperience,
           referralCode,
           updatedAt: new Date(),
-          ...optionalFields,
+          ...optionalUpdates,
         },
       })
       .returning()

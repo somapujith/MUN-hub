@@ -49,6 +49,34 @@ describe('isProfileComplete', () => {
 })
 
 describe('completeStudentProfile', () => {
+  it('an edit that omits optional fields keeps what signup stored in them', async () => {
+    const { user, session } = await createTestUser()
+    await completeStudentProfile(
+      { ...validInput, gender: 'Female', courseOrProgram: 'Science', languages: ['English', 'Telugu'], isPublicProfileVisible: true },
+      session,
+    )
+
+    // The profile page sends only the core fields.
+    await completeStudentProfile({ ...validInput, gradeOrYear: '11th Grade' }, session)
+
+    const [row] = await db.select().from(studentProfiles).where(eq(studentProfiles.userId, user.id)).limit(1)
+    expect(row.gradeOrYear).toBe('11th Grade')
+    expect(row.gender).toBe('Female')
+    expect(row.courseOrProgram).toBe('Science')
+    expect(row.languages).toEqual(['English', 'Telugu'])
+    expect(row.isPublicProfileVisible).toBe(true)
+  })
+
+  it('an edit can still clear an optional field by sending it blank', async () => {
+    const { user, session } = await createTestUser()
+    await completeStudentProfile({ ...validInput, nationality: 'Indian' }, session)
+
+    await completeStudentProfile({ ...validInput, nationality: '' }, session)
+
+    const [row] = await db.select().from(studentProfiles).where(eq(studentProfiles.userId, user.id)).limit(1)
+    expect(row.nationality).toBeNull()
+  })
+
   it('updates users.phone/users.institution to match the input', async () => {
     const { user, session } = await createTestUser()
 
