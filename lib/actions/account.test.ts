@@ -22,7 +22,16 @@ describe('getAccountSettings', () => {
       phone: null,
       institution: null,
       emailNotificationsEnabled: true,
+      emailVerified: false,
+      emailVerificationRequired: false,
     })
+  })
+
+  it('reports emailVerified once the address has been confirmed', async () => {
+    const { user, session } = await createTestUser()
+    await db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, user.id))
+
+    await expect(getAccountSettings(session)).resolves.toMatchObject({ emailVerified: true })
   })
 
   it('returns the saved phone and institution, so registration can pre-fill it', async () => {
