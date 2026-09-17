@@ -1,7 +1,8 @@
 import * as React from "react";
 import type { ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import {
   requestOrganizerCode,
   verifyOrganizerCode,
@@ -13,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useSession } from "@/hooks/use-session";
 import { safeRedirectTo } from "@/lib/redirect";
 import { cn } from "cn";
 
@@ -65,7 +67,21 @@ export function OrganizerOtpForm({ mode }: { mode: "login" | "signup" }) {
   const [step, setStep] = React.useState<Step>(
     mode === "signup" ? { name: "details", draft: EMPTY_DRAFT } : { name: "email", email: "" },
   );
-  const completeSignIn = useCompleteSignIn();
+  const { data: session, isPending: sessionPending } = useSession();
+  // Committed before this form seeds the new session, so the "already signed
+  // in" redirect below never hijacks the sign-in's own destination.
+  const [signingIn, setSigningIn] = React.useState(false);
+  const completeSignIn = useCompleteSignIn(() => flushSync(() => setSigningIn(true)));
+  const [searchParams] = useSearchParams();
+
+  if (!signingIn) {
+    if (sessionPending) return null;
+    // Already an organizer: nothing to sign in to.
+    if (session?.role === "ORGANIZER") {
+      const redirectTo = safeRedirectTo(searchParams.get("redirectTo") ?? searchParams.get("redirect"));
+      return <Navigate to={redirectTo !== "/" ? redirectTo : "/organizer/dashboard"} replace />;
+    }
+  }
 
   let content: ReactNode;
   switch (step.name) {
@@ -131,13 +147,14 @@ function SwitchModeLink({ mode }: { mode: "login" | "signup" }) {
   );
 }
 
-function useCompleteSignIn() {
+function useCompleteSignIn(onStart: () => void) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const redirectTo = safeRedirectTo(searchParams.get("redirectTo") ?? searchParams.get("redirect"));
 
   return (result: SignedIn) => {
+    onStart();
     // Drop anything cached under the previous identity, then seed the session
     // so the organizer guards see the new account without a refetch.
     queryClient.clear();
