@@ -1,0 +1,281 @@
+{
+  "verdict": {
+    "oversold": false,
+    "doubleBooked": false,
+    "activeCount": 5,
+    "capacity": 5,
+    "httpSucceeded": 5,
+    "httpCapacityRejected": 15,
+    "httpOtherFailed": 0,
+    "wallElapsedMs": 214.16029999999998
+  },
+  "outcomes": [
+    {
+      "userId": "d487384c-5aba-4235-845f-433732826e65",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 181.8835
+    },
+    {
+      "userId": "36b23c16-1c79-4f1f-abf7-394e768741ec",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 152.7473
+    },
+    {
+      "userId": "cc40247c-bcb2-4e8d-8713-be4592b0e599",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 134.8224
+    },
+    {
+      "userId": "db88f2ae-23a1-4a57-9e75-1bd9cebe262a",
+      "status": 201,
+      "ok": true,
+      "body": {
+        "registrationId": "80bf4bc5-9a3a-411d-8fce-04fde3427d35",
+        "orderId": "mock_order_80bf4bc5-9a3a-411d-8fce-04fde3427d35_1789657777194",
+        "status": "PAYMENT_PENDING",
+        "replayed": false
+      },
+      "elapsedMs": 162.80880000000002
+    },
+    {
+      "userId": "d776797d-ab0f-4238-87b2-c2edb50eacd9",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 142.3249
+    },
+    {
+      "userId": "a7babc8a-46e4-4848-9f8a-6b4d212be4f1",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 131.2636
+    },
+    {
+      "userId": "089a42b8-05ca-4b88-b7b4-77dfd809a57b",
+      "status": 201,
+      "ok": true,
+      "body": {
+        "registrationId": "4d227665-962e-475f-aa23-9c1be8963311",
+        "orderId": "mock_order_4d227665-962e-475f-aa23-9c1be8963311_1789657777200",
+        "status": "PAYMENT_PENDING",
+        "replayed": false
+      },
+      "elapsedMs": 165.11219999999997
+    },
+    {
+      "userId": "4f63ad6c-a0b1-422c-8d84-37de0134d3c5",
+      "status": 201,
+      "ok": true,
+      "body": {
+        "registrationId": "887a8bf1-7805-4e97-99d6-8e1ea2de9dd1",
+        "orderId": "mock_order_887a8bf1-7805-4e97-99d6-8e1ea2de9dd1_1789657777187",
+        "status": "PAYMENT_PENDING",
+        "replayed": false
+      },
+      "elapsedMs": 158.5668
+    },
+    {
+      "userId": "e7f19936-fbdf-4b4a-850b-d7521089250b",
+      "status": 201,
+      "ok": true,
+      "body": {
+        "registrationId": "9309b7df-77ca-4660-a547-f19b5f8f6f2e",
+        "orderId": "mock_order_9309b7df-77ca-4660-a547-f19b5f8f6f2e_1789657777207",
+        "status": "PAYMENT_PENDING",
+        "replayed": false
+      },
+      "elapsedMs": 169.7717
+    },
+    {
+      "userId": "a5e616be-8c5b-4122-91e1-f3423821ec6f",
+      "status": 201,
+      "ok": true,
+      "body": {
+        "registrationId": "c1bbab00-b343-41be-ae96-597dc6cc3ba3",
+        "orderId": "mock_order_c1bbab00-b343-41be-ae96-597dc6cc3ba3_1789657777181",
+        "status": "PAYMENT_PENDING",
+        "replayed": false
+      },
+      "elapsedMs": 153.2872
+    },
+    {
+      "userId": "9a4fe31b-725c-43e5-916d-724a2e7ba8ab",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 176.4688
+    },
+    {
+      "userId": "733ad3ad-019a-4540-8387-e59fec2ac1ec",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 180.28300000000002
+    },
+    {
+      "userId": "b58c8edf-ba88-4b85-830c-45c7fc39d48c",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 144.6542
+    },
+    {
+      "userId": "ccd62fa1-979d-43de-b75c-d788bb8638e8",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 136.6723
+    },
+    {
+      "userId": "f4019976-b25a-40c1-8943-5274680396a5",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 170.66539999999998
+    },
+    {
+      "userId": "3b8842d1-33b5-41c1-8940-515338017713",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 130.6581
+    },
+    {
+      "userId": "166b50bf-79a6-4784-8585-7df74b6cf8c8",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 187.79960000000003
+    },
+    {
+      "userId": "970af756-40cb-4230-a7e9-599bee3406ee",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 153.897
+    },
+    {
+      "userId": "56586147-33f2-441c-a959-0b1a2a0155c1",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 183.2111
+    },
+    {
+      "userId": "8a6e3d6d-cf58-417b-bc64-2bcaf796f05a",
+      "status": 409,
+      "ok": false,
+      "body": {
+        "error": {
+          "code": "CONFLICT_CAPACITY",
+          "message": "Registration product is at capacity"
+        }
+      },
+      "elapsedMs": 191.4283
+    }
+  ],
+  "dbRows": [
+    {
+      "id": "c1bbab00-b343-41be-ae96-597dc6cc3ba3",
+      "userId": "a5e616be-8c5b-4122-91e1-f3423821ec6f",
+      "status": "PAYMENT_PENDING"
+    },
+    {
+      "id": "887a8bf1-7805-4e97-99d6-8e1ea2de9dd1",
+      "userId": "4f63ad6c-a0b1-422c-8d84-37de0134d3c5",
+      "status": "PAYMENT_PENDING"
+    },
+    {
+      "id": "80bf4bc5-9a3a-411d-8fce-04fde3427d35",
+      "userId": "db88f2ae-23a1-4a57-9e75-1bd9cebe262a",
+      "status": "PAYMENT_PENDING"
+    },
+    {
+      "id": "4d227665-962e-475f-aa23-9c1be8963311",
+      "userId": "089a42b8-05ca-4b88-b7b4-77dfd809a57b",
+      "status": "PAYMENT_PENDING"
+    },
+    {
+      "id": "9309b7df-77ca-4660-a547-f19b5f8f6f2e",
+      "userId": "e7f19936-fbdf-4b4a-850b-d7521089250b",
+      "status": "PAYMENT_PENDING"
+    }
+  ]
+}

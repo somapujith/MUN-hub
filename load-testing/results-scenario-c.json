@@ -1,0 +1,47 @@
+{
+  "workerCount": 30,
+  "durationSec": 65.07090409999999,
+  "totalRequests": 12285,
+  "totalErrors": 0,
+  "errorRatePct": 0,
+  "throughputReqPerSec": 188.8,
+  "registrationAttemptsIssued": 110,
+  "perAction": {
+    "list": {
+      "count": 8535,
+      "errors": 0,
+      "errorRatePct": 0,
+      "p50": 129.20020000000005,
+      "p95": 220.1875999999993,
+      "p99": 338.44719999999506,
+      "max": 490.7630999999965
+    },
+    "detail": {
+      "count": 1875,
+      "errors": 0,
+      "errorRatePct": 0,
+      "p50": 218.9239000000016,
+      "p95": 353.3737000000001,
+      "p99": 580.5967999999993,
+      "max": 752.4230000000025
+    },
+    "dashboard": {
+      "count": 1243,
+      "errors": 0,
+      "errorRatePct": 0,
+      "p50": 145.10839999999735,
+      "p95": 235.60959999999977,
+      "p99": 397.43650000000343,
+      "max": 562.7548999999999
+    },
+    "register": {
+      "count": 632,
+      "errors": 0,
+      "errorRatePct": 0,
+      "p50": 141.1398999999983,
+      "p95": 595.2294999999995,
+      "p99": 710.6332000000002,
+      "max": 819.7047000000002
+    }
+  }
+}
