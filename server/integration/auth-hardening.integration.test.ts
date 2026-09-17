@@ -175,6 +175,36 @@ describe('POST /auth/users guardian consent', () => {
   })
 })
 
+describe('POST /auth/users welcome email', () => {
+  it('sends the welcome email before responding', async () => {
+    let delivered: NotificationPayload | undefined
+    vi.spyOn(consoleNotificationsAdapter, 'send').mockImplementation(async (notification) => {
+      // Slower than the rest of the request: an un-awaited send would still be
+      // pending when the response comes back (and dropped on Workers).
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      delivered = notification
+    })
+    const body = signUpBody()
+
+    const res = await post('/auth/users', body)
+
+    expect(res.status).toBe(201)
+    expect(delivered).toMatchObject({ to: body.email, subject: 'Welcome to MUN Hub' })
+  })
+
+  it('still creates the account when the welcome email fails', async () => {
+    vi.spyOn(consoleNotificationsAdapter, 'send').mockRejectedValue(new Error('mail provider down'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const body = signUpBody()
+
+    const res = await post('/auth/users', body)
+
+    expect(res.status).toBe(201)
+    expect(sessionTokenFrom(res)).toBeTruthy()
+    expect(await db.select({ id: users.id }).from(users).where(eq(users.email, body.email))).toHaveLength(1)
+  })
+})
+
 describe('Turnstile', () => {
   let fetchSpy: MockInstance<typeof fetch>
   let sendSpy: MockInstance<(notification: NotificationPayload) => Promise<void>>
