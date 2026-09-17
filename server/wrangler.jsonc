@@ -5,7 +5,11 @@
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
   "routes": [
-    { "pattern": "api.munhub.in", "custom_domain": true }
+    { "pattern": "api.munhub.in", "custom_domain": true },
+    // Explicit route as well as the Custom Domain: munhub-web's zone-wide
+    // `*.munhub.in/*` route otherwise intermittently served api.munhub.in
+    // (a Custom Domain does not automatically beat a wildcard route).
+    { "pattern": "api.munhub.in/*", "zone_name": "munhub.in" }
   ],
   "vars": {
     // Non-secret config only. Secrets (DATABASE_URL, PAYMENT_FIELD_KEY,
@@ -59,5 +63,44 @@
   // ],
   "observability": {
     "enabled": true
+  },
+  // Cron trigger → the `scheduled` export in src/worker.ts, which runs every
+  // job in lib/jobs/registry.ts. Every 5 minutes: a seat hold lasts 15
+  // minutes, so an expired hold is released at most ~5 minutes late.
+  // Inherited by env.staging.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  // Named environments. `wrangler deploy --env staging` deploys a separate
+  // Worker, munhub-api-staging, reachable only on workers.dev.
+  // See docs/operations/ENVIRONMENTS.md.
+  "env": {
+    "staging": {
+      // Routes are inherited from the top level unless overridden. The empty
+      // list keeps staging off every munhub.in hostname.
+      "routes": [],
+      "workers_dev": true,
+      // `vars` and `hyperdrive` are never inherited; staging lists its own.
+      "vars": {
+        // Empty on purpose: workers.dev is a public suffix, so the session
+        // cookie has to stay host-only.
+        "COOKIE_DOMAIN": "",
+        "CORS_ORIGINS": "https://munhub-web-staging.somapujith.workers.dev",
+        // Only used when a ZEPTOMAIL_TOKEN secret is set on staging; leave
+        // that unset and mail goes to the log instead.
+        "ZEPTOMAIL_FROM_ADDRESS": "noreply@munhub.in",
+        "APP_URL": "https://munhub-web-staging.somapujith.workers.dev"
+      },
+      "hyperdrive": [
+        {
+          "binding": "HYPERDRIVE",
+          // TODO(staging): placeholder. Create a Hyperdrive config that points
+          // at the STAGING Neon branch (never the production branch):
+          //   npx wrangler hyperdrive create munhub-db-staging --connection-string="<staging branch URL>"
+          // then paste its id here. Deploying staging fails until then.
+          "id": "00000000000000000000000000000000"
+        }
+      ]
+    }
   }
 }
