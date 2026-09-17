@@ -56,6 +56,14 @@ export function submitMunForReview(munId: string) {
 }
 
 /**
+ * Wraps lib/lifecycle/go-live.ts#withdrawSubmission — "Make changes first":
+ * steps back from Gate 3 so every section is editable again.
+ */
+export function withdrawSubmission(munId: string) {
+  return request<void>(`/muns/${munId}/actions/withdraw-submission`, { method: "POST" });
+}
+
+/**
  * Wraps lib/lifecycle/go-live.ts#getGoLiveQueue — OPERATIONS/ADMIN/SUPER_ADMIN
  * only. `slaState` is computed on read server-side, never trust a cached
  * copy of this response for long.

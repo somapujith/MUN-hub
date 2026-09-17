@@ -12,6 +12,7 @@ import {
   saveOrganizerMunStep,
   saveOrganizerPaymentStep,
   saveOrganizerProfileStep,
+  updateOrganizerOrganization,
 } from './organizer-onboarding'
 import { submitOrganizerApplication } from './organizer-application'
 
@@ -41,6 +42,47 @@ async function fillAllButAgreement(session: Session) {
 }
 
 describe('organizer onboarding', () => {
+  it('prefills the contact and UPI numbers from the phone given at signup', async () => {
+    const session = await makeUser('ORGANIZER', 'Meera Iyer')
+    await db.update(users).set({ phone: '+91 98450 12345' }).where(eq(users.id, session.userId))
+
+    const initial = await getOrganizerOnboarding(session)
+    expect(initial.profile).toMatchObject({ contactPhone: '9845012345', upiPhone: '9845012345' })
+
+    // A signup phone that isn't an Indian mobile number isn't prefilled.
+    const other = await makeUser('ORGANIZER', 'Tom Hale')
+    await db.update(users).set({ phone: '+44 20 7946 0958' }).where(eq(users.id, other.userId))
+    expect((await getOrganizerOnboarding(other)).profile).toMatchObject({ contactPhone: null, upiPhone: null })
+  })
+
+  it('saves the organization on the account, where the marketplace reads the host name', async () => {
+    const session = await makeUser('ORGANIZER', 'Ravi Kumar')
+    expect((await getOrganizerOnboarding(session)).profile.organization).toBeNull()
+
+    const state = await saveOrganizerProfileStep({ ...PROFILE, organization: '  Deccan Debating Society ' }, session)
+    expect(state.profile.organization).toBe('Deccan Debating Society')
+    const [user] = await db.select().from(users).where(eq(users.id, session.userId))
+    expect(user.institution).toBe('Deccan Debating Society')
+
+    await expect(saveOrganizerProfileStep({ ...PROFILE, organization: '   ' }, session)).rejects.toThrow(
+      'Organization is required',
+    )
+    await expect(saveOrganizerProfileStep({ ...PROFILE, organization: 'x'.repeat(121) }, session)).rejects.toThrow(
+      'Organization must be at most 120 characters',
+    )
+    // Leaving it out keeps what was saved.
+    await saveOrganizerProfileStep(PROFILE, session)
+    expect((await getOrganizerOnboarding(session)).profile.organization).toBe('Deccan Debating Society')
+
+    // Editable any time, including clearing it.
+    await expect(updateOrganizerOrganization(' Hyderabad MUN Society ', session)).resolves.toEqual({
+      organization: 'Hyderabad MUN Society',
+    })
+    await expect(updateOrganizerOrganization('', session)).resolves.toEqual({ organization: null })
+    const student = await makeUser('STUDENT')
+    await expect(updateOrganizerOrganization('Nope', student)).rejects.toThrow()
+  })
+
   it('walks the five steps and submits the MUN as the organizer application', async () => {
     const session = await makeUser('ORGANIZER', 'Asha Rao Kumar')
 

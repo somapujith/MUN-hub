@@ -75,11 +75,11 @@ export function AdminRegistrationsPage() {
         description="Platform-wide registration search across every conference — by delegate name or email, MUN, or registration ID."
       >
         <div className="flex flex-wrap items-end justify-between gap-md">
-          <div className="flex flex-col gap-xs">
+          <div className="flex w-full max-w-md flex-col gap-xs">
             <label htmlFor="admin-registrations-search" className="text-body-md font-medium text-ink">
               Search
             </label>
-            <div className="relative w-full max-w-sm">
+            <div className="relative w-full">
               <SearchIcon
                 aria-hidden
                 className="pointer-events-none absolute top-1/2 left-md size-4 -translate-y-1/2 text-muted-foreground"

@@ -10,6 +10,7 @@ export const ADMIN_NAV_ITEMS = [
   { href: "/admin/support", label: "Support", exact: false },
   { href: "/admin/staff", label: "Staff", exact: false },
   { href: "/admin/audit", label: "Audit Log", exact: false },
+  { href: "/admin/security", label: "Security", exact: false },
 ] as const;
 
 export const ADMIN_REVIEW_ROLES = ["OPERATIONS", "ADMIN", "SUPER_ADMIN"] as const;

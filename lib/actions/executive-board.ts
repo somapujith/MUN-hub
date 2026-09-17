@@ -5,6 +5,9 @@ import type { EbRole } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { FILES_ROUTE_PREFIX, isSafeStorageKey } from '@/lib/storage/keys'
+import { deleteStoredObjectQuietly, selectStorageAdapter } from '@/lib/storage/select-adapter'
+import { validateUpload } from '@/lib/storage/validate'
 
 // -----------------------------------------------------------------------------
 // executive-board — EXECUTIVE_BOARD module (PRD Section 14)
@@ -158,7 +161,7 @@ export async function updateEbMember(
 
 export async function deleteEbMember(id: string, session: Session | null): Promise<void> {
   const [existing] = await db
-    .select({ munId: munExecutiveBoard.munId })
+    .select({ munId: munExecutiveBoard.munId, photoUrl: munExecutiveBoard.photoUrl })
     .from(munExecutiveBoard)
     .where(eq(munExecutiveBoard.id, id))
     .limit(1)
@@ -167,8 +170,94 @@ export async function deleteEbMember(id: string, session: Session | null): Promi
   await assertModuleNotLocked(existing.munId, 'EXECUTIVE_BOARD', session)
 
   await db.delete(munExecutiveBoard).where(eq(munExecutiveBoard.id, id))
+  await deleteUploadedPhoto(existing.munId, existing.photoUrl)
 
   await onModuleDataChanged(existing.munId, 'EXECUTIVE_BOARD', session!.userId)
+}
+
+// -----------------------------------------------------------------------------
+// Member photos
+// -----------------------------------------------------------------------------
+//
+// Organizers upload a photo file instead of pasting a link. Stored under
+// `muns/<munId>/board/<uuid>` with the same checks as branding images; the
+// member's `photoUrl` points at it. A pasted external link still works.
+
+const boardPhotoPrefix = (munId: string) => `muns/${munId}/board/`
+
+/** The storage key behind `photoUrl` when it's a photo uploaded for this MUN, else null. */
+function uploadedPhotoKey(munId: string, photoUrl: string | null): string | null {
+  if (!photoUrl) return null
+  const at = photoUrl.indexOf(FILES_ROUTE_PREFIX)
+  if (at < 0) return null
+  const key = photoUrl
+    .slice(at + FILES_ROUTE_PREFIX.length)
+    .split('/')
+    .map((segment) => decodeURIComponent(segment))
+    .join('/')
+  return key.startsWith(boardPhotoPrefix(munId)) && isSafeStorageKey(key) ? key : null
+}
+
+async function deleteUploadedPhoto(munId: string, photoUrl: string | null): Promise<void> {
+  const key = uploadedPhotoKey(munId, photoUrl)
+  if (key) await deleteStoredObjectQuietly(selectStorageAdapter(), key, 'executive board photo')
+}
+
+async function loadMemberForPhoto(id: string, session: Session | null) {
+  const [existing] = await db
+    .select({ munId: munExecutiveBoard.munId, photoUrl: munExecutiveBoard.photoUrl })
+    .from(munExecutiveBoard)
+    .where(eq(munExecutiveBoard.id, id))
+    .limit(1)
+  if (!existing) throw new Error('Executive board member not found')
+  await assertOwnsOrAdmin(existing.munId, session)
+  await assertModuleNotLocked(existing.munId, 'EXECUTIVE_BOARD', session)
+  return existing
+}
+
+/**
+ * Uploads a board member's photo and points `photoUrl` at it, replacing (and
+ * deleting) a previously uploaded one. Type, size and contents are checked
+ * before storage is touched.
+ */
+export async function uploadEbMemberPhoto(
+  id: string,
+  file: Buffer,
+  contentType: string,
+  session: Session | null,
+): Promise<ExecutiveBoardMember> {
+  const existing = await loadMemberForPhoto(id, session)
+  validateUpload(file, contentType, 'IMAGE')
+
+  const storage = selectStorageAdapter()
+  const key = `${boardPhotoPrefix(existing.munId)}${crypto.randomUUID()}`
+  const { url } = await storage.upload(file, key, contentType)
+
+  let updated: ExecutiveBoardMember | undefined
+  try {
+    ;[updated] = await db.update(munExecutiveBoard).set({ photoUrl: url }).where(eq(munExecutiveBoard.id, id)).returning()
+  } catch (error) {
+    await deleteStoredObjectQuietly(storage, key, 'executive board photo rollback')
+    throw error
+  }
+  if (!updated) {
+    await deleteStoredObjectQuietly(storage, key, 'executive board photo rollback')
+    throw new Error('Executive board member not found')
+  }
+
+  await deleteUploadedPhoto(existing.munId, existing.photoUrl)
+  await onModuleDataChanged(existing.munId, 'EXECUTIVE_BOARD', session!.userId)
+  return updated
+}
+
+/** Clears a board member's photo, deleting it from storage if it was uploaded. */
+export async function removeEbMemberPhoto(id: string, session: Session | null): Promise<ExecutiveBoardMember> {
+  const existing = await loadMemberForPhoto(id, session)
+  const [updated] = await db.update(munExecutiveBoard).set({ photoUrl: null }).where(eq(munExecutiveBoard.id, id)).returning()
+  if (!updated) throw new Error('Executive board member not found')
+  await deleteUploadedPhoto(existing.munId, existing.photoUrl)
+  await onModuleDataChanged(existing.munId, 'EXECUTIVE_BOARD', session!.userId)
+  return updated
 }
 
 /** Public read, no auth — the mun detail page renders the executive board. */

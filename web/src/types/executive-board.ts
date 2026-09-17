@@ -27,7 +27,8 @@ export interface ExecutiveBoardMemberInput {
   name: string;
   role: ExecutiveBoardRole;
   customRole: string | null;
-  photoUrl: string | null;
+  /** Set by the photo upload endpoint; left out of saves so it isn't overwritten. */
+  photoUrl?: string | null;
   bio: string | null;
   displayOrder: number;
   institution?: string | null;

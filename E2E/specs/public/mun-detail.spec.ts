@@ -173,9 +173,9 @@ test.describe('MUNs that are not open for registration', () => {
 test.describe('unknown MUN', () => {
   test('an unknown slug renders the not-found page with a way home', async ({ page }) => {
     await page.goto(`/mun/${NONEXISTENT_MUN_SLUG}`)
-    await expect(pageHeading(page)).toHaveText('Page not found')
-    await expect(page.getByText('The page you requested does not exist.')).toBeVisible()
-    await page.getByRole('button', { name: 'Back home' }).click()
+    await expect(pageHeading(page)).toHaveText("We couldn't find that page")
+    await expect(page.getByText('the conference may not be published yet')).toBeVisible()
+    await page.getByRole('button', { name: 'Back to home' }).click()
     await expect(page).toHaveURL(/\/$/)
   })
 

@@ -143,6 +143,8 @@ export interface SimulateOptions {
   currency?: string
   /** Overrides the signed delivery time (tests: replay window). */
   signedAt?: Date
+  /** Overrides when the capture happened at the provider (tests: hold expiry). */
+  occurredAt?: Date
 }
 
 /**
@@ -166,7 +168,7 @@ export function simulatePaymentOutcome(
       options.providerPaymentId ?? (outcome === 'success' ? `mock_pay_${crypto.randomUUID()}` : null),
     amount: options.amount ?? order.amount,
     currency: options.currency ?? order.currency,
-    createdAt: now.toISOString(),
+    createdAt: (options.occurredAt ?? now).toISOString(),
   }
   const rawBody = JSON.stringify(body)
   const timestamp = String(Math.floor(signedAt.getTime() / 1000))

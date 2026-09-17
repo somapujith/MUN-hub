@@ -4,6 +4,7 @@ import {
   LayoutDashboardIcon,
   LifeBuoyIcon,
   LogOutIcon,
+  ShieldIcon,
   TicketIcon,
   UserRoundIcon,
 } from "lucide-react";
@@ -94,6 +95,8 @@ export function SiteHeaderUserMenu({ role }: SiteHeaderUserMenuProps) {
   const dashboardUrl = homeUrlForRole(role);
   const profileUrl = resolveZoneUrl("student", "/profile");
   const registrationsUrl = resolveZoneUrl("student", "/dashboard");
+  const securityUrl = resolveZoneUrl("admin", "/admin/security");
+  const isStaff = role === "OPERATIONS" || role === "ADMIN" || role === "SUPER_ADMIN";
 
   return (
     <DropdownMenu>
@@ -128,6 +131,11 @@ export function SiteHeaderUserMenu({ role }: SiteHeaderUserMenuProps) {
           {(role === "STUDENT" || role === "ORGANIZER") && (
             <MenuNavItem url={inboxUrlForRole(role)} icon={<LifeBuoyIcon />}>
               Support
+            </MenuNavItem>
+          )}
+          {isStaff && (
+            <MenuNavItem url={securityUrl} icon={<ShieldIcon />}>
+              Security
             </MenuNavItem>
           )}
           <DropdownMenuSeparator />

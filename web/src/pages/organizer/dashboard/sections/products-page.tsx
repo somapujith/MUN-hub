@@ -20,6 +20,14 @@ import { Label } from "@/components/ui/label";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
 import type { RegistrationProduct, RegistrationProductInput } from "@/types/registration-product";
 
+const DEADLINE_FORMAT = new Intl.DateTimeFormat("en-IN", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
 interface ProductFormState {
   name: string;
   price: string;
@@ -225,7 +233,7 @@ export function OrganizerProductsPage() {
                     <p className="mt-xxs text-body-md text-body">
                       {formatPrice(product.price)} {product.currency !== "INR" && product.currency} ·{" "}
                       {product.capacity} seats
-                      {product.deadline && ` · Closes ${new Date(product.deadline).toLocaleString()}`}
+                      {product.deadline && ` · Closes ${DEADLINE_FORMAT.format(new Date(product.deadline))}`}
                     </p>
                     <p className="mt-xs text-caption text-muted-foreground">
                       {[

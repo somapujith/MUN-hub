@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
-import { AlertTriangle, CheckCircle2, Eye, LockIcon, Save, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, Globe, LockIcon, Save, ShieldCheck } from "lucide-react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
-import { getMunProgress, getMunReviewFeedback, submitMunForReview } from "@/api/go-live";
+import { getMunProgress, getMunReviewFeedback, submitMunForReview, withdrawSubmission } from "@/api/go-live";
 import { getMunDetails, updateMunDetails } from "@/api/mun-config";
 import { submitFinalConfirmation } from "@/api/organizer-confirmation";
 import { queryKeys } from "@/api/query-keys";
@@ -19,8 +19,15 @@ import { GoLiveChecklist } from "@/components/organizer/go-live/go-live-checklis
 import { ReviewFeedbackCard } from "@/components/organizer/go-live/review-feedback-card";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
 import { getStatusMeta } from "@/lib/mun-status";
-import { hasReviewFeedback, isUnderReview } from "@/lib/organizer/go-live";
-import type { MunStatus } from "@/types/enums";
+import {
+  LIVE_STATUSES,
+  MODULE_SECTION,
+  POST_APPROVAL_STATUSES,
+  hasReviewFeedback,
+  isUnderReview,
+} from "@/lib/organizer/go-live";
+import { munSectionHref } from "@/lib/organizer/nav-config";
+import type { MunModule, MunStatus } from "@/types/enums";
 import type { SubmitMunForReviewResult } from "@/types/go-live";
 import type { MunSetupDetails } from "@/types/mun-config";
 
@@ -165,11 +172,23 @@ export function OrganizerSetupPage() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to confirm submission"),
   });
 
+  const withdrawMutation = useMutation({
+    mutationFn: () => withdrawSubmission(munId),
+    onSuccess: async () => {
+      setLastReview(null);
+      await refresh();
+      toast.success("Your sections are unlocked. Run the checks again when you're ready.");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to unlock your sections"),
+  });
+
   const mun = detailsQuery.data;
   const progress = progressQuery.data;
   const status: MunStatus | undefined = progress?.lifecycleStatus ?? mun?.status;
   const canSubmitForReview = Boolean(status && SUBMITTABLE_STATUSES.includes(status));
   const canConfirm = Boolean(status && CONFIRMABLE_STATUSES.includes(status));
+  const approved = Boolean(status && POST_APPROVAL_STATUSES.includes(status));
+  const live = Boolean(status && LIVE_STATUSES.includes(status));
   // The API unlocks whichever of these two a reviewer sent back.
   const detailsSentBack =
     progress?.modules.some(
@@ -177,6 +196,12 @@ export function OrganizerSetupPage() {
         (module.key === "BASIC_INFO" || module.key === "DATES_VENUE") && module.verificationState === "CHANGES_REQUESTED",
     ) ?? false;
   const detailsLocked = Boolean(status && isUnderReview(status)) && !detailsSentBack;
+  const feedback = feedbackQuery.data;
+  // Once approved, old notes only matter if an issue is still open.
+  const showFeedback =
+    hasReviewFeedback(feedback) && (!approved || feedback.issues.some((issue) => !issue.resolved));
+  const nextModule = progress?.modules.find((module) => module.isRequired && module.completionStatus !== "COMPLETE" && module.completionStatus !== "LOCKED");
+  const nextSegment = nextModule ? MODULE_SECTION[nextModule.key as MunModule] : undefined;
 
   return (
     <>
@@ -212,12 +237,12 @@ export function OrganizerSetupPage() {
                   munId={munId}
                   confirming={confirmMutation.isPending}
                   onConfirm={() => confirmMutation.mutate()}
+                  withdrawing={withdrawMutation.isPending}
+                  onWithdraw={() => withdrawMutation.mutate()}
                 />
               )}
 
-              {hasReviewFeedback(feedbackQuery.data) && (
-                <ReviewFeedbackCard munId={munId} feedback={feedbackQuery.data} />
-              )}
+              {showFeedback && feedback && <ReviewFeedbackCard munId={munId} feedback={feedback} />}
 
               {mun && (
                 // Remounts with fresh values whenever the saved record changes.
@@ -230,79 +255,107 @@ export function OrganizerSetupPage() {
                 />
               )}
 
-              {progress && <GoLiveChecklist munId={munId} modules={progress.modules} />}
+              {progress && !approved && <GoLiveChecklist munId={munId} modules={progress.modules} />}
             </div>
 
-            <aside className="flex flex-col gap-md">
-              <Card size="sm">
+            {/* First on small screens: where you are and what's next, before the long form. */}
+            <aside className="order-first flex flex-col gap-md xl:order-none">
+              {!approved && (
+                <Card size="sm">
+                  <CardHeader>
+                    <CardTitle>Go-live progress</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-sm">
+                    {progressQuery.isLoading && (
+                      <p className="text-body-md text-muted-foreground">Checking your sections...</p>
+                    )}
+                    {progressQuery.isError && (
+                      <p className="text-body-md text-destructive">{progressQuery.error.message}</p>
+                    )}
+                    {progress && (
+                      <>
+                        <p className="text-body-md text-body">
+                          Status:{" "}
+                          <span className="font-medium text-ink">{getStatusMeta(progress.lifecycleStatus).label}</span>
+                        </p>
+                        <div
+                          className="h-2 w-full overflow-hidden rounded-full bg-surface-soft"
+                          role="progressbar"
+                          aria-label="Required sections complete"
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={progress.overallPercentage}
+                        >
+                          <div
+                            className="h-full rounded-full bg-primary transition-[width]"
+                            style={{ width: `${Math.min(100, Math.max(0, progress.overallPercentage))}%` }}
+                          />
+                        </div>
+                        <p className="text-caption text-muted-foreground">
+                          {progress.requiredComplete} of {progress.requiredTotal} required sections complete
+                        </p>
+                        {progress.blockingIssueCount > 0 && (
+                          <p className="flex items-center gap-xs text-body-md text-warning-text">
+                            <AlertTriangle className="size-4" aria-hidden />
+                            {progress.blockingIssueCount === 1
+                              ? "1 blocking issue to fix"
+                              : `${progress.blockingIssueCount} blocking issues to fix`}
+                          </p>
+                        )}
+                        {canSubmitForReview && nextModule && (
+                          <p className="text-body-md text-body" data-testid="next-section">
+                            Next up:{" "}
+                            {nextSegment && nextSegment !== "setup" ? (
+                              <Link
+                                to={munSectionHref(munId, nextSegment)}
+                                className="font-medium text-link underline-offset-2 hover:underline"
+                              >
+                                {nextModule.label}
+                              </Link>
+                            ) : (
+                              <a href="#go-live-checklist-title" className="font-medium text-link underline-offset-2 hover:underline">
+                                {nextModule.label}
+                              </a>
+                            )}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card size="sm" data-testid="go-live-status">
                 <CardHeader>
-                  <CardTitle>Go-live progress</CardTitle>
+                  <CardTitle>
+                    {live ? "Your MUN is live" : approved ? "Approved" : canSubmitForReview ? "Submit for review" : "In review"}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-sm">
-                  {progressQuery.isLoading && (
-                    <p className="text-body-md text-muted-foreground">Loading progress...</p>
-                  )}
-                  {progressQuery.isError && (
-                    <p className="text-body-md text-destructive">{progressQuery.error.message}</p>
-                  )}
-                  {progress && (
+                  {canSubmitForReview && (
                     <>
-                      <p className="text-body-md text-body">
-                        Status:{" "}
-                        <span className="font-medium text-ink">{getStatusMeta(progress.lifecycleStatus).label}</span>
-                      </p>
-                      <div
-                        className="h-2 w-full overflow-hidden rounded-full bg-surface-soft"
-                        role="progressbar"
-                        aria-label="Required sections complete"
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={progress.overallPercentage}
+                      <ol className="flex list-decimal flex-col gap-xxs pl-md text-body-md text-muted-foreground">
+                        <li>Run MUN Hub&apos;s automated checks on every section.</li>
+                        <li>Review the summary and confirm it&apos;s accurate.</li>
+                        <li>MUN Hub verifies each section and emails you the result.</li>
+                      </ol>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={submitForReviewMutation.isPending}
+                        onClick={() => submitForReviewMutation.mutate()}
                       >
-                        <div
-                          className="h-full rounded-full bg-primary transition-[width]"
-                          style={{ width: `${Math.min(100, Math.max(0, progress.overallPercentage))}%` }}
-                        />
-                      </div>
-                      <p className="text-caption text-muted-foreground">
-                        {progress.requiredComplete}/{progress.requiredTotal} required sections complete
-                      </p>
-                      {progress.blockingIssueCount > 0 && (
-                        <p className="flex items-center gap-xs text-body-md text-warning-text">
-                          <AlertTriangle className="size-4" aria-hidden />
-                          {progress.blockingIssueCount} blocking issue(s) to fix
-                        </p>
+                        <ShieldCheck aria-hidden />
+                        {submitForReviewMutation.isPending ? "Checking..." : "Run checks and submit"}
+                      </Button>
+                      {lastReview && !lastReview.passed && (
+                        <ul className="flex flex-col gap-xxs rounded-sm border border-destructive/30 bg-destructive/10 p-sm text-caption text-destructive-text">
+                          {lastReview.blockers.map((blocker) => (
+                            <li key={blocker.key}>{blocker.message ?? blocker.label}</li>
+                          ))}
+                        </ul>
                       )}
                     </>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card size="sm">
-                <CardHeader>
-                  <CardTitle>Submit for review</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-sm">
-                  <ol className="flex list-decimal flex-col gap-xxs pl-md text-body-md text-muted-foreground">
-                    <li>Run MUN Hub&apos;s automated checks on every section.</li>
-                    <li>Review the summary and confirm it&apos;s accurate.</li>
-                    <li>MUN Hub verifies each section and emails you the result.</li>
-                  </ol>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!canSubmitForReview || submitForReviewMutation.isPending}
-                    onClick={() => submitForReviewMutation.mutate()}
-                  >
-                    <ShieldCheck aria-hidden />
-                    {submitForReviewMutation.isPending ? "Checking..." : "Run checks and submit"}
-                  </Button>
-                  {lastReview && !lastReview.passed && (
-                    <ul className="flex flex-col gap-xxs rounded-sm border border-destructive/30 bg-destructive/10 p-sm text-caption text-destructive-text">
-                      {lastReview.blockers.map((blocker) => (
-                        <li key={blocker.key}>{blocker.message ?? blocker.label}</li>
-                      ))}
-                    </ul>
                   )}
                   {canConfirm && (
                     <p className="flex items-center gap-xs text-body-md text-success-text">
@@ -312,14 +365,35 @@ export function OrganizerSetupPage() {
                   )}
                   {status === "VERIFICATION" && (
                     <p className="text-body-md text-body">
-                      MUN Hub is verifying your MUN. Sections they send back show up in the checklist.
+                      MUN Hub is verifying your MUN and will email you the result. Sections they send back show up
+                      in the checklist below, unlocked for you to fix.
                     </p>
                   )}
-                  {status === "VERIFIED" && (
+                  {approved && !live && (
                     <p className="flex items-center gap-xs text-body-md text-success-text">
                       <CheckCircle2 className="size-4 shrink-0" aria-hidden />
-                      Verified. MUN Hub will publish your MUN shortly.
+                      MUN Hub approved your MUN and will publish it shortly.
                     </p>
+                  )}
+                  {live && mun && (
+                    <>
+                      <p className="text-body-md text-body">
+                        Delegates can find {mun.name} on MUN Hub. Open or close registration from Settings.
+                      </p>
+                      <div className="flex flex-wrap gap-xs">
+                        <Button size="sm" variant="outline" render={<Link to={`/mun/${mun.slug}`} />}>
+                          <Globe aria-hidden />
+                          View public page
+                        </Button>
+                        <Button size="sm" variant="outline" render={<Link to={munSectionHref(munId, "settings")} />}>
+                          Registration settings
+                        </Button>
+                      </div>
+                      <p className="text-caption text-muted-foreground">
+                        Changing dates, venue, committees, passes or payout details sends that section back to MUN
+                        Hub and takes your MUN off the site until it's re-checked.
+                      </p>
+                    </>
                   )}
                 </CardContent>
               </Card>

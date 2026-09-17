@@ -12,6 +12,7 @@ import {
   regenerateMfaRecoveryCodes,
 } from '@/lib/actions/staff-mfa'
 import { SESSION_COOKIE_NAME, SESSION_MAX_LIFETIME_MS } from '@/lib/auth/session'
+import { notifyWelcome } from '@/lib/notifications/welcome-email'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import { TURNSTILE_ACTIONS, TURNSTILE_TOKEN_MAX_LENGTH, turnstileRejection } from '../lib/turnstile'
 import { requireAuth } from '../middleware/require-auth'
@@ -230,6 +231,15 @@ authRoutes.post('/users', async (c) => {
   const { userId, role, token } = await signUp(input)
 
   setSessionCookie(c, token)
+
+  // The account already exists, so a failed welcome email is logged and never
+  // fails the signup. Awaited, not fire-and-forget: on Workers, work still
+  // pending after the response is sent can be dropped.
+  try {
+    await notifyWelcome(userId)
+  } catch (error) {
+    console.error('[signup] welcome email failed', error)
+  }
 
   return c.json({ userId, role }, 201)
 })

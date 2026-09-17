@@ -47,3 +47,18 @@ export function updateExecutiveBoardMember(memberId: string, input: ExecutiveBoa
 export function deleteExecutiveBoardMember(memberId: string) {
   return request<void>(`/executive-board/${memberId}`, { method: "DELETE" });
 }
+
+/** Uploads (or replaces) a member's photo. PNG, JPEG or WebP, max 5MB. */
+export function uploadExecutiveBoardPhoto(
+  memberId: string,
+  input: { contentType: "image/png" | "image/jpeg" | "image/webp"; fileBase64: string },
+) {
+  return request<ExecutiveBoardMember>(`/executive-board/${memberId}/photo`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function removeExecutiveBoardPhoto(memberId: string) {
+  return request<ExecutiveBoardMember>(`/executive-board/${memberId}/photo`, { method: "DELETE" });
+}

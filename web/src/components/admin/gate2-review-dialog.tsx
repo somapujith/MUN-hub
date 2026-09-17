@@ -97,14 +97,18 @@ export function Gate2ReviewDialog({ target, onClose, onDecided }: Gate2ReviewDia
         if (!open) close();
       }}
     >
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-lg">
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-lg">
+        <form onSubmit={handleSubmit} noValidate className="flex min-h-0 flex-1 flex-col gap-lg">
           <DialogHeader>
             <DialogTitle>Review {target?.munName}</DialogTitle>
             <DialogDescription>
               Gate 2 content review of the submitted MUN. This does not touch the organizer&apos;s application.
             </DialogDescription>
           </DialogHeader>
+
+          {/* Only this middle section scrolls — the footer's submit/cancel
+              buttons stay on screen at any dialog height. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-lg overflow-y-auto">
 
           <fieldset className="flex flex-col gap-xs">
             <legend className="mb-xs text-body-md font-medium text-ink">Decision</legend>
@@ -156,6 +160,8 @@ export function Gate2ReviewDialog({ target, onClose, onDecided }: Gate2ReviewDia
                   : "Tell the organizer what needs to change."}
               </p>
             )}
+          </div>
+
           </div>
 
           <DialogFooter>

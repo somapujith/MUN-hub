@@ -25,7 +25,8 @@
  *
  * Refuses to touch anything but a local database.
  */
-import { eq } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
+import { MUNS } from './fixtures/accounts'
 import * as schema from '../lib/db/schema'
 import { FIXTURE_MUNS } from './fixtures/fixture-muns'
 import {
@@ -43,6 +44,13 @@ import {
 
 async function main(db: FixtureDb): Promise<void> {
   await resetSeededLogins(db)
+  // Specs rely on the seeded demo MUNs being live but not yet open. Other
+  // sessions' tests and scheduled jobs share this local database and have been
+  // seen opening them, so put them back (local database only).
+  await db
+    .update(schema.muns)
+    .set({ status: 'PUBLISHED', registrationOpensAt: sql`${schema.muns.startDate} - interval '60 days'` })
+    .where(inArray(schema.muns.slug, [MUNS.open.slug, MUNS.published.slug]))
   // MUN Hub has no refunds. Older seeds created REFUND_POLICY documents; the
   // seed no longer does (fc45913), so clear leftovers from this local database.
   await db.delete(schema.munDocuments).where(eq(schema.munDocuments.kind, 'REFUND_POLICY'))

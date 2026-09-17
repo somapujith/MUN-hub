@@ -13,7 +13,7 @@ test.use({ storageState: { cookies: [], origins: [] } })
 function registrationCard(page: Page) {
   return main(page)
     .getByRole('listitem')
-    .filter({ has: page.getByRole('link', { name: OPEN.name }) })
+    .filter({ has: page.getByRole('link', { name: OPEN.name, exact: true }) })
 }
 
 function formatDay(iso: string) {
@@ -66,7 +66,7 @@ test.describe('student dashboard — registrations', () => {
     await expect(card).toContainText('Confirmed')
     await expect(card).toContainText('Paid')
 
-    await card.getByRole('link', { name: OPEN.name }).click()
+    await card.getByRole('link', { name: OPEN.name, exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/mun/${OPEN.slug}$`))
     await context.close()
   })
@@ -120,7 +120,7 @@ test.describe('student dashboard — account menu', () => {
 
     await accountMenuButton(page).click()
     const menu = page.getByRole('menu')
-    await expect(menu.getByRole('menuitem')).toHaveText(['Dashboard', 'My registrations', 'Profile & account', 'Sign out'])
+    await expect(menu.getByRole('menuitem')).toHaveText(['Dashboard', 'My registrations', 'Profile & account', 'Support', 'Sign out'])
 
     await menu.getByRole('menuitem', { name: 'Dashboard' }).click()
     await expect(page).toHaveURL(/\/dashboard$/)

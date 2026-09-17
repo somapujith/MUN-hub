@@ -40,7 +40,7 @@ function card(page: Page, name: string) {
 }
 
 async function searchFromMarketplace(page: Page, term: string) {
-  const box = main(page).getByRole('searchbox', { name: 'Search MUNs by name or city' })
+  const box = main(page).getByRole('searchbox', { name: 'Search MUNs by name, city, theme or organizer' })
   await box.fill(term)
   await main(page).getByRole('button', { name: /^search$/i }).click()
   await expect(page).toHaveURL(new RegExp(`[?&]q=${encodeURIComponent(term).replace(/%20/g, '(\\+|%20)')}`))
@@ -58,9 +58,10 @@ test.describe('home page', () => {
     // The row is capped, and the local database holds many open MUNs, so
     // assert what every card in it has in common rather than which ones made the cut.
     await expectOnlyOpenMunsInRow(page)
+    // "See all" opens the matching /muns view (186b22b).
     await expect(main(page).getByRole('link', { name: /see all registration open now/i })).toHaveAttribute(
       'href',
-      '/muns',
+      '/muns?status=REGISTRATION_OPEN',
     )
     // Signed-out visitors get the organizer pitch.
     await expect(main(page).getByText('List your conference where delegates are already looking.')).toBeVisible()
@@ -123,7 +124,9 @@ test.describe('/muns marketplace', () => {
     await searchFromMarketplace(page, 'Hyderabad')
     const cards = results(page).getByRole('article')
     await expect(cards.first()).toBeVisible()
-    for (const text of await cards.allTextContents()) expect(text).toMatch(/Hyderabad/)
+    // Search also matches the organizer's name and institution (186b22b), so
+    // not every hit is located in Hyderabad, but the first page has some that are.
+    expect((await cards.allTextContents()).some((text) => /Hyderabad/.test(text))).toBe(true)
 
     // The fixture MUN (city Hyderabad, name without it) is matched by city,
     // though it may sit past page 1 among the many local test MUNs.
@@ -205,7 +208,7 @@ test.describe('/muns marketplace', () => {
       await page.goto(`/muns?sortBy=${sortBy}`)
       await expect(results(page).getByRole('article').first()).toBeVisible()
       const rail = main(page).getByRole('complementary', { name: 'Filter MUNs' })
-      await expect(rail.getByRole('button', { name: label })).toHaveAttribute('aria-current', 'true')
+      await expect(rail.getByRole('button', { name: label, exact: true })).toHaveAttribute('aria-pressed', 'true')
       crashes.assertNone()
     })
   }
@@ -249,6 +252,6 @@ test.describe('/muns marketplace', () => {
 
   test('an unknown MUN slug from a stale link renders not-found', async ({ page }) => {
     await page.goto(`/mun/${NONEXISTENT_MUN_SLUG}`)
-    await expect(pageHeading(page)).toHaveText('Page not found')
+    await expect(pageHeading(page)).toHaveText("We couldn't find that page")
   })
 })

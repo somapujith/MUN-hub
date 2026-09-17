@@ -36,6 +36,7 @@ import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
 import { encryptField } from '@/lib/crypto/field-encryption'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { countedPaymentsFilter } from '@/lib/payments/counted-payments'
 
 const PUBLISH_ROLES = ['ADMIN', 'SUPER_ADMIN'] as const
 
@@ -221,7 +222,8 @@ const STANDING_REGISTRATION_STATUSES: RegistrationStatus[] = ['CONFIRMED', 'ATTE
  * Money collected for one MUN from PAID payments, split into platform fee,
  * fee tax and organizer net — one row per currency (normally just INR; an
  * empty list means nothing has been paid yet). Payments recorded before the
- * fee model existed carry no split and count as zero fee.
+ * fee model existed carry no split and count as zero fee. Mock checkout
+ * payments moved no money and count only while the mock adapter is active.
  * Owner or ADMIN/SUPER_ADMIN only (same rule as the settings above).
  */
 export async function getMunPaymentsSummary(munId: string, session: Session | null): Promise<MunPaymentsSummary[]> {
@@ -245,6 +247,7 @@ export async function getMunPaymentsSummary(munId: string, session: Session | nu
         eq(registrations.munId, munId),
         eq(payments.status, 'PAID'),
         inArray(registrations.status, STANDING_REGISTRATION_STATUSES),
+        countedPaymentsFilter(),
       ),
     )
     .groupBy(payments.currency)

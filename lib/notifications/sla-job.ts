@@ -1,6 +1,7 @@
 import { eq, notInArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { munSubmissions } from '@/lib/db/schema'
+import { munSubmissions, muns } from '@/lib/db/schema'
+import type { MunStatus, SubmissionStatus } from '@/lib/db/schema-enums'
 import { computeSlaState } from '@/lib/lifecycle/sla'
 import { notifyPipelineEvent } from './pipeline-events'
 import { resolveMunNotificationContext } from './resolve-recipients'
@@ -12,6 +13,18 @@ import { resolveMunNotificationContext } from './resolve-recipients'
 const TERMINAL_STATUSES = ['PUBLISHED', 'REJECTED', 'WITHDRAWN'] as const
 
 const DEGRADED_STATES = new Set(['DUE_SOON', 'OVERDUE'])
+
+/**
+ * SLA_DELAY says "our review is taking longer", so it only goes out while
+ * MUN Hub actually holds the review: the mun is in VERIFICATION (the organizer
+ * has confirmed) and the submission is still undecided. A submission row
+ * exists, with its clock running, before that point (the mun is still in
+ * ORGANIZER_CONFIRMATION, waiting on the organizer) and after it (APPROVED,
+ * waiting to be published), and neither is a delay on MUN Hub's side.
+ */
+function isUnderMunHubReview(munStatus: MunStatus, submissionStatus: SubmissionStatus): boolean {
+  return munStatus === 'VERIFICATION' && (submissionStatus === 'SUBMITTED' || submissionStatus === 'UNDER_REVIEW')
+}
 
 /**
  * SLA reminder job — intended to be called by a cron scheduler (the
@@ -26,7 +39,8 @@ const DEGRADED_STATES = new Set(['DUE_SOON', 'OVERDUE'])
  * state via the same pure `computeSlaState` the rest of the codebase uses,
  * and only sends a notification when that computed state is DUE_SOON or
  * OVERDUE *and* differs from what's already stored — i.e. only on the
- * transition INTO a worse state, never on every run while it stays there.
+ * transition INTO a worse state, never on every run while it stays there,
+ * and only while the review is MUN Hub's (`isUnderMunHubReview`).
  * The stored column is written on every run regardless (not just on a
  * notify), so it stays honest for anything that reads it directly instead
  * of recomputing. A submission that degrades DUE_SOON -> OVERDUE across two
@@ -48,8 +62,10 @@ export async function runSlaNotifications(now: Date): Promise<{ sent: number }> 
       slaPausedAt: munSubmissions.slaPausedAt,
       slaPausedTotalMs: munSubmissions.slaPausedTotalMs,
       submittedAt: munSubmissions.submittedAt,
+      munStatus: muns.status,
     })
     .from(munSubmissions)
+    .innerJoin(muns, eq(munSubmissions.munId, muns.id))
     .where(notInArray(munSubmissions.status, [...TERMINAL_STATUSES]))
 
   let sent = 0
@@ -69,7 +85,7 @@ export async function runSlaNotifications(now: Date): Promise<{ sent: number }> 
 
     if (computed === row.slaState) continue
 
-    if (DEGRADED_STATES.has(computed)) {
+    if (DEGRADED_STATES.has(computed) && isUnderMunHubReview(row.munStatus, row.status)) {
       try {
         const context = await resolveMunNotificationContext(row.munId)
         await notifyPipelineEvent({ type: 'SLA_DELAY', munId: row.munId, organizerEmail: context.organizerEmail, munName: context.munName })

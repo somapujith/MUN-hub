@@ -54,3 +54,11 @@ With a token that has **Workers KV Storage: Edit** (or in the dashboard), run
 Worker logs `[storage] No UPLOADS_BUCKET or UPLOADS_KV binding in production`.
 The existing `RATE_LIMIT_KV` namespace on the account is not referenced by this repo (it may
 belong to another project), so it was deliberately not reused.
+
+## 6. Product decision — a live MUN re-checked after a high-impact edit
+
+Today a high-impact edit (dates, venue, prices, capacity, …) on a live conference moves it back to
+VERIFICATION, which removes it from the marketplace and pauses registration until the review
+passes (the organizer's Setup page now warns about this). Alternative: keep the last verified
+version listed while the change is reviewed (needs the published page to render from
+`mun_versions`). Decide which behaviour you want.

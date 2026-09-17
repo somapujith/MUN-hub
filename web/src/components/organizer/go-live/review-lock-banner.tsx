@@ -31,7 +31,7 @@ export function ReviewLockBanner({ mun }: { mun: WorkspaceMun }) {
   const body = editableHere
     ? "You can keep editing this section during the review."
     : awaitingConfirmation
-      ? `Your MUN passed the automated checks. ${LOCKED_TEXT} Confirm your submission to send it to MUN Hub.`
+      ? `Your MUN passed the automated checks, so your sections are locked while you confirm. Confirm your submission to send it to MUN Hub, or choose "Make changes first" on MUN Setup to edit something.`
       : `${LOCKED_TEXT} Any section a reviewer sends back unlocks for you.`;
 
   return (

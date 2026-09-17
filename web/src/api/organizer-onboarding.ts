@@ -26,6 +26,8 @@ export interface OrganizerOnboarding {
     firstName: string | null;
     lastName: string | null;
     contactPhone: string | null;
+    /** School, college or society hosting the MUN; delegates see it as the host. */
+    organization: string | null;
     munName: string | null;
     munCity: string | null;
     /** YYYY-MM-DD */
@@ -56,8 +58,22 @@ function put<T>(path: string, body: T) {
   });
 }
 
-export const saveProfileStep = (input: { firstName: string; lastName: string; contactPhone: string }) =>
-  put("profile", input);
+export const MAX_ORGANIZATION_LENGTH = 120;
+
+/** The host name delegates see. Editable after onboarding; "" clears it. */
+export function updateOrganization(organization: string) {
+  return request<{ organization: string | null }>("/organizer/organization", {
+    method: "PUT",
+    body: JSON.stringify({ organization }),
+  });
+}
+
+export const saveProfileStep = (input: {
+  firstName: string;
+  lastName: string;
+  contactPhone: string;
+  organization: string;
+}) => put("profile", input);
 
 export const saveMunStep = (input: { munName: string; munCity: string; munStartDate: string }) => put("mun", input);
 

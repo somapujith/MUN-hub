@@ -7,6 +7,7 @@ import {
   saveOrganizerMunStep,
   saveOrganizerPaymentStep,
   saveOrganizerProfileStep,
+  updateOrganizerOrganization,
 } from '@/lib/actions/organizer-onboarding'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
@@ -16,7 +17,7 @@ import type { AppVariables } from '../src/types'
 // Field formats are validated in lib/actions/organizer-onboarding.ts so the
 // messages reach the form; these schemas only pin the shape.
 const profileBodySchema = z
-  .object({ firstName: z.string(), lastName: z.string(), contactPhone: z.string() })
+  .object({ firstName: z.string(), lastName: z.string(), contactPhone: z.string(), organization: z.string().optional() })
   .strict()
 const munBodySchema = z.object({ munName: z.string(), munCity: z.string(), munStartDate: z.string() }).strict()
 const detailsBodySchema = z
@@ -41,6 +42,14 @@ export const organizerOnboardingRoutes = new Hono<{ Variables: AppVariables }>()
 organizerOnboardingRoutes.get('/organizer/onboarding', ...organizerOnly, async (c) => {
   return c.json(await getOrganizerOnboarding(c.get('session')!))
 })
+
+// The host name delegates see; editable after onboarding too.
+organizerOnboardingRoutes.put(
+  '/organizer/organization',
+  ...organizerOnly,
+  zValidator('json', z.object({ organization: z.string() }).strict()),
+  async (c) => c.json(await updateOrganizerOrganization(c.req.valid('json').organization, c.get('session')!)),
+)
 
 organizerOnboardingRoutes.put(
   '/organizer/onboarding/profile',

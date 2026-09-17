@@ -111,3 +111,9 @@ payout execution.
   wiring leftovers), `munhub-integrated-review` workflow (9 areas, verify, fix, merge), and the
   delegate/visitor UX walkthrough agent. f1 = organizer UX pass, 4b = MFA web UI + admin UX pass.
   Deploy-time vars/secrets list: see the wiring report section in lane change logs + RUNBOOK.
+- 10:20 Fixed from 84's E2E: webhook hold-expiry timing + confirmation-page wording (`1d86713`);
+  seeded student has a complete profile (`edb7b83`); dev-only cron trigger (`042a436`,
+  ENABLE_DEV_ENDPOINTS). f1 organizer UX pass done (`4e62a1d`, log `5888df1`), now on preview
+  labels, toaster position, organization name (slot 0036 after 0035). QUEUED (lead): payout
+  settings rework — UPI-first, optional bank, no PAN/GST, verificationState PENDING on save
+  (needs slot 0037: pan/bank columns NOT NULL today, no UPI column).

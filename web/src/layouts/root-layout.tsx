@@ -39,7 +39,15 @@ export function RootLayout() {
         <div className="flex min-h-dvh flex-col">
           <Outlet />
         </div>
-        <Toaster richColors closeButton position="top-center" />
+        {/* Bottom-right, stacked above the floating support button: top-center
+            covered the breadcrumb and status badge in the workspace header. */}
+        <Toaster
+          richColors
+          closeButton
+          position="bottom-right"
+          offset={{ bottom: 88, right: 24 }}
+          mobileOffset={{ bottom: 84, right: 16, left: 16 }}
+        />
       </TooltipProvider>
     </ThemeProvider>
   );

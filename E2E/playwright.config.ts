@@ -14,6 +14,12 @@ if (!process.env.TEST_WORKER_INDEX) {
   writeFileSync(EMAIL_OUTBOX_FILE, '')
 }
 
+// A non-zero platform fee, so fee/tax/net assertions mean something. Set on
+// process.env so the test workers (fixtures/payments.ts) see the same rate
+// the API server is started with.
+process.env.PLATFORM_FEE_BPS ??= '250'
+process.env.PLATFORM_FEE_TAX_BPS ??= '1800'
+
 const ROOT = path.resolve(__dirname, '..')
 
 // E2E_BROWSER_CHANNEL=chromium uses Playwright's bundled browser (needs
@@ -131,6 +137,11 @@ export default defineConfig({
         // Test-only key for encrypting staff TOTP secrets (local database only;
         // never used anywhere else). The API refuses 2FA enrollment without one.
         TOTP_FIELD_KEY: 'iQ0HBpXmBmry9VPSfstOXez8gweh08VhoO8ZxnlO6A0=',
+        PLATFORM_FEE_BPS: process.env.PLATFORM_FEE_BPS,
+        PLATFORM_FEE_TAX_BPS: process.env.PLATFORM_FEE_TAX_BPS,
+        // POST /api/v1/dev/jobs/:name, so specs can run scheduled jobs on demand
+        // (refused in production runtimes).
+        ENABLE_DEV_ENDPOINTS: 'true',
         // Links in emails point at the local web app.
         APP_URL: WEB_URL,
       },

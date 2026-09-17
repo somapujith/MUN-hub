@@ -253,7 +253,11 @@ function EmailStep({ initialEmail, onSent }: { initialEmail: string; onSent: (em
 function DetailsStep({ initialDraft, onSent }: { initialDraft: SignupDraft; onSent: (draft: SignupDraft) => void }) {
   const [draft, setDraft] = React.useState(initialDraft);
   const [formError, setFormError] = React.useState<string | null>(null);
-  const update = (patch: Partial<SignupDraft>) => setDraft((current) => ({ ...current, ...patch }));
+  const update = (patch: Partial<SignupDraft>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+    // The message described the old values; don't leave it up once they change.
+    setFormError(null);
+  };
   const turnstile = useTurnstile("organizer-code");
 
   const sendCode = useMutation({

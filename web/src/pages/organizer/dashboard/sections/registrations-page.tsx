@@ -242,11 +242,13 @@ export function OrganizerRegistrationsPage() {
 
         <div className="flex flex-wrap items-center justify-between gap-sm">
           <p className="text-body-md text-muted-foreground" aria-live="polite">
-            {total === 0
-              ? hasFilters
-                ? "No delegates match"
-                : "No delegates yet"
-              : `${rangeStart}–${rangeEnd} of ${total}`}
+            {/* When there are none, the empty state below says so on screen;
+                this line only announces it. */}
+            {total === 0 ? (
+              <span className="sr-only">{hasFilters ? "No delegates match" : "No delegates yet"}</span>
+            ) : (
+              `${rangeStart}–${rangeEnd} of ${total}`
+            )}
           </p>
           {attendanceOpen && (
             <p className="text-body-md text-muted-foreground">

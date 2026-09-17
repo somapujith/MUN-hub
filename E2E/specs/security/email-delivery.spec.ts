@@ -1,8 +1,11 @@
 import { expect, request, test, type APIRequestContext } from '@playwright/test'
 import { API_ORIGIN, WEB_URL } from '../../env'
-import { newApiContext, seedOrganizerLoginCode, signUpOrganizerViaApi, signUpViaApi } from '../../fixtures/api'
+import { getMun, newApiContext, seedOrganizerLoginCode, signUpOrganizerViaApi, signUpViaApi } from '../../fixtures/api'
 import { uniqueEmail } from '../../fixtures/data'
+import { OPEN } from '../../fixtures/fixture-muns'
 import { emailsTo, expectNoEmail, linkIn, waitForEmail } from '../../fixtures/outbox'
+import { registerForPass } from '../../fixtures/payments'
+import { expireSeatHold, paymentFor } from '../../fixtures/payments-fixture-db'
 import { STORAGE_STATE } from '../../paths'
 
 /**
@@ -180,9 +183,109 @@ test.describe('support replies', () => {
     await student.api.dispose()
   })
 
+  test('an organizer\'s reply email points at the organizer inbox, and resolving sends nothing extra', async () => {
+    const organizer = await signUpOrganizerViaApi('E2E Mail Organizer', uniqueEmail('support-mail-org'))
+    const started = await organizer.api.post('support/conversations', { data: { body: `E2E organizer mail ${Date.now()}` } })
+    expect(started.status(), await started.text()).toBe(201)
+    const { ticket } = (await started.json()) as { ticket: { id: string; subject: string } }
+
+    const admin = await adminApi()
+    const reply = await admin.post(`support/conversations/${ticket.id}/messages`, {
+      data: { body: 'Private staff answer', nextStatus: 'IN_PROGRESS' },
+    })
+    expect(reply.status(), await reply.text()).toBe(201)
+    // Status changes alone (no message) never email.
+    expect((await admin.patch(`admin/support/tickets/${ticket.id}`, { data: { status: 'RESOLVED', resolutionNotes: 'Done' } })).status()).toBe(200)
+    await admin.dispose()
+
+    const subject = `New reply on your support ticket — ${ticket.subject}`
+    const mail = await waitForEmail(organizer.email, subject)
+    expect(mail.text).not.toContain('Private staff answer')
+    expect(linkIn(mail, '/organizer/support').pathname).toBe('/organizer/support')
+    await expectNoEmail(organizer.email, /^(?!New reply on your support ticket)(.*support|.*ticket)/i, 1_000)
+    expect((await emailsTo(organizer.email)).filter((m) => m.subject === subject)).toHaveLength(1)
+    await organizer.api.dispose()
+  })
+
   test('a delegate who turned email notifications off gets none', async () => {
     const { student, subject } = await ticketWithStaffReply(true)
     await expectNoEmail(student.email, `New reply on your support ticket — ${subject}`)
+    await student.api.dispose()
+  })
+})
+
+test.describe('registration payment emails', () => {
+  const PASS = OPEN.products[0] // E2E Delegate Pass, ₹1,499
+  const confirmedSubject = `Registration confirmed — ${OPEN.name}`
+  const failedSubject = `Payment failed — ${OPEN.name}`
+
+  async function delegate(optOut = false) {
+    const session = await signUpViaApi()
+    if (optOut) {
+      expect((await session.api.patch('account/notifications', { data: { enabled: false } })).status()).toBe(204)
+    }
+    return session
+  }
+
+  test('a successful payment emails a confirmation with the pass and registration id, and no refund talk', async () => {
+    const student = await delegate()
+    const registrationId = await registerForPass(student, OPEN.slug, PASS.name, { pay: 'success' })
+    const mail = await waitForEmail(student.email, confirmedSubject)
+    expect(mail.text).toContain(PASS.name)
+    expect(mail.text).toContain(registrationId)
+    expect(mail.text).not.toMatch(/refund/i)
+    await expectNoEmail(student.email, failedSubject, 500)
+    expect((await emailsTo(student.email)).filter((m) => m.subject === confirmedSubject)).toHaveLength(1)
+    await student.api.dispose()
+  })
+
+  test('the confirmation email states the amount actually paid (4d3d86e)', async () => {
+    const student = await delegate()
+    await registerForPass(student, OPEN.slug, PASS.name, { pay: 'success' })
+    const mail = await waitForEmail(student.email, confirmedSubject)
+    expect(mail.text).not.toContain('14.99')
+    expect(mail.text).toMatch(/(₹|INR) ?1,?499\b/)
+    await student.api.dispose()
+  })
+
+  test('a failed payment emails that the seat was released, with no refund talk', async () => {
+    const student = await delegate()
+    await registerForPass(student, OPEN.slug, PASS.name, { pay: 'failure' })
+    const mail = await waitForEmail(student.email, failedSubject)
+    expect(mail.text).toContain(PASS.name)
+    expect(mail.text).toMatch(/seat hold has been released/)
+    expect(mail.text).not.toMatch(/refund/i)
+    await expectNoEmail(student.email, confirmedSubject, 500)
+    await student.api.dispose()
+  })
+
+  test('a delegate who turned email notifications off gets neither', async () => {
+    const paid = await delegate(true)
+    await registerForPass(paid, OPEN.slug, PASS.name, { pay: 'success' })
+    const failed = await delegate(true)
+    await registerForPass(failed, OPEN.slug, PASS.name, { pay: 'failure' })
+    await expectNoEmail(paid.email, confirmedSubject)
+    await expectNoEmail(failed.email, failedSubject, 500)
+    await paid.api.dispose()
+    await failed.api.dispose()
+  })
+
+  test('holding a seat, and a payment that arrives after the hold lapsed, send no confirmation', async () => {
+    const student = await delegate()
+    const registrationId = await registerForPass(student, OPEN.slug, PASS.name)
+    await expectNoEmail(student.email, /Registration confirmed|Payment failed/, 1_000)
+
+    await expireSeatHold(registrationId)
+    const mun = await getMun(student.api, OPEN.slug)
+    await student.api.get(`products/availability?ids=${mun.registrationProducts.map((p) => p.id).join(',')}`)
+    const pay = await student.api.post(`registrations/${registrationId}/mock-payment`, { data: { outcome: 'success' } })
+    expect(await pay.json()).toEqual({ ok: true, exception: true })
+    await expectNoEmail(student.email, /Registration confirmed|Payment failed/)
+
+    const payment = await paymentFor(registrationId)
+    const admin = await adminApi()
+    await admin.post(`admin/payment-exceptions/${payment!.id}/resolve`, { data: { note: 'Returned (E2E email spec)' } })
+    await admin.dispose()
     await student.api.dispose()
   })
 })

@@ -151,7 +151,9 @@ describe('LOCKED enforcement wired into action files', () => {
     await expect(
       updateMunDetails(mun.id, { name: mun.name, venue: 'Fixed Venue Hall' }, session),
     ).resolves.toMatchObject({ venue: 'Fixed Venue Hall' })
-    await expect(updateMunDetails(mun.id, { name: 'Sneaky Rename' }, session)).rejects.toThrow(/"BASIC_INFO" module is locked/)
+    await expect(updateMunDetails(mun.id, { name: 'Sneaky Rename' }, session)).rejects.toThrow(
+      'Basic Info is locked while MUN Hub reviews this MUN. You can edit it again if a reviewer sends it back.',
+    )
   })
 
   it('mun-config.ts createCommittee: rejects organizer, allows admin, during CONTENT_SUBMITTED', async () => {
