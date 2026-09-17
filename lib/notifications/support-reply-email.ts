@@ -7,15 +7,15 @@ import { getNotificationsAdapter } from './select-adapter'
 import type { NotificationsAdapter } from './adapter'
 
 /**
- * Where a requester's support inbox lives, by role — matches
- * components/support/support-widget.tsx's own inboxHref logic. Deliberately
- * a link to the general inbox, not a deep link to this one ticket — the chat
- * widget/panel has no per-ticket route today (openThread is client-only
- * state), so there's nothing more specific to link to.
+ * Deep link straight to this ticket's thread, by the requester's role —
+ * `/dashboard/support?ticket=<id>` for delegates, `/organizer/support?ticket=<id>`
+ * for organizers (support lane, landed 2026-09-17 — the inboxes now read the
+ * `ticket` query param to open that conversation directly).
  */
-function supportInboxUrl(role: string): string {
+function supportTicketUrl(role: string, ticketId: string): string {
   const baseUrl = getRuntimeEnv('APP_URL') ?? 'http://localhost:3000'
-  return `${baseUrl}${role === 'ORGANIZER' ? '/organizer/support' : '/dashboard/support'}`
+  const path = role === 'ORGANIZER' ? '/organizer/support' : '/dashboard/support'
+  return `${baseUrl}${path}?ticket=${ticketId}`
 }
 
 /**
@@ -58,7 +58,7 @@ export async function notifySupportReply(
       body:
         `Hi ${row.requesterName},\n\n` +
         `Our team replied to your support conversation "${row.subject}".\n\n` +
-        `View it here: ${supportInboxUrl(row.requesterRole)}`,
+        `View it here: ${supportTicketUrl(row.requesterRole, ticketId)}`,
     })
   } catch (error) {
     console.error('[support-reply-email] delivery failed', { ticketId, error })

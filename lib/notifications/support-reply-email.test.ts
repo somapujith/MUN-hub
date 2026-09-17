@@ -23,7 +23,7 @@ async function makeTicket(role: 'STUDENT' | 'ORGANIZER', emailNotificationsEnabl
 }
 
 describe('notifySupportReply', () => {
-  it('emails the requester with a pointer back to their organizer support inbox', async () => {
+  it('emails the requester with a deep link straight to the ticket in their organizer support inbox', async () => {
     const { requester, ticket } = await makeTicket('ORGANIZER')
     const { adapter, send } = mockAdapter()
 
@@ -33,16 +33,16 @@ describe('notifySupportReply', () => {
     const call = send.mock.calls[0][0]
     expect(call.to).toBe(requester.email)
     expect(call.subject).toContain('Cannot upload my logo')
-    expect(call.body).toContain('/organizer/support')
+    expect(call.body).toContain(`/organizer/support?ticket=${ticket.id}`)
   })
 
-  it('emails the requester with a pointer back to their student dashboard inbox', async () => {
+  it('emails the requester with a deep link straight to the ticket in their student dashboard inbox', async () => {
     const { requester, ticket } = await makeTicket('STUDENT')
     const { adapter, send } = mockAdapter()
 
     await notifySupportReply(ticket.id, adapter)
 
-    expect(send.mock.calls[0][0].body).toContain('/dashboard/support')
+    expect(send.mock.calls[0][0].body).toContain(`/dashboard/support?ticket=${ticket.id}`)
     expect(send.mock.calls[0][0].to).toBe(requester.email)
   })
 
