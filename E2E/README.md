@@ -88,6 +88,10 @@ The API rate-limits by client IP, and a local test run makes every request from 
 
 To keep the suite from throttling itself, `playwright.config.ts` starts the API with `RATE_LIMIT_GLOBAL_PER_MINUTE=100000`. That raises only the generic per-IP cap (300/min by default). The dedicated limits stay at their production values: sign-in is 5/min per IP+email, organizer code requests are 3/min per IP+email plus 30/min per IP, and organizer code verification is 10/min per IP+email. Tests should use a fresh email per attempt rather than work around these limits. If a run starts getting `429`s from one of them, spread the requests over more emails; don't reintroduce header tricks.
 
+## API server settings
+
+Besides the database, ports and rate limit above, `playwright.config.ts` starts the API with `MOCK_PAYMENTS_ENABLED=true` (the mock checkout the payment specs drive, off in production) and `ALLOW_LOCALHOST_ORIGINS=true` (so CORS/CSRF accept the local web origin).
+
 ## Writing tests
 
 - Use role and label selectors scoped to `main`, `banner` or `dialog`. No CSS classes and no `waitForTimeout`.

@@ -109,6 +109,11 @@ export default defineConfig({
         // is raised; the login and organizer-code limits stay as in prod.
         RATE_LIMIT_GLOBAL_PER_MINUTE: '100000',
         TRUST_PROXY_HEADERS: '',
+        // Local-only switches the suite depends on: the mock checkout (off in
+        // production until the real gateway lands) and trusting the
+        // localhost web origin for CORS/CSRF.
+        MOCK_PAYMENTS_ENABLED: 'true',
+        ALLOW_LOCALHOST_ORIGINS: 'true',
       },
     },
     {
