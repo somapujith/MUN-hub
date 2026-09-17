@@ -196,7 +196,7 @@ test.describe('payments webhook', () => {
   })
 
   test('an amount that differs from the order never confirms the seat; it becomes an exception', async () => {
-    const { registrationId, payment } = await pendingOrder()
+    const { delegate, registrationId, payment } = await pendingOrder()
     const res = await deliverWebhook(
       signedWebhook({ orderId: payment.providerOrderId, amount: payment.amount - 1, currency: payment.currency }),
     )
@@ -208,8 +208,12 @@ test.describe('payments webhook', () => {
     expect(stored!.exceptionRaisedAt).not.toBeNull()
 
     const admin = await adminApi()
-    const queue = (await (await admin.get('admin/payment-exceptions')).json()) as Array<{ paymentId: string; reason: string }>
-    expect(queue.find((row) => row.paymentId === payment.id)).toMatchObject({ reason: 'AMOUNT_MISMATCH' })
+    // The queue is paginated ({results, total}); search by the delegate's email.
+    const listed = await admin.get(`admin/payment-exceptions?q=${encodeURIComponent(delegate.email)}`)
+    expect(listed.status(), await listed.text()).toBe(200)
+    const queue = (await listed.json()) as { results: Array<{ paymentId: string; reason: string }>; total: number }
+    expect(queue.total).toBe(1)
+    expect(queue.results.find((row) => row.paymentId === payment.id)).toMatchObject({ reason: 'AMOUNT_MISMATCH' })
     await admin.dispose()
     await resolveException(payment.id)
   })

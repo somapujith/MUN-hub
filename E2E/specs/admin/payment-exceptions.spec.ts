@@ -4,7 +4,7 @@ import { browserContextFor, getMun, newApiContext, signUpViaApi, type ApiSession
 import { OPEN } from '../../fixtures/fixture-muns'
 import { expireSeatHold, paymentFor, registrationStatus } from '../../fixtures/payments-fixture-db'
 import { watchForCrashes } from '../../fixtures/ui'
-import { adminApi, fixtureOwnerApi, heading, main, tableRow, toast, uniqueName } from './_helpers'
+import { adminApi, filterPaymentExceptions, fixtureOwnerApi, heading, main, tableRow, toast, uniqueName } from './_helpers'
 
 /**
  * A payment that lands after the delegate's 15-minute seat hold ran out
@@ -43,10 +43,12 @@ function exceptionRow(page: Page, registrationId: string) {
   return tableRow(page, registrationId)
 }
 
-async function openExceptions(page: Page) {
+/** The open-exceptions queue, narrowed to one delegate (it holds every MUN's exceptions). */
+async function openExceptions(page: Page, delegateEmail: string) {
   await page.goto('/admin/payments')
   await expect(heading(page, 'Payments')).toBeVisible()
   await expect(main(page)).toContainText('There are no refunds')
+  await filterPaymentExceptions(page, delegateEmail)
 }
 
 async function resolveViaApi(api: APIRequestContext, paymentId: string, note: unknown) {
@@ -93,7 +95,7 @@ test.describe('late payments', () => {
     expect(detail.payment).toEqual([{ amount: DELEGATE_PASS.price, currency: 'INR', status: 'PAID' }])
 
     // The admin queue lists it.
-    await openExceptions(page)
+    await openExceptions(page, delegate.email)
     const row = exceptionRow(page, registrationId)
     await expect(row).toHaveCount(1)
     await expect(row).toContainText(name)
@@ -127,6 +129,14 @@ test.describe('late payments', () => {
     await expect(toast(page, 'Payment exception resolved')).toBeVisible()
     await expect(dialog).toBeHidden()
     await expect(exceptionRow(page, registrationId)).toHaveCount(0)
+    await expect(main(page).getByText('No open payment exceptions')).toBeVisible()
+
+    // It moves to the resolved list, which shows the note instead of a button.
+    await filterPaymentExceptions(page, delegate.email, 'resolved')
+    const resolvedRow = exceptionRow(page, registrationId)
+    await expect(resolvedRow).toHaveCount(1)
+    await expect(resolvedRow).toContainText(note)
+    await expect(resolvedRow.getByRole('button', { name: /resolve/i })).toHaveCount(0)
 
     const resolved = await paymentFor(registrationId)
     expect(resolved).toMatchObject({ status: 'PAID', exceptionReason: 'PAYMENT_AFTER_HOLD_EXPIRED', exceptionResolutionNote: note })
@@ -136,7 +146,11 @@ test.describe('late payments', () => {
     // Resolving twice is a conflict; the resolution is in the audit trail.
     expect((await resolveViaApi(admin, payment!.id, 'again')).status()).toBe(409)
     const history = (await (await admin.get(`admin/audit/payment/${payment!.id}`)).json()) as Array<{ action: string; reason: string | null }>
-    expect(history).toEqual([expect.objectContaining({ action: 'PAYMENT_DETAILS_CHANGED', reason: note })])
+    // Listing the queue logs a PII read of its own (delegate names/emails);
+    // the resolution itself is one PAYMENT_EXCEPTION_RESOLVED entry.
+    expect(history.filter((entry) => entry.action !== 'PII_READ')).toEqual([
+      expect.objectContaining({ action: 'PAYMENT_EXCEPTION_RESOLVED', reason: note }),
+    ])
     await admin.dispose()
     await delegateContext.close()
     crashes.assertNone()

@@ -5,7 +5,7 @@ import { DATABASE_URL, assertLocalDatabase } from '../../env'
 import { getMun, signUpViaApi, type ApiSession } from '../../fixtures/api'
 import { OPEN } from '../../fixtures/fixture-muns'
 import { watchForCrashes } from '../../fixtures/ui'
-import { heading, main, tableRow, uniqueName } from './_helpers'
+import { filterPaymentExceptions, heading, main, tableRow, uniqueName } from './_helpers'
 
 /**
  * Admin Registrations + Payments views, driven by a fresh delegate's own
@@ -112,22 +112,26 @@ test.describe('admin payments', () => {
     await page.goto('/admin/payments')
     await expect(heading(page, 'Payments')).toBeVisible()
     await expect(main(page)).toContainText(/Payment exceptions requiring manual review/)
+    // The queue is filtered and paged like every other admin list.
+    await expect(main(page).getByRole('searchbox', { name: 'Search' })).toBeVisible()
+    await expect(main(page).getByRole('combobox', { name: 'Status' })).toHaveValue('open')
     const table = main(page).getByRole('table')
-    await expect(table.or(main(page).getByText('No payment exceptions'))).toBeVisible()
+    await expect(table.or(main(page).getByText('No open payment exceptions'))).toBeVisible()
     if (await table.isVisible()) {
       for (const column of ['Registration', 'Delegate', 'MUN', 'Amount', 'Exception']) {
         await expect(table.getByRole('columnheader', { name: column, exact: true })).toBeVisible()
       }
-      await expect(main(page).getByText(/\d+ exceptions? — newest first, capped at 100\./)).toBeVisible()
+      await expect(main(page).getByText(/^\d+ exceptions?$/)).toBeVisible()
     }
     crashes.assertNone()
   })
 
   test('a failed payment releases the seat but is not an exception (no money was taken)', async ({ page }) => {
-    const { name, registrationId } = await registeredDelegate('failure')
+    const { delegate, name, registrationId } = await registeredDelegate('failure')
     await page.goto('/admin/payments')
     await expect(heading(page, 'Payments')).toBeVisible()
-    await expect(main(page).getByRole('table').or(main(page).getByText('No payment exceptions'))).toBeVisible()
+    await filterPaymentExceptions(page, delegate.email)
+    await expect(main(page).getByText('No open payment exceptions')).toBeVisible()
     await expect(tableRow(page, registrationId)).toHaveCount(0)
 
     await searchRegistrations(page, registrationId)
@@ -144,6 +148,7 @@ test.describe('admin payments', () => {
     expect(await pay.json()).toEqual({ ok: true, exception: true })
 
     await page.goto('/admin/payments')
+    await filterPaymentExceptions(page, delegate.email)
     const row = tableRow(page, registrationId)
     await expect(row).toHaveCount(1)
     await expect(row).toContainText(name)
@@ -161,10 +166,11 @@ test.describe('admin payments', () => {
   })
 
   test('a successfully paid, confirmed registration is not an exception', async ({ page }) => {
-    const { registrationId } = await registeredDelegate('success')
+    const { delegate, registrationId } = await registeredDelegate('success')
     await page.goto('/admin/payments')
     await expect(heading(page, 'Payments')).toBeVisible()
-    await expect(main(page).getByRole('table').or(main(page).getByText('No payment exceptions'))).toBeVisible()
+    await filterPaymentExceptions(page, delegate.email)
+    await expect(main(page).getByText('No open payment exceptions')).toBeVisible()
     await expect(tableRow(page, registrationId)).toHaveCount(0)
   })
 })
