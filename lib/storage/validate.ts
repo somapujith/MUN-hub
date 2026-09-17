@@ -42,6 +42,27 @@ export const UPLOAD_RULES = {
 
 export type UploadPurpose = keyof typeof UPLOAD_RULES
 
+/** The largest file any upload route accepts, across every purpose. */
+export const MAX_UPLOAD_BYTES = Math.max(...Object.values(UPLOAD_RULES).map((rule) => rule.maxBytes))
+
+/** Largest image any media upload accepts (LOGO is stricter still, checked per kind). */
+export const MAX_IMAGE_UPLOAD_BYTES = Math.max(
+  UPLOAD_RULES.LOGO.maxBytes,
+  UPLOAD_RULES.COVER.maxBytes,
+  UPLOAD_RULES.IMAGE.maxBytes,
+)
+
+/**
+ * Longest base64 string that can encode `bytes` bytes (4 characters per 3
+ * bytes, padded). The upload routes cap `fileBase64` with this so an
+ * oversized body is rejected by the schema, before the handler decodes it —
+ * the byte cap above is only reached after a Buffer has already been
+ * allocated, which is too late to protect the isolate's memory.
+ */
+export function base64LengthForBytes(bytes: number): number {
+  return Math.ceil(bytes / 3) * 4
+}
+
 const DESCRIPTIONS: Record<AllowedContentType, string> = {
   'image/png': 'PNG image',
   'image/jpeg': 'JPEG image',
