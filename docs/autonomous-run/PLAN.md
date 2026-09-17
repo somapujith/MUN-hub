@@ -51,7 +51,7 @@ the shared tree commit only their own hunks.
 | 0034 | mun-hub-4b | staff TOTP 2FA | committed e6a0db9 |
 | 0035 | mun-hub-62 agent `followups` | admin audit enum values + seeded REFUND_POLICY doc cleanup | in progress |
 | 0036 | mun-hub-4b | payout settings rework (UPI-first, no PAN/GST) | reserved (after 0035) |
-| 0037 | mun-hub-f1 | team access (members, invitations) | reserved (after 0036) |
+| 0037 | — | (released: team access awaits the user, USER_ACTIONS §7) | free |
 
 Lead-agent lanes must not add migrations without a slot from the lead.
 
