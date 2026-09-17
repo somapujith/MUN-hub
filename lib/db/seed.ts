@@ -438,6 +438,7 @@ async function main() {
     munScheduleItems,
     munContacts,
     organizerApplications,
+    studentProfiles,
   } = await import('./schema')
   const tables: Tables = {
     users,
@@ -471,8 +472,35 @@ async function main() {
     email: 'student@munhub.test',
     role: 'STUDENT',
     institution: 'VIT Vellore',
+    phone: '+91 90000 00001',
     passwordHash: demoPasswordHash,
   })
+  // A complete one-time profile, so the demo delegate can register straight
+  // away (registration is gated on it — lib/actions/student-profile.ts).
+  if (!student.phone) {
+    await db.update(users).set({ phone: '+91 90000 00001' }).where(eq(users.id, student.id))
+  }
+  const [studentProfile] = await db
+    .select({ id: studentProfiles.id })
+    .from(studentProfiles)
+    .where(eq(studentProfiles.userId, student.id))
+    .limit(1)
+  if (!studentProfile) {
+    await db.insert(studentProfiles).values({
+      userId: student.id,
+      dateOfBirth: new Date('2005-06-15'),
+      gradeOrYear: 'Second year',
+      residentialAddress: 'VIT Men’s Hostel, Katpadi, Vellore 632014',
+      emergencyContactName: 'Rakesh Verma',
+      emergencyContactPhone: '+91 90000 00002',
+      emergencyContactRelation: 'Father',
+      gender: 'Female',
+      addressCity: 'Vellore',
+      addressState: 'Tamil Nadu',
+      addressCountry: 'India',
+    })
+    console.log('    (seeded a complete delegate profile for the demo student)')
+  }
   console.log(`  - Student: ${student.email} (institution: ${student.institution})`)
 
   // One organizer account per MUN_SEED, derived from each seed's `organizer`
