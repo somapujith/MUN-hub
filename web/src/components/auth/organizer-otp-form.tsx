@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSession } from "@/hooks/use-session";
+import { useTurnstile } from "@/hooks/use-turnstile";
 import { safeRedirectTo } from "@/lib/redirect";
 import { cn } from "cn";
 
@@ -191,14 +192,21 @@ function errorText(error: unknown, fallback: string): string | null {
   return error instanceof Error ? error.message : fallback;
 }
 
+/** Every code request carries a Turnstile token when that check is on (hooks/use-turnstile.tsx). */
+function sendCodeRequest({ email, turnstileToken }: { email: string; turnstileToken?: string }) {
+  return requestOrganizerCode(email, turnstileToken);
+}
+
 function EmailStep({ initialEmail, onSent }: { initialEmail: string; onSent: (email: string) => void }) {
   const [email, setEmail] = React.useState(initialEmail);
   const normalized = email.trim().toLowerCase();
   const isValid = EMAIL_PATTERN.test(normalized);
+  const turnstile = useTurnstile("organizer-code");
 
   const sendCode = useMutation({
-    mutationFn: requestOrganizerCode,
-    onSuccess: () => onSent(normalized),
+    mutationFn: sendCodeRequest,
+    onSuccess: (_result, variables) => onSent(variables.email),
+    onSettled: turnstile.reset,
   });
   const error = errorText(sendCode.error, "Could not send the code.");
 
@@ -210,7 +218,9 @@ function EmailStep({ initialEmail, onSent }: { initialEmail: string; onSent: (em
         noValidate
         onSubmit={(event) => {
           event.preventDefault();
-          if (isValid && !sendCode.isPending) sendCode.mutate(normalized);
+          if (isValid && turnstile.ready && !sendCode.isPending) {
+            sendCode.mutate({ email: normalized, turnstileToken: turnstile.token });
+          }
         }}
       >
         <Label htmlFor="organizer-email" className="sr-only">
@@ -230,8 +240,9 @@ function EmailStep({ initialEmail, onSent }: { initialEmail: string; onSent: (em
           aria-describedby={error ? "organizer-email-error" : undefined}
           className={FIELD_CLASS}
         />
+        {turnstile.widget}
         <ErrorMessage id="organizer-email-error" message={error} />
-        <Button type="submit" className={BUTTON_CLASS} disabled={!isValid || sendCode.isPending}>
+        <Button type="submit" className={BUTTON_CLASS} disabled={!isValid || !turnstile.ready || sendCode.isPending}>
           {sendCode.isPending ? "Sending OTP…" : "Send OTP"}
         </Button>
       </form>
@@ -243,10 +254,12 @@ function DetailsStep({ initialDraft, onSent }: { initialDraft: SignupDraft; onSe
   const [draft, setDraft] = React.useState(initialDraft);
   const [formError, setFormError] = React.useState<string | null>(null);
   const update = (patch: Partial<SignupDraft>) => setDraft((current) => ({ ...current, ...patch }));
+  const turnstile = useTurnstile("organizer-code");
 
   const sendCode = useMutation({
-    mutationFn: requestOrganizerCode,
+    mutationFn: sendCodeRequest,
     onSuccess: () => onSent(draft),
+    onSettled: turnstile.reset,
   });
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -258,7 +271,8 @@ function DetailsStep({ initialDraft, onSent }: { initialDraft: SignupDraft; onSe
     if (!draft.acceptedTerms || !draft.acceptedPrivacy) {
       return setFormError("Accept the Terms of Service and Privacy Policy to continue.");
     }
-    if (!sendCode.isPending) sendCode.mutate(email);
+    if (!turnstile.ready) return setFormError("Complete the verification check, then try again.");
+    if (!sendCode.isPending) sendCode.mutate({ email, turnstileToken: turnstile.token });
   }
 
   const error = formError ?? errorText(sendCode.error, "Could not send the code.");
@@ -311,6 +325,7 @@ function DetailsStep({ initialDraft, onSent }: { initialDraft: SignupDraft; onSe
           acceptedPrivacy={draft.acceptedPrivacy}
           onChange={update}
         />
+        {turnstile.widget}
         <ErrorMessage id="organizer-details-error" message={error} />
         <Button type="submit" className={BUTTON_CLASS} disabled={sendCode.isPending}>
           {sendCode.isPending ? "Sending OTP…" : "Send OTP"}
@@ -411,13 +426,16 @@ function CodeStep({
     },
   });
 
+  // Invisible unless Cloudflare wants an interaction, so it doesn't crowd the code step.
+  const turnstile = useTurnstile("organizer-code", { appearance: "interaction-only" });
   const resend = useMutation({
-    mutationFn: requestOrganizerCode,
+    mutationFn: sendCodeRequest,
     onSuccess: () => {
       setResendAt(Date.now() + RESEND_COOLDOWN_MS);
       setCode("");
       verify.reset();
     },
+    onSettled: turnstile.reset,
   });
 
   function submit(value: string) {
@@ -487,14 +505,15 @@ function CodeStep({
         ) : (
           <button
             type="button"
-            onClick={() => resend.mutate(email)}
-            disabled={resend.isPending}
+            onClick={() => resend.mutate({ email, turnstileToken: turnstile.token })}
+            disabled={resend.isPending || !turnstile.ready}
             className="font-medium text-link underline-offset-2 hover:underline disabled:opacity-60"
           >
             {resend.isPending ? "Sending…" : "Resend OTP"}
           </button>
         )}
       </p>
+      {turnstile.widget ? <div className="mt-md">{turnstile.widget}</div> : null}
     </>
   );
 }
