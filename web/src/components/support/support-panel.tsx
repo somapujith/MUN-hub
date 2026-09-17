@@ -1,380 +1,455 @@
 import * as React from "react";
+import { Link, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { cn } from "cn";
 import { toast } from "sonner";
-import { ArrowLeftIcon, Loader2Icon, LifeBuoyIcon, SendIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { queryKeys } from "@/api/query-keys";
 import {
-  getConversation,
-  listMyConversations,
-  markConversationRead,
-  sendConversationMessage,
-  startConversation,
-} from "@/api/support";
-import type { SupportTicket } from "@/types/support";
+  AlertCircleIcon,
+  ArrowLeftIcon,
+  CheckCircle2Icon,
+  LifeBuoyIcon,
+  LockIcon,
+  RotateCwIcon,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { queryKeys } from "@/api/query-keys";
+import { getOrganizerWorkspaceOverview } from "@/api/organizer-dashboard";
+import { listMyConversations, startConversation } from "@/api/support";
+import { useSession } from "@/hooks/use-session";
+import { MessageComposer } from "@/components/support/message-composer";
+import { MessageThread } from "@/components/support/message-thread";
+import {
+  categoryLabel,
+  formatRelativeTime,
+  statusLabel,
+  statusTone,
+} from "@/components/support/support-labels";
+import {
+  SUPPORT_POLL_MS,
+  invalidateSupportSummaries,
+  useConversation,
+  useMarkReadWhenViewed,
+  useSendMessage,
+} from "@/components/support/use-support";
+import type { ConversationDetail, SupportTicket } from "@/types/support";
 
 /**
- * Core reusable chat UI for the "Support Desk" feature. Two mount points:
- * the floating `SupportWidget` (`variant="popover"`, inside a `Sheet`) and
- * the full-page `/dashboard/support` + `/organizer/support` routes
- * (`variant="page"`, built by other agents against this exact prop
- * contract).
+ * The requester side of the support desk: a conversation list with a
+ * "new message" composer, and the selected thread.
  *
- * No `role` prop — every ticket `listMyConversations()` returns is one the
- * caller created, so `message.senderId === ticket.createdBy` is a complete
- * "is this my bubble" test without knowing the caller's own role or id.
+ * - `variant="popover"` (inside the chat widget): one column, list or thread.
+ *   The selection is local state.
+ * - `variant="page"` (/dashboard/support, /organizer/support): list and
+ *   thread side by side from `lg`, one at a time below it. The selection is
+ *   the `?ticket=` search param, so a ticket can be linked to directly (the
+ *   /support/new form lands there).
  */
 export interface SupportPanelProps {
   variant?: "popover" | "page";
 }
 
-const LIST_POLL_MS = 20_000;
-const THREAD_POLL_MS = 4_000;
-
-function statusVariant(status: SupportTicket["status"]): "secondary" | "info" | "success" {
-  switch (status) {
-    case "NEW":
-    case "ASSIGNED":
-    case "IN_PROGRESS":
-      return "info";
-    case "WAITING":
-      return "secondary";
-    case "RESOLVED":
-    case "CLOSED":
-      return "success";
-    default:
-      return "secondary";
-  }
-}
-
-/** Unread iff the last message wasn't mine and either I've never read this
- * ticket or it arrived after my last read. */
-function isTicketUnread(ticket: SupportTicket): boolean {
-  if (!ticket.lastMessageSenderId || ticket.lastMessageSenderId === ticket.createdBy) {
-    return false;
-  }
-  if (!ticket.requesterReadAt) return true;
-  if (!ticket.lastMessageAt) return false;
-  return new Date(ticket.lastMessageAt).getTime() > new Date(ticket.requesterReadAt).getTime();
-}
-
-function formatRelativeTime(date: Date | string): string {
-  const target = typeof date === "string" ? new Date(date) : date;
-  const diffSec = Math.round((Date.now() - target.getTime()) / 1000);
-  if (diffSec < 60) return "just now";
-  const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.round(diffHr / 24);
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return target.toLocaleDateString();
-}
-
-const fieldClassName = cn(
-  "w-full min-w-0 resize-none rounded-sm border border-input bg-background px-md py-sm text-body-md text-ink transition-colors outline-none",
-  "placeholder:text-muted-foreground",
-  "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25",
-  "disabled:pointer-events-none disabled:bg-surface-soft disabled:text-muted-foreground",
-  "dark:bg-card"
-);
+const PAGE_SIZE = 20;
+const MAX_LIST = 100;
 
 export function SupportPanel({ variant = "popover" }: SupportPanelProps) {
-  const queryClient = useQueryClient();
-  const [view, setView] = React.useState<"list" | "thread">("list");
-  const [selectedTicketId, setSelectedTicketId] = React.useState<string | null>(null);
-  const [composerBody, setComposerBody] = React.useState("");
-  const [replyBody, setReplyBody] = React.useState("");
+  const isPage = variant === "page";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [localSelected, setLocalSelected] = React.useState<string | null>(null);
+  const selectedId = isPage ? searchParams.get("ticket") : localSelected;
+  const [limit, setLimit] = React.useState(PAGE_SIZE);
+  const { data: session } = useSession();
 
-  const scrollRef = React.useRef<HTMLDivElement>(null);
-  const lastSeenActivityRef = React.useRef<string | null>(null);
-
-  const ticketsQuery = useQuery({
-    queryKey: queryKeys.myConversations(),
-    queryFn: listMyConversations,
-    refetchInterval: LIST_POLL_MS,
-    enabled: view === "list",
-  });
-
-  const conversationQuery = useQuery({
-    queryKey: selectedTicketId ? queryKeys.conversation(selectedTicketId) : ["support", "conversations", "none"],
-    queryFn: () => getConversation(selectedTicketId as string),
-    refetchInterval: THREAD_POLL_MS,
-    enabled: view === "thread" && Boolean(selectedTicketId),
-  });
-
-  const readMutation = useMutation({
-    mutationFn: (ticketId: string) => markConversationRead(ticketId),
-  });
-
-  // Mark-read once when the thread opens, and again whenever the poll
-  // surfaces a newer `lastMessageAt` than what we last saw — this is what
-  // clears the unread dot.
-  React.useEffect(() => {
-    if (view !== "thread" || !selectedTicketId) return;
-    const ticket = conversationQuery.data?.ticket;
-    if (!ticket) return;
-    const latest = ticket.lastMessageAt ? new Date(ticket.lastMessageAt).toISOString() : "read";
-    if (latest !== lastSeenActivityRef.current) {
-      lastSeenActivityRef.current = latest;
-      readMutation.mutate(selectedTicketId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, selectedTicketId, conversationQuery.data?.ticket.lastMessageAt]);
-
-  React.useEffect(() => {
-    if (ticketsQuery.isError) {
-      toast.error(
-        ticketsQuery.error instanceof Error ? ticketsQuery.error.message : "Could not load conversations"
-      );
-    }
-  }, [ticketsQuery.isError, ticketsQuery.error]);
-
-  React.useEffect(() => {
-    if (conversationQuery.isError) {
-      toast.error(
-        conversationQuery.error instanceof Error ? conversationQuery.error.message : "Could not load conversation"
-      );
-    }
-  }, [conversationQuery.isError, conversationQuery.error]);
-
-  // Auto-scroll to bottom on new messages.
-  React.useEffect(() => {
-    if (view !== "thread") return;
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [conversationQuery.data?.messages, view]);
-
-  const startMutation = useMutation({
-    mutationFn: (body: string) => startConversation({ body }),
-    onSuccess: (result) => {
-      setComposerBody("");
-      void queryClient.invalidateQueries({ queryKey: queryKeys.myConversations() });
-      queryClient.setQueryData(queryKeys.conversation(result.ticket.id), {
-        ticket: result.ticket,
-        messages: [result.message],
-      });
-      lastSeenActivityRef.current = result.ticket.lastMessageAt
-        ? new Date(result.ticket.lastMessageAt).toISOString()
-        : "read";
-      setSelectedTicketId(result.ticket.id);
-      setView("thread");
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Could not send message"),
-  });
-
-  const sendMutation = useMutation({
-    mutationFn: (body: string) => sendConversationMessage(selectedTicketId as string, body),
-    onSuccess: () => {
-      setReplyBody("");
-      if (selectedTicketId) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.conversation(selectedTicketId) });
+  const select = React.useCallback(
+    (ticketId: string | null) => {
+      if (!isPage) {
+        setLocalSelected(ticketId);
+        return;
       }
+      // From the live URL, not the last-rendered params (see the staff queue).
+      const next = new URLSearchParams(window.location.search);
+      if (ticketId) next.set("ticket", ticketId);
+      else next.delete("ticket");
+      setSearchParams(next);
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Could not send message"),
+    [isPage, setSearchParams],
+  );
+
+  // In the widget the list is hidden while a thread is open, so it doesn't poll then.
+  const listVisible = isPage || selectedId === null;
+  const listQuery = useQuery({
+    queryKey: queryKeys.myConversations({ limit }),
+    queryFn: () => listMyConversations({ limit }),
+    enabled: listVisible,
+    placeholderData: (previous) => previous,
+    refetchInterval: SUPPORT_POLL_MS.list,
+    refetchIntervalInBackground: false,
   });
 
-  function handleBack() {
-    setView("list");
-    setSelectedTicketId(null);
-    setReplyBody("");
-    lastSeenActivityRef.current = null;
-  }
+  const isOrganizer = session?.role === "ORGANIZER";
+  const workspaceQuery = useQuery({
+    queryKey: queryKeys.organizerWorkspace(),
+    queryFn: getOrganizerWorkspaceOverview,
+    enabled: isOrganizer,
+  });
+  const munOptions = React.useMemo(
+    () => (workspaceQuery.data?.muns ?? []).map((mun) => ({ id: mun.id, name: mun.name })),
+    [workspaceQuery.data],
+  );
+  const munName = React.useCallback(
+    (munId: string | null) => (munId ? (munOptions.find((m) => m.id === munId)?.name ?? null) : null),
+    [munOptions],
+  );
 
-  function openThread(ticketId: string) {
-    setSelectedTicketId(ticketId);
-    setReplyBody("");
-    lastSeenActivityRef.current = null;
-    setView("thread");
-  }
+  const tickets = listQuery.data?.results ?? [];
+  const total = listQuery.data?.total ?? 0;
 
-  function handleStartConversation() {
-    const body = composerBody.trim();
-    if (!body || startMutation.isPending) return;
-    startMutation.mutate(body);
-  }
-
-  function handleSendReply() {
-    if (!selectedTicketId) return;
-    const body = replyBody.trim();
-    if (!body || sendMutation.isPending) return;
-    sendMutation.mutate(body);
-  }
-
-  function handleReplyKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      handleSendReply();
-    }
-  }
-
-  const tickets = ticketsQuery.data ?? [];
-  const ticketsLoaded = ticketsQuery.isSuccess;
-  const selectedTicket = conversationQuery.data?.ticket ?? null;
-  const messages = conversationQuery.data?.messages ?? [];
-  const isClosed = selectedTicket?.status === "CLOSED";
-
-  return (
-    <div
-      className={cn(
-        "flex min-h-0 flex-col",
-        variant === "popover"
-          ? "h-full"
-          : "h-[70vh] min-h-[420px] rounded-md border border-border bg-card"
-      )}
+  const list = (
+    <section
+      aria-label="Your conversations"
+      className={`min-h-0 flex-col ${isPage ? "border-border lg:border-r" : ""} ${
+        isPage && selectedId ? "hidden lg:flex" : "flex"
+      } ${isPage ? "" : "flex-1"}`}
     >
-      {view === "list" ? (
-        <>
-          <div className="flex flex-col gap-xs border-b border-border p-md">
-            <textarea
-              value={composerBody}
-              onChange={(event) => setComposerBody(event.target.value)}
-              placeholder="Message our support team…"
-              rows={2}
-              disabled={startMutation.isPending}
-              className={fieldClassName}
-            />
-            <Button
-              size="sm"
-              className="self-end"
-              disabled={startMutation.isPending || !composerBody.trim()}
-              onClick={handleStartConversation}
-            >
-              {startMutation.isPending ? <Loader2Icon className="animate-spin" aria-hidden /> : null}
-              Send
-            </Button>
+      <NewConversation
+        munOptions={munOptions}
+        onStarted={(ticketId) => select(ticketId)}
+        autoFocus={!isPage}
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {listQuery.isPending ? (
+          <div className="flex flex-col gap-xs p-md" aria-busy="true" aria-label="Loading conversations">
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
           </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {!ticketsLoaded ? (
-              <div className="flex items-center justify-center p-lg text-body-sm text-muted-foreground">
-                <Loader2Icon className="animate-spin" aria-hidden />
-              </div>
-            ) : tickets.length === 0 ? (
-              <div className="flex flex-col items-center gap-sm px-lg py-xl text-center">
-                <LifeBuoyIcon className="size-8 text-muted-foreground" strokeWidth={1.25} aria-hidden />
-                <p className="font-display text-title-sm text-ink">No conversations yet</p>
-                <p className="max-w-xs text-body-sm text-muted-foreground">
-                  Send us a message and our team will get back to you.
-                </p>
-              </div>
-            ) : (
-              <ul className="divide-y divide-border">
-                {tickets.map((ticket) => {
-                  const unread = isTicketUnread(ticket);
-                  return (
-                    <li key={ticket.id}>
-                      <button
-                        type="button"
-                        onClick={() => openThread(ticket.id)}
-                        className="flex w-full flex-col gap-1 px-md py-sm text-left transition-colors hover:bg-surface-soft focus-visible:bg-surface-soft focus-visible:outline-none"
-                      >
-                        <div className="flex items-center justify-between gap-sm">
-                          <span className="flex min-w-0 items-center gap-xs">
-                            {unread && (
-                              <span
-                                className="size-2 shrink-0 rounded-full bg-primary"
-                                aria-hidden
-                              />
-                            )}
-                            <span className="truncate text-body-md font-medium text-ink">
-                              {ticket.subject}
-                            </span>
-                          </span>
-                          <span className="shrink-0 text-body-sm text-muted-foreground">
-                            {formatRelativeTime(ticket.lastMessageAt ?? ticket.createdAt)}
-                          </span>
-                        </div>
-                        <Badge variant={statusVariant(ticket.status)} className="w-fit">
-                          {ticket.status}
-                        </Badge>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+        ) : listQuery.isError && tickets.length === 0 ? (
+          <LoadError message={listQuery.error.message} onRetry={() => void listQuery.refetch()} />
+        ) : tickets.length === 0 ? (
+          <div className="flex flex-col items-center gap-sm px-lg py-xl text-center">
+            <LifeBuoyIcon className="size-8 text-muted-foreground" strokeWidth={1.25} aria-hidden />
+            <p className="font-display text-title-sm text-ink">No conversations yet</p>
+            <p className="max-w-xs text-body-md text-muted-foreground">
+              Send us a message and our team will reply here.
+            </p>
           </div>
-        </>
-      ) : (
-        <>
-          <div className="flex items-center gap-xs border-b border-border p-md">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={handleBack}
-              aria-label="Back to conversations"
-            >
-              <ArrowLeftIcon aria-hidden />
-            </Button>
-            <span className="min-w-0 flex-1 truncate text-body-md font-medium text-ink">
-              {selectedTicket?.subject ?? "Conversation"}
-            </span>
-            {selectedTicket && (
-              <Badge variant={statusVariant(selectedTicket.status)}>{selectedTicket.status}</Badge>
-            )}
-          </div>
-
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-md">
-            <div className="flex flex-col gap-sm">
-              {messages.map((message) => {
-                const mine = selectedTicket ? message.senderId === selectedTicket.createdBy : false;
-                return (
-                  <div key={message.id} className={cn("flex flex-col", mine ? "items-end" : "items-start")}>
-                    {!mine && (
-                      <span className="mb-0.5 px-1 text-body-sm text-muted-foreground">Support team</span>
-                    )}
-                    <div
-                      className={cn(
-                        "max-w-[85%] rounded-md px-sm py-xs text-body-md break-words",
-                        mine ? "bg-primary/10 text-ink" : "bg-surface-soft text-ink"
-                      )}
-                    >
-                      {message.body}
-                    </div>
-                    <span className="mt-0.5 px-1 text-body-sm text-muted-foreground">
-                      {formatRelativeTime(message.createdAt)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="border-t border-border p-md">
-            {isClosed ? (
-              <p className="text-body-sm text-muted-foreground">This conversation is closed.</p>
-            ) : (
-              <div className="flex items-end gap-xs">
-                <textarea
-                  value={replyBody}
-                  onChange={(event) => setReplyBody(event.target.value)}
-                  onKeyDown={handleReplyKeyDown}
-                  placeholder="Type a message…"
-                  rows={2}
-                  disabled={sendMutation.isPending}
-                  className={cn(fieldClassName, "flex-1")}
+        ) : (
+          <>
+            <ul className="divide-y divide-border">
+              {tickets.map((ticket) => (
+                <ConversationListItem
+                  key={ticket.id}
+                  ticket={ticket}
+                  selected={ticket.id === selectedId}
+                  munName={munName(ticket.relatedMunId)}
+                  onSelect={() => select(ticket.id)}
                 />
+              ))}
+            </ul>
+            {total > tickets.length && limit < MAX_LIST && (
+              <div className="p-md">
                 <Button
-                  size="icon-sm"
-                  disabled={sendMutation.isPending || !replyBody.trim()}
-                  onClick={handleSendReply}
-                  aria-label="Send message"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  disabled={listQuery.isFetching}
+                  onClick={() => setLimit((current) => Math.min(current + PAGE_SIZE, MAX_LIST))}
                 >
-                  {sendMutation.isPending ? (
-                    <Loader2Icon className="animate-spin" aria-hidden />
-                  ) : (
-                    <SendIcon aria-hidden />
-                  )}
+                  Show older conversations
                 </Button>
               </div>
             )}
+            {total > tickets.length && limit >= MAX_LIST && (
+              <p className="p-md text-[12px] text-muted-foreground">
+                Showing your {MAX_LIST} most recent conversations.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+      <div className="border-t border-border px-md py-sm">
+        <Link to="/support/new" className="text-[13px] text-link underline-offset-4 hover:underline">
+          Need to pick a category? Use the full support form
+        </Link>
+      </div>
+    </section>
+  );
+
+  const thread = selectedId ? (
+    <RequesterThread
+      key={selectedId}
+      ticketId={selectedId}
+      munName={munName}
+      onBack={() => select(null)}
+      backVisibility={isPage ? "mobile" : "always"}
+    />
+  ) : (
+    <div className="hidden flex-1 flex-col items-center justify-center gap-sm p-xl text-center lg:flex">
+      <LifeBuoyIcon className="size-8 text-muted-foreground" strokeWidth={1.25} aria-hidden />
+      <p className="text-body-md text-muted-foreground">
+        Pick a conversation, or send a new message to start one.
+      </p>
+    </div>
+  );
+
+  if (!isPage) {
+    return <div className="flex min-h-0 w-full flex-1 flex-col">{selectedId ? thread : list}</div>;
+  }
+
+  return (
+    <div className="grid h-[72vh] min-h-[480px] w-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-card lg:grid-cols-[22rem_minmax(0,1fr)]">
+      {list}
+      <div className={`min-h-0 min-w-0 flex-col ${selectedId ? "flex" : "hidden lg:flex"}`}>{thread}</div>
+    </div>
+  );
+}
+
+function ConversationListItem({
+  ticket,
+  selected,
+  munName,
+  onSelect,
+}: {
+  ticket: SupportTicket;
+  selected: boolean;
+  munName: string | null;
+  onSelect: () => void;
+}) {
+  const base =
+    "flex w-full flex-col gap-xxs px-md py-sm text-left transition-colors outline-none hover:bg-surface-soft focus-visible:bg-surface-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+  return (
+    <li>
+      <button type="button" onClick={onSelect} aria-current={selected ? "true" : undefined} className={`${base} ${selected ? "bg-surface-soft" : ""}`}>
+        <span className="flex items-center justify-between gap-sm">
+          <span className="flex min-w-0 items-center gap-xs">
+            {ticket.unread && <span className="size-2 shrink-0 rounded-full bg-link" aria-hidden />}
+            <span className={`truncate text-body-md text-ink ${ticket.unread ? "font-semibold" : "font-medium"}`}>
+              {ticket.subject}
+            </span>
+          </span>
+          <time dateTime={ticket.lastActivityAt} className="shrink-0 text-[12px] text-muted-foreground">
+            {formatRelativeTime(ticket.lastActivityAt)}
+          </time>
+        </span>
+        <span className="flex flex-wrap items-center gap-xs">
+          <Badge variant={statusTone(ticket.status, "requester")}>{statusLabel(ticket.status, "requester")}</Badge>
+          <span className="truncate text-[12px] text-muted-foreground">
+            {munName ? `${munName} · ` : ""}
+            {categoryLabel(ticket.category)}
+          </span>
+          {ticket.unread && <span className="sr-only">New reply from support</span>}
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function NewConversation({
+  munOptions,
+  onStarted,
+  autoFocus,
+}: {
+  munOptions: { id: string; name: string }[];
+  onStarted: (ticketId: string) => void;
+  autoFocus: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [body, setBody] = React.useState("");
+  const [munId, setMunId] = React.useState("");
+
+  const mutation = useMutation({
+    mutationFn: startConversation,
+    onSuccess: (result) => {
+      setBody("");
+      queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(result.ticket.id), {
+        viewer: "REQUESTER",
+        ticket: result.ticket,
+        messages: [result.message],
+      });
+      invalidateSupportSummaries(queryClient);
+      onStarted(result.ticket.id);
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const munPicker =
+    munOptions.length > 0 ? (
+      <>
+        <label htmlFor="support-new-mun" className="sr-only">
+          Which conference is this about?
+        </label>
+        <select
+          id="support-new-mun"
+          value={munId}
+          onChange={(event) => setMunId(event.target.value)}
+          disabled={mutation.isPending}
+          className="h-9 max-w-[14rem] min-w-0 rounded-sm border border-input bg-background px-sm text-body-md text-ink outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 dark:bg-card"
+        >
+          <option value="">Any conference</option>
+          {munOptions.map((mun) => (
+            <option key={mun.id} value={mun.id}>
+              About {mun.name}
+            </option>
+          ))}
+        </select>
+      </>
+    ) : null;
+
+  return (
+    <div className="border-b border-border p-md">
+      <MessageComposer
+        id="support-new-message"
+        label="Message our support team…"
+        placeholder="Message our support team…"
+        value={body}
+        onChange={setBody}
+        onSubmit={() => mutation.mutate({ body: body.trim(), relatedMunId: munId || undefined })}
+        sending={mutation.isPending}
+        submitStyle="text"
+        extra={munPicker}
+        autoFocus={autoFocus}
+      />
+    </div>
+  );
+}
+
+function RequesterThread({
+  ticketId,
+  munName,
+  onBack,
+  backVisibility,
+}: {
+  ticketId: string;
+  munName: (munId: string | null) => string | null;
+  onBack: () => void;
+  backVisibility: "always" | "mobile";
+}) {
+  const conversationQuery = useConversation(ticketId);
+  const conversation = conversationQuery.data;
+  useMarkReadWhenViewed(conversation);
+  const { send, pending, sending } = useSendMessage(ticketId);
+  const [draft, setDraft] = React.useState("");
+
+  const ticket = conversation?.ticket;
+  const about = ticket ? munName(ticket.relatedMunId) : null;
+
+  async function handleSend() {
+    const text = draft.trim();
+    if (!text) return;
+    setDraft("");
+    try {
+      await send(text);
+    } catch (error) {
+      setDraft((current) => current || text);
+      toast.error(error instanceof Error ? error.message : "Your message wasn't sent. Try again.");
+    }
+  }
+
+  return (
+    <div className="flex min-h-0 w-full flex-1 flex-col">
+      <div className="flex items-start gap-xs border-b border-border px-md py-sm">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onBack}
+          aria-label="Back to conversations"
+          className={backVisibility === "mobile" ? "lg:hidden" : undefined}
+        >
+          <ArrowLeftIcon aria-hidden />
+        </Button>
+        <div className="flex min-w-0 flex-1 flex-col gap-xxs pt-1">
+          <h2 className="truncate text-body-md font-semibold text-ink">{ticket?.subject ?? "Conversation"}</h2>
+          {ticket && (
+            <span className="flex flex-wrap items-center gap-xs">
+              <Badge variant={statusTone(ticket.status, "requester")}>{statusLabel(ticket.status, "requester")}</Badge>
+              <span className="text-[12px] text-muted-foreground">
+                {about ? `${about} · ` : ""}
+                {categoryLabel(ticket.category)}
+              </span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {conversationQuery.isPending ? (
+        <div className="flex flex-1 flex-col gap-sm p-md" aria-busy="true" aria-label="Loading conversation">
+          <Skeleton className="h-12 w-2/3" />
+          <Skeleton className="ml-auto h-12 w-1/2" />
+        </div>
+      ) : !conversation ? (
+        <LoadError
+          message={
+            conversationQuery.error && "status" in conversationQuery.error &&
+            (conversationQuery.error.status === 403 || conversationQuery.error.status === 404)
+              ? "This conversation isn't available."
+              : (conversationQuery.error?.message ?? "Couldn't load this conversation.")
+          }
+          onRetry={() => void conversationQuery.refetch()}
+        />
+      ) : (
+        <>
+          {conversationQuery.isError && (
+            <p role="status" className="flex items-center gap-xs border-b border-border bg-warning/10 px-md py-xs text-[12px] text-warning-text">
+              <AlertCircleIcon className="size-3.5" aria-hidden />
+              Reconnecting… new messages may be delayed.
+            </p>
+          )}
+          <MessageThread
+            conversationKey={conversation.ticket.id}
+            messages={conversation.messages}
+            pending={pending}
+            viewer="REQUESTER"
+            fallback={{ body: conversation.ticket.description, createdAt: conversation.ticket.createdAt }}
+          />
+          <div className="border-t border-border p-md">
+            {conversation.ticket.status === "CLOSED" ? (
+              <p className="flex items-center gap-xs text-body-md text-muted-foreground">
+                <LockIcon className="size-4" aria-hidden />
+                This conversation is closed. Send a new message to start another one.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-sm">
+                {conversation.ticket.status === "RESOLVED" && (
+                  <div className="flex gap-xs rounded-sm border border-success/30 bg-success/10 px-sm py-xs text-body-md text-ink">
+                    <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
+                    <div className="flex flex-col gap-xxs">
+                      <span className="font-medium">Marked resolved by our team</span>
+                      {conversation.ticket.resolutionNotes && (
+                        <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+                          {conversation.ticket.resolutionNotes}
+                        </span>
+                      )}
+                      <span className="text-[12px] text-muted-foreground">Still need help? Reply and we'll reopen it.</span>
+                    </div>
+                  </div>
+                )}
+                <MessageComposer
+                  id={`support-reply-${conversation.ticket.id}`}
+                  label="Type a message…"
+                  placeholder="Type a message…"
+                  value={draft}
+                  onChange={setDraft}
+                  onSubmit={() => void handleSend()}
+                  sending={sending}
+                />
+              </div>
+            )}
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="flex flex-1 flex-col items-center justify-center gap-sm p-lg text-center">
+      <AlertCircleIcon className="size-6 text-destructive" aria-hidden />
+      <p className="max-w-xs text-body-md text-ink">{message}</p>
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        <RotateCwIcon aria-hidden />
+        Try again
+      </Button>
     </div>
   );
 }

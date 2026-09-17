@@ -1,24 +1,34 @@
-import type { Role, SupportCategory } from "@/types";
+import type { Role } from "@/types/enums";
+
+/**
+ * Wire types for the support desk (server/routes/support.ts over
+ * lib/actions/support.ts). Dates arrive as ISO strings.
+ */
+
+/** Every value of the database enum. REFUND only appears on legacy tickets. */
+export type SupportCategory =
+  | "GENERAL"
+  | "REGISTRATION"
+  | "PAYMENT"
+  | "REFUND"
+  | "MUN_INFO"
+  | "ACCOUNT"
+  | "CERTIFICATE"
+  | "ORGANIZER"
+  | "TECHNICAL"
+  | "SAFETY_POLICY";
+
+/** What a requester may file under — there are no refunds in this product. */
+export type RequesterCategory = Exclude<SupportCategory, "REFUND">;
 
 export type SupportPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 
-export type SupportStatus =
-  | "NEW"
-  | "ASSIGNED"
-  | "IN_PROGRESS"
-  | "WAITING"
-  | "RESOLVED"
-  | "CLOSED";
+export type SupportStatus = "NEW" | "ASSIGNED" | "IN_PROGRESS" | "WAITING" | "RESOLVED" | "CLOSED";
 
-export interface CreateSupportTicketInput {
-  category: SupportCategory;
-  priority?: SupportPriority;
-  subject: string;
-  description: string;
-  relatedRegistrationId?: string;
-  relatedMunId?: string;
-}
+/** What a staff reply leaves the ticket as. */
+export type StaffReplyStatus = "WAITING" | "IN_PROGRESS";
 
+/** The requester's view of their own ticket. */
 export interface SupportTicket {
   id: string;
   createdBy: string;
@@ -27,65 +37,101 @@ export interface SupportTicket {
   status: SupportStatus;
   subject: string;
   description: string;
-  assignedTo: string | null;
-  relatedRegistrationId: string | null;
   relatedMunId: string | null;
+  relatedRegistrationId: string | null;
   resolutionNotes: string | null;
-  /** Denormalized for conversation-list sorting/unread — see lib/db/schema.ts's support_tickets comment. */
   lastMessageAt: string | null;
-  lastMessageSenderId: string | null;
-  requesterReadAt: string | null;
-  adminReadAt: string | null;
+  lastActivityAt: string;
+  lastMessageFromStaff: boolean;
+  /** Has a message the viewer hasn't opened yet. */
+  unread: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-/** One support_messages row — the chat thread behind a SupportTicket. */
+/** The staff view: the requester view plus ownership and requester details. */
+export interface StaffSupportTicket extends SupportTicket {
+  assignedTo: string | null;
+  assigneeName: string | null;
+  requesterName: string;
+  requesterEmail: string;
+  requesterRole: Role;
+  relatedMunName: string | null;
+  requesterReadAt: string | null;
+  adminReadAt: string | null;
+}
+
 export interface SupportMessage {
   id: string;
   ticketId: string;
-  senderId: string;
+  author: "REQUESTER" | "STAFF";
+  /** Null for staff messages shown to the requester. */
+  senderId: string | null;
+  /** Sender's name — staff viewers only. */
+  senderName: string | null;
   senderRole: Role;
   body: string;
   createdAt: string;
 }
 
-/** POST /support/conversations body — the floating widget's quick-start entry (no category picker). */
+export type ConversationDetail =
+  | { viewer: "REQUESTER"; ticket: SupportTicket; messages: SupportMessage[] }
+  | { viewer: "STAFF"; ticket: StaffSupportTicket; messages: SupportMessage[] };
+
+export interface SupportPage<T> {
+  results: T[];
+  total: number;
+}
+
+export interface CreateSupportTicketInput {
+  category: RequesterCategory;
+  priority?: SupportPriority;
+  subject: string;
+  description: string;
+  relatedRegistrationId?: string;
+  relatedMunId?: string;
+}
+
 export interface StartConversationInput {
   body: string;
+  category?: RequesterCategory;
+  relatedMunId?: string;
+}
+
+export interface SendMessageResult {
+  message: SupportMessage;
+  ticket: SupportTicket | StaffSupportTicket;
+}
+
+export type StaffStatusFilter = SupportStatus | "OPEN";
+
+export interface ListStaffTicketsParams {
+  status?: StaffStatusFilter;
   category?: SupportCategory;
+  priority?: SupportPriority;
+  assignee?: "me" | "unassigned";
+  q?: string;
+  limit?: number;
+  offset?: number;
 }
 
-/** GET /support/conversations/:ticketId response shape. */
-export interface ConversationDetail {
-  ticket: SupportTicket;
-  messages: SupportMessage[];
-}
-
-/**
- * Shape returned by `GET /admin/support/tickets`
- * (lib/actions/support.ts#listTicketsWithRequester) — every `SupportTicket`
- * field plus who filed it, for the admin queue.
- */
-export interface AdminTicketListItem extends SupportTicket {
-  requesterName: string;
-  requesterRole: Role;
-}
-
-export interface ListAdminTicketsParams {
-  status?: SupportStatus;
-}
+/** Mirrors lib/actions/support.ts#SUPPORT_LIMITS — the server enforces the same bounds. */
+export const SUPPORT_LIMITS = {
+  subject: 150,
+  body: 5000,
+  resolutionNotes: 2000,
+  search: 100,
+} as const;
 
 /**
- * Mirrors `ALLOWED_TICKET_TRANSITIONS` in lib/actions/support.ts — kept in
- * sync by hand since the server is the source of truth (it re-validates
- * regardless). Used only to decide which action buttons render.
+ * Mirrors ALLOWED_TICKET_TRANSITIONS in lib/actions/support.ts. The server
+ * re-checks every change; this only decides which buttons render.
  */
-export const ALLOWED_TICKET_TRANSITIONS: Record<SupportStatus, SupportStatus[]> = {
+export const ALLOWED_TICKET_TRANSITIONS: Record<SupportStatus, readonly SupportStatus[]> = {
   NEW: ["ASSIGNED"],
   ASSIGNED: ["IN_PROGRESS", "WAITING"],
   IN_PROGRESS: ["WAITING", "RESOLVED"],
   WAITING: ["IN_PROGRESS", "RESOLVED"],
-  RESOLVED: ["CLOSED"],
+  RESOLVED: ["IN_PROGRESS", "CLOSED"],
   CLOSED: [],
 };

@@ -42,9 +42,11 @@ export const queryKeys = {
   // Gate 2 — module-level content-verification review (never the Gate 1 queue above).
   adminModuleReviewQueue: (params: Record<string, unknown>) =>
     ["admin", "module-review-queue", params] as const,
+  // Support desk. The list and thread keys don't share a prefix, so
+  // invalidating every list never refetches an open thread (and vice versa).
   adminSupportTickets: (params: Record<string, unknown>) => ["admin", "support-tickets", params] as const,
-  myConversations: () => ["support", "conversations"] as const,
-  conversation: (ticketId: string) => ["support", "conversations", ticketId] as const,
+  myConversations: (params: Record<string, unknown> = {}) => ["support", "conversation-list", params] as const,
+  conversation: (ticketId: string) => ["support", "conversation", ticketId] as const,
   unreadConversationCount: () => ["support", "unread-count"] as const,
   adminUnreadConversationCount: () => ["admin", "support", "unread-count"] as const,
   // Gate 2 publish queue (getGoLiveQueue) — never the organizer-facing
