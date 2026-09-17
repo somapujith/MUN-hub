@@ -33,6 +33,7 @@ interface SeedOptions {
   provider?: string
   amount?: number
   exceptionReason?: string | null
+  expiresAt?: Date
 }
 
 async function seed(options: SeedOptions = {}) {
@@ -60,7 +61,7 @@ async function seed(options: SeedOptions = {}) {
       munId: mun.id,
       registrationProductId: product.id,
       status: options.registrationStatus ?? 'PAYMENT_PENDING',
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      expiresAt: options.expiresAt ?? new Date(Date.now() + 15 * 60 * 1000),
     })
     .returning()
   const [payment] = await db
@@ -195,6 +196,35 @@ describe('processPaymentWebhook — captures', () => {
     expect(after.payment.exceptionResolvedAt).toBeNull()
     expect((await eventRow(eventId)).outcome).toBe('EXCEPTION_PAYMENT_AFTER_HOLD_EXPIRED')
     expect(onRegistrationConfirmed).not.toHaveBeenCalled()
+  })
+
+  it('treats a capture after an expired hold as a payment exception even before the sweep releases it', async () => {
+    const { registration, payment } = await seed({ expiresAt: new Date(Date.now() - 60_000) })
+    const eventId = `evt_${crypto.randomUUID()}`
+    const result = await deliver(simulatePaymentOutcome(orderOf(payment), 'success', { eventId, providerPaymentId: 'pay_after_expiry' }))
+
+    expect(result).toMatchObject({ ok: true, body: { ok: true, exception: true } })
+    const after = await reload(registration.id, payment.id)
+    expect(after.registration.status).toBe('CANCELLED')
+    expect(after.payment.status).toBe('PAID')
+    expect(after.payment.exceptionReason).toBe('PAYMENT_AFTER_HOLD_EXPIRED')
+    expect(onRegistrationConfirmed).not.toHaveBeenCalled()
+  })
+
+  it('still confirms a capture that happened inside the hold when the webhook arrives after it expired', async () => {
+    const { registration, payment } = await seed({ expiresAt: new Date(Date.now() - 60_000) })
+    const result = await deliver(
+      simulatePaymentOutcome(orderOf(payment), 'success', {
+        eventId: `evt_${crypto.randomUUID()}`,
+        providerPaymentId: 'pay_in_time',
+        occurredAt: new Date(Date.now() - 2 * 60_000),
+      }),
+    )
+
+    expect(result).toMatchObject({ ok: true, body: { ok: true, confirmed: true } })
+    const after = await reload(registration.id, payment.id)
+    expect(after.registration.status).toBe('CONFIRMED')
+    expect(after.payment.exceptionReason).toBeNull()
   })
 
   it.each([

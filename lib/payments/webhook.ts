@@ -183,7 +183,7 @@ async function applyEvent(
   }
 
   const [registration] = await tx
-    .select({ status: registrations.status })
+    .select({ status: registrations.status, expiresAt: registrations.expiresAt })
     .from(registrations)
     .where(eq(registrations.id, payment.registrationId))
     .for('update')
@@ -270,7 +270,24 @@ async function applyEvent(
     }
   }
 
-  if (registration?.status === 'PAYMENT_PENDING') {
+  // A hold that ran out before the money moved is expired even if the
+  // release sweep hasn't reached it yet — otherwise the outcome would depend
+  // on sweep timing. Judge by when the provider says the capture happened
+  // (a delayed webhook for an in-time payment still confirms), and release
+  // the seat exactly as the sweep would.
+  const capturedAt = Number.isNaN(event.occurredAt.getTime()) ? now : event.occurredAt
+  const holdExpired =
+    registration?.status === 'PAYMENT_PENDING' &&
+    registration.expiresAt !== null &&
+    registration.expiresAt.getTime() < capturedAt.getTime()
+  if (holdExpired) {
+    await tx
+      .update(registrations)
+      .set({ status: 'CANCELLED', updatedAt: now })
+      .where(and(eq(registrations.id, payment.registrationId), eq(registrations.status, 'PAYMENT_PENDING')))
+  }
+
+  if (registration?.status === 'PAYMENT_PENDING' && !holdExpired) {
     await tx
       .update(payments)
       .set({ status: 'PAID', providerPaymentId: event.providerPaymentId, updatedAt: now })
