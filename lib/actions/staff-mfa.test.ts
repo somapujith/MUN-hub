@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
-import { mfaPendingChallenges, mfaRecoveryCodes, userMfa, users } from '@/lib/db/schema'
+import { adminActions, mfaPendingChallenges, mfaRecoveryCodes, userMfa, users } from '@/lib/db/schema'
 import { hashPassword } from '@/lib/auth/password'
 import { totp } from '@/lib/auth/totp'
 import type { Session } from '@/lib/auth/adapter'
@@ -199,12 +199,61 @@ describe('resetStaffMfa', () => {
     expect(recoveryRows).toHaveLength(0)
   })
 
+  it('clears an open sign-in challenge too, so the old secret leaves nothing usable behind', async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    const admin = await makeUser('ADMIN')
+    await enrollAndConfirm(admin)
+    const { pendingToken } = await beginMfaChallenge(admin.id)
+
+    await resetStaffMfa(admin.id, sess(superAdmin))
+
+    const challenges = await db.select().from(mfaPendingChallenges).where(eq(mfaPendingChallenges.userId, admin.id))
+    expect(challenges).toHaveLength(0)
+    await expect(completeMfaChallenge(pendingToken, '000000')).rejects.toThrow(MFA_ERRORS.expired)
+  })
+
   it('rejects a non-SUPER_ADMIN caller', async () => {
     const otherAdmin = await makeUser('ADMIN')
     const target = await makeUser('ADMIN')
     await enrollAndConfirm(target)
 
     await expect(resetStaffMfa(target.id, sess(otherAdmin))).rejects.toThrow('Forbidden')
+  })
+
+  // Otherwise this is a second, code-free route to disableMfa — which exists
+  // precisely so a stolen session cookie can't take the safety net down.
+  it('refuses to clear the caller their own MFA', async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    await enrollAndConfirm(superAdmin)
+
+    await expect(resetStaffMfa(superAdmin.id, sess(superAdmin))).rejects.toThrow(
+      'You cannot change your own staff account here',
+    )
+    expect(await hasConfirmedMfa(superAdmin.id)).toBe(true)
+  })
+
+  it('refuses a non-staff target and writes no audit row', async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    const student = await makeUser('STUDENT')
+
+    await expect(resetStaffMfa(student.id, sess(superAdmin))).rejects.toThrow('Staff member not found')
+    const actions = await db.select().from(adminActions).where(eq(adminActions.targetId, student.id))
+    expect(actions).toHaveLength(0)
+  })
+
+  it('refuses an unknown user id', async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    await expect(resetStaffMfa(crypto.randomUUID(), sess(superAdmin))).rejects.toThrow('Staff member not found')
+  })
+
+  it('refuses a caller whose own SUPER_ADMIN account has been suspended', async () => {
+    const superAdmin = await makeUser('SUPER_ADMIN')
+    const admin = await makeUser('ADMIN')
+    await enrollAndConfirm(admin)
+    await db.update(users).set({ suspended: true }).where(eq(users.id, superAdmin.id))
+
+    await expect(resetStaffMfa(admin.id, sess(superAdmin))).rejects.toThrow('Forbidden')
+    expect(await hasConfirmedMfa(admin.id)).toBe(true)
   })
 })
 
