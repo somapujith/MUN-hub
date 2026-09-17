@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
 import { Link, useNavigate, useSearchParams } from "react-router";
@@ -675,7 +675,10 @@ export function SignupPage() {
                     onCheckedChange={(checked) => set("acceptedTermsOfService", checked === true)}
                   />
                   <Label htmlFor="acceptTos" className="cursor-pointer">
-                    I agree to the Terms of Service *
+                    <span>
+                      I agree to the{" "}
+                      <PolicyLink to="/legal/terms">Terms of Service</PolicyLink> *
+                    </span>
                   </Label>
                 </label>
                 <label className="flex items-start gap-sm text-body-md text-body" htmlFor="acceptPrivacy">
@@ -686,7 +689,10 @@ export function SignupPage() {
                     onCheckedChange={(checked) => set("acceptedPrivacyPolicy", checked === true)}
                   />
                   <Label htmlFor="acceptPrivacy" className="cursor-pointer">
-                    I agree to the Privacy Policy *
+                    <span>
+                      I agree to the{" "}
+                      <PolicyLink to="/legal/privacy">Privacy Policy</PolicyLink> *
+                    </span>
                   </Label>
                 </label>
                 {isMinor ? (
@@ -732,5 +738,23 @@ export function SignupPage() {
 
       <SiteFooter />
     </div>
+  );
+}
+
+/**
+ * Opens in a new tab: this form is long, and following a same-tab link from
+ * the consent step would throw away everything typed so far.
+ */
+function PolicyLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link
+      to={to}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-link underline underline-offset-2"
+    >
+      {children}
+      <span className="sr-only"> (opens in a new tab)</span>
+    </Link>
   );
 }

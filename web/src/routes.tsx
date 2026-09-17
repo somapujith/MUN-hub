@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Navigate } from "react-router";
 import { AdminLayout } from "@/layouts/admin-layout";
 import { MunWorkspaceLayout } from "@/layouts/mun-workspace-layout";
 import { RegisterLayout } from "@/layouts/register-layout";
@@ -14,6 +14,13 @@ import { AdminRegistrationsPage } from "@/pages/admin/registrations-page";
 import { AdminReviewPage } from "@/pages/admin/review-page";
 import { AdminSupportPage } from "@/pages/admin/support-page";
 import { AdminVerificationPage } from "@/pages/admin/verification-page";
+import { AboutPage } from "@/pages/about/about-page";
+import { CurationStandardsPage } from "@/pages/about/curation-standards-page";
+import { ContactPage } from "@/pages/contact-page";
+import { LegalIndexPage } from "@/pages/legal/legal-index-page";
+import { PrivacyPage } from "@/pages/legal/privacy-page";
+import { RefundPolicyPage } from "@/pages/legal/refund-policy-page";
+import { TermsPage } from "@/pages/legal/terms-page";
 import { ForgotPasswordPage } from "@/pages/forgot-password-page";
 import { HostAwareIndexPage } from "@/pages/host-aware-index-page";
 import { AdminLoginPage } from "@/pages/admin/admin-login-page";
@@ -64,6 +71,18 @@ export const router = createBrowserRouter([
       { index: true, element: <HostAwareIndexPage /> },
       { path: "muns", element: <MunsPage /> },
       { path: "mun/:slug", element: <MunDetailPage /> },
+      { path: "about", element: <AboutPage /> },
+      { path: "about/curation", element: <CurationStandardsPage /> },
+      { path: "contact", element: <ContactPage /> },
+      { path: "legal", element: <LegalIndexPage /> },
+      { path: "legal/terms", element: <TermsPage /> },
+      { path: "legal/privacy", element: <PrivacyPage /> },
+      { path: "legal/refunds", element: <RefundPolicyPage /> },
+      // Short aliases — the URLs people type, and what payment gateways ask
+      // merchants to link during onboarding.
+      { path: "terms", element: <Navigate to="/legal/terms" replace /> },
+      { path: "privacy", element: <Navigate to="/legal/privacy" replace /> },
+      { path: "refunds", element: <Navigate to="/legal/refunds" replace /> },
       { path: "login", element: <LoginPage /> },
       // Labelled per-role doors. Same POST /auth/session underneath — these
       // differ only in signposting and post-login destination. /admin/login is

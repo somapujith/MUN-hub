@@ -331,7 +331,6 @@ function ConsentCheckboxes({
 }) {
   // Plain divs, not wrapping <label>s: <Label> already renders a label element,
   // and labels can't nest.
-  // TODO: link the policy text once /legal/terms and /legal/privacy ship.
   return (
     <>
       <div className="flex items-start gap-sm">
@@ -341,7 +340,9 @@ function ConsentCheckboxes({
           onCheckedChange={(checked) => onChange({ acceptedTerms: checked === true })}
         />
         <Label htmlFor="organizer-terms" className="cursor-pointer text-body-md font-normal text-body">
-          I agree to the Terms of Service
+          <span>
+            I agree to the <PolicyLink to="/legal/terms">Terms of Service</PolicyLink>
+          </span>
         </Label>
       </div>
       <div className="flex items-start gap-sm">
@@ -351,10 +352,22 @@ function ConsentCheckboxes({
           onCheckedChange={(checked) => onChange({ acceptedPrivacy: checked === true })}
         />
         <Label htmlFor="organizer-privacy" className="cursor-pointer text-body-md font-normal text-body">
-          I agree to the Privacy Policy
+          <span>
+            I agree to the <PolicyLink to="/legal/privacy">Privacy Policy</PolicyLink>
+          </span>
         </Label>
       </div>
     </>
+  );
+}
+
+/** New tab, so following the link doesn't discard the half-filled sign-up. */
+function PolicyLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link to={to} target="_blank" rel="noopener noreferrer" className="text-link underline underline-offset-2">
+      {children}
+      <span className="sr-only"> (opens in a new tab)</span>
+    </Link>
   );
 }
 

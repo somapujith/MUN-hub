@@ -26,24 +26,25 @@ const FOOTER_COLUMNS = [
     heading: "For organizers",
     links: [
       { href: "/organizer/apply", label: "List your MUN" },
-      { href: "/organizer/apply", label: "How verification works" },
-      { href: "/organizer/apply", label: "Organizer guidelines" },
+      { href: "/about/curation#review-process", label: "How verification works" },
+      { href: "/about/curation#organizer-responsibilities", label: "Organizer guidelines" },
     ],
   },
   {
     heading: "About",
     links: [
-      { href: "/", label: "What is MUN Hub" },
-      { href: "/", label: "Curation standards" },
-      { href: "/", label: "Contact" },
+      { href: "/about", label: "What is MUN Hub" },
+      { href: "/about/curation", label: "Curation standards" },
+      { href: "/contact", label: "Contact" },
     ],
   },
   {
     heading: "Legal",
     links: [
-      { href: "/", label: "Terms of service" },
-      { href: "/", label: "Privacy policy" },
-      { href: "/", label: "Refund policy" },
+      { href: "/legal/terms", label: "Terms of service" },
+      { href: "/legal/privacy", label: "Privacy policy" },
+      { href: "/legal/refunds", label: "Refund policy" },
+      { href: "/legal", label: "All policies" },
     ],
   },
 ] as const;
