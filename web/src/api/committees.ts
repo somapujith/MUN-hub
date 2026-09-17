@@ -1,4 +1,4 @@
-import type { Committee, CommitteeInput } from "@/types/committee";
+import type { Committee, CommitteeInput, Portfolio, PortfolioInput } from "@/types/committee";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -38,4 +38,34 @@ export function updateCommittee(committeeId: string, input: CommitteeInput) {
 
 export function deleteCommittee(committeeId: string) {
   return request<void>(`/committees/${committeeId}`, { method: "DELETE" });
+}
+
+export function listPortfolios(committeeId: string) {
+  return request<Portfolio[]>(`/committees/${committeeId}/portfolios`);
+}
+
+export function createPortfolio(committeeId: string, input: PortfolioInput) {
+  return request<Portfolio>(`/committees/${committeeId}/portfolios`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Adds a whole list at once; the API rejects all of it if any name is taken. */
+export function createPortfolios(committeeId: string, portfolios: PortfolioInput[]) {
+  return request<Portfolio[]>(`/committees/${committeeId}/portfolios/bulk`, {
+    method: "POST",
+    body: JSON.stringify({ portfolios }),
+  });
+}
+
+export function updatePortfolio(portfolioId: string, input: Partial<PortfolioInput>) {
+  return request<Portfolio>(`/portfolios/${portfolioId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deletePortfolio(portfolioId: string) {
+  return request<void>(`/portfolios/${portfolioId}`, { method: "DELETE" });
 }

@@ -24,3 +24,24 @@ export interface CommitteeInput {
   description: string;
   capacity: number;
 }
+
+/** A seat delegates can pick in a committee — mirrors the server's portfolios table. */
+export interface Portfolio {
+  id: string;
+  committeeId: string;
+  name: string;
+  /** Free text; the UI writes one of PORTFOLIO_TYPES. */
+  type: string | null;
+  /** Seats for this portfolio. 0 means it can't be picked. */
+  availability: number;
+  description: string | null;
+  restrictions: string | null;
+  createdAt: string;
+}
+
+/** Matches `createPortfolioBodySchema` in server/routes/mun-config.ts (`.strict()`). */
+export interface PortfolioInput {
+  name: string;
+  type?: string;
+  availability?: number;
+}

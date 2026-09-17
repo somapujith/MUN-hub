@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CommitteePortfolios } from "@/components/organizer/committee-portfolios";
 import { WorkspacePage } from "@/components/organizer/workspace-page";
 import type { Committee, CommitteeInput } from "@/types/committee";
 
@@ -47,7 +48,11 @@ export function OrganizerCommitteesPage() {
     enabled: Boolean(munId),
   });
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.committees(munId) });
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.committees(munId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.munProgress(munId) }),
+    ]);
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -98,10 +103,10 @@ export function OrganizerCommitteesPage() {
 
   return (
     <>
-      <Helmet title="Committees" />
+      <Helmet title="Committees & Portfolios" />
       <WorkspacePage
-        title="Committees"
-        description="Committees delegates can apply to for this conference."
+        title="Committees & Portfolios"
+        description="Committees delegates can apply to, and the portfolios (countries, people or organizations) they can represent in each."
         actions={
           <Button size="sm" onClick={openCreate}>
             <Plus aria-hidden /> Add committee
@@ -109,7 +114,7 @@ export function OrganizerCommitteesPage() {
         }
       >
         <div className="grid gap-lg xl:grid-cols-[minmax(0,1fr)_22rem]">
-          <section aria-label="Committees" className="flex flex-col gap-md">
+          <section aria-label="Committees" className="flex min-w-0 flex-col gap-md">
             {committeesQuery.isLoading && (
               <p className="text-body-md text-muted-foreground">Loading committees...</p>
             )}
@@ -134,45 +139,48 @@ export function OrganizerCommitteesPage() {
             )}
             {committees.map((committee) => (
               <Card key={committee.id} size="sm">
-                <CardContent className="flex flex-wrap items-start gap-md">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-x-sm gap-y-xxs">
-                      <h2 className="font-display text-title-sm text-ink">{committee.name}</h2>
-                      <span className="text-caption text-muted-foreground">
-                        Capacity {committee.capacity}
-                      </span>
+                <CardContent className="flex flex-col gap-sm">
+                  <div className="flex flex-wrap items-start gap-md">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-sm gap-y-xxs">
+                        <h2 className="font-display text-title-sm text-ink">{committee.name}</h2>
+                        <span className="text-caption text-muted-foreground">
+                          Capacity {committee.capacity}
+                        </span>
+                      </div>
+                      {committee.agenda && (
+                        <p className="mt-xxs text-body-md text-body">{committee.agenda}</p>
+                      )}
+                      {committee.description && (
+                        <p className="mt-sm max-w-2xl whitespace-pre-wrap text-body-md leading-relaxed text-muted-foreground">
+                          {committee.description}
+                        </p>
+                      )}
                     </div>
-                    {committee.agenda && (
-                      <p className="mt-xxs text-body-md text-body">{committee.agenda}</p>
-                    )}
-                    {committee.description && (
-                      <p className="mt-sm max-w-2xl whitespace-pre-wrap text-body-md leading-relaxed text-muted-foreground">
-                        {committee.description}
-                      </p>
-                    )}
+                    <div className="flex items-center gap-xxs">
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`Edit ${committee.name}`}
+                        onClick={() => openEdit(committee)}
+                      >
+                        <Edit3 aria-hidden />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`Delete ${committee.name}`}
+                        onClick={() => {
+                          if (window.confirm(`Delete ${committee.name} and its portfolios?`)) {
+                            deleteMutation.mutate(committee.id);
+                          }
+                        }}
+                      >
+                        <Trash2 aria-hidden />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-xxs">
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={`Edit ${committee.name}`}
-                      onClick={() => openEdit(committee)}
-                    >
-                      <Edit3 aria-hidden />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={`Delete ${committee.name}`}
-                      onClick={() => {
-                        if (window.confirm(`Delete ${committee.name}?`)) {
-                          deleteMutation.mutate(committee.id);
-                        }
-                      }}
-                    >
-                      <Trash2 aria-hidden />
-                    </Button>
-                  </div>
+                  <CommitteePortfolios munId={munId} committeeId={committee.id} committeeName={committee.name} />
                 </CardContent>
               </Card>
             ))}

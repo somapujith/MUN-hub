@@ -11,6 +11,7 @@ export const queryKeys = {
     ["registration", "availability", productIds] as const,
   executiveBoard: (munId: string) => ["organizer", "executive-board", munId] as const,
   committees: (munId: string) => ["organizer", "committees", munId] as const,
+  portfolios: (committeeId: string) => ["organizer", "portfolios", committeeId] as const,
   account: () => ["account"] as const,
   profileFormDefaults: () => ["profile", "form-defaults"] as const,
   accommodationOptions: (munId: string) => ["organizer", "accommodation", munId] as const,
