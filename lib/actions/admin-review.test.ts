@@ -1,10 +1,11 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, eq, notInArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
   adminActions,
   muns,
   munModuleVerifications,
+  munSubmissions,
   organizerApplications,
   registrationProducts,
   registrations,
@@ -12,6 +13,7 @@ import {
   verificationLogs,
 } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
+import { reviewSubmission } from '@/lib/lifecycle/go-live'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { listAdminActions } from './admin-audit'
 
@@ -381,6 +383,55 @@ describe('reinstateMun', () => {
     const __actor = sess(ops)
 
     await expect(reinstateMun(mun.id, __actor)).rejects.toThrow('Forbidden')
+  })
+
+  // A previously published mun's only submission is PUBLISHED (terminal), so
+  // without a fresh round the reinstated mun was stranded: reviewSubmission
+  // threw "No active submission found", no module sat in PENDING_REVIEW, and
+  // enqueueForGoLive refuses status VERIFICATION.
+  it('opens a fresh review round so the mun can be approved and go live again', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'SUSPENDED')
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+    await db.insert(munSubmissions).values({
+      munId: mun.id,
+      submittedBy: organizer.id,
+      versionNumber: 1,
+      status: 'PUBLISHED',
+      slaDeadline: new Date(),
+    })
+
+    await reinstateMun(mun.id, __actor)
+
+    const [submission] = await db
+      .select({ status: munSubmissions.status, versionNumber: munSubmissions.versionNumber })
+      .from(munSubmissions)
+      .where(and(eq(munSubmissions.munId, mun.id), notInArray(munSubmissions.status, ['PUBLISHED', 'REJECTED', 'WITHDRAWN'])))
+    expect(submission).toMatchObject({ status: 'SUBMITTED', versionNumber: 2 })
+
+    const approved = await reviewSubmission(mun.id, 'APPROVED', {}, __actor)
+    expect(approved.status).toBe('APPROVED')
+    const [after] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(after.status).toBe('VERIFIED')
+  })
+
+  it('reuses an existing active submission instead of opening a second one', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'SUSPENDED')
+    const admin = await makeUser('ADMIN')
+    await db.insert(munSubmissions).values({
+      munId: mun.id,
+      submittedBy: organizer.id,
+      versionNumber: 3,
+      status: 'UNDER_REVIEW',
+      slaDeadline: new Date(),
+    })
+
+    await reinstateMun(mun.id, sess(admin))
+
+    const rows = await db.select({ id: munSubmissions.id }).from(munSubmissions).where(eq(munSubmissions.munId, mun.id))
+    expect(rows).toHaveLength(1)
   })
 })
 

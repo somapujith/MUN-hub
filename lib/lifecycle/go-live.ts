@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, notInArray, or, sql } from 'drizzle-orm'
+import { fireAndForget } from '@/lib/background-tasks'
 import { db } from '@/lib/db/client'
 import {
   adminActions,
@@ -83,11 +84,14 @@ export interface SubmitMunForReviewResult {
  * file. Wraps the recipient-resolution + `notifyPipelineEvent` call in its
  * own try/catch and logs (never throws) — see the file header comment for
  * why. Never awaited by the caller in a way that blocks its return value.
+ *
+ * Registered with the request's `executionCtx.waitUntil` via
+ * lib/background-tasks.ts: on Cloudflare Workers a detached promise is
+ * cancelled once the response is sent, so without this the email (a
+ * Hyperdrive read followed by an API call) would silently never go out.
  */
 function notifyAfterCommit(work: () => Promise<void>): void {
-  work().catch((error) => {
-    console.error('[go-live] pipeline notification failed', error)
-  })
+  fireAndForget('go-live', work)
 }
 
 /**
@@ -606,11 +610,15 @@ const REQUEUEABLE_STATUSES = ['UNPUBLISHED', 'VERIFIED'] as const
  * the round that published it is finished. Opens a fresh, already-approved
  * round so it can go through the queue and publish again.
  *
- * Safe without a new content review: any high-impact edit while UNPUBLISHED
+ * Safe without a new content review: a high-impact edit while UNPUBLISHED
  * moves the mun to VERIFICATION (reverification.ts), so a mun still in
  * UNPUBLISHED hasn't changed in a way that needs review, and a mun in VERIFIED
- * has just been re-verified. As a backstop, refuses while any required section
- * is still waiting for review. `publishFromQueue` re-validates live data too.
+ * has just been re-verified. That guarantee is only as good as the
+ * `triggerReverificationIfNeeded` calls at each module's own mutation site —
+ * `onModuleDataChanged` does NOT provide it (see its note), so a module whose
+ * update action doesn't call it is a hole in this reasoning, not a covered
+ * case. As a backstop, this refuses while any required section is still
+ * waiting for review, and `publishFromQueue` re-validates live data too.
  */
 async function openRepublishSubmission(tx: Tx, munId: string, actorId: string) {
   const [mun] = await tx.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).for('update').limit(1)
@@ -661,6 +669,51 @@ async function openRepublishSubmission(tx: Tx, munId: string, actorId: string) {
       decidedAt: now,
       approvedAt: now,
       reviewerId: actorId,
+      slaDeadline: addBusinessDays(now, 1, DEFAULT_BUSINESS_CALENDAR),
+      slaState: 'ON_TRACK',
+    })
+    .returning()
+  return submission
+}
+
+/**
+ * Opens a fresh Gate-2 review round for a mun that is back in VERIFICATION
+ * with no active submission — today that means `reinstateMun`
+ * (lib/actions/admin-review.ts), which sends a SUSPENDED mun back through
+ * verification before it can be live again.
+ *
+ * Without this the mun was stranded: after its first publish the only
+ * `mun_submissions` row is PUBLISHED (terminal), so `reviewSubmission`
+ * threw "No active submission found", every module was already VERIFIED so
+ * `reviewModule`/`checkAllModulesVerified` had nothing to act on, and
+ * `enqueueForGoLive` refuses status VERIFICATION. The only way out was
+ * CANCELLED, while delegates still held paid seats.
+ *
+ * Returns the existing active submission untouched when there already is one
+ * (the partial unique index allows exactly one), so this is safe to call on
+ * a mun that was suspended mid-review.
+ */
+export async function openReviewRound(tx: Tx, munId: string, actorId: string) {
+  const active = await lockActiveSubmission(tx, munId)
+  if (active) return active
+
+  const [prior] = await tx
+    .select({ versionNumber: munSubmissions.versionNumber })
+    .from(munSubmissions)
+    .where(eq(munSubmissions.munId, munId))
+    .orderBy(desc(munSubmissions.versionNumber))
+    .limit(1)
+
+  const now = new Date()
+  const [submission] = await tx
+    .insert(munSubmissions)
+    .values({
+      munId,
+      submittedBy: actorId,
+      versionNumber: (prior?.versionNumber ?? 0) + 1,
+      status: 'SUBMITTED',
+      progressPercentage: 100,
+      submittedAt: now,
       slaDeadline: addBusinessDays(now, 1, DEFAULT_BUSINESS_CALENDAR),
       slaState: 'ON_TRACK',
     })
