@@ -12,7 +12,6 @@ import { hasPassed } from "@/components/registration/deadline";
 import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
 import { completeMockPayment, fetchRegistrationById } from "@/api/registration";
-import { getMockMunBySlug } from "@/mocks/data";
 import { NotFoundPage } from "@/pages/not-found-page";
 
 export function RegisterPayPage() {
@@ -24,18 +23,23 @@ export function RegisterPayPage() {
   const queryClient = useQueryClient();
   const [paying, setPaying] = React.useState(false);
 
-  const mun = getMockMunBySlug(slug);
-  if (!mun) return <NotFoundPage />;
-  if (!registrationId) {
-    navigate(`/register/${slug}`, { replace: true });
-    return null;
-  }
-
   const regQuery = useQuery({
-    queryKey: queryKeys.registration(registrationId),
-    queryFn: () => fetchRegistrationById(registrationId),
+    queryKey: queryKeys.registration(registrationId ?? ""),
+    queryFn: () => fetchRegistrationById(registrationId!),
+    enabled: Boolean(registrationId),
   });
   const registration = regQuery.data;
+  const settled = registration && registration.status !== "PAYMENT_PENDING" && registration.status !== "PENDING";
+
+  React.useEffect(() => {
+    if (!registrationId) {
+      navigate(`/register/${slug}`, { replace: true });
+    } else if (settled) {
+      navigate(`/register/${slug}/confirmation?registrationId=${encodeURIComponent(registrationId)}`, { replace: true });
+    }
+  }, [registrationId, settled, slug, navigate]);
+
+  if (!registrationId || settled) return null;
 
   if (regQuery.isPending) {
     return (
@@ -48,24 +52,21 @@ export function RegisterPayPage() {
   }
   if (!registration) return <NotFoundPage />;
 
-  if (registration.status !== "PAYMENT_PENDING" && registration.status !== "PENDING") {
-    navigate(`/register/${slug}/confirmation?registrationId=${encodeURIComponent(registrationId)}`, { replace: true });
-    return null;
-  }
-
+  const mun = registration.mun;
+  const id = registrationId;
   const expired = registration.expiresAt ? hasPassed(registration.expiresAt) : false;
 
   async function handlePay(outcome: "success" | "failure") {
     setPaying(true);
     try {
-      await completeMockPayment(registrationId!, outcome);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.registration(registrationId!) });
+      await completeMockPayment(id, outcome);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.registration(id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.dashboardUpcoming() });
-      navigate(`/register/${slug}/confirmation?registrationId=${encodeURIComponent(registrationId!)}`);
+      navigate(`/register/${slug}/confirmation?registrationId=${encodeURIComponent(id)}`);
     } catch {
       setPaying(false);
       navigate(
-        `/register/${slug}/pay?registrationId=${encodeURIComponent(registrationId!)}&error=webhook`,
+        `/register/${slug}/pay?registrationId=${encodeURIComponent(id)}&error=webhook`,
         { replace: true },
       );
     }

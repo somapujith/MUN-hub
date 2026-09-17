@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { Helmet } from "react-helmet-async";
 import { useQuery } from "@tanstack/react-query";
@@ -10,7 +10,6 @@ import { formatDateRange } from "@/components/shared/date-range";
 import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
 import { fetchRegistrationById } from "@/api/registration";
-import { getMockMunBySlug } from "@/mocks/data";
 import { NotFoundPage } from "@/pages/not-found-page";
 import type { RegistrationStatus } from "@/types/enums";
 
@@ -29,18 +28,19 @@ export function RegisterConfirmationPage() {
   const [searchParams] = useSearchParams();
   const registrationId = searchParams.get("registrationId");
   const navigate = useNavigate();
-  const mun = getMockMunBySlug(slug);
-  if (!mun) return <NotFoundPage />;
-  if (!registrationId) {
-    navigate(`/register/${slug}`, { replace: true });
-    return null;
-  }
 
   const regQuery = useQuery({
-    queryKey: queryKeys.registration(registrationId),
-    queryFn: () => fetchRegistrationById(registrationId),
+    queryKey: queryKeys.registration(registrationId ?? ""),
+    queryFn: () => fetchRegistrationById(registrationId!),
+    enabled: Boolean(registrationId),
   });
   const registration = regQuery.data;
+
+  useEffect(() => {
+    if (!registrationId) navigate(`/register/${slug}`, { replace: true });
+  }, [registrationId, slug, navigate]);
+
+  if (!registrationId) return null;
 
   if (regQuery.isPending) {
     return (
@@ -53,6 +53,7 @@ export function RegisterConfirmationPage() {
   }
   if (!registration) return <NotFoundPage />;
 
+  const mun = registration.mun;
   const receipt = (
     <dl className="divide-y divide-border rounded-md border border-border bg-card">
       <ReceiptRow label="Reference" value={registration.id} mono />

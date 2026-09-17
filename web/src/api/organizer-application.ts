@@ -21,9 +21,11 @@ const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
+    credentials: "include",
+    // Spread options FIRST: spreading them last replaced this merged object
+    // whenever a caller passed its own headers, silently dropping Content-Type.
+    headers: { "Content-Type": "application/json", ...options?.headers },
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
