@@ -94,10 +94,9 @@ export async function completeOrganizerOnboarding(userId: string): Promise<void>
   const sql = postgres(DATABASE_URL, { max: 1, prepare: false, onnotice: () => {} })
   try {
     await sql`
-      insert into organizer_profiles (user_id, first_name, last_name, contact_phone, pan_name, pan_last4,
-        pan_ciphertext, has_gstin, upi_id, upi_phone, agreement_version, completed_at)
-      values (${userId}, 'E2E', 'Organizer', '9876543210', 'E2E Organizer', '234F',
-        'e2e-not-real-ciphertext', false, 'e2e@ybl', '9876543210', 'e2e', now())
+      insert into organizer_profiles (user_id, first_name, last_name, contact_phone,
+        upi_id, upi_phone, agreement_version, completed_at)
+      values (${userId}, 'E2E', 'Organizer', '9876543210', 'e2e@ybl', '9876543210', 'e2e', now())
       on conflict (user_id) do nothing`
   } finally {
     await sql.end()
