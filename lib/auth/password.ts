@@ -111,17 +111,55 @@ function parseStoredHash(stored: string): ParsedHash | null {
   return { params: LEGACY_PARAMS, salt, key: Buffer.from(keyHex, 'hex'), legacy: true }
 }
 
+/** scrypt's work is proportional to N * r * p — the unit the padding below equalizes. */
+function scryptCost({ N, r, p }: ScryptParams): number {
+  return N * r * p
+}
+
+/** At most this many padding runs, so a corrupted row with tiny parameters can't spin. */
+const MAX_PADDING_ROUNDS = 4
+
+/**
+ * Brings a verification against cheaper-than-current parameters up to the
+ * cost of a current-parameter one, by repeating the same derivation and
+ * throwing the result away.
+ *
+ * Without this, `signIn`'s "check an unknown email against
+ * DUMMY_PASSWORD_HASH so every path costs the same" trick doesn't hold: the
+ * dummy hash is written at SCRYPT_PARAMS (N=2^15) while every account that
+ * hasn't signed in since the cost was raised still stores a legacy N=2^14
+ * hash, which answers in roughly half the time. Timing a few sign-ins with
+ * random passwords would then separate registered dormant accounts (fast)
+ * from addresses that don't exist (slow). Two 2^14 runs cost about what one
+ * 2^15 run does, so one padding round closes that gap; the hash is upgraded
+ * in place on the next successful sign-in anyway, so this is only paid until
+ * then.
+ */
+async function padVerificationCost(password: string, parsed: ParsedHash): Promise<void> {
+  const target = scryptCost(SCRYPT_PARAMS)
+  const unit = scryptCost(parsed.params)
+  if (unit <= 0 || unit >= target) return
+
+  const rounds = Math.min(MAX_PADDING_ROUNDS, Math.ceil(target / unit) - 1)
+  for (let round = 0; round < rounds; round += 1) {
+    await scryptAsync(password, parsed.salt, parsed.params, parsed.key.length)
+  }
+}
+
 /**
  * Verifies a plaintext password against a stored hash in either the current
  * `scrypt$…` format or the legacy `salt:hash` one. Uses a timing-safe
- * comparison so response time doesn't leak how close a guess was. Returns
- * false (never throws) for a malformed stored value.
+ * comparison so response time doesn't leak how close a guess was, and pads
+ * below-current-cost parameters (`padVerificationCost`) so response time
+ * doesn't leak which *format* the stored hash is in either. Returns false
+ * (never throws) for a malformed stored value.
  */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const parsed = parseStoredHash(stored)
   if (!parsed) return false
 
   const derivedKey = await scryptAsync(password, parsed.salt, parsed.params, parsed.key.length)
+  await padVerificationCost(password, parsed)
   if (derivedKey.length !== parsed.key.length) return false
 
   return crypto.timingSafeEqual(derivedKey, parsed.key)

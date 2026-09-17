@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { DUMMY_PASSWORD_HASH, SCRYPT_PARAMS, hashPassword, needsRehash, verifyPassword } from './password'
 
 /** A hash in the pre-2026-09-17 `salt:hash` format (Node scrypt defaults, hex salt string as the salt). */
@@ -49,6 +49,32 @@ describe('verifyPassword', () => {
 
     await expect(verifyPassword('legacy-password-1', hash)).resolves.toBe(true)
     await expect(verifyPassword('wrong-password', hash)).resolves.toBe(false)
+  })
+
+  it('costs the same for a legacy hash as for a current one', async () => {
+    // signIn checks an unknown email against DUMMY_PASSWORD_HASH so every
+    // answer costs one scrypt run. That only hides which emails exist if a
+    // *stored* hash costs the same — and legacy hashes are at half the
+    // current N, so an account that hasn't signed in since the cost was
+    // raised would answer in about half the time of an unknown address.
+    const currentHash = await hashPassword('same-cost')
+    const legacyStored = legacyHash('same-cost')
+
+    const spy = vi.spyOn(crypto, 'scrypt')
+    try {
+      await verifyPassword('wrong-guess', currentHash)
+      const current = spy.mock.calls.length
+
+      spy.mockClear()
+      await verifyPassword('wrong-guess', legacyStored)
+      const legacy = spy.mock.calls.length
+
+      expect(current).toBe(1)
+      // Two runs at N=2^14 cost about what one at N=2^15 does.
+      expect(legacy * 2 ** 14).toBe(current * SCRYPT_PARAMS.N)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('honours the parameters recorded in the hash, not the current defaults', async () => {
