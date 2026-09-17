@@ -121,7 +121,9 @@ describe('validateRulesDocuments', () => {
     const ctx = makeContext({ documents: [lostRules, document('CODE_OF_CONDUCT')] })
     const result = validateRulesDocuments(ctx)
     expect(result.passed).toBe(false)
-    expect(result.checks[0].message).toBe('Upload your rules of procedure.')
+    expect(result.checks[0].message).toBe(
+      'Upload your rules of procedure again — the earlier upload was not stored.',
+    )
   })
 })
 

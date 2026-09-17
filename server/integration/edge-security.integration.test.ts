@@ -265,10 +265,14 @@ describe('body limit', () => {
     })
   })
 
-  // The schema cap is what stops a 13 MB base64 string being decoded into a
-  // Buffer for a MUN the caller doesn't own; the byte cap in
-  // lib/storage/validate.ts only applies after that Buffer exists.
-  it('rejects an over-cap fileBase64 on the schema, before any decode', async () => {
+  // Ownership (assertCanUploadToMun) now runs as Hono middleware BEFORE
+  // zValidator parses the body (server/routes/mun-branding.ts,
+  // mun-documents.ts) — a caller who may not upload here is rejected before
+  // the JSON body, let alone an oversized fileBase64 inside it, is ever
+  // parsed. This subsumes the older "schema cap stops the decode" property:
+  // an authorized caller's own oversized payload is covered separately by
+  // "refuses a base64 string longer than the largest file of its kind" above.
+  it('rejects an oversized payload for an unowned MUN at the ownership check, before parsing it', async () => {
     const student = await makeUser('STUDENT')
     const cookie = await authHeaders(student.id)
     const munId = crypto.randomUUID()
@@ -282,8 +286,8 @@ describe('body limit', () => {
         fileBase64: 'A'.repeat(maxBase64Length(largestUploadBytes(['LOGO', 'COVER', 'IMAGE'])) + 4),
       }),
     })
-    expect(overImageCap.status).toBe(400)
-    expect((await overImageCap.json()).error.code).toBe('VALIDATION_FAILED')
+    expect(overImageCap.status).toBe(404)
+    expect((await overImageCap.json()).error.code).toBe('NOT_FOUND')
 
     const overDocumentCap = await app.request(`/api/v1/muns/${munId}/documents`, {
       method: 'POST',
@@ -295,8 +299,8 @@ describe('body limit', () => {
         fileBase64: 'A'.repeat(maxBase64Length(UPLOAD_RULES.DOCUMENT.maxBytes) + 4),
       }),
     })
-    expect(overDocumentCap.status).toBe(400)
-    expect((await overDocumentCap.json()).error.code).toBe('VALIDATION_FAILED')
+    expect(overDocumentCap.status).toBe(404)
+    expect((await overDocumentCap.json()).error.code).toBe('NOT_FOUND')
   })
 
   it('keeps the 1 MB limit on other routes under /muns/:munId', async () => {
