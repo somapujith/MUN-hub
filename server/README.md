@@ -63,7 +63,7 @@ Read through `getRuntimeEnv()` (`lib/runtime-env.ts`). Workers never put custom 
 | `ALLOW_LOCALHOST_ORIGINS` | *(unset)* | `true` trusts `http://localhost:<port>` and `http://127.0.0.1:<port>` (the web dev server is on `:5174`) — local dev/tests only, never in a deployed environment |
 | `COOKIE_DOMAIN` | unset (host-only) | `.munhub.in` in production, so the session is shared across subdomains |
 | `APP_URL` | none | Public site URL for links in emails |
-| `STORAGE_ADAPTER` | unset (mock) | Node only: `local` writes uploads to `.local-uploads/` (`LOCAL_UPLOADS_DIR` overrides). On Workers the `UPLOADS_BUCKET` / `UPLOADS_KV` bindings win (`lib/storage/select-adapter.ts` at the repo root). |
+| `STORAGE_ADAPTER` | unset (uploads refused, 503) | Node only: `local` writes uploads to `.local-uploads/` (`LOCAL_UPLOADS_DIR` overrides); `mock` accepts and discards them (tests). Anything else, with no binding, fails closed. On Workers the `UPLOADS_BUCKET` / `UPLOADS_KV` bindings win (`lib/storage/select-adapter.ts` at the repo root). |
 | `PUBLIC_API_URL` | unset (request origin) | Origin put in front of `/api/v1/files/<key>` in uploaded-file URLs; set in `wrangler.jsonc` for production |
 | `PAYMENT_FIELD_KEY` | none (required) | AES-256-GCM key for payout details |
 | `MOCK_PAYMENT_WEBHOOK_SECRET` | none | Mock payment provider webhook secret (dev/test) |

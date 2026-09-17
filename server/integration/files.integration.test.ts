@@ -1,6 +1,7 @@
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
-import { muns } from '@/lib/db/schema'
+import { munDocuments, munMedia, muns } from '@/lib/db/schema'
 import { setRuntimeEnv } from '@/lib/runtime-env'
 import { createInMemoryKv, SAMPLE_FILES } from '@/lib/storage/in-memory-bindings'
 import { createApp } from '../src/app'
@@ -170,6 +171,48 @@ describe('uploads served by /api/v1/files', () => {
     expect(await notPdf.json()).toMatchObject({ error: { code: 'VALIDATION_FAILED' } })
 
     expect(kv.entries.size).toBe(0)
+  })
+
+  it('refuses uploads with 503 and writes no row when no storage is configured', async () => {
+    const { mun, headers } = await setup()
+    // No UPLOADS_KV/UPLOADS_BUCKET binding, and STORAGE_ADAPTER overridden
+    // away from .env.test's "mock": what a Worker deployed without a binding sees.
+    const env = { STORAGE_ADAPTER: '' }
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const logo = await app.request(
+      `/api/v1/muns/${mun.id}/media`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ kind: 'LOGO', contentType: 'image/png', fileBase64: SAMPLE_FILES.png.toString('base64') }),
+      },
+      env,
+    )
+    expect(logo.status).toBe(503)
+    expect(await logo.json()).toMatchObject({
+      error: { code: 'UNAVAILABLE', message: 'File storage is not configured' },
+    })
+
+    const rules = await app.request(
+      `/api/v1/muns/${mun.id}/documents`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          kind: 'RULES',
+          title: 'Rules',
+          contentType: 'application/pdf',
+          fileBase64: SAMPLE_FILES.pdf.toString('base64'),
+        }),
+      },
+      env,
+    )
+    expect(rules.status).toBe(503)
+
+    expect(await db.select({ id: munMedia.id }).from(munMedia).where(eq(munMedia.munId, mun.id))).toEqual([])
+    expect(await db.select({ id: munDocuments.id }).from(munDocuments).where(eq(munDocuments.munId, mun.id))).toEqual([])
+    vi.restoreAllMocks()
   })
 })
 

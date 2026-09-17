@@ -103,6 +103,14 @@ describe('validateRulesDocuments', () => {
     const result = validateRulesDocuments(ctx)
     expect(result.passed).toBe(true)
   })
+
+  it('treats a document whose file was never stored (mock-storage URL) as missing', () => {
+    const lostRules = { ...(document('RULES') as object), url: '/mock-storage/muns/mun-1/documents/x' } as never
+    const ctx = makeContext({ documents: [lostRules, document('CODE_OF_CONDUCT')] })
+    const result = validateRulesDocuments(ctx)
+    expect(result.passed).toBe(false)
+    expect(result.checks[0].message).toBe('Upload your rules of procedure.')
+  })
 })
 
 describe('validateSchedule', () => {

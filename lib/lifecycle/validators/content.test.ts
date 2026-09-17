@@ -178,6 +178,36 @@ describe('validateBranding', () => {
     const result = validateBranding(ctx)
     expect(result.passed).toBe(false)
   })
+
+  it('does not count logo or cover rows whose file was never stored (mock-storage URLs)', () => {
+    const ctx = makeContext({
+      media: [
+        { kind: 'LOGO', url: '/mock-storage/muns/mun-1/branding/a' } as never,
+        { kind: 'COVER', url: '/mock-storage/muns/mun-1/branding/b' } as never,
+      ],
+    })
+    const result = validateBranding(ctx)
+    expect(result.passed).toBe(false)
+    expect(result.checks.find((c) => c.key === 'logo_present')).toMatchObject({
+      passed: false,
+      message: 'Your logo was not saved. Upload it again.',
+    })
+    expect(result.checks.find((c) => c.key === 'cover_present')).toMatchObject({
+      passed: false,
+      message: 'Your cover image was not saved. Upload it again.',
+    })
+  })
+
+  it('passes once a stored logo sits next to a lost one', () => {
+    const ctx = makeContext({
+      media: [
+        { kind: 'LOGO', url: '/mock-storage/muns/mun-1/branding/a' } as never,
+        { kind: 'LOGO', url: 'https://api.munhub.in/api/v1/files/muns/mun-1/branding/c' } as never,
+        { kind: 'COVER', url: 'https://api.munhub.in/api/v1/files/muns/mun-1/branding/d' } as never,
+      ],
+    })
+    expect(validateBranding(ctx).passed).toBe(true)
+  })
 })
 
 describe('validateContact', () => {

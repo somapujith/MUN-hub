@@ -50,7 +50,7 @@ The deploy token can list but not create KV namespaces (`Authentication error [c
 With a token that has **Workers KV Storage: Edit** (or in the dashboard), run
 `cd server && npx wrangler kv namespace create munhub-uploads`, then uncomment the
 `kv_namespaces` block in `server/wrangler.jsonc` with the printed id and redeploy
-`munhub-api`. Until then production uploads use the mock store (files are not kept) and the
-Worker logs `[storage] No UPLOADS_BUCKET or UPLOADS_KV binding in production`.
+`munhub-api`. Until then production refuses uploads with 503 "File storage is not configured" and the
+Worker logs `[storage] No UPLOADS_BUCKET or UPLOADS_KV binding`. Rows uploaded while the mock was still the fallback have `/mock-storage/...` URLs; go-live checks now treat them as missing, so those organizers must upload the files again.
 The existing `RATE_LIMIT_KV` namespace on the account is not referenced by this repo (it may
 belong to another project), so it was deliberately not reused.

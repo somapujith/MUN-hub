@@ -148,7 +148,7 @@ export async function deleteMunMedia(id: string, session: Session | null): Promi
   await assertOwnsOrAdmin(existing.munId, session)
 
   await db.delete(munMedia).where(eq(munMedia.id, id))
-  await deleteStoredObjectQuietly(selectStorageAdapter(), existing.storageKey, 'deleteMunMedia')
+  await deleteStoredObjectQuietly(selectStorageAdapter, existing.storageKey, 'deleteMunMedia')
 
   await onModuleDataChanged(existing.munId, 'BRANDING', session!.userId)
 }

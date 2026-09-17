@@ -6,6 +6,22 @@ import { mockStorageAdapter } from './mock-adapter'
 import { createR2StorageAdapter } from './r2-adapter'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 
+export const STORAGE_NOT_CONFIGURED_MESSAGE = 'File storage is not configured'
+
+/**
+ * Thrown when no storage backend is configured. The request is refused
+ * (server/middleware/error.ts maps this to 503) instead of the upload being
+ * accepted and its bytes discarded: a row pointing at a file that was never
+ * stored passes the go-live checks and leaves broken images and dead
+ * document links on the public page.
+ */
+export class StorageNotConfiguredError extends Error {
+  constructor() {
+    super(STORAGE_NOT_CONFIGURED_MESSAGE)
+    this.name = 'StorageNotConfiguredError'
+  }
+}
+
 /**
  * Picks the storage backend for the current request, in this order:
  *   1. R2      — the UPLOADS_BUCKET binding, when present (reads fall back
@@ -13,11 +29,13 @@ import { getRuntimeEnv } from '@/lib/runtime-env'
  *   2. KV      — the UPLOADS_KV binding, when present (production today:
  *                R2 is not enabled on the Cloudflare account yet)
  *   3. local   — the filesystem, when STORAGE_ADAPTER=local (Node dev)
- *   4. mock    — everything else (tests); discards the bytes
+ *   4. mock    — only when STORAGE_ADAPTER=mock (tests); discards the bytes
+ *
+ * Anything else throws StorageNotConfiguredError. Storage fails closed: a
+ * Worker deployed without a binding refuses uploads instead of accepting
+ * them and throwing the bytes away.
  *
  * Bindings come from server/middleware/storage.ts via lib/storage/bindings.ts.
- * Production must have one of them. Falling back to the mock there loses
- * every upload, so it is logged as an error on each call.
  *
  * Called per operation, never cached: the adapters wrap request-scoped
  * binding objects and are cheap to build.
@@ -32,14 +50,18 @@ export function selectStorageAdapter(): StorageAdapter {
 
   const configured = getRuntimeEnv('STORAGE_ADAPTER')
   if (configured === 'local') return createLocalStorageAdapter()
-
-  if (process.env.NODE_ENV === 'production') {
-    console.error(
-      '[storage] No UPLOADS_BUCKET or UPLOADS_KV binding in production — falling back to the mock adapter, ' +
-        'so uploaded files are NOT being stored. Add the binding in server/wrangler.jsonc.',
-    )
+  if (configured === 'mock') {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[storage] STORAGE_ADAPTER=mock in production, so uploaded files are NOT being stored.')
+    }
+    return mockStorageAdapter
   }
-  return mockStorageAdapter
+
+  console.error(
+    '[storage] No UPLOADS_BUCKET or UPLOADS_KV binding, and STORAGE_ADAPTER is neither local nor mock: ' +
+      'refusing the storage operation. Add a binding in server/wrangler.jsonc, or set STORAGE_ADAPTER=local for Node dev.',
+  )
+  throw new StorageNotConfiguredError()
 }
 
 /**
@@ -63,10 +85,18 @@ export function withReadFallback(primary: StorageAdapter, fallback: StorageAdapt
  * Deletes a stored object without failing the caller. Used after the row
  * that referenced the object is gone (or was never written): a leftover
  * object costs storage, not correctness, so it is logged, not thrown.
+ *
+ * When no adapter has been picked yet, pass `selectStorageAdapter` itself
+ * rather than its result, so an unconfigured store is logged here too
+ * instead of failing a request whose row is already deleted.
  */
-export async function deleteStoredObjectQuietly(storage: StorageAdapter, key: string, context: string): Promise<void> {
+export async function deleteStoredObjectQuietly(
+  storage: StorageAdapter | (() => StorageAdapter),
+  key: string,
+  context: string,
+): Promise<void> {
   try {
-    await storage.delete(key)
+    await (typeof storage === 'function' ? storage() : storage).delete(key)
   } catch (error) {
     console.error(`[storage] ${context}: could not delete object "${key}"`, error)
   }

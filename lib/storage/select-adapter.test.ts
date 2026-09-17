@@ -6,7 +6,12 @@ import type { StorageAdapter } from './adapter'
 import { runWithStorageBindings } from './bindings'
 import { createInMemoryKv, createInMemoryR2, SAMPLE_FILES } from './in-memory-bindings'
 import { mockStorageAdapter } from './mock-adapter'
-import { deleteStoredObjectQuietly, selectStorageAdapter } from './select-adapter'
+import {
+  deleteStoredObjectQuietly,
+  selectStorageAdapter,
+  STORAGE_NOT_CONFIGURED_MESSAGE,
+  StorageNotConfiguredError,
+} from './select-adapter'
 
 const KEY = 'muns/mun-1/branding/6f1c2b1e-3c4d-4e5f-8a9b-0c1d2e3f4a5b'
 
@@ -32,11 +37,27 @@ describe('selectStorageAdapter', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  it('uses the mock outside a request when STORAGE_ADAPTER is mock or unset', () => {
+  it('uses the mock outside a request only when STORAGE_ADAPTER=mock', () => {
     process.env.STORAGE_ADAPTER = 'mock'
     expect(selectStorageAdapter()).toBe(mockStorageAdapter)
+  })
+
+  it.each([undefined, '', 'r2', 'kv'])('fails closed with no binding when STORAGE_ADAPTER is %j', (value) => {
+    if (value === undefined) delete process.env.STORAGE_ADAPTER
+    else process.env.STORAGE_ADAPTER = value
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(() => selectStorageAdapter()).toThrow(StorageNotConfiguredError)
+    expect(() => selectStorageAdapter()).toThrow(STORAGE_NOT_CONFIGURED_MESSAGE)
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('No UPLOADS_BUCKET or UPLOADS_KV binding'))
+  })
+
+  it('fails closed in production when nothing is configured, instead of discarding uploads', () => {
     delete process.env.STORAGE_ADAPTER
-    expect(selectStorageAdapter()).toBe(mockStorageAdapter)
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(() => selectStorageAdapter()).toThrow(StorageNotConfiguredError)
   })
 
   it('uses the filesystem when STORAGE_ADAPTER=local', async () => {
@@ -81,6 +102,7 @@ describe('selectStorageAdapter', () => {
   })
 
   it('does not leak bindings between concurrent requests', async () => {
+    process.env.STORAGE_ADAPTER = 'mock'
     const kvA = createInMemoryKv()
     const kvB = createInMemoryKv()
     const upload = (kv: typeof kvA, key: string) =>
@@ -94,13 +116,13 @@ describe('selectStorageAdapter', () => {
     expect(selectStorageAdapter()).toBe(mockStorageAdapter)
   })
 
-  it('logs an error when production falls back to the mock', () => {
-    delete process.env.STORAGE_ADAPTER
+  it('logs an error when production is explicitly configured with the mock', () => {
+    process.env.STORAGE_ADAPTER = 'mock'
     vi.stubEnv('NODE_ENV', 'production')
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     expect(selectStorageAdapter()).toBe(mockStorageAdapter)
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('No UPLOADS_BUCKET or UPLOADS_KV binding in production'))
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('STORAGE_ADAPTER=mock in production'))
   })
 
   it('does not log outside production', () => {
@@ -127,5 +149,15 @@ describe('deleteStoredObjectQuietly', () => {
 
     await expect(deleteStoredObjectQuietly(failing, KEY, 'test')).resolves.toBeUndefined()
     expect(error).toHaveBeenCalledWith(expect.stringContaining(`could not delete object "${KEY}"`), expect.any(Error))
+  })
+
+  it('logs instead of throwing when a lazily picked adapter is not configured', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const unconfigured = () => {
+      throw new StorageNotConfiguredError()
+    }
+
+    await expect(deleteStoredObjectQuietly(unconfigured, KEY, 'test')).resolves.toBeUndefined()
+    expect(error).toHaveBeenCalledWith(expect.stringContaining(`could not delete object "${KEY}"`), expect.any(StorageNotConfiguredError))
   })
 })

@@ -1,5 +1,6 @@
 import type { MunValidationContext, ModuleValidationResult, ValidationCheck } from '../validation'
 import { modulePassed } from '../validation'
+import { isMockStorageUrl } from '@/lib/storage/mock-adapter'
 
 // -----------------------------------------------------------------------------
 // validators/content.ts — BASIC_INFO, DATES_VENUE, BRANDING, CONTACT
@@ -181,8 +182,13 @@ export function validateDatesVenue(ctx: MunValidationContext): ModuleValidationR
 }
 
 export function validateBranding(ctx: MunValidationContext): ModuleValidationResult {
-  const hasLogo = ctx.media.some((m) => m.kind === 'LOGO')
-  const hasCover = ctx.media.some((m) => m.kind === 'COVER')
+  // A row whose URL came from the mock store has no file behind it (it was
+  // "uploaded" while production still fell back to the mock), so it doesn't count.
+  const stored = ctx.media.filter((m) => !isMockStorageUrl(m.url))
+  const hasLogo = stored.some((m) => m.kind === 'LOGO')
+  const hasCover = stored.some((m) => m.kind === 'COVER')
+  const lostLogo = !hasLogo && ctx.media.some((m) => m.kind === 'LOGO')
+  const lostCover = !hasCover && ctx.media.some((m) => m.kind === 'COVER')
 
   const checks: ValidationCheck[] = [
     {
@@ -190,14 +196,22 @@ export function validateBranding(ctx: MunValidationContext): ModuleValidationRes
       label: 'Logo is uploaded',
       passed: hasLogo,
       severity: 'BLOCKER',
-      message: hasLogo ? undefined : 'A logo image is required.',
+      message: hasLogo
+        ? undefined
+        : lostLogo
+          ? 'Your logo was not saved. Upload it again.'
+          : 'A logo image is required.',
     },
     {
       key: 'cover_present',
       label: 'Cover image is uploaded',
       passed: hasCover,
       severity: 'BLOCKER',
-      message: hasCover ? undefined : 'A cover image is required.',
+      message: hasCover
+        ? undefined
+        : lostCover
+          ? 'Your cover image was not saved. Upload it again.'
+          : 'A cover image is required.',
     },
   ]
 

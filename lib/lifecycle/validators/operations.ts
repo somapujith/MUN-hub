@@ -1,6 +1,7 @@
 import type { MunValidationContext, ModuleValidationResult, ValidationCheck } from '../validation'
 import { modulePassed } from '../validation'
 import type { MunDocumentKind } from '@/lib/db/schema-enums'
+import { isMockStorageUrl } from '@/lib/storage/mock-adapter'
 
 // -----------------------------------------------------------------------------
 // validators/operations.ts — RULES_DOCUMENTS, SCHEDULE, ACCOMMODATION,
@@ -17,7 +18,9 @@ const REQUIRED_DOCUMENTS: { kind: MunDocumentKind; label: string }[] = [
 ]
 
 export function validateRulesDocuments(ctx: MunValidationContext): ModuleValidationResult {
-  const presentKinds = new Set(ctx.documents.map((d) => d.kind))
+  // Documents whose URL came from the mock store have no file behind them
+  // (see validateBranding), so they count as missing.
+  const presentKinds = new Set(ctx.documents.filter((d) => !isMockStorageUrl(d.url)).map((d) => d.kind))
   const missing = REQUIRED_DOCUMENTS.filter((doc) => !presentKinds.has(doc.kind))
   const allPresent = missing.length === 0
 

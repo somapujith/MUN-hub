@@ -102,7 +102,7 @@ export async function deleteMunDocument(id: string, session: Session | null): Pr
   await assertModuleNotLocked(existing.munId, 'RULES_DOCUMENTS', session)
 
   await db.delete(munDocuments).where(eq(munDocuments.id, id))
-  await deleteStoredObjectQuietly(selectStorageAdapter(), existing.storageKey, 'deleteMunDocument')
+  await deleteStoredObjectQuietly(selectStorageAdapter, existing.storageKey, 'deleteMunDocument')
 
   await onModuleDataChanged(existing.munId, 'RULES_DOCUMENTS', session!.userId)
 }
