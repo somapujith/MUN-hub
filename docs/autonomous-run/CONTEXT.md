@@ -102,3 +102,7 @@ payout execution.
   `57b7629`, support `6cce29a` (23 defects fixed; support-form conflict resolved to the support
   version). f1 finished all 7 items (preview `aa85127`) and is on the organizer UX walkthrough.
   Workflow now in wire & verify.
+- 09:55 4b: staff TOTP 2FA server side (`900f476`, `e6a0db9`, migration 0034), support-reply deep
+  link (`35cd296`). DEPLOY: `munhub-api` needs secret TOTP_FIELD_KEY (fresh 32-byte base64, not
+  PAYMENT_FIELD_KEY); REQUIRE_STAFF_2FA stays unset until the user enrolls. New ratelimit
+  bindings RL_MFA_VERIFY_IP/TOKEN (namespace ids 1015/1016). 4b now on MFA web UI + admin UX pass.
