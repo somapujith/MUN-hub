@@ -346,16 +346,20 @@ test.describe('onboarding gates the host application', () => {
     await expectError(res, 409, 'Finish organizer onboarding before applying to host a MUN')
     expect(await workspaceMuns(org.api)).toHaveLength(0)
 
-    // Once onboarded (which submits the application), /organizer/apply shows the finished wizard.
-    await completeOnboardingViaApi(org.api)
+    // Once onboarded (which submits the application), /organizer/apply stays put
+    // and says that application is under review (multi-MUN hosting, 57943d3).
+    const answers = onboardingAnswers()
+    await completeOnboardingViaApi(org.api, answers)
     expect(await workspaceMuns(org.api)).toHaveLength(1)
     await page.goto('/organizer/apply')
-    await expect(page).toHaveURL(/\/organizer\/onboarding$/)
+    await expect(page).toHaveURL(/\/organizer\/apply$/)
+    await expect(pageHeading(page)).toHaveText(`${answers.munName} is being reviewed`)
+    await page.goto('/organizer/onboarding')
     await expect(pageHeading(page)).toHaveText("You're registered as an organizer")
     await org.close()
   })
 
-  test('an organizer who applied before onboarding existed gets no second application from the wizard', async () => {
+  test('an organizer who applied before onboarding existed gets no second application from the wizard, and cannot stack a second while the first is reviewed', async () => {
     // Apply through the API (the fixture marks onboarding done), then drop the
     // onboarding row: the state of an organizer who applied before the wizard existed.
     const { api, userId } = await createFreshOrganizer('E2E Applied First')
@@ -371,7 +375,7 @@ test.describe('onboarding gates the host application', () => {
         },
       }),
       409,
-      'You have already submitted an application to host a MUN',
+      'Your previous application is still being reviewed. You can apply for another MUN once it has been reviewed.',
     )
     await forgetOnboarding(userId)
     expect((await onboardingOf(api)).completed).toBe(false)

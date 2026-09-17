@@ -36,9 +36,16 @@ let api: APIRequestContext
 let munId: string
 const created: string[] = []
 
+async function setProvided(provided: 'PROVIDED' | 'NOT_PROVIDED') {
+  const res = await api.put(`muns/${munId}/accommodation/provided`, { data: { provided } })
+  expect(res.status(), await res.text()).toBeLessThan(300)
+}
+
 test.beforeAll(async () => {
   api = await organizerApi()
   munId = await sandboxId(api)
+  // The options list only shows once the MUN says it offers accommodation.
+  await setProvided('PROVIDED')
 })
 
 test.afterAll(async () => {
@@ -68,6 +75,36 @@ async function openAccommodation(page: Page) {
 }
 
 test.describe('accommodation UI', () => {
+  test('the options list appears only when the MUN offers accommodation', async ({ page }) => {
+    const yes = main(page).getByRole('radio', { name: 'Yes, delegates can book accommodation' })
+    const no = main(page).getByRole('radio', { name: "No, accommodation isn't provided" })
+    try {
+      await openAccommodation(page)
+      await expect(main(page).getByText('Does your conference offer accommodation?')).toBeVisible()
+      await expect(yes).toBeChecked()
+      await expect(main(page).getByRole('button', { name: 'Add option' }).first()).toBeVisible()
+
+      await no.click()
+      await expect(no).toBeChecked()
+      await expect(main(page).getByRole('button', { name: 'Add option' })).toHaveCount(0)
+      await page.reload()
+      await expect(no).toBeChecked()
+
+      await yes.click()
+      await expect(yes).toBeChecked()
+      await expect(main(page).getByRole('button', { name: 'Add option' }).first()).toBeVisible()
+    } finally {
+      await setProvided('PROVIDED')
+    }
+  })
+
+  test('the accommodation answer is validated and owner-only', async () => {
+    expect((await api.put(`muns/${munId}/accommodation/provided`, { data: { provided: 'MAYBE' } })).status()).toBe(400)
+    const anon = await anonApi()
+    expect((await anon.put(`muns/${munId}/accommodation/provided`, { data: { provided: 'PROVIDED' } })).status()).toBe(401)
+    await anon.dispose()
+  })
+
   test('add and edit an option, then archive and restore it', async ({ page }) => {
     const name = `E2E Twin Room ${uid()}`
     await openAccommodation(page)
