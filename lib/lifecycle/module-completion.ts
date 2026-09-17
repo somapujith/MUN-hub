@@ -3,6 +3,8 @@ import { db } from '@/lib/db/client'
 import { muns, munModuleVerifications, verificationIssues } from '@/lib/db/schema'
 import type { MunModule, MunStatus, ModuleCompletionStatus, ModuleVerificationState } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
+import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
+import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import { getModuleDefinition, TRACKED_MODULES } from './module-registry'
 import { getModuleVerificationState } from './module-verification'
 import { transitionMun } from './mun-state-machine'
@@ -402,6 +404,18 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
  * ---
  */
 export async function onModuleDataChanged(munId: string, moduleKey: MunModule, actorId: string, tx?: Tx): Promise<void> {
+  // Set inside `run()` when this call is the one that flips the mun to
+  // READY_FOR_SUBMISSION (never on a recompute that leaves it there
+  // unchanged) — read below, only in the self-transacting branch, to fire
+  // the READY_FOR_SUBMISSION pipeline notification after that transaction
+  // has actually committed. Every current call site (checked: accommodation,
+  // executive-board, mun-branding, mun-config, mun-contact, mun-documents,
+  // mun-schedule, payment-settlement, registration-form) calls this with no
+  // `tx` argument, so this covers 100% of real usage today; the `tx`-supplied
+  // branch below intentionally does not notify (see its comment) since this
+  // function can't know when a caller-supplied transaction commits.
+  let justBecameReadyForSubmission = false
+
   const run = async (transaction: Tx): Promise<void> => {
     // Ensure the row exists before computing/persisting against it.
     // `transaction` threaded through — see getModuleVerificationState's
@@ -438,6 +452,7 @@ export async function onModuleDataChanged(munId: string, moduleKey: MunModule, a
           undefined,
           transaction,
         )
+        if (targetStatus === 'READY_FOR_SUBMISSION') justBecameReadyForSubmission = true
       }
     }
 
@@ -458,8 +473,27 @@ export async function onModuleDataChanged(munId: string, moduleKey: MunModule, a
   }
 
   if (tx) {
+    // Caller-supplied transaction: this function can't know when it will
+    // commit (that's the caller's own boundary), so — matching every other
+    // notify site in this codebase's "never fire before commit" rule — it
+    // deliberately does not notify here. Moot today: no real call site
+    // passes a `tx` (see the comment above `justBecameReadyForSubmission`).
     await run(tx)
   } else {
     await db.transaction((transaction) => run(transaction))
+
+    // Fired here, after the transaction above has actually committed — same
+    // fire-and-forget-with-logging convention as go-live.ts's
+    // `notifyAfterCommit` (a notification failure must never surface as a
+    // failure of the module write that triggered it).
+    if (justBecameReadyForSubmission) {
+      resolveMunNotificationContext(munId)
+        .then((context) =>
+          notifyPipelineEvent({ type: 'READY_FOR_SUBMISSION', munId, organizerEmail: context.organizerEmail, munName: context.munName }),
+        )
+        .catch((error) => {
+          console.error('[module-completion] pipeline notification failed', error)
+        })
+    }
   }
 }

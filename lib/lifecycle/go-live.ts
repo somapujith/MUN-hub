@@ -67,6 +67,8 @@ export interface SubmitMunForReviewResult {
   passed: boolean
   blockers: ValidationCheck[]
   submissionId?: string
+  /** True when this passing submission followed an earlier ACTION_REQUIRED loop (drives NEW_SUBMISSION vs RESUBMISSION). Undefined on the failed-validation path. */
+  isResubmission?: boolean
 }
 
 /**
@@ -231,7 +233,13 @@ export async function submitMunForReview(munId: string, session: Session | null)
       })
       .returning()
 
-    return { passed: true as const, blockers: [], submissionId: submission.id }
+    // nextVersion > 1 means an earlier mun_submissions row already exists
+    // for this mun (a prior pass through this same function reached
+    // SUBMITTED at least once) — the signal this is a resubmission after
+    // changes, not a first-time submission. Computed here, inside the
+    // transaction, rather than re-deriving it from the pre-lock `mun.status`
+    // read above so it can't drift from what actually got persisted.
+    return { passed: true as const, blockers: [], submissionId: submission.id, isResubmission: nextVersion > 1 }
   })
 
   // Outside the transaction, after commit (Task 12 Step 5). Only on the
@@ -248,7 +256,14 @@ export async function submitMunForReview(munId: string, session: Session | null)
         munName: context.munName,
       })
       const adminEmails = await resolveAdminEmails()
-      await notifyPipelineEvent({ type: 'NEW_SUBMISSION', munId, munName: context.munName, adminEmails })
+      // NEW_SUBMISSION and RESUBMISSION are mutually exclusive per the
+      // PipelineEvent union's own copy ("has been submitted" vs "has been
+      // resubmitted after changes") — never fire both for the same call.
+      await notifyPipelineEvent(
+        result.isResubmission
+          ? { type: 'RESUBMISSION', munId, munName: context.munName, adminEmails }
+          : { type: 'NEW_SUBMISSION', munId, munName: context.munName, adminEmails },
+      )
     })
   }
 
@@ -767,6 +782,13 @@ export async function publishFromQueue(
   if (!result.replay) {
     notifyAfterCommit(async () => {
       const context = await resolveMunNotificationContext(munId)
+      // PUBLISHING and PUBLISHED both happened inside the transaction above
+      // (steps 4 and 6) — the house rule that notifications only fire after
+      // commit (see file header) means there's no earlier point to fire
+      // PUBLISHING at, so it's sent here, immediately before PUBLISHED,
+      // preserving their transaction-order sequence rather than firing
+      // PUBLISHED first.
+      await notifyPipelineEvent({ type: 'PUBLISHING', munId, organizerEmail: context.organizerEmail, munName: context.munName })
       await notifyPipelineEvent({
         type: 'PUBLISHED',
         munId,

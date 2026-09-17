@@ -18,8 +18,23 @@ import {
 } from '@/lib/db/schema'
 import type { Mun } from '@/lib/types'
 import type { Session } from '@/lib/auth/adapter'
+import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
+import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import { transitionMun } from './mun-state-machine'
 import { validateMunForSubmission } from './validation'
+
+/**
+ * Fire-and-forget notification helper — same reasoning as go-live.ts's
+ * `notifyAfterCommit` (a notification failure must never surface as a
+ * failure of the state change that triggered it), duplicated locally rather
+ * than imported since this file has no transaction boundary to wait on (see
+ * below) and the two call sites otherwise have nothing else in common.
+ */
+function notifyFireAndForget(work: () => Promise<void>): void {
+  work().catch((error) => {
+    console.error('[organizer-confirmation] pipeline notification failed', error)
+  })
+}
 
 /**
  * Snapshots the full submission surface for Gate 3 (PRD §14). Widened
@@ -171,5 +186,19 @@ export async function submitFinalConfirmation(munId: string, session: Session | 
   if (mun.status !== 'ORGANIZER_CONFIRMATION') {
     await transitionMun(munId, 'ORGANIZER_CONFIRMATION', session.userId, 'Organizer submitted final confirmation')
   }
-  return transitionMun(munId, 'VERIFICATION', session.userId, 'Auto-advanced to MUNHub verification')
+  const updated = await transitionMun(munId, 'VERIFICATION', session.userId, 'Auto-advanced to MUNHub verification')
+
+  // Fired after the transition above has already committed (transitionMun
+  // runs its own transaction when no `tx` is passed in, same as every other
+  // call in this function) — never inside it, matching go-live.ts's Task 12
+  // Step 5 convention. VERIFICATION is PRD_STATE_ALIASES's "UNDER_REVIEW"
+  // display state (mun-state-machine.ts) — this is the PipelineEvent whose
+  // trigger is entering that status, not Gate 1's distinct literal
+  // UNDER_REVIEW enum value (see that file's Gate-1/Gate-2 header comment).
+  notifyFireAndForget(async () => {
+    const context = await resolveMunNotificationContext(munId)
+    await notifyPipelineEvent({ type: 'UNDER_REVIEW', munId, organizerEmail: context.organizerEmail, munName: context.munName })
+  })
+
+  return updated
 }
