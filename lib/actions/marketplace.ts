@@ -234,6 +234,16 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
             ]
           : [byStartDate]
 
+  // `total` rides along as a window-function column on the same query as the
+  // page of rows, instead of a second, separately-executed COUNT(*) query
+  // repeating the exact same FROM/JOIN/WHERE — confirmed via load testing
+  // (docs/autonomous-run/changes/lane-load-testing.md) to roughly halve
+  // GET /api/v1/muns's DB time (~78ms -> ~40ms per request on the reference
+  // dataset). A window function only ever produces rows when the base query
+  // has at least one row, so an empty page (offset past the last matching
+  // row, or truly zero matches) can't read `total` off it — the separate
+  // COUNT(*) query is kept as a fallback for exactly that (rare) case, never
+  // skipped outright, so pagination metadata stays correct either way.
   const rows = await db
     .select({
       id: muns.id,
@@ -249,6 +259,7 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
       minPrice: priceSq.minPrice,
       organizerName: hostNameSql,
       coverImage: mediaUrlSql('COVER'),
+      total: sql<number>`count(*) over ()::int`,
     })
     .from(muns)
     .leftJoin(priceSq, eq(priceSq.munId, muns.id))
@@ -259,12 +270,18 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
     .limit(limit)
     .offset(offset)
 
-  const [{ count } = { count: 0 }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(muns)
-    .leftJoin(priceSq, eq(priceSq.munId, muns.id))
-    .leftJoin(users, eq(users.id, muns.organizerId))
-    .where(whereClause)
+  let total: number
+  if (rows.length > 0) {
+    total = rows[0].total
+  } else {
+    const [{ count } = { count: 0 }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(muns)
+      .leftJoin(priceSq, eq(priceSq.munId, muns.id))
+      .leftJoin(users, eq(users.id, muns.organizerId))
+      .where(whereClause)
+    total = count
+  }
 
   const results: MunSummary[] = rows.map((row) => ({
     id: row.id,
@@ -282,7 +299,7 @@ export async function searchMuns(params: MunSearchParams): Promise<MunSearchResu
     organizerName: row.organizerName ?? null,
   }))
 
-  return { results, total: count }
+  return { results, total }
 }
 
 /**

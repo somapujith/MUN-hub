@@ -1,0 +1,108 @@
+{
+  "list": [
+    {
+      "connections": 10,
+      "durationSec": 11.02,
+      "totalRequests": 46614,
+      "2xx": 120,
+      "errors": 0,
+      "timeouts": 0,
+      "non2xx": 46494,
+      "errorRatePct": 99.743,
+      "throughputReqPerSec": 4237.73,
+      "latencyMs": {
+        "p50": 2,
+        "p97_5": 3,
+        "p99": 4,
+        "max": 137
+      }
+    },
+    {
+      "connections": 50,
+      "durationSec": 11.02,
+      "totalRequests": 49574,
+      "2xx": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "non2xx": 49574,
+      "errorRatePct": 100,
+      "throughputReqPerSec": 4507.46,
+      "latencyMs": {
+        "p50": 10,
+        "p97_5": 14,
+        "p99": 16,
+        "max": 26
+      }
+    },
+    {
+      "connections": 100,
+      "durationSec": 10.03,
+      "totalRequests": 43188,
+      "2xx": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "non2xx": 43188,
+      "errorRatePct": 100,
+      "throughputReqPerSec": 4319.3,
+      "latencyMs": {
+        "p50": 22,
+        "p97_5": 31,
+        "p99": 38,
+        "max": 47
+      }
+    }
+  ],
+  "detail": [
+    {
+      "connections": 10,
+      "durationSec": 11.02,
+      "totalRequests": 51338,
+      "2xx": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "non2xx": 51338,
+      "errorRatePct": 100,
+      "throughputReqPerSec": 4668.19,
+      "latencyMs": {
+        "p50": 2,
+        "p97_5": 2,
+        "p99": 2,
+        "max": 20
+      }
+    },
+    {
+      "connections": 50,
+      "durationSec": 11.03,
+      "totalRequests": 48591,
+      "2xx": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "non2xx": 48591,
+      "errorRatePct": 100,
+      "throughputReqPerSec": 4418,
+      "latencyMs": {
+        "p50": 10,
+        "p97_5": 15,
+        "p99": 16,
+        "max": 33
+      }
+    },
+    {
+      "connections": 100,
+      "durationSec": 11.03,
+      "totalRequests": 47209,
+      "2xx": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "non2xx": 47209,
+      "errorRatePct": 100,
+      "throughputReqPerSec": 4292.64,
+      "latencyMs": {
+        "p50": 22,
+        "p97_5": 32,
+        "p99": 38,
+        "max": 61
+      }
+    }
+  ]
+}

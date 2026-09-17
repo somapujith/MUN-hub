@@ -1,0 +1,130 @@
+{
+  "publicList": [
+    {
+      "label": "public list",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 75.9238
+    },
+    {
+      "label": "public list",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 36.751400000000004
+    },
+    {
+      "label": "public list",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 31.969300000000004
+    },
+    {
+      "label": "public list",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 32.06890000000001
+    },
+    {
+      "label": "public list",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 31.882000000000005
+    }
+  ],
+  "publicDetail": [
+    {
+      "label": "public detail",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 7.2605000000000075
+    },
+    {
+      "label": "public detail",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 6.165999999999997
+    },
+    {
+      "label": "public detail",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 5.760100000000023
+    },
+    {
+      "label": "public detail",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 5.932500000000033
+    },
+    {
+      "label": "public detail",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 6.296500000000037
+    }
+  ],
+  "authenticatedRead": [
+    {
+      "label": "authenticated read",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 5.524400000000014
+    },
+    {
+      "label": "authenticated read",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 5.170000000000016
+    },
+    {
+      "label": "authenticated read",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 4.968099999999993
+    },
+    {
+      "label": "authenticated read",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 4.956900000000019
+    },
+    {
+      "label": "authenticated read",
+      "status": 200,
+      "ok": true,
+      "elapsedMs": 4.992199999999968
+    }
+  ],
+  "authenticatedWrite": [
+    {
+      "label": "authenticated write (registration)",
+      "status": 201,
+      "ok": true,
+      "elapsedMs": 20.59280000000001
+    },
+    {
+      "label": "authenticated write (registration)",
+      "status": 201,
+      "ok": true,
+      "elapsedMs": 18.38409999999999
+    },
+    {
+      "label": "authenticated write (registration)",
+      "status": 201,
+      "ok": true,
+      "elapsedMs": 18.901599999999974
+    },
+    {
+      "label": "authenticated write (registration)",
+      "status": 201,
+      "ok": true,
+      "elapsedMs": 18.247500000000002
+    },
+    {
+      "label": "authenticated write (registration)",
+      "status": 201,
+      "ok": true,
+      "elapsedMs": 18.692000000000007
+    }
+  ]
+}
