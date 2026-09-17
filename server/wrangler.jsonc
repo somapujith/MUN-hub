@@ -31,7 +31,12 @@
     // Origin used in uploaded-file URLs (lib/storage/keys.ts#publicFileUrl);
     // the web app loads them cross-origin from here.
     "PUBLIC_API_URL": "https://api.munhub.in",
-    "COOKIE_SECURE": "true"
+    "COOKIE_SECURE": "true",
+    // Platform fee (lib/payments/fees.ts#computeFeeBreakdown): 5% of the
+    // registration price, plus 18% GST on that fee — both included in the
+    // listed price and non-refundable. User-set rate, confirmed 2026-09-17.
+    "PLATFORM_FEE_BPS": "500",
+    "PLATFORM_FEE_TAX_BPS": "1800"
   },
   // Workers Rate Limiting bindings, one per limit in
   // server/middleware/rate-limit.ts's LIMITERS (same name, limit and period —
@@ -135,7 +140,9 @@
         // Origin used in uploaded-file URLs: the staging API itself.
         "PUBLIC_API_URL": "https://munhub-api-staging.somapujith.workers.dev",
         // workers.dev is served over HTTPS, same as production.
-        "COOKIE_SECURE": "true"
+        "COOKIE_SECURE": "true",
+        "PLATFORM_FEE_BPS": "500",
+        "PLATFORM_FEE_TAX_BPS": "1800"
       },
       // Bindings are never inherited: leaving these out would deploy
       // munhub-api-staging with no RL_* bindings at all, and every limit would
