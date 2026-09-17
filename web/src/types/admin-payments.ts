@@ -26,6 +26,22 @@ export interface PaymentExceptionRow {
   studentEmail: string;
   munName: string;
   raisedAt: string;
+  /** Set only when `status: 'resolved'` was requested; null for an open row. */
+  resolvedAt: string | null;
+  resolvedByUserId: string | null;
+  resolutionNote: string | null;
+}
+
+export interface ListPaymentExceptionsParams {
+  status?: "open" | "resolved";
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListPaymentExceptionsResult {
+  results: PaymentExceptionRow[];
+  total: number;
 }
 
 export interface ResolvedPaymentException {

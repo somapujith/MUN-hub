@@ -344,7 +344,8 @@ describe('admin payment exceptions', () => {
 
     const list = await app.request('/api/v1/admin/payment-exceptions', { headers })
     expect(list.status).toBe(200)
-    const rows = await list.json()
+    const { results: rows, total } = (await list.json()) as { results: { paymentId: string }[]; total: number }
+    expect(typeof total).toBe('number')
     expect(rows.find((row: { paymentId: string }) => row.paymentId === payment.id)).toMatchObject({
       reason: 'PAYMENT_AFTER_HOLD_EXPIRED',
       amount: 1499,
@@ -378,6 +379,40 @@ describe('admin payment exceptions', () => {
       json(headers, { note: 'Nothing' }),
     )
     expect(unknown.status).toBe(404)
+  })
+
+  it('supports ?status, ?q and pagination', async () => {
+    const payment = await lateException()
+    const admin = await makeUser('ADMIN')
+    const headers = await authHeaders(admin.id)
+
+    // Not resolved yet: absent from ?status=resolved, present in the default (open) list.
+    const beforeResolve = await app.request('/api/v1/admin/payment-exceptions?status=resolved', { headers })
+    const { results: resolvedBefore } = (await beforeResolve.json()) as { results: { paymentId: string }[] }
+    expect(resolvedBefore.some((row) => row.paymentId === payment.id)).toBe(false)
+
+    await app.request(`/api/v1/admin/payment-exceptions/${payment.id}/resolve`, json(headers, { note: 'Returned' }))
+
+    const afterOpen = await app.request('/api/v1/admin/payment-exceptions?status=open', { headers })
+    const { results: openAfter } = (await afterOpen.json()) as { results: { paymentId: string }[] }
+    expect(openAfter.some((row) => row.paymentId === payment.id)).toBe(false)
+
+    const afterResolved = await app.request('/api/v1/admin/payment-exceptions?status=resolved', { headers })
+    const { results: resolvedAfter } = (await afterResolved.json()) as {
+      results: { paymentId: string; resolvedAt: string | null; resolutionNote: string | null }[]
+    }
+    const row = resolvedAfter.find((r) => r.paymentId === payment.id)
+    expect(row).toBeDefined()
+    expect(row?.resolvedAt).not.toBeNull()
+    expect(row?.resolutionNote).toBe('Returned')
+
+    const paged = await app.request('/api/v1/admin/payment-exceptions?status=resolved&limit=1&offset=0', { headers })
+    const pagedBody = (await paged.json()) as { results: unknown[]; total: number }
+    expect(pagedBody.results.length).toBeLessThanOrEqual(1)
+    expect(pagedBody.total).toBeGreaterThanOrEqual(1)
+
+    const badStatus = await app.request('/api/v1/admin/payment-exceptions?status=bogus', { headers })
+    expect(badStatus.status).toBe(400)
   })
 
   it('is closed to students and organizers', async () => {

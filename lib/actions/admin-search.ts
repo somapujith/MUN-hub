@@ -68,8 +68,5 @@ export async function searchRegistrations(
 // and live in lib/payments/exceptions.ts. Re-exported here because the admin
 // overview (admin-audit.ts) and the admin payments route read them from this
 // module. A failed payment is NOT an exception — no money was taken.
-export type { PaymentExceptionRow } from '@/lib/payments/exceptions'
-export {
-  listOpenPaymentExceptions as listPaymentExceptions,
-  resolvePaymentException,
-} from '@/lib/payments/exceptions'
+export type { ListPaymentExceptionsParams, ListPaymentExceptionsResult, PaymentExceptionRow } from '@/lib/payments/exceptions'
+export { listPaymentExceptions, resolvePaymentException } from '@/lib/payments/exceptions'

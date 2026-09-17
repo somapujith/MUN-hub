@@ -1,4 +1,4 @@
-import type { PaymentExceptionRow, ResolvedPaymentException } from "@/types/admin-payments";
+import type { ListPaymentExceptionsParams, ListPaymentExceptionsResult, ResolvedPaymentException } from "@/types/admin-payments";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -19,12 +19,18 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 /**
- * Open payment exceptions (money taken with no valid registration behind
- * it), newest first — `GET /admin/payment-exceptions`
+ * Payment exceptions (money taken with no valid registration behind it),
+ * newest first, paginated — `GET /admin/payment-exceptions`
  * (server/routes/admin-search.ts → lib/payments/exceptions.ts).
  */
-export function listPaymentExceptions() {
-  return request<PaymentExceptionRow[]>("/admin/payment-exceptions");
+export function listPaymentExceptions(params: ListPaymentExceptionsParams = {}) {
+  const query = new URLSearchParams();
+  if (params.status) query.set("status", params.status);
+  if (params.q) query.set("q", params.q);
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  if (params.offset !== undefined) query.set("offset", String(params.offset));
+  const qs = query.toString();
+  return request<ListPaymentExceptionsResult>(`/admin/payment-exceptions${qs ? `?${qs}` : ""}`);
 }
 
 /** Marks one exception resolved. The note is required and goes into the audit log. */

@@ -28,7 +28,8 @@ export const queryKeys = {
   munMedia: (munId: string) => ["organizer", "media", munId] as const,
   paymentSettings: (munId: string) => ["organizer", "payment-settings", munId] as const,
   paymentsSummary: (munId: string) => ["organizer", "payments-summary", munId] as const,
-  adminPaymentExceptions: () => ["admin", "payment-exceptions"] as const,
+  adminPaymentExceptions: (params: Record<string, unknown> = {}) => ["admin", "payment-exceptions", params] as const,
+  adminPaymentExceptionsAll: () => ["admin", "payment-exceptions"] as const,
   schedule: (munId: string) => ["organizer", "schedule", munId] as const,
   delegates: (munId: string, filters: Record<string, unknown>) =>
     ["organizer", "delegates", munId, filters] as const,

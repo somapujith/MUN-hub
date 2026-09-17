@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, isNull, or, sql } from 'drizzle-orm'
+import { and, desc, eq, ilike, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, payments, registrations, users } from '@/lib/db/schema'
 import type { PaymentStatus, RegistrationStatus } from '@/lib/db/schema-enums'
@@ -39,6 +39,10 @@ export interface PaymentExceptionRow {
   studentEmail: string
   munName: string
   raisedAt: Date
+  /** Set only for a resolved row (status: 'resolved'); null for an open one. */
+  resolvedAt: Date | null
+  resolvedByUserId: string | null
+  resolutionNote: string | null
 }
 
 // LEGACY: before payment exceptions existed (migration 0031), the webhook
@@ -46,49 +50,92 @@ export interface PaymentExceptionRow {
 // meant exactly "money owed back", never an actual refund. Those rows have no
 // exception_reason, so they're surfaced as PAYMENT_AFTER_HOLD_EXPIRED until
 // an admin resolves them.
-const openException = and(
-  isNull(payments.exceptionResolvedAt),
-  or(isNotNull(payments.exceptionReason), eq(payments.status, 'REFUNDED')),
-)
+const hasException = or(isNotNull(payments.exceptionReason), eq(payments.status, 'REFUNDED'))
+
+function pattern(q: string): string {
+  return q.replace(/[\\%_]/g, (ch) => `\\${ch}`)
+}
+
+export interface ListPaymentExceptionsParams {
+  /** Default 'open'. */
+  status?: 'open' | 'resolved'
+  /** Matches the delegate's email or the MUN's name, case-insensitive substring. */
+  search?: string
+  /** Default 50. */
+  limit?: number
+  /** Default 0. */
+  offset?: number
+}
+
+export interface ListPaymentExceptionsResult {
+  results: PaymentExceptionRow[]
+  total: number
+}
 
 /**
- * Open payment exceptions, newest first, capped at 100 (no pagination yet —
- * the queue is expected to stay short, and a fresh exception must always
- * be on the first page). Mock checkout rows (including legacy REFUNDED ones)
- * are listed only while the mock adapter is active: they took no money, so
- * there is nothing to return. OPERATIONS/ADMIN/SUPER_ADMIN only.
+ * Payment exceptions, newest-raised first, paginated. Mock checkout rows
+ * (including legacy REFUNDED ones) are listed only while the mock adapter is
+ * active: they took no money, so there is nothing to return.
+ * OPERATIONS/ADMIN/SUPER_ADMIN only.
  */
-export async function listOpenPaymentExceptions(session: Session | null): Promise<PaymentExceptionRow[]> {
+export async function listPaymentExceptions(
+  params: ListPaymentExceptionsParams,
+  session: Session | null,
+): Promise<ListPaymentExceptionsResult> {
   requireRole(session, [...EXCEPTION_ROLES])
 
+  const limit = params.limit ?? 50
+  const offset = params.offset ?? 0
+  const statusFilter =
+    params.status === 'resolved' ? and(hasException, isNotNull(payments.exceptionResolvedAt)) : and(hasException, isNull(payments.exceptionResolvedAt))
+
+  const q = params.search?.trim()
+  const searchFilter = q
+    ? or(ilike(users.email, `%${pattern(q)}%`), ilike(muns.name, `%${pattern(q)}%`))
+    : undefined
+
+  const whereClause = and(statusFilter, countedPaymentsFilter(), searchFilter)
   const raisedAt = sql<Date>`coalesce(${payments.exceptionRaisedAt}, ${payments.updatedAt})`
 
-  const rows = await db
-    .select({
-      paymentId: payments.id,
-      registrationId: registrations.id,
-      exceptionReason: payments.exceptionReason,
-      amount: payments.amount,
-      currency: payments.currency,
-      paymentStatus: payments.status,
-      registrationStatus: registrations.status,
-      providerOrderId: payments.providerOrderId,
-      providerPaymentId: payments.providerPaymentId,
-      studentName: users.name,
-      studentEmail: users.email,
-      munName: muns.name,
-      exceptionRaisedAt: payments.exceptionRaisedAt,
-      updatedAt: payments.updatedAt,
-    })
-    .from(payments)
-    .innerJoin(registrations, eq(payments.registrationId, registrations.id))
-    .innerJoin(users, eq(registrations.userId, users.id))
-    .innerJoin(muns, eq(registrations.munId, muns.id))
-    .where(and(openException, countedPaymentsFilter()))
-    .orderBy(desc(raisedAt), desc(payments.id))
-    .limit(100)
+  const [rows, [{ count } = { count: 0 }]] = await Promise.all([
+    db
+      .select({
+        paymentId: payments.id,
+        registrationId: registrations.id,
+        exceptionReason: payments.exceptionReason,
+        amount: payments.amount,
+        currency: payments.currency,
+        paymentStatus: payments.status,
+        registrationStatus: registrations.status,
+        providerOrderId: payments.providerOrderId,
+        providerPaymentId: payments.providerPaymentId,
+        studentName: users.name,
+        studentEmail: users.email,
+        munName: muns.name,
+        exceptionRaisedAt: payments.exceptionRaisedAt,
+        updatedAt: payments.updatedAt,
+        exceptionResolvedAt: payments.exceptionResolvedAt,
+        exceptionResolvedBy: payments.exceptionResolvedBy,
+        exceptionResolutionNote: payments.exceptionResolutionNote,
+      })
+      .from(payments)
+      .innerJoin(registrations, eq(payments.registrationId, registrations.id))
+      .innerJoin(users, eq(registrations.userId, users.id))
+      .innerJoin(muns, eq(registrations.munId, muns.id))
+      .where(whereClause)
+      .orderBy(desc(raisedAt), desc(payments.id))
+      .limit(limit)
+      .offset(offset),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(payments)
+      .innerJoin(registrations, eq(payments.registrationId, registrations.id))
+      .innerJoin(users, eq(registrations.userId, users.id))
+      .innerJoin(muns, eq(registrations.munId, muns.id))
+      .where(whereClause),
+  ])
 
-  return rows.map((row) => ({
+  const results = rows.map((row) => ({
     paymentId: row.paymentId,
     registrationId: row.registrationId,
     reason: row.exceptionReason ?? PAYMENT_EXCEPTION_REASONS.paymentAfterHoldExpired,
@@ -102,7 +149,12 @@ export async function listOpenPaymentExceptions(session: Session | null): Promis
     studentEmail: row.studentEmail,
     munName: row.munName,
     raisedAt: row.exceptionRaisedAt ?? row.updatedAt,
+    resolvedAt: row.exceptionResolvedAt,
+    resolvedByUserId: row.exceptionResolvedBy,
+    resolutionNote: row.exceptionResolutionNote,
   }))
+
+  return { results, total: count }
 }
 
 export interface ResolvedPaymentException {

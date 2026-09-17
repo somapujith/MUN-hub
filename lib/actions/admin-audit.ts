@@ -44,7 +44,7 @@ export async function getAdminOverviewStats(session: Session | null): Promise<Ad
     getReviewQueue({ limit: 1 }, session),
     getModuleReviewQueue({ limit: 1 }, session),
     listTickets({}, session),
-    listPaymentExceptions(session),
+    listPaymentExceptions({ status: 'open', limit: 1 }, session),
     getGoLiveQueue({ limit: 1 }, session),
   ])
 
@@ -56,7 +56,7 @@ export async function getAdminOverviewStats(session: Session | null): Promise<Ad
     pendingApplications: reviewQueue.total,
     pendingModuleReviews: moduleQueue.total,
     openSupportTickets,
-    paymentExceptions: paymentExceptions.length,
+    paymentExceptions: paymentExceptions.total,
     goLiveQueue: goLiveQueue.total,
   }
 }

@@ -96,8 +96,8 @@ describe('listPaymentExceptions', () => {
     })
     const ops = await makeUser('OPERATIONS')
 
-    const exceptions = await listPaymentExceptions(sess(ops))
-    const row = exceptions.find((e) => e.paymentId === payment.id)
+    const { results } = await listPaymentExceptions({}, sess(ops))
+    const row = results.find((e) => e.paymentId === payment.id)
     expect(row).toMatchObject({
       registrationId: registration.id,
       reason: 'PAYMENT_AFTER_HOLD_EXPIRED',
@@ -108,6 +108,7 @@ describe('listPaymentExceptions', () => {
       studentName: student.name,
       studentEmail: student.email,
       munName: mun.name,
+      resolvedAt: null,
     })
     expect(row?.raisedAt.getTime()).toBe(raisedAt.getTime())
   })
@@ -115,7 +116,7 @@ describe('listPaymentExceptions', () => {
   it('surfaces a legacy REFUNDED (late-payment) row as PAYMENT_AFTER_HOLD_EXPIRED', async () => {
     const { payment } = await seedRegistrationWithPayment('REFUNDED', 'CANCELLED')
     const ops = await makeUser('OPERATIONS')
-    const row = (await listPaymentExceptions(sess(ops))).find((e) => e.paymentId === payment.id)
+    const row = (await listPaymentExceptions({}, sess(ops))).results.find((e) => e.paymentId === payment.id)
     expect(row?.reason).toBe('PAYMENT_AFTER_HOLD_EXPIRED')
     expect(row?.raisedAt).toBeInstanceOf(Date)
   })
@@ -123,23 +124,24 @@ describe('listPaymentExceptions', () => {
   it('does not treat a failed payment as an exception (no money was taken)', async () => {
     const { registration } = await seedRegistrationWithPayment('FAILED', 'CANCELLED')
     const ops = await makeUser('OPERATIONS')
-    const exceptions = await listPaymentExceptions(sess(ops))
-    expect(exceptions.some((e) => e.registrationId === registration.id)).toBe(false)
+    const { results } = await listPaymentExceptions({}, sess(ops))
+    expect(results.some((e) => e.registrationId === registration.id)).toBe(false)
   })
 
   it('excludes a healthy PAID+CONFIRMED payment', async () => {
     const { registration } = await seedRegistrationWithPayment('PAID', 'CONFIRMED')
     const ops = await makeUser('OPERATIONS')
 
-    const exceptions = await listPaymentExceptions(sess(ops))
-    expect(exceptions.some((e) => e.registrationId === registration.id)).toBe(false)
+    const { results } = await listPaymentExceptions({}, sess(ops))
+    expect(results.some((e) => e.registrationId === registration.id)).toBe(false)
   })
 
-  it('excludes a resolved exception', async () => {
+  it('excludes a resolved exception from the default (open) list', async () => {
     const { payment } = await seedRegistrationWithPayment('PAID', 'CONFIRMED', { reason: 'DUPLICATE_PAYMENT' })
     const ops = await makeUser('OPERATIONS')
     await resolvePaymentException(payment.id, 'Extra charge returned', sess(ops))
-    expect((await listPaymentExceptions(sess(ops))).some((e) => e.paymentId === payment.id)).toBe(false)
+    const { results } = await listPaymentExceptions({}, sess(ops))
+    expect(results.some((e) => e.paymentId === payment.id)).toBe(false)
   })
 
   it('lists newest first', async () => {
@@ -152,13 +154,13 @@ describe('listPaymentExceptions', () => {
       raisedAt: new Date(Date.now() + 120_000),
     })
     const ops = await makeUser('OPERATIONS')
-    const ids = (await listPaymentExceptions(sess(ops))).map((e) => e.paymentId)
+    const ids = (await listPaymentExceptions({}, sess(ops))).results.map((e) => e.paymentId)
     expect(ids.indexOf(newer.payment.id)).toBeLessThan(ids.indexOf(older.payment.id))
   })
 
   it('throws Forbidden for a STUDENT', async () => {
     const student = await makeUser('STUDENT')
-    await expect(listPaymentExceptions(sess(student))).rejects.toThrow('Forbidden')
+    await expect(listPaymentExceptions({}, sess(student))).rejects.toThrow('Forbidden')
   })
 })
 

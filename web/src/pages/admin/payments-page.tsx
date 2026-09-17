@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
-import { CircleAlertIcon } from "lucide-react";
+import { CircleAlertIcon, SearchIcon } from "lucide-react";
 import { toast } from "sonner";
 import { listPaymentExceptions, resolvePaymentException } from "@/api/admin-payments";
 import { queryKeys } from "@/api/query-keys";
@@ -16,10 +16,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getToneClassName, type StatusTone } from "@/components/dashboard/registration-status";
+import { adminSelectClassName } from "@/lib/admin/styles";
 import type { PaymentExceptionRow } from "@/types/admin-payments";
 import type { RegistrationStatus } from "@/types/enums";
+
+const PAGE_SIZE = 20;
 
 const NOTE_MAX_LENGTH = 2000;
 
@@ -72,10 +77,24 @@ export function AdminPaymentsPage() {
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<PaymentExceptionRow | null>(null);
   const [note, setNote] = useState("");
+  const [status, setStatus] = useState<"open" | "resolved">("open");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
 
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  const params = { status, q: search || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE };
   const exceptionsQuery = useQuery({
-    queryKey: queryKeys.adminPaymentExceptions(),
-    queryFn: listPaymentExceptions,
+    queryKey: queryKeys.adminPaymentExceptions(params),
+    queryFn: () => listPaymentExceptions(params),
+    placeholderData: (previous) => previous,
   });
 
   const resolveMutation = useMutation({
@@ -83,7 +102,7 @@ export function AdminPaymentsPage() {
       resolvePaymentException(paymentId, note),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.adminPaymentExceptions() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminPaymentExceptionsAll() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.adminOverview() }),
       ]);
       setTarget(null);
@@ -93,7 +112,9 @@ export function AdminPaymentsPage() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to resolve this exception"),
   });
 
-  const results = exceptionsQuery.data ?? [];
+  const results = exceptionsQuery.data?.results ?? [];
+  const total = exceptionsQuery.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const trimmedNote = note.trim();
 
   const openResolve = (row: PaymentExceptionRow) => {
@@ -114,28 +135,73 @@ export function AdminPaymentsPage() {
         title="Payments"
         description="Payment exceptions requiring manual review: money taken with no valid registration behind it. There are no refunds — return the money off-platform, then resolve the exception with a note."
       >
-        {exceptionsQuery.isLoading && (
-          <p className="text-body-md text-muted-foreground">Loading payment exceptions...</p>
-        )}
-        {exceptionsQuery.isError && (
+        <div className="flex flex-wrap items-end gap-md">
+          <div className="flex w-full max-w-md flex-col gap-xs">
+            <label htmlFor="payments-search" className="text-body-md font-medium text-ink">
+              Search
+            </label>
+            <div className="relative w-full">
+              <SearchIcon
+                aria-hidden
+                className="pointer-events-none absolute top-1/2 left-md size-4 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                id="payments-search"
+                type="search"
+                placeholder="Delegate email or MUN name"
+                className="pl-xxl"
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-xs">
+            <Label htmlFor="payments-status">Status</Label>
+            <select
+              id="payments-status"
+              className={adminSelectClassName}
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value as "open" | "resolved");
+                setPage(0);
+              }}
+            >
+              <option value="open">Open</option>
+              <option value="resolved">Resolved</option>
+            </select>
+          </div>
+          <p className="text-body-md text-muted-foreground">
+            {total === 0 ? "No exceptions" : `${total} exception${total === 1 ? "" : "s"}`}
+          </p>
+        </div>
+
+        {exceptionsQuery.isLoading ? (
+          <div className="flex flex-col gap-sm">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Skeleton key={index} className="h-14 w-full" />
+            ))}
+          </div>
+        ) : exceptionsQuery.isError ? (
           <p className="text-body-md text-destructive">
             {exceptionsQuery.error instanceof Error
               ? exceptionsQuery.error.message
               : "Unable to load payment exceptions right now."}
           </p>
-        )}
-
-        {!exceptionsQuery.isLoading && !exceptionsQuery.isError && results.length === 0 && (
+        ) : results.length === 0 ? (
           <div className="flex flex-col items-center gap-sm rounded-md border border-dashed border-border bg-card px-lg py-xxl text-center">
             <CircleAlertIcon className="size-8 text-muted-foreground" strokeWidth={1.25} aria-hidden />
-            <p className="font-display text-title-md text-ink">No payment exceptions</p>
+            <p className="font-display text-title-md text-ink">
+              {status === "open" ? "No open payment exceptions" : "No resolved payment exceptions"}
+            </p>
             <p className="max-w-sm text-body-md text-muted-foreground">
-              Every captured payment has a registration behind it. Nothing needs manual review.
+              {search
+                ? "Try a different name or email."
+                : status === "open"
+                  ? "Every captured payment has a registration behind it. Nothing needs manual review."
+                  : "Nothing has been resolved yet."}
             </p>
           </div>
-        )}
-
-        {results.length > 0 && (
+        ) : (
           <div className="overflow-x-auto rounded-md border border-border bg-card">
             <table className="w-full min-w-[56rem] text-left text-body-md">
               <thead className="border-b border-border bg-surface-soft/80 text-muted-foreground">
@@ -147,7 +213,7 @@ export function AdminPaymentsPage() {
                   <th className="px-md py-sm font-medium">Exception</th>
                   <th className="px-md py-sm font-medium">Raised</th>
                   <th className="px-md py-sm font-medium">
-                    <span className="sr-only">Actions</span>
+                    {status === "open" ? <span className="sr-only">Actions</span> : "Resolution"}
                   </th>
                 </tr>
               </thead>
@@ -183,20 +249,46 @@ export function AdminPaymentsPage() {
                       <td className="px-md py-sm whitespace-nowrap text-body">
                         <time dateTime={row.raisedAt}>{formatRaisedAt(row.raisedAt)}</time>
                       </td>
-                      <td className="px-md py-sm text-right">
-                        <Button variant="outline" size="sm" onClick={() => openResolve(row)}>
-                          Resolve
-                          <span className="sr-only"> exception for {row.studentName}</span>
-                        </Button>
+                      <td className="max-w-56 px-md py-sm text-right">
+                        {status === "open" ? (
+                          <Button variant="outline" size="sm" onClick={() => openResolve(row)}>
+                            Resolve
+                            <span className="sr-only"> exception for {row.studentName}</span>
+                          </Button>
+                        ) : (
+                          <div className="text-left">
+                            {row.resolvedAt && (
+                              <time dateTime={row.resolvedAt} className="block whitespace-nowrap text-caption text-muted-foreground">
+                                {formatRaisedAt(row.resolvedAt)}
+                              </time>
+                            )}
+                            {row.resolutionNote && <p className="break-words text-body">{row.resolutionNote}</p>}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-            <p className="border-t border-border px-md py-sm text-body-md text-muted-foreground">
-              {results.length} exception{results.length === 1 ? "" : "s"} — newest first, capped at 100.
-            </p>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between gap-md border-t border-border px-md py-sm">
+                <Button variant="outline" size="sm" disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>
+                  Previous
+                </Button>
+                <p className="text-body-md tabular-nums text-muted-foreground">
+                  Page {page + 1} of {totalPages}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page + 1 >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </AdminPageFrame>

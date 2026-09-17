@@ -16,6 +16,15 @@ const searchQuerySchema = z
   })
   .strict()
 
+const paymentExceptionsQuerySchema = z
+  .object({
+    status: z.enum(['open', 'resolved']).optional(),
+    q: z.string().trim().min(1).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    offset: z.coerce.number().int().min(0).optional(),
+  })
+  .strict()
+
 const resolveExceptionBodySchema = z
   .object({
     note: z
@@ -53,14 +62,28 @@ adminSearchRoutes.get(
   },
 )
 
-/** Open payment exceptions (money taken with no valid registration), newest first. */
+/**
+ * Payment exceptions (money taken with no valid registration), newest first,
+ * paginated. `?status=open|resolved` (default open), `?q=` matches the
+ * delegate's email or the MUN's name.
+ */
 adminSearchRoutes.get(
   '/admin/payment-exceptions',
   requireAuth,
   requireRole([...ADMIN_ROLES]),
   async (c) => {
-    const results = await listPaymentExceptions(c.get('session'))
-    return c.json(results)
+    const query = paymentExceptionsQuerySchema.parse(c.req.query())
+    const session = c.get('session')!
+    const result = await listPaymentExceptions({ status: query.status, search: query.q, limit: query.limit, offset: query.offset }, session)
+    // Rows carry delegate names/emails.
+    recordPiiRead({
+      actorId: session.userId,
+      route: 'GET /admin/payment-exceptions',
+      targetType: 'payment',
+      targetIds: result.results.map((row) => row.paymentId),
+      hasQuery: Boolean(query.q),
+    })
+    return c.json(result)
   },
 )
 
