@@ -8,6 +8,8 @@ import { hyperdriveMiddleware } from '../middleware/hyperdrive'
 import { rateLimitMiddleware } from '../middleware/rate-limit'
 import { runtimeEnvMiddleware } from '../middleware/runtime-env'
 import { sessionMiddleware } from '../middleware/session'
+import { storageMiddleware } from '../middleware/storage'
+import { filesRoutes } from '../routes/files'
 import { apiV1 } from '../routes/index'
 import { munLifecycleRoutes } from '../routes/mun-lifecycle'
 import { webhooks } from '../routes/webhooks'
@@ -41,8 +43,9 @@ export function makeCorsOriginMatcher() {
 /**
  * Base Hono app with the full middleware stack (spec Section 8.2):
  * runtime-env bridge → hyperdrive-bridge (both Workers-only, see below) →
- * request-id → logger → CORS → session → [webhooks outside CSRF] → CSRF →
- * rate-limit → /api/v1 routes → error handler
+ * storage bindings → request-id → logger → CORS → session →
+ * [webhooks outside CSRF] → CSRF → rate-limit → /api/v1/files + /api/v1
+ * routes → error handler
  */
 export function createApp() {
   const app = new Hono<{ Variables: AppVariables }>()
@@ -52,6 +55,9 @@ export function createApp() {
   // or touch `db` — see lib/runtime-env.ts / lib/db/hyperdrive-bridge.ts.
   app.use('*', runtimeEnvMiddleware)
   app.use('*', hyperdriveMiddleware)
+  // Upload storage bindings + request origin for lib/storage, scoped to the
+  // request — see lib/storage/bindings.ts.
+  app.use('*', storageMiddleware)
   app.use('*', requestId())
   app.use('*', logger())
   app.use(
@@ -71,6 +77,8 @@ export function createApp() {
   // CSRF + rate-limit scoped to /api/v1 only
   app.use('/api/v1/*', csrfMiddleware)
   app.use('/api/v1/*', rateLimitMiddleware)
+  // Public uploaded files (logos, covers, PDFs) — server/routes/files.ts
+  app.route('/api/v1/files', filesRoutes)
   app.route('/api/v1', apiV1)
   app.route('/api/v1', munLifecycleRoutes)
 

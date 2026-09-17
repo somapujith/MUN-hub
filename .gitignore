@@ -58,6 +58,9 @@ next-env.d.ts
 # stray build/scratch dirs
 .dist/
 
+# local-dev uploaded files (STORAGE_ADAPTER=local, lib/storage/local-adapter.ts)
+.local-uploads/
+
 # Playwright E2E (E2E/) — saved sessions contain live session cookies
 /E2E/.auth*/
 /E2E/test-results*/

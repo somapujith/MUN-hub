@@ -12,6 +12,7 @@ import { createScheduleItem } from '@/lib/actions/mun-schedule'
 import { upsertMunContact } from '@/lib/actions/mun-contact'
 import { upsertPaymentSettings } from '@/lib/actions/payment-settlement'
 import { uploadMunMedia } from '@/lib/actions/mun-branding'
+import { SAMPLE_FILES } from '@/lib/storage/in-memory-bindings'
 import { createAccommodationOption } from '@/lib/actions/accommodation'
 
 // -----------------------------------------------------------------------------
@@ -288,7 +289,7 @@ describe('LOCKED enforcement wired into action files', () => {
   it('mun-branding.ts uploadMunMedia: EMPTY HIGH_IMPACT_FIELDS module (BRANDING) stays editable for organizers even during VERIFICATION', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id, 'VERIFICATION')
-    const file = Buffer.from('fake-png-bytes')
+    const file = SAMPLE_FILES.png
 
     await expect(
       uploadMunMedia({ munId: mun.id, kind: 'LOGO', file, contentType: 'image/png' }, sessionFor(organizer)),
