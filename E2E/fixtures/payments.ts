@@ -81,6 +81,8 @@ export interface WebhookEvent {
   type?: 'payment.captured' | 'payment.failed'
   eventId?: string
   providerPaymentId?: string | null
+  /** When the provider says the capture happened (defaults to now). */
+  occurredAt?: Date
   /** When the delivery was signed (the replay window is 5 minutes). */
   signedAt?: Date
   /** Signs with this secret instead of the API's. */
@@ -116,7 +118,7 @@ export function signedWebhook(event: WebhookEvent): SignedWebhook {
     providerPaymentId,
     amount: event.amount,
     currency: event.currency,
-    createdAt: new Date().toISOString(),
+    createdAt: (event.occurredAt ?? new Date()).toISOString(),
   })
   const timestamp = String(Math.floor((event.signedAt ?? new Date()).getTime() / 1000))
   const signature = createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex')

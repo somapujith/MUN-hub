@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { getMun, signUpViaApi, type ApiSession } from '../../fixtures/api'
 import { OPEN } from '../../fixtures/fixture-muns'
 import { deliverWebhook, signedWebhook } from '../../fixtures/payments'
-import { paymentFor, registrationCount, registrationStatus, type StoredPayment } from '../../fixtures/payments-fixture-db'
+import { expireSeatHold, paymentFor, registrationCount, registrationStatus, type StoredPayment } from '../../fixtures/payments-fixture-db'
 import { adminApi } from '../admin/_helpers'
 
 /**
@@ -296,6 +296,41 @@ test.describe('payments webhook', () => {
     expect(fresh.status, fresh.text).toBe(200)
     expect(fresh.json).toEqual({ ok: true, confirmed: true })
     expect(await registrationStatus(registrationId)).toBe('CONFIRMED')
+  })
+
+  test('expiry is judged by when the provider captured the money, not when the webhook arrives', async () => {
+    // Captured while the hold was still running, delivered after it ran out: confirms.
+    const inTime = await pendingOrder()
+    await expireSeatHold(inTime.registrationId, 60_000)
+    const delayed = await deliverWebhook(
+      signedWebhook({
+        orderId: inTime.payment.providerOrderId,
+        amount: inTime.payment.amount,
+        currency: inTime.payment.currency,
+        occurredAt: new Date(Date.now() - 2 * 60_000),
+      }),
+    )
+    expect(delayed.status, delayed.text).toBe(200)
+    expect(delayed.json).toEqual({ ok: true, confirmed: true })
+    expect(await registrationStatus(inTime.registrationId)).toBe('CONFIRMED')
+    expect(await paymentFor(inTime.registrationId)).toMatchObject({ status: 'PAID', exceptionReason: null })
+
+    // Captured after the hold ran out, with no sweep in between: the webhook releases the seat itself.
+    const late = await pendingOrder()
+    await expireSeatHold(late.registrationId, 2 * 60_000)
+    expect(await registrationStatus(late.registrationId)).toBe('PAYMENT_PENDING')
+    const res = await deliverWebhook(
+      signedWebhook({
+        orderId: late.payment.providerOrderId,
+        amount: late.payment.amount,
+        currency: late.payment.currency,
+        occurredAt: new Date(Date.now() - 60_000),
+      }),
+    )
+    expect(res.json).toEqual({ ok: true, exception: true })
+    expect(await registrationStatus(late.registrationId)).toBe('CANCELLED')
+    expect(await paymentFor(late.registrationId)).toMatchObject({ status: 'PAID', exceptionReason: 'PAYMENT_AFTER_HOLD_EXPIRED' })
+    await resolveException(late.payment.id)
   })
 
   test('a failed payment releases the seat; money captured afterwards is an exception, never a refund', async () => {

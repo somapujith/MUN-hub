@@ -109,11 +109,11 @@ export async function registrationCount(userId: string, munId: string): Promise<
  * run out. The seat is released by the next sweep (any availability read or
  * registration attempt on that pass), exactly as it would be in production.
  */
-export async function expireSeatHold(registrationId: string): Promise<void> {
+export async function expireSeatHold(registrationId: string, msAgo = 60_000): Promise<void> {
   await withFixtureDb(async (db) => {
     await db
       .update(schema.registrations)
-      .set({ expiresAt: new Date(Date.now() - 60_000) })
+      .set({ expiresAt: new Date(Date.now() - msAgo) })
       .where(eq(schema.registrations.id, registrationId))
   })
 }

@@ -75,7 +75,8 @@ test.describe('late payments', () => {
     expect(response.status()).toBe(200)
     expect(await response.json()).toEqual({ ok: true, exception: true })
     await expect(checkout).toHaveURL(/\/confirmation\?registrationId=/)
-    await expect(checkout.getByRole('main')).not.toContainText(/you're registered/i)
+    await expect(checkout.getByRole('main')).toContainText('Payment received after your seat hold ended')
+    await expect(checkout.getByRole('main')).not.toContainText(/you're registered|didn't go through/i)
     await expect(checkout.getByRole('main')).not.toContainText(/refund/i)
 
     // Not confirmed, money recorded as taken, never a refund.
@@ -141,11 +142,7 @@ test.describe('late payments', () => {
     crashes.assertNone()
   })
 
-  test('the delegate is told the truth when their payment arrived after the hold lapsed', async ({ browser }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      "BUG: web/src/pages/register/register-confirmation-page.tsx shows \"Payment didn't go through\" for every CANCELLED registration, even when its payment was captured (a late payment raised as an exception) — the delegate was charged but is told the payment failed.",
-    )
+  test('the confirmation page tells a late payer their money arrived after the hold ended', async ({ browser }) => {
     const { delegate, registrationId, productId } = await heldSeat()
     await expireSeatHold(registrationId)
     await sweepExpiredHolds(productId)
@@ -155,31 +152,54 @@ test.describe('late payments', () => {
     const context = await browserContextFor(browser, delegate)
     const page = await context.newPage()
     await page.goto(`/register/${OPEN.slug}/confirmation?registrationId=${registrationId}`)
-    await expect(page.getByRole('main')).toContainText('₹1,499')
-    await expect(page.getByRole('main')).not.toContainText("Payment didn't go through")
+    const notice = page.getByRole('main')
+    await expect(notice).toContainText('Payment received after your seat hold ended')
+    await expect(notice).toContainText('₹1,499')
+    await expect(notice).not.toContainText("Payment didn't go through")
+    await expect(notice).not.toContainText('Your seat hold expired')
+    await notice.getByRole('button', { name: 'Contact support' }).click()
+    await expect(page).toHaveURL(/\/support\/new$/)
     await context.close()
+    await resolveOpenException(registrationId)
   })
 
-  test('a payment after the hold expired is not confirmed even before any sweep released the seat', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: lib/payments/webhook.ts confirms a PAYMENT_PENDING registration whose expiresAt has already passed (it checks only the status), so whether a late payment confirms or becomes an exception depends on whether an expiry sweep happened to run first.',
-    )
+  test('the confirmation page tells a failed payment and an unpaid lapsed hold apart', async ({ browser }) => {
+    const failed = await heldSeat()
+    await failed.delegate.api.post(`registrations/${failed.registrationId}/mock-payment`, { data: { outcome: 'failure' } })
+    const lapsed = await heldSeat()
+    await expireSeatHold(lapsed.registrationId)
+    await sweepExpiredHolds(lapsed.productId)
+    expect(await registrationStatus(lapsed.registrationId)).toBe('CANCELLED')
+
+    for (const [who, title, other, button] of [
+      [failed, "Payment didn't go through", 'Your seat hold expired', 'Try again'],
+      [lapsed, 'Your seat hold expired', "Payment didn't go through", 'Start again'],
+    ] as const) {
+      const context = await browserContextFor(browser, who.delegate)
+      const page = await context.newPage()
+      await page.goto(`/register/${OPEN.slug}/confirmation?registrationId=${who.registrationId}`)
+      const notice = page.getByRole('main')
+      await expect(notice).toContainText(title)
+      await expect(notice).not.toContainText(other)
+      await expect(notice).not.toContainText('Payment received after your seat hold ended')
+      await expect(notice).not.toContainText(/refund/i)
+      await notice.getByRole('button', { name: button }).click()
+      await expect(page).toHaveURL(new RegExp(`/register/${OPEN.slug}$`))
+      await context.close()
+    }
+    expect(await paymentFor(failed.registrationId)).toMatchObject({ status: 'FAILED', exceptionReason: null })
+  })
+
+  test('a payment captured after the hold expired is an exception even before any sweep released the seat', async () => {
     const { delegate, registrationId } = await heldSeat()
     await expireSeatHold(registrationId)
+    expect(await registrationStatus(registrationId)).toBe('PAYMENT_PENDING')
     const pay = await delegate.api.post(`registrations/${registrationId}/mock-payment`, { data: { outcome: 'success' } })
-    expect(pay.ok()).toBe(true)
-    const outcome = await pay.json()
-    const status = await registrationStatus(registrationId)
-    const payment = await paymentFor(registrationId)
-    // Clean up before asserting, so a confirmed seat doesn't linger either way.
-    if (payment?.exceptionReason) {
-      const admin = await adminApi()
-      await resolveViaApi(admin, payment.id, 'E2E cleanup')
-      await admin.dispose()
-    }
-    expect(outcome).toEqual({ ok: true, exception: true })
-    expect(status).not.toBe('CONFIRMED')
+    expect(await pay.json()).toEqual({ ok: true, exception: true })
+    // The webhook released the seat itself.
+    expect(await registrationStatus(registrationId)).toBe('CANCELLED')
+    expect(await paymentFor(registrationId)).toMatchObject({ status: 'PAID', exceptionReason: 'PAYMENT_AFTER_HOLD_EXPIRED' })
+    await resolveOpenException(registrationId)
   })
 
   test('a lapsed, unpaid hold shows as expired on the checkout page with no way to pay', async ({ browser }) => {
@@ -221,3 +241,12 @@ test.describe('payment exception access', () => {
     await admin.dispose()
   })
 })
+
+/** Resolves a registration's open payment exception, so the admin queue stays short. */
+async function resolveOpenException(registrationId: string) {
+  const payment = await paymentFor(registrationId)
+  const admin = await adminApi()
+  const res = await resolveViaApi(admin, payment!.id, 'Returned (E2E cleanup)')
+  expect(res.status(), await res.text()).toBe(200)
+  await admin.dispose()
+}
