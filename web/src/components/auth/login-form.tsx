@@ -1,7 +1,7 @@
-import type { FormEvent, ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { signIn } from "@/api/auth";
+import { completeMfaChallenge, signIn } from "@/api/auth";
 import { queryKeys } from "@/api/query-keys";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,32 +58,50 @@ export function LoginForm({ door }: { door: LoginDoor }) {
   const redirectTo = safeRedirectTo(searchParams.get("redirectTo") ?? searchParams.get("redirect"));
   const returningTo = destinationLabel(redirectTo);
 
+  // Set only when POST /auth/session answered MFA_REQUIRED (staff account,
+  // confirmed TOTP enrollment) — swaps the form to the code step below.
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+
+  function completeSignIn(session: Session) {
+    // Drop everything cached under whatever (anonymous, or a previous
+    // account's) identity was active before, then seed the session query
+    // directly so `useSession`/`RequireAuth` see the signed-in account right
+    // away instead of waiting on a refetch.
+    queryClient.clear();
+    queryClient.setQueryData(queryKeys.session(), session);
+
+    const wrongDoor = door.expectedRoles !== null && !door.expectedRoles.includes(session.role);
+    if (wrongDoor) return; // render the redirect card below instead of navigating
+
+    // An explicit ?redirectTo= (from a RequireAuth bounce) wins — that's the
+    // page the user was actually trying to reach. Otherwise send them to the
+    // home their role belongs to, which may be a different subdomain.
+    const destination = redirectTo !== "/" ? redirectTo : homeUrlForRole(session.role);
+    if (isCrossOrigin(destination)) {
+      window.location.assign(destination);
+      return;
+    }
+    navigate(destination, { replace: true });
+  }
+
   const signInMutation = useMutation({
     mutationFn: signIn,
-    onSuccess: (session: Session) => {
-      // Drop everything cached under whatever (anonymous, or a previous
-      // account's) identity was active before, then seed the session query
-      // directly so `useSession`/`RequireAuth` see the signed-in account right
-      // away instead of waiting on a refetch.
-      queryClient.clear();
-      queryClient.setQueryData(queryKeys.session(), session);
-
-      const wrongDoor = door.expectedRoles !== null && !door.expectedRoles.includes(session.role);
-      if (wrongDoor) return; // render the redirect card below instead of navigating
-
-      // An explicit ?redirectTo= (from a RequireAuth bounce) wins — that's the
-      // page the user was actually trying to reach. Otherwise send them to the
-      // home their role belongs to, which may be a different subdomain.
-      const destination = redirectTo !== "/" ? redirectTo : homeUrlForRole(session.role);
-      if (isCrossOrigin(destination)) {
-        window.location.assign(destination);
+    onSuccess: (result) => {
+      if (result.status === "MFA_REQUIRED") {
+        setPendingToken(result.pendingToken);
         return;
       }
-      navigate(destination, { replace: true });
+      completeSignIn(result);
     },
   });
 
-  const session = signInMutation.data;
+  const mfaMutation = useMutation({
+    mutationFn: completeMfaChallenge,
+    onSuccess: completeSignIn,
+  });
+
+  const session = signInMutation.data?.status === "SIGNED_IN" ? signInMutation.data : mfaMutation.data;
   const landedAtWrongDoor =
     Boolean(session) && door.expectedRoles !== null && !door.expectedRoles.includes(session!.role);
 
@@ -95,10 +113,24 @@ export function LoginForm({ door }: { door: LoginDoor }) {
     signInMutation.mutate({ email, password });
   }
 
+  function handleMfaSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!pendingToken) return;
+    const form = new FormData(event.currentTarget);
+    const code = String(form.get("code") ?? "").trim();
+    mfaMutation.mutate({ pendingToken, code });
+  }
+
   const errorMessage = signInMutation.isError
     ? signInMutation.error instanceof Error
       ? signInMutation.error.message
       : "Unable to sign in."
+    : undefined;
+
+  const mfaErrorMessage = mfaMutation.isError
+    ? mfaMutation.error instanceof Error
+      ? mfaMutation.error.message
+      : "Unable to verify that code."
     : undefined;
 
   if (landedAtWrongDoor && session) {
@@ -127,6 +159,80 @@ export function LoginForm({ door }: { door: LoginDoor }) {
           <Button variant="outline" className="w-full" render={<Link to="/" />}>
             Back to marketplace
           </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (pendingToken) {
+    return (
+      <div className="w-full max-w-[400px]">
+        <header className="flex flex-col gap-xs">
+          <h1 className="font-display text-title-lg text-ink md:text-display-md">
+            Two-factor verification
+          </h1>
+          <p className="text-body-md text-muted-foreground">
+            {useRecoveryCode
+              ? "Enter one of your 10-character recovery codes."
+              : "Enter the 6-digit code from your authenticator app."}
+          </p>
+        </header>
+
+        <form onSubmit={handleMfaSubmit} className="mt-xl flex flex-col gap-md" noValidate>
+          <div className="flex flex-col gap-xs">
+            <Label htmlFor="code">{useRecoveryCode ? "Recovery code" : "Verification code"}</Label>
+            <Input
+              id="code"
+              name="code"
+              type="text"
+              inputMode={useRecoveryCode ? "text" : "numeric"}
+              autoComplete="one-time-code"
+              autoFocus
+              required
+              placeholder={useRecoveryCode ? "XXXXX-XXXXX" : "123456"}
+              className={useRecoveryCode ? "font-mono uppercase" : "font-mono tracking-[0.3em]"}
+              aria-invalid={mfaErrorMessage ? true : undefined}
+              aria-describedby={mfaErrorMessage ? "mfa-error" : undefined}
+            />
+          </div>
+
+          {mfaErrorMessage ? (
+            <p
+              id="mfa-error"
+              role="alert"
+              className="flex items-start gap-xs rounded-sm border border-destructive/30 bg-destructive/8 px-sm py-sm text-body-md text-destructive-text"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="mt-px size-4 shrink-0 fill-current">
+                <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM7.25 4.5a.75.75 0 0 1 1.5 0v4a.75.75 0 0 1-1.5 0v-4ZM8 12a.9.9 0 1 1 0-1.8A.9.9 0 0 1 8 12Z" />
+              </svg>
+              <span>{mfaErrorMessage}</span>
+            </p>
+          ) : null}
+
+          <Button type="submit" className="w-full" disabled={mfaMutation.isPending}>
+            {mfaMutation.isPending ? "Verifying…" : "Verify"}
+          </Button>
+        </form>
+
+        <div className="mt-lg flex flex-col items-start gap-sm text-body-md">
+          <button
+            type="button"
+            className="text-link underline-offset-2 hover:underline"
+            onClick={() => setUseRecoveryCode((current) => !current)}
+          >
+            {useRecoveryCode ? "Use your authenticator app instead" : "Use a recovery code instead"}
+          </button>
+          <button
+            type="button"
+            className="text-muted-foreground underline-offset-2 hover:underline"
+            onClick={() => {
+              setPendingToken(null);
+              setUseRecoveryCode(false);
+              mfaMutation.reset();
+            }}
+          >
+            Back to sign in
+          </button>
         </div>
       </div>
     );

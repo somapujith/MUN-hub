@@ -12,4 +12,5 @@ export const adminQueryKeys = {
   staff: (params: Record<string, unknown>) => ["admin", "staff", params] as const,
   staffAll: () => ["admin", "staff"] as const,
   analytics: () => ["admin", "analytics"] as const,
+  mfaStatus: () => ["admin", "mfa-status"] as const,
 };

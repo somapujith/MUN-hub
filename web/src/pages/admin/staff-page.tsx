@@ -8,6 +8,7 @@ import {
   issueStaffSetPasswordLink,
   listStaff,
   reinstateStaff,
+  resetStaffMfa,
   suspendStaff,
 } from "@/api/admin-staff";
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
@@ -113,9 +114,22 @@ export function AdminStaffPage() {
     onError: onError("Unable to issue a link"),
   });
 
+  const resetMfaMutation = useMutation({
+    mutationFn: (staff: StaffRow) => resetStaffMfa(staff.id),
+    onSuccess: (_result, staff) => {
+      toast.success(`Two-factor authentication cleared for ${staff.name} — they can set it up again`);
+    },
+    onError: onError("Unable to reset two-factor authentication"),
+  });
+
   const results = staffQuery.data?.results ?? [];
   const total = staffQuery.data?.total ?? 0;
-  const busy = roleMutation.isPending || suspendMutation.isPending || reinstateMutation.isPending || linkMutation.isPending;
+  const busy =
+    roleMutation.isPending ||
+    suspendMutation.isPending ||
+    reinstateMutation.isPending ||
+    linkMutation.isPending ||
+    resetMfaMutation.isPending;
 
   return (
     <AdminPageFrame
@@ -304,6 +318,22 @@ export function AdminStaffPage() {
                                 Suspend
                               </Button>
                             )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `Reset two-factor authentication for ${staff.name}? Use this if they've lost their device. They'll need to set it up again.`,
+                                  )
+                                ) {
+                                  resetMfaMutation.mutate(staff);
+                                }
+                              }}
+                            >
+                              Reset 2FA
+                            </Button>
                           </div>
                         )}
                       </td>

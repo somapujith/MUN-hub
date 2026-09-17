@@ -77,3 +77,8 @@ export function issueStaffSetPasswordLink(userId: string) {
     cache: "no-store",
   });
 }
+
+/** Clears a staff member's TOTP enrollment (e.g. a lost device) so they can re-enroll from scratch. */
+export function resetStaffMfa(userId: string) {
+  return request<void>(`/admin/staff/${userId}/mfa/reset`, { method: "POST" });
+}
