@@ -19,7 +19,32 @@ import type { RegistrationInput, RegistrationStatus } from '@/lib/types'
 
 const RESERVATION_TTL_MS = 15 * 60 * 1000
 
-const ACTIVE_REGISTRATION_STATUSES: RegistrationStatus[] = ['PENDING', 'PAYMENT_PENDING', 'CONFIRMED']
+/**
+ * Every status that holds a seat: the two in-flight holds, a confirmed
+ * registration, and the two attendance outcomes a confirmed registration
+ * turns into (`ATTENDED` at door check-in, `NO_SHOW` from the roster).
+ *
+ * ATTENDED/NO_SHOW are counted here on purpose. Door check-in opens 24h
+ * before the conference and is allowed while the MUN is still
+ * REGISTRATION_OPEN (lib/actions/check-in.ts), so a delegate checked in
+ * early used to stop counting toward their pass, committee, portfolio and
+ * accommodation capacity — and toward the "you already have an active
+ * registration" check — while registration was still taking money. Their
+ * portfolio could then be sold to someone else, and they could buy the same
+ * pass twice. MUN Hub has no refunds, so neither is recoverable.
+ *
+ * Matches lib/actions/admin-muns.ts's `SEATED_STATUSES` and
+ * lib/actions/organizer-communications.ts's `MESSAGEABLE_STATUSES` for the
+ * post-confirmation half. CANCELLED/REFUNDED are excluded so a released or
+ * refunded seat frees capacity immediately.
+ */
+const ACTIVE_REGISTRATION_STATUSES: RegistrationStatus[] = [
+  'PENDING',
+  'PAYMENT_PENDING',
+  'CONFIRMED',
+  'ATTENDED',
+  'NO_SHOW',
+]
 const RELEASABLE_STATUSES: RegistrationStatus[] = ['PENDING', 'PAYMENT_PENDING']
 
 /**

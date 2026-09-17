@@ -204,6 +204,70 @@ describe('initiateRegistration', () => {
     ).rejects.toThrow('You already have an active registration for this product')
   })
 
+  // A delegate checked in at the door (ATTENDED) or marked absent (NO_SHOW)
+  // still holds their seat. Door check-in opens 24h before the conference and
+  // is allowed while registration is still open, so counting only
+  // PENDING/PAYMENT_PENDING/CONFIRMED used to free the seat, let the portfolio
+  // be resold and let the same delegate buy the pass a second time.
+  for (const seatedStatus of ['ATTENDED', 'NO_SHOW'] as const) {
+    it(`keeps a ${seatedStatus} registration counted against pass capacity`, async () => {
+      const organizer = await createUser('ORGANIZER')
+      const student = await createUser('STUDENT')
+      const other = await createUser('STUDENT')
+      const mun = await createMun(organizer.id)
+      const product = await createProduct(mun.id, 1)
+
+      const first = await initiateRegistration(
+        { munId: mun.id, registrationProductId: product.id },
+        { userId: student.id, role: 'STUDENT' },
+      )
+      await db.update(registrations).set({ status: seatedStatus }).where(eq(registrations.id, first.registrationId))
+
+      await expect(
+        initiateRegistration({ munId: mun.id, registrationProductId: product.id }, { userId: other.id, role: 'STUDENT' }),
+      ).rejects.toThrow('Registration product is at capacity')
+
+      expect(await getProductAvailability(product.id)).toEqual({ capacity: 1, taken: 1, available: 0 })
+    })
+
+    it(`keeps a ${seatedStatus} delegate's portfolio taken and blocks them buying the pass again`, async () => {
+      const organizer = await createUser('ORGANIZER')
+      const student = await createUser('STUDENT')
+      const other = await createUser('STUDENT')
+      const mun = await createMun(organizer.id)
+      const product = await createProduct(mun.id, 10)
+      const committee = await createCommittee(mun.id, 10, { portfoliosEnabled: true })
+      const portfolio = await createPortfolio(committee.id, 1)
+
+      const first = await initiateRegistration(
+        {
+          munId: mun.id,
+          registrationProductId: product.id,
+          committeeId: committee.id,
+          portfolioId: portfolio.id,
+        },
+        { userId: student.id, role: 'STUDENT' },
+      )
+      await db.update(registrations).set({ status: seatedStatus }).where(eq(registrations.id, first.registrationId))
+
+      await expect(
+        initiateRegistration(
+          {
+            munId: mun.id,
+            registrationProductId: product.id,
+            committeeId: committee.id,
+            portfolioId: portfolio.id,
+          },
+          { userId: other.id, role: 'STUDENT' },
+        ),
+      ).rejects.toThrow('Portfolio is at capacity')
+
+      await expect(
+        initiateRegistration({ munId: mun.id, registrationProductId: product.id }, { userId: student.id, role: 'STUDENT' }),
+      ).rejects.toThrow('You already have an active registration for this product')
+    })
+  }
+
   it('allows a fresh registration after the previous one was cancelled (retry after failed payment)', async () => {
     const organizer = await createUser('ORGANIZER')
     const student = await createUser('STUDENT')
