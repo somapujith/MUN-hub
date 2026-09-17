@@ -71,3 +71,20 @@ design is ready to build (OWNER / EDITOR / VIEWER roles, email invitations, one 
 full access). It was not built because CLAUDE.md lists "team & permissions / sub-organizer
 roles" as deferred — do not build without asking. Say the word and it can be scheduled
 (needs one migration).
+
+## 8. GitHub Actions workflow files couldn't be pushed (token scope)
+
+`.github/workflows/ci.yml` and `.github/workflows/deploy.yml` (built by the DevOps lane) were
+removed from `main` right before pushing at commit `6e41475`, because the git credential in use
+has no `workflow` OAuth scope and GitHub rejects ANY push that adds/modifies files under
+`.github/workflows/` without it — this blocked pushing everything else too, so removal was the
+fastest unblock.
+
+**To restore them:** grant the `workflow` scope to the credential (Settings → Developer settings
+→ your PAT → scopes, or `gh auth refresh -s workflow` if using `gh`), then run:
+```
+git show 6e41475:.github/workflows/ci.yml > .github/workflows/ci.yml
+git show 6e41475:.github/workflows/deploy.yml > .github/workflows/deploy.yml
+git add .github/workflows/ && git commit -m "chore(ci): restore CI and deploy workflows"
+git push origin main
+```
