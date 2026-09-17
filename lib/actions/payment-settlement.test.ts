@@ -1,7 +1,15 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
-import { munPaymentSettings, muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
+import {
+  munModuleVerifications,
+  munPaymentSettings,
+  muns,
+  payments,
+  registrationProducts,
+  registrations,
+  users,
+} from '@/lib/db/schema'
 import type { Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import {
@@ -177,6 +185,75 @@ describe('payment-settlement actions', () => {
       expect(result?.accountNumberLast4).toBe(FULL_ACCOUNT_NUMBER.slice(-4))
       expect(serialized).toContain(FULL_PAN.slice(-4))
       expect(serialized).toContain(FULL_ACCOUNT_NUMBER.slice(-4))
+    })
+  })
+
+  describe('re-verification after a verified account changes', () => {
+    it('drops a VERIFIED account back to PENDING when the bank details change', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const admin = await makeUser('ADMIN')
+      const mun = await makeMun(organizer.id)
+      await upsertPaymentSettings(mun.id, fullInput(), sessionFor(organizer))
+      await setPaymentVerificationState(mun.id, 'VERIFIED', sessionFor(admin))
+
+      const swapped = await upsertPaymentSettings(
+        mun.id,
+        fullInput({ accountNumber: '999888777666555', ifsc: 'OTHR0009999', legalName: 'Someone Else' }),
+        sessionFor(organizer),
+      )
+
+      expect(swapped.verificationState).toBe('PENDING')
+      expect(swapped.verifiedAt).toBeNull()
+      const [row] = await db
+        .select({ verifiedBy: munPaymentSettings.verifiedBy })
+        .from(munPaymentSettings)
+        .where(eq(munPaymentSettings.munId, mun.id))
+      expect(row.verifiedBy).toBeNull()
+    })
+
+    it('keeps VERIFIED when nothing that was verified changed', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const admin = await makeUser('ADMIN')
+      const mun = await makeMun(organizer.id)
+      await upsertPaymentSettings(mun.id, fullInput(), sessionFor(organizer))
+      await setPaymentVerificationState(mun.id, 'VERIFIED', sessionFor(admin))
+
+      const resaved = await upsertPaymentSettings(
+        mun.id,
+        fullInput({ settlementNotes: 'Call the treasurer first' }),
+        sessionFor(organizer),
+      )
+
+      expect(resaved.verificationState).toBe('VERIFIED')
+      expect(resaved.verifiedAt).not.toBeNull()
+    })
+
+    it('sends an already-published mun back to VERIFICATION and its module to PENDING_REVIEW', async () => {
+      const organizer = await makeUser('ORGANIZER')
+      const admin = await makeUser('ADMIN')
+      const mun = await makeMun(organizer.id)
+      await upsertPaymentSettings(mun.id, fullInput(), sessionFor(organizer))
+      await setPaymentVerificationState(mun.id, 'VERIFIED', sessionFor(admin))
+      await db.update(muns).set({ status: 'PUBLISHED' }).where(eq(muns.id, mun.id))
+      await db
+        .insert(munModuleVerifications)
+        .values({ munId: mun.id, moduleName: 'PAYMENT_SETTLEMENT', state: 'VERIFIED' })
+        .onConflictDoNothing()
+
+      await upsertPaymentSettings(mun.id, fullInput({ accountNumber: '111222333444555' }), sessionFor(organizer))
+
+      const [after] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+      expect(after.status).toBe('VERIFICATION')
+      const [module] = await db
+        .select({ state: munModuleVerifications.state })
+        .from(munModuleVerifications)
+        .where(
+          and(
+            eq(munModuleVerifications.munId, mun.id),
+            eq(munModuleVerifications.moduleName, 'PAYMENT_SETTLEMENT'),
+          ),
+        )
+      expect(module.state).toBe('PENDING_REVIEW')
     })
   })
 

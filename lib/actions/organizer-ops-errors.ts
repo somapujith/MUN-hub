@@ -33,6 +33,7 @@ export const ORGANIZER_OPS_ERRORS = {
   noRecipients: 'No delegates match this audience',
   audienceTooLarge: `This audience has more than ${COMMUNICATION_LIMITS.maxRecipientsPerSend} delegates — narrow it with the filters and send in parts`,
   hourlySendLimit: `This MUN has reached its limit of ${COMMUNICATION_LIMITS.maxSendsPerHour} delegate messages per hour — try again later`,
+  sendingClosed: 'Delegate messaging is unavailable for this MUN — contact MUNHub support',
   // check-in / pass
   checkInCodeFormat: "Enter the 10-character check-in code from the delegate's pass",
   checkInCodeUnknown: 'No confirmed registration for this MUN matches that code',
@@ -63,6 +64,7 @@ export const ORGANIZER_OPS_ERROR_STATUS: Readonly<Record<string, { status: 400 |
   [E.noRecipients]: { status: 400, code: 'VALIDATION_FAILED' },
   [E.audienceTooLarge]: { status: 400, code: 'VALIDATION_FAILED' },
   [E.hourlySendLimit]: { status: 429, code: 'RATE_LIMITED' },
+  [E.sendingClosed]: { status: 409, code: 'CONFLICT_STATE' },
   [E.checkInCodeFormat]: { status: 400, code: 'VALIDATION_FAILED' },
   [E.checkInCodeUnknown]: { status: 404, code: 'NOT_FOUND' },
   [E.checkInNotOpen]: { status: 409, code: 'CONFLICT_STATE' },

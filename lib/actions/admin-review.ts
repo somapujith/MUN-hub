@@ -15,7 +15,7 @@ import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
 import { runInBackground } from '@/lib/background-tasks'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
-import { publishFromQueue, type PublishFromQueueResult } from '@/lib/lifecycle/go-live'
+import { openReviewRound, publishFromQueue, type PublishFromQueueResult } from '@/lib/lifecycle/go-live'
 import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
 import { notifyOrganizerApplicationEvent } from '@/lib/notifications/organizer-application-events'
 import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
@@ -344,11 +344,22 @@ export async function suspendMun(munId: string, reason: string, session: Session
  * `verificationLogs` row `transitionMun` already writes is the audit trail
  * for this transition, mirroring how every other lifecycle transition (e.g.
  * `reviewMunApplication`) is recorded.
+ *
+ * Opens a fresh Gate-2 review round in the same transaction
+ * (`openReviewRound`). A previously published mun's only submission is
+ * PUBLISHED (terminal), so without one there is nothing for `reviewSubmission`
+ * to act on, no module sitting in PENDING_REVIEW, and `enqueueForGoLive`
+ * refuses status VERIFICATION — the mun would be stuck in VERIFICATION with
+ * CANCELLED as the only exit while delegates still held paid seats.
  */
 export async function reinstateMun(munId: string, session: Session | null): Promise<Mun> {
   requireRole(session, [...PUBLISH_ROLES])
 
-  return transitionMun(munId, 'VERIFICATION', session.userId)
+  return db.transaction(async (tx) => {
+    const updated = await transitionMun(munId, 'VERIFICATION', session.userId, undefined, undefined, tx)
+    await openReviewRound(tx, munId, session.userId)
+    return updated
+  })
 }
 
 export interface ModuleReviewQueueRow {

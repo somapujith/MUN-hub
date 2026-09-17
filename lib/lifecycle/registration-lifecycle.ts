@@ -1,7 +1,15 @@
 import { and, asc, count, eq, gt, gte, inArray, isNull, lt, lte, notInArray, or, type SQL } from 'drizzle-orm'
 import type { Session } from '@/lib/auth/adapter'
 import { db } from '@/lib/db/client'
-import { munPaymentSettings, munSubmissions, muns, registrationProducts, registrations } from '@/lib/db/schema'
+import {
+  achievements,
+  munPaymentSettings,
+  munSubmissions,
+  muns,
+  registrationProducts,
+  registrations,
+  users,
+} from '@/lib/db/schema'
 import type { MunStatus, PaymentVerificationState, Role } from '@/lib/db/schema-enums'
 import { notifyConferenceCancelled } from './lifecycle-events'
 import { canTransition, transitionMun } from './mun-state-machine'
@@ -414,6 +422,7 @@ async function applyPlan(
   tx: Tx,
   munId: string,
   action: LifecycleAction,
+  fromStatus: MunStatus,
   steps: PlanStep[],
   actorId: string,
   note: string | undefined,
@@ -425,6 +434,17 @@ async function applyPlan(
     status = updated.status
   }
   if (!status) throw new Error('Lifecycle plan had no steps')
+
+  // Completing from RESULTS_UNDER_REVIEW IS the results-review decision, so it
+  // must have the same effect as `reviewResults('APPROVE')` (lib/actions/
+  // results.ts) — which marks every award verified. Without this, staff who
+  // pressed "Mark completed" instead of "Approve results" left the awards
+  // permanently 'unverified': COMPLETED is in `RESULTS_LOCKED_STATUSES`, and
+  // `reviewResults` only accepts RESULTS_UNDER_REVIEW, so there was no way
+  // back.
+  if (action === 'complete' && fromStatus === 'RESULTS_UNDER_REVIEW') {
+    await tx.update(achievements).set({ verificationStatus: 'verified' }).where(eq(achievements.munId, munId))
+  }
 
   if (action === 'cancel') {
     await tx
@@ -507,7 +527,7 @@ export async function runLifecycleAction(
     const plan = planAction(action, mun, actor, readiness, now)
     if (plan.kind !== 'ready') throw new LifecycleActionError(plan.reason, 409)
 
-    return applyPlan(tx, munId, action, plan.steps, session.userId, reason, now)
+    return applyPlan(tx, munId, action, mun.status, plan.steps, session.userId, reason, now)
   })
 
   if (action === 'cancel') {
@@ -601,8 +621,16 @@ export interface ScheduledLifecycleResult {
   opened: string[]
   closed: string[]
   started: string[]
-  /** Due muns that were left alone this run (failed precondition or an error), with why. */
+  /** Due muns whose preconditions don't currently pass — expected, retried next run. */
   skipped: Array<{ munId: string; action: LifecycleAction; reason: string }>
+  /**
+   * Due muns whose transition threw. Unlike `skipped` this is never normal —
+   * the caller (lib/jobs/registry.ts) logs it at error level and fails the
+   * job, so a systemic fault (e.g. a SYSTEM_ACTOR_USER_ID that no longer
+   * resolves to a user, which makes every audit-log insert fail its NOT NULL
+   * foreign key) raises an alert instead of hiding in an info line.
+   */
+  failed: Array<{ munId: string; action: LifecycleAction; reason: string }>
 }
 
 export interface ScheduledLifecycleOptions {
@@ -635,7 +663,11 @@ function isDue(action: ScheduledAction, mun: LifecycleMun, now: Date): boolean {
   }
 }
 
-type StepOutcome = { kind: 'applied' } | { kind: 'skipped'; reason: string } | { kind: 'not-due' }
+type StepOutcome =
+  | { kind: 'applied' }
+  | { kind: 'skipped'; reason: string }
+  | { kind: 'failed'; reason: string }
+  | { kind: 'not-due' }
 
 async function runScheduledStep(
   munId: string,
@@ -654,11 +686,15 @@ async function runScheduledStep(
       const plan = planAction(action, mun, SYSTEM_ACTOR, readiness, now)
       if (plan.kind !== 'ready') return { kind: 'skipped', reason: plan.reason }
 
-      await applyPlan(tx, munId, action, plan.steps, actorId, SCHEDULED_NOTES[action], now)
+      await applyPlan(tx, munId, action, mun.status, plan.steps, actorId, SCHEDULED_NOTES[action], now)
       return { kind: 'applied' }
     })
   } catch (error) {
-    return { kind: 'skipped', reason: error instanceof Error ? error.message : String(error) }
+    // Deliberately NOT reported as 'skipped': a failed precondition is
+    // routine, an exception is not. Collapsing the two hid systemic faults
+    // (a bad SYSTEM_ACTOR_USER_ID makes every transition fail its audit-row
+    // foreign key) behind an info-level log line on an "ok" job.
+    return { kind: 'failed', reason: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -678,6 +714,9 @@ async function runScheduledStep(
  * Idempotent and safe to run concurrently: every mun is handled in its own
  * transaction that row-locks it and re-checks it is still due, so a mun is
  * transitioned at most once and a failure on one mun never aborts the rest.
+ * A mun whose preconditions don't pass lands in `skipped` (routine); a mun
+ * whose transition threw lands in `failed`, which the job wrapper treats as
+ * an error rather than a skip.
  *
  * `actorId` must be a real `users.id` — `verification_logs.reviewer_id` is a
  * NOT NULL foreign key. The Workers scheduled handler reads it from
@@ -690,9 +729,18 @@ export async function runScheduledLifecycleTransitions(
   actorId: string,
   options: ScheduledLifecycleOptions = {},
 ): Promise<ScheduledLifecycleResult> {
-  const result: ScheduledLifecycleResult = { opened: [], closed: [], started: [], skipped: [] }
+  const result: ScheduledLifecycleResult = { opened: [], closed: [], started: [], skipped: [], failed: [] }
   if (!actorId) throw new Error('runScheduledLifecycleTransitions requires a system actor user id')
   if (options.munIds && options.munIds.length === 0) return result
+
+  // Checked once up front rather than discovered as a foreign-key violation on
+  // every single mun: `verification_logs.reviewer_id` is a NOT NULL FK, so a
+  // SYSTEM_ACTOR_USER_ID pointing at a missing or deleted account fails every
+  // transition this job attempts.
+  const [actor] = await db.select({ id: users.id }).from(users).where(eq(users.id, actorId)).limit(1)
+  if (!actor) {
+    throw new Error(`runScheduledLifecycleTransitions: system actor user ${actorId} does not exist`)
+  }
 
   const batchSize = options.batchSize ?? 100
   const scope = options.munIds ? inArray(muns.id, [...options.munIds]) : undefined
@@ -746,6 +794,7 @@ export async function runScheduledLifecycleTransitions(
       const outcome = await runScheduledStep(id, step.action, now, actorId)
       if (outcome.kind === 'applied') step.into.push(id)
       else if (outcome.kind === 'skipped') result.skipped.push({ munId: id, action: step.action, reason: outcome.reason })
+      else if (outcome.kind === 'failed') result.failed.push({ munId: id, action: step.action, reason: outcome.reason })
     }
   }
 

@@ -313,6 +313,38 @@ describe('triggerReverificationIfNeeded', () => {
       .where(eq(munPaymentSettings.munId, mun.id))
     expect(paymentSettings.verificationState).toBe('VERIFIED')
   })
+
+  // REGISTRATION_CLOSED is in POST_VERIFICATION_STATUSES, so a high-impact
+  // edit to a closed MUN flips its module and then calls transitionMun. Until
+  // the state machine gained the REGISTRATION_CLOSED -> VERIFICATION edge that
+  // call threw "Invalid transition" (a 409 to the organizer) *after* the edit
+  // had already been written and the module already moved to PENDING_REVIEW.
+  it('moves a REGISTRATION_CLOSED mun back to VERIFICATION instead of throwing', async () => {
+    const organizer = await makeUser()
+    const [mun] = await db
+      .insert(muns)
+      .values({
+        organizerId: organizer.id,
+        name: 'Closed Mun',
+        slug: `closed-mun-${crypto.randomUUID()}`,
+        status: 'REGISTRATION_CLOSED',
+      })
+      .returning()
+    await db.insert(munModuleVerifications).values({ munId: mun.id, moduleName: 'DATES_VENUE', state: 'VERIFIED' })
+
+    await expect(
+      triggerReverificationIfNeeded('DATES_VENUE', { venue: 'Old Hall' }, { venue: 'New Hall' }, mun.id, organizer.id),
+    ).resolves.toBeUndefined()
+
+    const [updatedMun] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(updatedMun.status).toBe('VERIFICATION')
+
+    const [moduleState] = await db
+      .select({ state: munModuleVerifications.state })
+      .from(munModuleVerifications)
+      .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'DATES_VENUE')))
+    expect(moduleState.state).toBe('PENDING_REVIEW')
+  })
 })
 
 afterAll(async () => {

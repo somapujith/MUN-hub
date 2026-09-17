@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as lifecycle from '@/lib/lifecycle/registration-lifecycle'
 import { SCHEDULED_JOBS, runScheduledJobs, scheduledLifecycleTransitionsJob } from './registry'
 import type { JobContext, ScheduledJob } from './types'
 
@@ -235,5 +236,43 @@ describe('scheduledLifecycleTransitionsJob', () => {
         reason: 'SYSTEM_ACTOR_USER_ID is not set',
       }),
     )
+  })
+
+  // A blocked precondition is routine; an exception is not. Reporting both as
+  // 'skipped' at info level on an "ok" job meant a systemic fault (e.g. a
+  // SYSTEM_ACTOR_USER_ID that no longer resolves to a user, so every audit row
+  // fails its NOT NULL foreign key) never raised an alert.
+  it('logs a blocked precondition at info level and still reports the run ok', async () => {
+    vi.stubEnv('SYSTEM_ACTOR_USER_ID', 'system-actor')
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(lifecycle, 'runScheduledLifecycleTransitions').mockResolvedValue({
+      opened: [],
+      closed: [],
+      started: [],
+      skipped: [{ munId: 'mun-1', action: 'open-registration', reason: 'no active pass' }],
+      failed: [],
+    })
+
+    const result = await scheduledLifecycleTransitionsJob.run({ now: new Date() })
+
+    expect(result).toMatchObject({ skipped: 1, failed: 0 })
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ level: 'info', event: 'scheduled_lifecycle.skipped' }))
+  })
+
+  it('logs an unexpected transition error at error level and fails the job', async () => {
+    vi.stubEnv('SYSTEM_ACTOR_USER_ID', 'system-actor')
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(lifecycle, 'runScheduledLifecycleTransitions').mockResolvedValue({
+      opened: ['mun-ok'],
+      closed: [],
+      started: [],
+      skipped: [],
+      failed: [{ munId: 'mun-1', action: 'open-registration', reason: 'insert violates foreign key' }],
+    })
+
+    await expect(scheduledLifecycleTransitionsJob.run({ now: new Date() })).rejects.toThrow(
+      /1 transition\(s\) failed/,
+    )
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ level: 'error', event: 'scheduled_lifecycle.failed' }))
   })
 })

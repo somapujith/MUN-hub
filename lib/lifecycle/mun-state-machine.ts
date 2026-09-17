@@ -72,9 +72,15 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
  * decision). See lib/lifecycle/registration-lifecycle.ts for who may trigger
  * each registration/conference transition and when.
  *
- * VERIFIED/PUBLISHED/REGISTRATION_OPEN/UNPUBLISHED/SUSPENDED can transition
- * back to VERIFICATION — this is the re-verification trigger path (see
- * lib/lifecycle/reverification.ts). Most non-terminal states can transition
+ * VERIFIED/PUBLISHED/REGISTRATION_OPEN/REGISTRATION_CLOSED/UNPUBLISHED/
+ * SUSPENDED can transition back to VERIFICATION — this is the
+ * re-verification trigger path (see lib/lifecycle/reverification.ts). The
+ * REGISTRATION_CLOSED edge exists because reverification.ts's
+ * `POST_VERIFICATION_STATUSES` has always included REGISTRATION_CLOSED:
+ * without the edge, a high-impact edit to a closed MUN wrote the change,
+ * flipped the module to PENDING_REVIEW and then threw "Invalid transition
+ * from REGISTRATION_CLOSED to VERIFICATION" (a 409 to the organizer) while
+ * the edit stayed live and unreviewed. Most non-terminal states can transition
  * to CANCELLED. REJECTED, ARCHIVED, and CANCELLED are terminal (no outgoing
  * transitions).
  *
@@ -131,7 +137,7 @@ const ALLOWED_TRANSITIONS: Record<MunStatus, MunStatus[]> = {
   PUBLISHED: ['REGISTRATION_OPEN', 'VERIFICATION', 'VERIFIED', 'UNPUBLISHED', 'SUSPENDED', 'CANCELLED'],
   UNPUBLISHED: ['GO_LIVE_QUEUE', 'VERIFICATION', 'CANCELLED'],
   REGISTRATION_OPEN: ['REGISTRATION_CLOSED', 'VERIFICATION', 'SUSPENDED', 'CANCELLED'],
-  REGISTRATION_CLOSED: ['CONFERENCE_ACTIVE', 'SUSPENDED', 'CANCELLED'],
+  REGISTRATION_CLOSED: ['CONFERENCE_ACTIVE', 'VERIFICATION', 'SUSPENDED', 'CANCELLED'],
   CONFERENCE_ACTIVE: ['RESULTS_PENDING', 'COMPLETED', 'SUSPENDED', 'CANCELLED'],
   RESULTS_PENDING: ['RESULTS_UNDER_REVIEW'],
   RESULTS_UNDER_REVIEW: ['COMPLETED', 'RESULTS_PENDING'],

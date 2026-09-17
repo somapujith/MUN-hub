@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { db } from '@/lib/db/client'
-import { registrationProducts, registrations, users, verificationLogs } from '@/lib/db/schema'
+import { muns, registrationProducts, registrations, users, verificationLogs } from '@/lib/db/schema'
 import type { NotificationPayload } from '@/lib/notifications/adapter'
 import { consoleNotificationsAdapter } from '@/lib/notifications/console-adapter'
 import {
@@ -248,6 +248,30 @@ describe('sendMunCommunication', () => {
     expect(await auditRows(fixture.mun.id)).toHaveLength(COMMUNICATION_LIMITS.maxSendsPerHour)
     const preview = await previewCommunicationAudience(fixture.mun.id, {}, fixture.organizerSession)
     expect(preview.sendsRemainingThisHour).toBe(0)
+  })
+
+  // A MUN MUNHub has paused (identity/fraud review) must not keep MUN Hub's
+  // verified sender pointed at every paid delegate while that review runs.
+  it.each(['SUSPENDED', 'ARCHIVED'] as const)('refuses to send from a %s MUN', async (status) => {
+    const fixture = await makeOpsFixture()
+    await addDelegate(fixture)
+    await db.update(muns).set({ status }).where(eq(muns.id, fixture.mun.id))
+
+    await expect(
+      sendMunCommunication(fixture.mun.id, { ...message, audience: {} }, fixture.organizerSession),
+    ).rejects.toThrow(ORGANIZER_OPS_ERRORS.sendingClosed)
+    expect(sendSpy).not.toHaveBeenCalled()
+    expect(await auditRows(fixture.mun.id)).toHaveLength(0)
+  })
+
+  it('still lets a CANCELLED MUN tell its delegates', async () => {
+    const fixture = await makeOpsFixture()
+    const { user } = await addDelegate(fixture)
+    await db.update(muns).set({ status: 'CANCELLED' }).where(eq(muns.id, fixture.mun.id))
+
+    const result = await sendMunCommunication(fixture.mun.id, { ...message, audience: {} }, fixture.organizerSession)
+    expect(result).toEqual({ recipientCount: 1, sent: 1, failed: 0 })
+    expect(sentTo()).toEqual([user.email])
   })
 
   it('validates before touching the database and is owner-only', async () => {

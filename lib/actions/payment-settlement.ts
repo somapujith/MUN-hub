@@ -36,6 +36,7 @@ import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
 import { encryptField } from '@/lib/crypto/field-encryption'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 import { countedPaymentsFilter } from '@/lib/payments/counted-payments'
 
 const PUBLISH_ROLES = ['ADMIN', 'SUPER_ADMIN'] as const
@@ -102,6 +103,32 @@ const MASKED_COLUMNS = {
 
 function last4(value: string): string {
   return value.slice(-4)
+}
+
+/**
+ * The settlement identity + bank fields whose change invalidates MUNHub's
+ * verification of this payout account. A superset of reverification.ts's
+ * `HIGH_IMPACT_FIELDS.PAYMENT_SETTLEMENT` (which drives the MUN-level
+ * re-verification flow): swapping the account holder, bank or account type
+ * is the same "approved with a clean account, then swap in a different one"
+ * fraud vector even though it doesn't move the MUN back through review.
+ */
+const SETTLEMENT_VERIFIED_FIELDS = [
+  'legalName',
+  'panLast4',
+  'accountHolderName',
+  'bankName',
+  'accountNumberLast4',
+  'ifsc',
+  'accountType',
+  'gateway',
+  'currency',
+] as const
+
+type SettlementVerifiedField = (typeof SETTLEMENT_VERIFIED_FIELDS)[number]
+
+function settlementSnapshot(row: Pick<MaskedPaymentSettings, SettlementVerifiedField>): Record<string, unknown> {
+  return Object.fromEntries(SETTLEMENT_VERIFIED_FIELDS.map((field) => [field, row[field]]))
 }
 
 export interface UpsertPaymentSettingsInput {
@@ -187,14 +214,47 @@ export async function upsertPaymentSettings(
     updatedAt: new Date(),
   }
 
-  const [row] = await db
-    .insert(munPaymentSettings)
-    .values(values)
-    .onConflictDoUpdate({
-      target: munPaymentSettings.munId,
-      set: values,
-    })
-    .returning(MASKED_COLUMNS)
+  const row = await db.transaction(async (tx) => {
+    // Row-locked so a concurrent upsert can't read the same "before" and let
+    // one of the two changes keep the VERIFIED stamp.
+    const [existing] = await tx
+      .select(MASKED_COLUMNS)
+      .from(munPaymentSettings)
+      .where(eq(munPaymentSettings.munId, munId))
+      .for('update')
+      .limit(1)
+
+    const before = existing ? settlementSnapshot(existing) : {}
+    const after = settlementSnapshot(values)
+    const accountChanged =
+      existing != null && SETTLEMENT_VERIFIED_FIELDS.some((field) => before[field] !== after[field])
+
+    // Independently of the MUN's status: an account MUNHub already looked at
+    // must not stay VERIFIED once its details change. The MUN-level
+    // re-verification flow below only runs post-VERIFIED, so relying on it
+    // alone would leave an ONBOARDING MUN's swapped-in account reading as
+    // VERIFIED — and `open-registration` (registration-lifecycle.ts) gates
+    // paid passes on exactly that value.
+    const write = accountChanged
+      ? { ...values, verificationState: 'PENDING' as const, verifiedAt: null, verifiedBy: null }
+      : values
+
+    const [saved] = await tx
+      .insert(munPaymentSettings)
+      .values(write)
+      .onConflictDoUpdate({ target: munPaymentSettings.munId, set: write })
+      .returning(MASKED_COLUMNS)
+
+    // Real before/after snapshots, in the same transaction as the write, so a
+    // change on an already-verified MUN sends it back through review. (This
+    // used to be left to `onModuleDataChanged`, which passes empty snapshots
+    // and therefore never fired — see that function's note.)
+    if (accountChanged) {
+      await triggerReverificationIfNeeded('PAYMENT_SETTLEMENT', before, after, munId, session!.userId, tx)
+    }
+
+    return saved
+  })
 
   await onModuleDataChanged(munId, 'PAYMENT_SETTLEMENT', session!.userId)
 

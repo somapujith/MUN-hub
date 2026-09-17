@@ -4,7 +4,7 @@ import { COMMUNICATION_LIMITS, ORGANIZER_OPS_ERRORS } from '@/lib/actions/organi
 import type { Session } from '@/lib/auth/adapter'
 import { db } from '@/lib/db/client'
 import { muns, registrations, users, verificationLogs } from '@/lib/db/schema'
-import type { RegistrationStatus } from '@/lib/db/schema-enums'
+import type { MunStatus, RegistrationStatus } from '@/lib/db/schema-enums'
 import type { NotificationPayload } from '@/lib/notifications/adapter'
 import { getNotificationsAdapter } from '@/lib/notifications/select-adapter'
 
@@ -43,6 +43,27 @@ export const COMMUNICATION_SENT_ACTION = 'COMMUNICATION_SENT'
 /** Registration statuses a message can target — delegates who hold a seat. */
 export const MESSAGEABLE_STATUSES = ['CONFIRMED', 'ATTENDED', 'NO_SHOW'] as const satisfies readonly RegistrationStatus[]
 export type MessageableStatus = (typeof MESSAGEABLE_STATUSES)[number]
+
+/**
+ * MUN statuses an organizer may send delegate mail from: the ones where
+ * delegates legitimately exist and the MUN is not under a platform hold.
+ *
+ * SUSPENDED and ARCHIVED are deliberately excluded. A suspended MUN is one
+ * MUNHub has paused (identity or fraud review) — leaving sending on would
+ * hand it MUN Hub's verified sender to reach every paid delegate, 500 at a
+ * time, 5 times an hour, while that review runs. CANCELLED stays allowed:
+ * telling delegates a conference is off is exactly the message that must
+ * still get through.
+ */
+export const SENDABLE_MUN_STATUSES = [
+  'REGISTRATION_OPEN',
+  'REGISTRATION_CLOSED',
+  'CONFERENCE_ACTIVE',
+  'RESULTS_PENDING',
+  'RESULTS_UNDER_REVIEW',
+  'COMPLETED',
+  'CANCELLED',
+] as const satisfies readonly MunStatus[]
 
 export interface CommunicationAudience {
   /** Omitted or empty means every seat-holding status. */
@@ -227,7 +248,9 @@ export async function previewCommunicationAudience(
 }
 
 /**
- * Sends one message to every delegate in `audience`. Owning organizer only.
+ * Sends one message to every delegate in `audience`. Owning organizer only,
+ * and only while the MUN is in a `SENDABLE_MUN_STATUSES` status (a MUN under
+ * a platform hold can't mail its delegates).
  *
  * The limit checks, recipient snapshot and audit row happen in one
  * transaction under a row lock on the MUN; delivery runs after commit, one
@@ -244,8 +267,19 @@ export async function sendMunCommunication(
   const cap = COMMUNICATION_LIMITS.maxRecipientsPerSend
 
   const { munName, recipients } = await db.transaction(async (tx) => {
-    const [mun] = await tx.select({ name: muns.name }).from(muns).where(eq(muns.id, munId)).for('update').limit(1)
+    const [mun] = await tx
+      .select({ name: muns.name, status: muns.status })
+      .from(muns)
+      .where(eq(muns.id, munId))
+      .for('update')
+      .limit(1)
     if (!mun) throw new Error('Mun not found')
+
+    // Checked under the same row lock as the rate limit, so a suspension that
+    // lands mid-request can't be raced past.
+    if (!(SENDABLE_MUN_STATUSES as readonly MunStatus[]).includes(mun.status)) {
+      throw new Error(ORGANIZER_OPS_ERRORS.sendingClosed)
+    }
 
     if ((await countRecentSends(tx, munId)) >= COMMUNICATION_LIMITS.maxSendsPerHour) {
       throw new Error(ORGANIZER_OPS_ERRORS.hourlySendLimit)

@@ -4,6 +4,7 @@ import { munContacts } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 
 // -----------------------------------------------------------------------------
 // mun-contact — CONTACT module (PRD Section 23)
@@ -52,6 +53,11 @@ export async function upsertMunContact(
   await assertOwnsOrAdmin(munId, session)
   await assertModuleNotLocked(munId, 'CONTACT', session)
 
+  // Snapshot before the upsert so a post-verification change to the official
+  // email/phone can trigger re-verification below — `onModuleDataChanged` has
+  // no snapshots to diff and can't do this for us.
+  const [existing] = await db.select().from(munContacts).where(eq(munContacts.munId, munId)).limit(1)
+
   const values = {
     munId,
     officialEmail: input.officialEmail,
@@ -74,6 +80,9 @@ export async function upsertMunContact(
     })
     .returning()
 
+  if (existing) {
+    await triggerReverificationIfNeeded('CONTACT', existing, result, munId, session!.userId)
+  }
   await onModuleDataChanged(munId, 'CONTACT', session!.userId)
 
   return result
