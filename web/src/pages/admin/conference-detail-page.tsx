@@ -85,13 +85,16 @@ const LIFECYCLE_STEPS: Array<{ action: Exclude<MunLifecycleAction, "cancel">; la
   {
     action: "start-conference",
     label: "Start conference",
-    from: ["REGISTRATION_CLOSED"],
+    // From REGISTRATION_OPEN the server closes registration first, as two logged steps.
+    from: ["REGISTRATION_OPEN", "REGISTRATION_CLOSED"],
     confirm: "Mark the conference as running?",
   },
   {
     action: "complete",
     label: "Mark completed",
-    from: ["CONFERENCE_ACTIVE", "RESULTS_PENDING", "RESULTS_UNDER_REVIEW"],
+    // Not RESULTS_PENDING: the server refuses that move (results must go
+    // through review first; see lib/lifecycle/registration-lifecycle.ts).
+    from: ["CONFERENCE_ACTIVE", "RESULTS_UNDER_REVIEW"],
     confirm: "Mark the conference as completed?",
   },
   {
@@ -292,6 +295,16 @@ export function AdminConferenceDetailPage() {
   if (status === "VERIFIED" && submission?.active) {
     visibilityButtons.push(
       <Button key="enqueue" size="sm" variant="outline" disabled={busy} onClick={() => visibilityMutation.mutate({ kind: "enqueue" })}>
+        Queue for go-live
+      </Button>,
+    );
+  }
+  if (status === "UNPUBLISHED") {
+    // The server opens a fresh approved submission for a MUN that was
+    // published before (lib/lifecycle/go-live.ts#enqueueForGoLive), and
+    // refuses while a required section still needs review.
+    visibilityButtons.push(
+      <Button key="requeue" size="sm" variant="outline" disabled={busy} onClick={() => visibilityMutation.mutate({ kind: "enqueue" })}>
         Queue for go-live
       </Button>,
     );

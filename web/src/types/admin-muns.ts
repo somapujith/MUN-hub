@@ -143,16 +143,12 @@ export interface ReviewSubmissionInput {
   reason?: string;
 }
 
-/** Contract of `POST /muns/:munId/lifecycle/:action` (built by the lifecycle lane). */
-export type MunLifecycleAction =
-  | "open-registration"
-  | "close-registration"
-  | "start-conference"
-  | "complete"
-  | "archive"
-  | "cancel";
-
-export interface MunLifecycleResult {
-  munId: string;
-  status: MunStatus;
-}
+/**
+ * `POST /muns/:munId/lifecycle/:action`. The client and its types live in
+ * @/api/mun-lifecycle (shared with the organizer settings page); these are
+ * aliases so there is only one definition to keep in step with the server.
+ */
+export type {
+  LifecycleAction as MunLifecycleAction,
+  LifecycleActionResult as MunLifecycleResult,
+} from "@/api/mun-lifecycle";
