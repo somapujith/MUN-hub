@@ -5,7 +5,7 @@ import type { FormFieldType } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
-import { forceReverification } from '@/lib/lifecycle/reverification'
+import { forceReverification, POST_VERIFICATION_STATUSES } from '@/lib/lifecycle/reverification'
 import { DEFAULT_REGISTRATION_FIELDS } from './registration-form-defaults'
 
 // -----------------------------------------------------------------------------
@@ -148,9 +148,6 @@ async function findDependents(munId: string, fieldKey: string): Promise<string[]
     .where(and(eq(munFormFields.munId, munId), eq(munFormFields.conditionalOn, fieldKey)))
   return rows.map((row) => row.fieldKey)
 }
-
-/** Mirrors reverification.ts's POST_VERIFICATION_STATUSES membership check for the statuses where "already verified" behavior applies. */
-const POST_VERIFICATION_STATUSES = ['VERIFIED', 'PUBLISHED', 'UNPUBLISHED', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED']
 
 async function isMunPostVerified(munId: string): Promise<boolean> {
   const [mun] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).limit(1)
