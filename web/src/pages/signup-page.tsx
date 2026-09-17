@@ -21,6 +21,9 @@ import { safeRedirectTo } from "@/lib/redirect";
 // fast feedback, but the server re-validates regardless.
 const MIN_PASSWORD_LENGTH = 8;
 
+/** Mirrors the server's duplicate-email message (lib/actions/auth.ts). */
+const EXISTING_ACCOUNT_MESSAGE = "An account with that email already exists";
+
 const GUARDIAN_CONSENT_MESSAGE =
   "You're under 18, so a parent or guardian must consent before you can create an account.";
 
@@ -135,6 +138,56 @@ const EMPTY_FORM: FormState = {
   acceptedGuardianAcknowledgement: false,
 };
 
+/**
+ * The fields the server refuses without — listed once, in form order, so the
+ * page can mark them, name them and focus the first one instead of relaying
+ * the API's generic "Validation failed".
+ */
+const REQUIRED_FIELDS = [
+  { key: "name", label: "Full name" },
+  { key: "email", label: "Email address" },
+  { key: "password", label: "Password" },
+  { key: "confirmPassword", label: "Confirm password" },
+  { key: "dateOfBirth", label: "Date of birth" },
+  { key: "gender", label: "Gender" },
+  { key: "phone", label: "Primary mobile number" },
+  { key: "residentialAddress", label: "Residential address" },
+  { key: "institution", label: "School / college / university" },
+  { key: "gradeOrYear", label: "Year of study" },
+  { key: "emergencyContactName", label: "Parent / guardian name" },
+  { key: "emergencyContactPhone", label: "Contact number" },
+  { key: "emergencyContactRelation", label: "Relationship" },
+] as const;
+
+type RequiredKey = (typeof REQUIRED_FIELDS)[number]["key"];
+
+/** Input ids, so an error can focus the control it belongs to. */
+const FIELD_IDS: Record<RequiredKey, string> = {
+  name: "name",
+  email: "email",
+  password: "password",
+  confirmPassword: "confirmPassword",
+  dateOfBirth: "dob",
+  gender: "gender",
+  phone: "phone",
+  residentialAddress: "address",
+  institution: "institution",
+  gradeOrYear: "gradeOrYear",
+  emergencyContactName: "ecName",
+  emergencyContactPhone: "ecPhone",
+  emergencyContactRelation: "ecRelation",
+};
+
+/** Deliberately loose — the server is authoritative; this only catches typos. */
+function looksLikeEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function listFields(labels: string[]): string {
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+}
+
 function splitList(value: string): string[] | undefined {
   const items = value
     .split(",")
@@ -198,11 +251,40 @@ export function SignupPage() {
   const redirectTo = safeRedirectTo(searchParams.get("redirectTo") ?? searchParams.get("redirect"));
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | undefined>(undefined);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<RequiredKey, string>>>({});
   const turnstile = useTurnstile("delegate-signup");
   const isMinor = isUnderAdultAge(form.dateOfBirth);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+    // Clear a field's error as soon as it's being fixed: an error that stays
+    // put while you type reads as "still wrong".
+    setFieldErrors((prev) => (key in prev ? { ...prev, [key]: undefined } : prev));
+  }
+
+  /**
+   * Ties a control to its message. Not `role="alert"` on the message itself —
+   * the summary above the submit button is the page's single alert, and a
+   * dozen simultaneous alerts would be read out one after another.
+   */
+  function fieldProps(key: RequiredKey) {
+    const message = fieldErrors[key];
+    return {
+      "aria-invalid": message ? (true as const) : undefined,
+      "aria-describedby": message ? `${FIELD_IDS[key]}-error` : undefined,
+    };
+  }
+
+  /** Marks the listed fields, focuses the first one, and shows one summary. */
+  function reportFieldErrors(errors: Partial<Record<RequiredKey, string>>, summary: string) {
+    setFieldErrors(errors);
+    setFormError(summary);
+    const firstKey = REQUIRED_FIELDS.find((field) => errors[field.key])?.key;
+    if (firstKey) {
+      const element = document.getElementById(FIELD_IDS[firstKey]);
+      element?.focus({ preventScroll: true });
+      element?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
   }
 
   const signUpMutation = useMutation({
@@ -219,23 +301,62 @@ export function SignupPage() {
       // honor the same redirect target login already does, falling back to
       // /profile (where they can review what was just created) only when
       // there's nowhere meaningful to return to.
-      navigate(redirectTo !== "/" ? redirectTo : "/profile", { replace: true });
+      navigate(redirectTo !== "/" ? redirectTo : "/profile", {
+        replace: true,
+        // Tells /profile the account was just created, so it can confirm that
+        // and point at the verification email — without putting anything in
+        // the URL.
+        state: { justSignedUp: true },
+      });
     },
     onError: (error) => {
-      setFormError(error instanceof Error ? error.message : "Unable to create your account.");
+      const message = error instanceof Error ? error.message : "Unable to create your account.";
+      if (message === "Validation failed") {
+        // The server checks more than this page can (date sanity, lengths);
+        // its generic message told the delegate nothing.
+        setFormError("Some details weren't accepted. Check the dates and contact numbers, then try again.");
+        return;
+      }
+      setFormError(message);
     },
   });
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(undefined);
+    setFieldErrors({});
 
+    // Every required field at once, named — so a long form doesn't have to be
+    // submitted a dozen times to discover what it still wants.
+    const missing = REQUIRED_FIELDS.filter((field) => !String(form[field.key]).trim());
+    if (missing.length > 0) {
+      reportFieldErrors(
+        Object.fromEntries(missing.map((field) => [field.key, `${field.label} is required.`])),
+        missing.length > 4
+          ? `${missing.length} required fields are still empty — they're marked below, starting with ${missing[0].label}.`
+          : `Fill in the required fields: ${listFields(missing.map((field) => field.label))}.`,
+      );
+      return;
+    }
+    if (!looksLikeEmail(form.email)) {
+      reportFieldErrors(
+        { email: "Enter an email address like you@school.edu." },
+        "Enter a valid email address.",
+      );
+      return;
+    }
     if (form.password.length < MIN_PASSWORD_LENGTH) {
-      setFormError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      reportFieldErrors(
+        { password: `At least ${MIN_PASSWORD_LENGTH} characters.` },
+        `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+      );
       return;
     }
     if (form.password !== form.confirmPassword) {
-      setFormError("Passwords do not match.");
+      reportFieldErrors(
+        { confirmPassword: "This doesn't match the password above." },
+        "Passwords do not match.",
+      );
       return;
     }
     if (!form.acceptedTermsOfService || !form.acceptedPrivacyPolicy) {
@@ -290,6 +411,7 @@ export function SignupPage() {
                   <Label htmlFor="name">Full name *</Label>
                   <Input
                     id="name"
+                    {...fieldProps("name")}
                     autoComplete="name"
                     autoFocus
                     required
@@ -297,11 +419,13 @@ export function SignupPage() {
                     onChange={(e) => set("name", e.target.value)}
                     placeholder="Alex Kumar"
                   />
+                  <FieldError id="name-error" message={fieldErrors.name} />
                 </div>
                 <div className="flex flex-col gap-xs">
                   <Label htmlFor="email">Email address *</Label>
                   <Input
                     id="email"
+                    {...fieldProps("email")}
                     type="email"
                     autoComplete="email"
                     required
@@ -309,11 +433,13 @@ export function SignupPage() {
                     onChange={(e) => set("email", e.target.value)}
                     placeholder="you@school.edu"
                   />
+                  <FieldError id="email-error" message={fieldErrors.email} />
                 </div>
                 <div className="flex flex-col gap-xs">
                   <Label htmlFor="password">Password *</Label>
                   <Input
                     id="password"
+                    {...fieldProps("password")}
                     type="password"
                     autoComplete="new-password"
                     required
@@ -322,11 +448,13 @@ export function SignupPage() {
                     onChange={(e) => set("password", e.target.value)}
                     placeholder="At least 8 characters"
                   />
+                  <FieldError id="password-error" message={fieldErrors.password} />
                 </div>
                 <div className="flex flex-col gap-xs">
                   <Label htmlFor="confirmPassword">Confirm password *</Label>
                   <Input
                     id="confirmPassword"
+                    {...fieldProps("confirmPassword")}
                     type="password"
                     autoComplete="new-password"
                     required
@@ -335,6 +463,7 @@ export function SignupPage() {
                     onChange={(e) => set("confirmPassword", e.target.value)}
                     placeholder="Re-enter your password"
                   />
+                  <FieldError id="confirmPassword-error" message={fieldErrors.confirmPassword} />
                 </div>
               </CardContent>
             </Card>
@@ -348,21 +477,25 @@ export function SignupPage() {
                   <Label htmlFor="dob">Date of birth *</Label>
                   <Input
                     id="dob"
+                    {...fieldProps("dateOfBirth")}
                     type="date"
                     required
                     value={form.dateOfBirth}
                     onChange={(e) => set("dateOfBirth", e.target.value)}
                   />
+                  <FieldError id="dob-error" message={fieldErrors.dateOfBirth} />
                 </div>
                 <div className="flex flex-col gap-xs">
                   <Label htmlFor="gender">Gender *</Label>
                   <Input
                     id="gender"
+                    {...fieldProps("gender")}
                     required
                     value={form.gender}
                     onChange={(e) => set("gender", e.target.value)}
                     placeholder="e.g. Female, Male, Non-binary"
                   />
+                  <FieldError id="gender-error" message={fieldErrors.gender} />
                 </div>
                 <div className="flex flex-col gap-xs">
                   <Label htmlFor="preferredName">Preferred name</Label>
@@ -392,11 +525,13 @@ export function SignupPage() {
                   <Label htmlFor="phone">Primary mobile number *</Label>
                   <Input
                     id="phone"
+                    {...fieldProps("phone")}
                     type="tel"
                     required
                     value={form.phone}
                     onChange={(e) => set("phone", e.target.value)}
                   />
+                  <FieldError id="phone-error" message={fieldErrors.phone} />
                 </div>
                 <div className="flex flex-col gap-xs">
                   <Label htmlFor="alternateMobile">Alternate mobile number</Label>
@@ -411,12 +546,14 @@ export function SignupPage() {
                   <Label htmlFor="address">Residential address *</Label>
                   <textarea
                     id="address"
+                    {...fieldProps("residentialAddress")}
                     rows={3}
                     required
                     className={textareaClassName}
                     value={form.residentialAddress}
                     onChange={(e) => set("residentialAddress", e.target.value)}
                   />
+                  <FieldError id="address-error" message={fieldErrors.residentialAddress} />
                 </div>
                 <div className="grid grid-cols-2 gap-md">
                   <div className="flex flex-col gap-xs">
@@ -462,19 +599,23 @@ export function SignupPage() {
                   <Label htmlFor="institution">School / college / university *</Label>
                   <Input
                     id="institution"
+                    {...fieldProps("institution")}
                     required
                     value={form.institution}
                     onChange={(e) => set("institution", e.target.value)}
                   />
+                  <FieldError id="institution-error" message={fieldErrors.institution} />
                 </div>
                 <div className="flex flex-col gap-xs">
                   <Label htmlFor="gradeOrYear">Year of study *</Label>
                   <Input
                     id="gradeOrYear"
+                    {...fieldProps("gradeOrYear")}
                     required
                     value={form.gradeOrYear}
                     onChange={(e) => set("gradeOrYear", e.target.value)}
                   />
+                  <FieldError id="gradeOrYear-error" message={fieldErrors.gradeOrYear} />
                 </div>
                 <div className="flex flex-col gap-xs">
                   <Label htmlFor="courseOrProgram">Course / program</Label>
@@ -524,30 +665,36 @@ export function SignupPage() {
                   <Label htmlFor="ecName">Parent / guardian name *</Label>
                   <Input
                     id="ecName"
+                    {...fieldProps("emergencyContactName")}
                     required
                     value={form.emergencyContactName}
                     onChange={(e) => set("emergencyContactName", e.target.value)}
                   />
+                  <FieldError id="ecName-error" message={fieldErrors.emergencyContactName} />
                 </div>
                 <div className="flex flex-col gap-xs">
                   <Label htmlFor="ecPhone">Contact number *</Label>
                   <Input
                     id="ecPhone"
+                    {...fieldProps("emergencyContactPhone")}
                     type="tel"
                     required
                     value={form.emergencyContactPhone}
                     onChange={(e) => set("emergencyContactPhone", e.target.value)}
                   />
+                  <FieldError id="ecPhone-error" message={fieldErrors.emergencyContactPhone} />
                 </div>
                 <div className="flex flex-col gap-xs">
                   <Label htmlFor="ecRelation">Relationship *</Label>
                   <Input
                     id="ecRelation"
+                    {...fieldProps("emergencyContactRelation")}
                     required
                     value={form.emergencyContactRelation}
                     onChange={(e) => set("emergencyContactRelation", e.target.value)}
                     placeholder="e.g. Father, Mother, Guardian"
                   />
+                  <FieldError id="ecRelation-error" message={fieldErrors.emergencyContactRelation} />
                 </div>
                 <div className="flex flex-col gap-xs pt-sm">
                   <Label htmlFor="altEcName">Alternate emergency contact name</Label>
@@ -745,15 +892,30 @@ export function SignupPage() {
             </Card>
 
             {formError ? (
-              <p
+              <div
                 role="alert"
-                className="flex items-start gap-xs rounded-sm border border-destructive/30 bg-destructive/8 px-sm py-sm text-body-md text-destructive-text"
+                className="flex flex-col gap-xs rounded-sm border border-destructive/30 bg-destructive/8 px-sm py-sm text-body-md text-destructive-text"
               >
-                <svg aria-hidden="true" viewBox="0 0 16 16" className="mt-px size-4 shrink-0 fill-current">
-                  <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM7.25 4.5a.75.75 0 0 1 1.5 0v4a.75.75 0 0 1-1.5 0v-4ZM8 12a.9.9 0 1 1 0-1.8A.9.9 0 0 1 8 12Z" />
-                </svg>
-                <span>{formError}</span>
-              </p>
+                <p className="flex items-start gap-xs">
+                  <svg aria-hidden="true" viewBox="0 0 16 16" className="mt-px size-4 shrink-0 fill-current">
+                    <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM7.25 4.5a.75.75 0 0 1 1.5 0v4a.75.75 0 0 1-1.5 0v-4ZM8 12a.9.9 0 1 1 0-1.8A.9.9 0 0 1 8 12Z" />
+                  </svg>
+                  <span>{formError}</span>
+                </p>
+                {/* An address that already has an account is a sign-in, not a
+                    signup — offer both ways back in rather than a dead end. */}
+                {formError === EXISTING_ACCOUNT_MESSAGE ? (
+                  <p className="pl-lg text-body">
+                    <Link to={loginHref} className="text-link underline underline-offset-2">
+                      Sign in instead
+                    </Link>
+                    {" · "}
+                    <Link to="/forgot-password" className="text-link underline underline-offset-2">
+                      Forgot password?
+                    </Link>
+                  </p>
+                ) : null}
+              </div>
             ) : null}
 
             <Button type="submit" className="w-full" disabled={signUpMutation.isPending}>
@@ -772,6 +934,16 @@ export function SignupPage() {
 
       <SiteFooter />
     </div>
+  );
+}
+
+/** The message under a field the page has marked invalid. */
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} className="text-body-md text-destructive-text">
+      {message}
+    </p>
   );
 }
 

@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RegistrationCard } from "@/components/dashboard/registration-card";
 import { DashboardEmptyState } from "@/components/dashboard/dashboard-empty-state";
+import { EmailVerificationNotice } from "@/components/dashboard/email-verification-notice";
 import { queryKeys } from "@/api/query-keys";
 import { fetchPastRegistrations, fetchUpcomingRegistrations } from "@/api/student-dashboard";
 import { getAccountSettings } from "@/api/account";
@@ -49,7 +50,7 @@ export function StudentDashboardPage() {
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Helmet>
-        <title>Your dashboard</title>
+        <title>Your dashboard | MUN Hub</title>
       </Helmet>
       <SiteHeader />
       {loading ? (
@@ -72,6 +73,9 @@ export function StudentDashboardPage() {
             </Button>
           </header>
           <Separator />
+          {user && !user.emailVerified && (
+            <EmailVerificationNotice email={user.email} required={user.emailVerificationRequired} />
+          )}
           {!hasAny ? (
             <DashboardEmptyState
               title="No registrations yet"
