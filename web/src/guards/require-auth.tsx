@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/hooks/use-session";
+import { loginPathFor } from "@/lib/host-routing";
 
 /**
  * UX-only auth gate. Server is authoritative — every protected API route
@@ -25,7 +26,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     const redirectTo = encodeURIComponent(
       `${location.pathname}${location.search}${location.hash}`,
     );
-    return <Navigate to={`/login?redirectTo=${redirectTo}`} replace />;
+    // Organizer pages bounce to the organizer sign-in, not the delegate one —
+    // an organizer who hits a stale link on publish.munhub.in should land on
+    // that host's own login page.
+    return <Navigate to={`${loginPathFor(location.pathname)}?redirectTo=${redirectTo}`} replace />;
   }
 
   return children;

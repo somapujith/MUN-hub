@@ -40,7 +40,9 @@ function slugify(name: string): string {
 // api/www hosts — a MUN can never be allocated one of these as its slug, or
 // its wildcard-subdomain page would collide with a role console.
 // docs/superpowers/specs/2026-09-17-subdomain-architecture-design.md §2
-const RESERVED_SLUGS = new Set(['www', 'app', 'organize', 'admin', 'api'])
+// `publish` is the organizer host; `organize` stays reserved because it's still
+// served as an alias for it.
+const RESERVED_SLUGS = new Set(['www', 'app', 'publish', 'organize', 'admin', 'api'])
 
 async function generateUniqueSlug(name: string): Promise<string> {
   const base = slugify(name) || 'mun'

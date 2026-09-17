@@ -1,10 +1,29 @@
-import { Outlet } from "react-router";
+import { useEffect } from "react";
+import { Outlet, useLocation } from "react-router";
 import { Helmet } from "react-helmet-async";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { canonicalUrlFor } from "@/lib/host-routing";
 
 export function RootLayout() {
+  const location = useLocation();
+
+  // Organizer pages live on publish.munhub.in. Every host serves the same SPA,
+  // so without this a visit to munhub.in/organizer/... would render the
+  // organizer workspace on the marketplace host. Checked on every navigation
+  // (not just first load) because in-app <Link>s can also lead there.
+  // No-op in local dev, where every zone shares one origin.
+  const canonical = canonicalUrlFor(location.pathname, location.search);
+
+  useEffect(() => {
+    if (canonical) window.location.replace(canonical);
+  }, [canonical]);
+
+  // Render nothing while leaving, so the organizer page never flashes on the
+  // wrong host.
+  if (canonical) return null;
+
   return (
     <ThemeProvider
       attribute="class"
