@@ -1,4 +1,8 @@
-import type { MaskedPaymentSettings, UpsertPaymentSettingsInput } from "@/types/payment-settlement";
+import type {
+  MaskedPaymentSettings,
+  PaymentVerificationState,
+  UpsertPaymentSettingsInput,
+} from "@/types/payment-settlement";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -21,6 +25,18 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 /** Returns the masked settlement configuration, or `null` if none has been submitted yet. */
 export function getPaymentSettings(munId: string) {
   return request<MaskedPaymentSettings | null>(`/muns/${munId}/payment-settings`);
+}
+
+/**
+ * Records MUNHub's off-platform check of the payout account (ADMIN/SUPER_ADMIN
+ * only). A MUN can't publish until this is VERIFIED; FAILED sends the
+ * organizer back to fix the details.
+ */
+export function setPaymentVerificationState(munId: string, state: PaymentVerificationState) {
+  return request<MaskedPaymentSettings>(`/muns/${munId}/payment-settings/actions/set-verification-state`, {
+    method: "POST",
+    body: JSON.stringify({ state }),
+  });
 }
 
 /**

@@ -39,6 +39,19 @@ export function getModuleReviewQueue(params: ModuleReviewQueueParams = {}) {
 }
 
 /**
+ * Marks one module required or optional for this MUN (`PATCH
+ * /muns/:munId/modules/:moduleName/requirement`, wrapping
+ * `setModuleRequirement`). ADMIN/SUPER_ADMIN only; FINAL_REVIEW can't be made
+ * optional.
+ */
+export function setModuleRequirement(munId: string, moduleName: MunModule, isRequired: boolean) {
+  return request<ModuleVerificationRow>(`/muns/${munId}/modules/${moduleName}/requirement`, {
+    method: "PATCH",
+    body: JSON.stringify({ isRequired }),
+  });
+}
+
+/**
  * Gate 2 reviewer decision on one module (`POST
  * /muns/:munId/modules/:moduleName/actions/review`, wrapping `reviewModule`).
  * Never route a Gate 1 application decision through this — use

@@ -6,6 +6,9 @@ import { RootLayout } from "@/layouts/root-layout";
 import { WorkspaceLayout } from "@/layouts/workspace-layout";
 import { AdminAuditDetailPage } from "@/pages/admin/audit-detail-page";
 import { AdminAuditPage } from "@/pages/admin/audit-page";
+import { AdminConferenceDetailPage } from "@/pages/admin/conference-detail-page";
+import { AdminConferencesPage } from "@/pages/admin/conferences-page";
+import { AdminStaffPage } from "@/pages/admin/staff-page";
 import { AdminGoLiveQueuePage } from "@/pages/admin/go-live-queue-page";
 import { AdminOrganizersPage } from "@/pages/admin/organizers-page";
 import { AdminOverviewPage } from "@/pages/admin/overview-page";
@@ -188,6 +191,9 @@ export const router = createBrowserRouter([
           { path: "review", element: <AdminReviewPage /> },
           { path: "verification", element: <AdminVerificationPage /> },
           { path: "go-live-queue", element: <AdminGoLiveQueuePage /> },
+          { path: "muns", element: <AdminConferencesPage /> },
+          { path: "muns/:munId", element: <AdminConferenceDetailPage /> },
+          { path: "staff", element: <AdminStaffPage /> },
           { path: "registrations", element: <AdminRegistrationsPage /> },
           { path: "payments", element: <AdminPaymentsPage /> },
           { path: "organizers", element: <AdminOrganizersPage /> },
