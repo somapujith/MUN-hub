@@ -1,13 +1,16 @@
 import { zValidator } from '../lib/zod-validator'
 import { eq } from 'drizzle-orm'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import {
+  REGISTRATION_ERRORS,
+  REGISTRATION_ERROR_STATUS,
   getProductAvailability,
   getProductsAvailability,
   getRegistrationById,
   initiateRegistration,
 } from '@/lib/actions/registration'
+import { isProfileComplete } from '@/lib/actions/student-profile'
 import { db } from '@/lib/db/client'
 import { payments, registrations } from '@/lib/db/schema'
 import { simulatePaymentOutcome } from '@/lib/payments/mock-adapter'
@@ -33,6 +36,12 @@ const mockPaymentBodySchema = z
     outcome: z.enum(['success', 'failure']),
   })
   .strict()
+
+function registrationErrorResponse(c: Context<{ Variables: AppVariables }>, message: string) {
+  const status = REGISTRATION_ERROR_STATUS[message] ?? 400
+  const code = status === 409 ? 'CONFLICT_STATE' : 'VALIDATION_FAILED'
+  return c.json({ error: { code, message } }, status)
+}
 
 export const registrationsRoutes = new Hono<{ Variables: AppVariables }>()
 
@@ -94,9 +103,25 @@ registrationsRoutes.post(
   zValidator('json', initiateRegistrationBodySchema),
   async (c) => {
     const body = c.req.valid('json')
-    const session = c.get('session')
-    const result = await initiateRegistration(body, session)
-    return c.json(result, 201)
+    const session = c.get('session')!
+
+    // The one-time participant profile (emergency contact, DOB, school…) is
+    // required before any registration. Enforced here rather than inside
+    // initiateRegistration so lib unit tests can keep calling it directly.
+    if (!(await isProfileComplete(session.userId))) {
+      return registrationErrorResponse(c, REGISTRATION_ERRORS.profileIncomplete)
+    }
+
+    try {
+      const result = await initiateRegistration(body, session)
+      return c.json(result, 201)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      if (Object.hasOwn(REGISTRATION_ERROR_STATUS, message)) {
+        return registrationErrorResponse(c, message)
+      }
+      throw error
+    }
   },
 )
 

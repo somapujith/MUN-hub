@@ -1,6 +1,14 @@
 import { and, count, eq, inArray, lt } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { accommodationOptions, muns, payments, registrationProducts, registrations } from '@/lib/db/schema'
+import {
+  accommodationOptions,
+  committees,
+  muns,
+  payments,
+  portfolios,
+  registrationProducts,
+  registrations,
+} from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { mockPaymentsAdapter } from '@/lib/payments/mock-adapter'
 import type { RegistrationInput, RegistrationStatus } from '@/lib/types'
@@ -34,6 +42,53 @@ export async function releaseExpiredReservations(registrationProductId: string):
   return released.length
 }
 
+async function releaseExpiredReservationsForMun(munId: string): Promise<void> {
+  await db
+    .update(registrations)
+    .set({ status: 'CANCELLED', updatedAt: new Date() })
+    .where(
+      and(
+        eq(registrations.munId, munId),
+        inArray(registrations.status, RELEASABLE_STATUSES),
+        lt(registrations.expiresAt, new Date()),
+      ),
+    )
+}
+
+/**
+ * Eligibility failures thrown by `initiateRegistration`. The HTTP layer
+ * (server/routes/registrations.ts) maps these to 4xx responses; capacity
+ * failures end in "at capacity" and map through the shared error handler.
+ */
+export const REGISTRATION_ERRORS = {
+  notOpen: 'Registration is not open for this MUN',
+  notOpenYet: "Registration for this MUN hasn't opened yet",
+  deadlinePassed: 'The registration deadline for this MUN has passed',
+  passUnavailable: 'This pass is no longer available',
+  passDeadlinePassed: 'The deadline for this pass has passed',
+  passWrongMun: 'This pass does not belong to this MUN',
+  committeeWrongMun: 'This committee does not belong to this MUN',
+  portfolioWrongCommittee: 'This portfolio does not belong to the chosen committee',
+  portfolioNeedsCommittee: 'Choose a committee before choosing a portfolio',
+  portfoliosDisabled: 'This committee does not offer portfolio selection',
+  profileIncomplete: 'Complete your profile before registering for a MUN',
+} as const
+
+/** HTTP status for each `REGISTRATION_ERRORS` message. */
+export const REGISTRATION_ERROR_STATUS: Record<string, 400 | 409> = {
+  [REGISTRATION_ERRORS.notOpen]: 409,
+  [REGISTRATION_ERRORS.notOpenYet]: 409,
+  [REGISTRATION_ERRORS.deadlinePassed]: 409,
+  [REGISTRATION_ERRORS.passUnavailable]: 409,
+  [REGISTRATION_ERRORS.passDeadlinePassed]: 409,
+  [REGISTRATION_ERRORS.passWrongMun]: 400,
+  [REGISTRATION_ERRORS.committeeWrongMun]: 400,
+  [REGISTRATION_ERRORS.portfolioWrongCommittee]: 400,
+  [REGISTRATION_ERRORS.portfolioNeedsCommittee]: 400,
+  [REGISTRATION_ERRORS.portfoliosDisabled]: 400,
+  [REGISTRATION_ERRORS.profileIncomplete]: 409,
+}
+
 /**
  * Reserves a seat and starts the payment flow for the authenticated user
  * identified by the caller-supplied `session`.
@@ -50,7 +105,13 @@ export async function releaseExpiredReservations(registrationProductId: string):
  *
  * Flow:
  *   1. Release expired reservations for this product (frees stale seats).
- *   2. In a transaction: count PENDING+PAYMENT_PENDING+CONFIRMED registrations
+ *   2. In a transaction: share-lock the mun and require REGISTRATION_OPEN
+ *      within its registration window; lock the pass and require it to be
+ *      active, on this mun and before its deadline; lock the chosen
+ *      committee/portfolio (if any), require they belong to this mun /
+ *      committee, and count their active seats. Every failure throws one of
+ *      `REGISTRATION_ERRORS` or an "... at capacity" error. Then
+ *      count PENDING+PAYMENT_PENDING+CONFIRMED registrations
  *      against the product's capacity; if full, abort. Otherwise create a
  *      PENDING registration with a 15-minute expiresAt.
  *   3. After that transaction commits, call the payments adapter's
@@ -68,9 +129,45 @@ export async function initiateRegistration(
   }
   const userId = session.userId
 
+  if (input.portfolioId && !input.committeeId) {
+    throw new Error(REGISTRATION_ERRORS.portfolioNeedsCommittee)
+  }
+
   await releaseExpiredReservations(input.registrationProductId)
+  // Committee/portfolio/accommodation counts span every pass on the mun, so
+  // stale holds on the mun's other passes must be released too.
+  await releaseExpiredReservationsForMun(input.munId)
 
   const registration = await db.transaction(async (tx) => {
+    // Share-lock the mun so an organizer/admin status change (transitionMun
+    // takes FOR UPDATE) cannot close registration between this check and the
+    // insert below. Shared locks don't block other registrations.
+    const [mun] = await tx
+      .select({
+        id: muns.id,
+        status: muns.status,
+        registrationOpensAt: muns.registrationOpensAt,
+        registrationDeadline: muns.registrationDeadline,
+      })
+      .from(muns)
+      .where(eq(muns.id, input.munId))
+      .for('share')
+      .limit(1)
+
+    if (!mun) {
+      throw new Error('Mun not found')
+    }
+    const now = new Date()
+    if (mun.status !== 'REGISTRATION_OPEN') {
+      throw new Error(REGISTRATION_ERRORS.notOpen)
+    }
+    if (mun.registrationOpensAt && mun.registrationOpensAt > now) {
+      throw new Error(REGISTRATION_ERRORS.notOpenYet)
+    }
+    if (mun.registrationDeadline && mun.registrationDeadline < now) {
+      throw new Error(REGISTRATION_ERRORS.deadlinePassed)
+    }
+
     // Row-lock the product for the duration of this transaction so concurrent
     // initiateRegistration calls for the same product serialize here instead
     // of all reading the same pre-insert count under READ COMMITTED (which
@@ -85,6 +182,15 @@ export async function initiateRegistration(
 
     if (!product) {
       throw new Error('Registration product not found')
+    }
+    if (product.munId !== input.munId) {
+      throw new Error(REGISTRATION_ERRORS.passWrongMun)
+    }
+    if (product.status !== 'active') {
+      throw new Error(REGISTRATION_ERRORS.passUnavailable)
+    }
+    if (product.deadline && product.deadline < now) {
+      throw new Error(REGISTRATION_ERRORS.passDeadlinePassed)
     }
 
     const activeRegistrations = await tx
@@ -107,6 +213,83 @@ export async function initiateRegistration(
 
     if (activeRegistrations.length >= product.capacity) {
       throw new Error('Registration product is at capacity')
+    }
+
+    // Committee selection is optional. When given, the committee must belong
+    // to this mun and its capacity gets the same row-lock treatment as the
+    // pass above: every concurrent registration into this committee (across
+    // all passes) serializes on this lock before counting.
+    if (input.committeeId) {
+      const [committee] = await tx
+        .select({
+          id: committees.id,
+          munId: committees.munId,
+          capacity: committees.capacity,
+          portfoliosEnabled: committees.portfoliosEnabled,
+        })
+        .from(committees)
+        .where(eq(committees.id, input.committeeId))
+        .for('update')
+        .limit(1)
+
+      if (!committee) {
+        throw new Error('Committee not found')
+      }
+      if (committee.munId !== input.munId) {
+        throw new Error(REGISTRATION_ERRORS.committeeWrongMun)
+      }
+
+      const [{ taken: committeeTaken }] = await tx
+        .select({ taken: count() })
+        .from(registrations)
+        .where(
+          and(
+            eq(registrations.committeeId, committee.id),
+            inArray(registrations.status, ACTIVE_REGISTRATION_STATUSES),
+          ),
+        )
+      if (committeeTaken >= committee.capacity) {
+        throw new Error('Committee is at capacity')
+      }
+
+      // `portfolios.availability` is the number of delegates a portfolio can
+      // seat (1 = a single delegate; the organizer can raise it for double
+      // delegations). Locked for the same reason as the committee.
+      if (input.portfolioId) {
+        const [portfolio] = await tx
+          .select({
+            id: portfolios.id,
+            committeeId: portfolios.committeeId,
+            availability: portfolios.availability,
+          })
+          .from(portfolios)
+          .where(eq(portfolios.id, input.portfolioId))
+          .for('update')
+          .limit(1)
+
+        if (!portfolio) {
+          throw new Error('Portfolio not found')
+        }
+        if (portfolio.committeeId !== committee.id) {
+          throw new Error(REGISTRATION_ERRORS.portfolioWrongCommittee)
+        }
+        if (!committee.portfoliosEnabled) {
+          throw new Error(REGISTRATION_ERRORS.portfoliosDisabled)
+        }
+
+        const [{ taken: portfolioTaken }] = await tx
+          .select({ taken: count() })
+          .from(registrations)
+          .where(
+            and(
+              eq(registrations.portfolioId, portfolio.id),
+              inArray(registrations.status, ACTIVE_REGISTRATION_STATUSES),
+            ),
+          )
+        if (portfolioTaken >= portfolio.availability) {
+          throw new Error('Portfolio is at capacity')
+        }
+      }
     }
 
     // Accommodation is optional. When selected, its capacity gets the exact

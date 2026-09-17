@@ -1,9 +1,25 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
-import { accommodationOptions, muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
+import {
+  accommodationOptions,
+  committees,
+  muns,
+  payments,
+  portfolios,
+  registrationProducts,
+  registrations,
+  users,
+} from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 
-import { initiateRegistration, releaseExpiredReservations, getRegistrationById, getProductAvailability, getProductsAvailability } from './registration'
+import {
+  REGISTRATION_ERRORS,
+  initiateRegistration,
+  releaseExpiredReservations,
+  getRegistrationById,
+  getProductAvailability,
+  getProductsAvailability,
+} from './registration'
 
 async function createUser(role: 'STUDENT' | 'ORGANIZER' | 'ADMIN' | 'SUPER_ADMIN' = 'STUDENT') {
   const [user] = await db
@@ -13,13 +29,37 @@ async function createUser(role: 'STUDENT' | 'ORGANIZER' | 'ADMIN' | 'SUPER_ADMIN
   return user
 }
 
-async function createMun(organizerId: string) {
+async function createMun(organizerId: string, overrides: Partial<typeof muns.$inferInsert> = {}) {
   const [mun] = await db
     .insert(muns)
-    .values({ organizerId, name: 'Reg Mun', slug: `reg-mun-${Date.now()}-${Math.random()}` })
+    .values({
+      organizerId,
+      name: 'Reg Mun',
+      slug: `reg-mun-${Date.now()}-${Math.random()}`,
+      status: 'REGISTRATION_OPEN',
+      ...overrides,
+    })
     .returning()
   return mun
 }
+
+async function createCommittee(munId: string, capacity: number, overrides: Partial<typeof committees.$inferInsert> = {}) {
+  const [committee] = await db
+    .insert(committees)
+    .values({ munId, name: 'Security Council', capacity, ...overrides })
+    .returning()
+  return committee
+}
+
+async function createPortfolio(committeeId: string, availability = 1) {
+  const [portfolio] = await db
+    .insert(portfolios)
+    .values({ committeeId, name: 'France', availability })
+    .returning()
+  return portfolio
+}
+
+const studentSessionFor = (userId: string) => ({ userId, role: 'STUDENT' as const })
 
 async function createProduct(munId: string, capacity: number) {
   const [product] = await db
@@ -266,6 +306,213 @@ describe('initiateRegistration', () => {
       await expect(
         initiateRegistration({ munId: mun.id, registrationProductId: product.id, accommodationOptionId: accommodation.id }, { userId: student.id, role: 'STUDENT' }),
       ).rejects.toThrow('not available')
+    })
+  })
+
+  describe('eligibility', () => {
+    async function setup(munOverrides: Partial<typeof muns.$inferInsert> = {}) {
+      const organizer = await createUser('ORGANIZER')
+      const student = await createUser('STUDENT')
+      const mun = await createMun(organizer.id, munOverrides)
+      const product = await createProduct(mun.id, 10)
+      return { organizer, student, mun, product, session: studentSessionFor(student.id) }
+    }
+
+    it.each(['DRAFT', 'PUBLISHED', 'VERIFIED', 'REGISTRATION_CLOSED', 'CANCELLED'] as const)(
+      'rejects a mun in status %s',
+      async (status) => {
+        const { mun, product, session } = await setup({ status })
+        await expect(
+          initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session),
+        ).rejects.toThrow(REGISTRATION_ERRORS.notOpen)
+      },
+    )
+
+    it('rejects before the registration window opens and after the mun deadline', async () => {
+      const early = await setup({ registrationOpensAt: new Date(Date.now() + 86_400_000) })
+      await expect(
+        initiateRegistration({ munId: early.mun.id, registrationProductId: early.product.id }, early.session),
+      ).rejects.toThrow(REGISTRATION_ERRORS.notOpenYet)
+
+      const late = await setup({ registrationDeadline: new Date(Date.now() - 86_400_000) })
+      await expect(
+        initiateRegistration({ munId: late.mun.id, registrationProductId: late.product.id }, late.session),
+      ).rejects.toThrow(REGISTRATION_ERRORS.deadlinePassed)
+    })
+
+    it('accepts a mun whose window is open', async () => {
+      const { mun, product, session } = await setup({
+        registrationOpensAt: new Date(Date.now() - 86_400_000),
+        registrationDeadline: new Date(Date.now() + 86_400_000),
+      })
+      const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session)
+      expect(result.registrationId).toBeTruthy()
+    })
+
+    it('rejects an inactive pass and a pass past its own deadline', async () => {
+      const { mun, product, session } = await setup()
+      await db.update(registrationProducts).set({ status: 'inactive' }).where(eq(registrationProducts.id, product.id))
+      await expect(
+        initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session),
+      ).rejects.toThrow(REGISTRATION_ERRORS.passUnavailable)
+
+      const expired = await createProduct(mun.id, 10)
+      await db
+        .update(registrationProducts)
+        .set({ deadline: new Date(Date.now() - 60_000) })
+        .where(eq(registrationProducts.id, expired.id))
+      await expect(
+        initiateRegistration({ munId: mun.id, registrationProductId: expired.id }, session),
+      ).rejects.toThrow(REGISTRATION_ERRORS.passDeadlinePassed)
+    })
+
+    it('rejects a pass that belongs to a different mun', async () => {
+      const { organizer, mun, session } = await setup()
+      const otherMun = await createMun(organizer.id)
+      const foreignPass = await createProduct(otherMun.id, 10)
+      await expect(
+        initiateRegistration({ munId: mun.id, registrationProductId: foreignPass.id }, session),
+      ).rejects.toThrow(REGISTRATION_ERRORS.passWrongMun)
+    })
+
+    it('rejects a committee from a different mun, and a portfolio from a different committee', async () => {
+      const { organizer, mun, product, session } = await setup()
+      const otherMun = await createMun(organizer.id)
+      const foreignCommittee = await createCommittee(otherMun.id, 10)
+      await expect(
+        initiateRegistration(
+          { munId: mun.id, registrationProductId: product.id, committeeId: foreignCommittee.id },
+          session,
+        ),
+      ).rejects.toThrow(REGISTRATION_ERRORS.committeeWrongMun)
+
+      const ga = await createCommittee(mun.id, 10)
+      const sc = await createCommittee(mun.id, 10)
+      const scPortfolio = await createPortfolio(sc.id)
+      await expect(
+        initiateRegistration(
+          { munId: mun.id, registrationProductId: product.id, committeeId: ga.id, portfolioId: scPortfolio.id },
+          session,
+        ),
+      ).rejects.toThrow(REGISTRATION_ERRORS.portfolioWrongCommittee)
+
+      await expect(
+        initiateRegistration({ munId: mun.id, registrationProductId: product.id, portfolioId: scPortfolio.id }, session),
+      ).rejects.toThrow(REGISTRATION_ERRORS.portfolioNeedsCommittee)
+
+      const noPortfolios = await createCommittee(mun.id, 10, { portfoliosEnabled: false })
+      const hidden = await createPortfolio(noPortfolios.id)
+      await expect(
+        initiateRegistration(
+          { munId: mun.id, registrationProductId: product.id, committeeId: noPortfolios.id, portfolioId: hidden.id },
+          session,
+        ),
+      ).rejects.toThrow(REGISTRATION_ERRORS.portfoliosDisabled)
+
+      // Nothing was created by any of the rejected attempts.
+      const rows = await db.select().from(registrations).where(eq(registrations.munId, mun.id))
+      expect(rows).toHaveLength(0)
+    })
+
+    it('records a valid committee + portfolio selection', async () => {
+      const { mun, product, session } = await setup()
+      const committee = await createCommittee(mun.id, 10)
+      const portfolio = await createPortfolio(committee.id)
+      const result = await initiateRegistration(
+        { munId: mun.id, registrationProductId: product.id, committeeId: committee.id, portfolioId: portfolio.id },
+        session,
+      )
+      const [row] = await db.select().from(registrations).where(eq(registrations.id, result.registrationId))
+      expect(row?.committeeId).toBe(committee.id)
+      expect(row?.portfolioId).toBe(portfolio.id)
+    })
+
+    it('never oversells committee capacity under concurrent registrations, across different passes', async () => {
+      const organizer = await createUser('ORGANIZER')
+      const mun = await createMun(organizer.id)
+      const passA = await createProduct(mun.id, 100)
+      const passB = await createProduct(mun.id, 100)
+      const committee = await createCommittee(mun.id, 3)
+      const students = await Promise.all(Array.from({ length: 10 }, () => createUser('STUDENT')))
+
+      const results = await Promise.allSettled(
+        students.map((student, i) =>
+          initiateRegistration(
+            {
+              munId: mun.id,
+              // Alternate passes so the pass row-lock alone can't serialize them.
+              registrationProductId: i % 2 === 0 ? passA.id : passB.id,
+              committeeId: committee.id,
+            },
+            studentSessionFor(student.id),
+          ),
+        ),
+      )
+
+      const succeeded = results.filter((r) => r.status === 'fulfilled')
+      const failed = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[]
+      expect(succeeded).toHaveLength(3)
+      expect(failed).toHaveLength(7)
+      for (const failure of failed) {
+        expect(String(failure.reason)).toMatch(/Committee is at capacity/)
+      }
+
+      const rows = await db.select().from(registrations).where(eq(registrations.committeeId, committee.id))
+      const active = rows.filter((r) => ['PENDING', 'PAYMENT_PENDING', 'CONFIRMED'].includes(r.status))
+      expect(active).toHaveLength(3)
+    })
+
+    it('never double-books a single-seat portfolio under concurrent registrations', async () => {
+      const organizer = await createUser('ORGANIZER')
+      const mun = await createMun(organizer.id)
+      const passA = await createProduct(mun.id, 100)
+      const passB = await createProduct(mun.id, 100)
+      const committee = await createCommittee(mun.id, 100)
+      const portfolio = await createPortfolio(committee.id, 1)
+      const students = await Promise.all(Array.from({ length: 6 }, () => createUser('STUDENT')))
+
+      const results = await Promise.allSettled(
+        students.map((student, i) =>
+          initiateRegistration(
+            {
+              munId: mun.id,
+              registrationProductId: i % 2 === 0 ? passA.id : passB.id,
+              committeeId: committee.id,
+              portfolioId: portfolio.id,
+            },
+            studentSessionFor(student.id),
+          ),
+        ),
+      )
+
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+      for (const failure of results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[]) {
+        expect(String(failure.reason)).toMatch(/Portfolio is at capacity/)
+      }
+    })
+
+    it('frees committee and portfolio seats when a hold on another pass expires or is cancelled', async () => {
+      const { mun, product, session } = await setup()
+      const otherPass = await createProduct(mun.id, 10)
+      const committee = await createCommittee(mun.id, 1)
+      const portfolio = await createPortfolio(committee.id, 1)
+      const holder = await createUser('STUDENT')
+
+      await db.insert(registrations).values({
+        userId: holder.id,
+        munId: mun.id,
+        registrationProductId: otherPass.id,
+        committeeId: committee.id,
+        portfolioId: portfolio.id,
+        status: 'PAYMENT_PENDING',
+        expiresAt: new Date(Date.now() - 60_000),
+      })
+
+      const result = await initiateRegistration(
+        { munId: mun.id, registrationProductId: product.id, committeeId: committee.id, portfolioId: portfolio.id },
+        session,
+      )
+      expect(result.registrationId).toBeTruthy()
     })
   })
 

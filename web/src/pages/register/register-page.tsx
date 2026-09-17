@@ -14,7 +14,7 @@ import type { ProductWithAvailability } from "@/components/registration/types";
 import { formatDateRange } from "@/components/shared/date-range";
 import { queryKeys } from "@/api/query-keys";
 import { getMunBySlug, getProductsAvailability } from "@/api/marketplace";
-import { getProfileFormDefaults } from "@/api/student-profile";
+import { getProfileCompletion, getProfileFormDefaults } from "@/api/student-profile";
 import { getAccountSettings } from "@/api/account";
 import { useSession } from "@/hooks/use-session";
 import { NotFoundPage } from "@/pages/not-found-page";
@@ -93,6 +93,16 @@ export function RegisterPage() {
     enabled: Boolean(session?.userId),
   });
 
+  // The API refuses registrations until the one-time profile is complete, so
+  // say so up front instead of after the delegate fills in the whole form.
+  // Always refetched: the profile may have just been completed in another tab.
+  const profileCompletionQuery = useQuery({
+    queryKey: ["profile", "complete"],
+    queryFn: getProfileCompletion,
+    enabled: Boolean(session?.userId),
+    refetchOnMount: "always",
+  });
+
   const productIds = mun?.registrationProducts.map((product) => product.id) ?? [];
   const availabilityQuery = useQuery({
     queryKey: queryKeys.productAvailability(productIds),
@@ -164,7 +174,12 @@ export function RegisterPage() {
   // initial state — so it must not mount until they've loaded. Coming from
   // the MUN page, the mun + availability queries are already cached, and
   // without this the form mounted instantly with empty, never-updated fields.
-  if (availabilityQuery.isPending || profileDefaultsQuery.isLoading || accountQuery.isLoading) {
+  if (
+    availabilityQuery.isPending ||
+    profileDefaultsQuery.isLoading ||
+    accountQuery.isLoading ||
+    profileCompletionQuery.isLoading
+  ) {
     return (
       <>
         <Helmet>
@@ -190,6 +205,28 @@ export function RegisterPage() {
             message="Something went wrong loading registration options. Try again."
           >
             <Button render={<Link to={`/mun/${slug}`} />}>View conference</Button>
+          </RegistrationNotice>
+        </RegistrationShell>
+      </>
+    );
+  }
+
+  if (profileCompletionQuery.data?.complete === false) {
+    return (
+      <>
+        <Helmet>
+          <title>{`Register — ${mun.name}`}</title>
+        </Helmet>
+        <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
+          <RegistrationNotice
+            tone="warning"
+            title="Complete your profile first"
+            message="Organizers need your date of birth, school, address and emergency contact before you can register. You only fill this in once."
+          >
+            <Button render={<Link to="/profile" />}>Complete your profile</Button>
+            <Button variant="outline" render={<Link to={`/mun/${slug}`} />}>
+              View conference
+            </Button>
           </RegistrationNotice>
         </RegistrationShell>
       </>

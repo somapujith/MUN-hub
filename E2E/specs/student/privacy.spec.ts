@@ -37,9 +37,10 @@ async function registeredStudentWithUniqueDetails() {
     dateOfBirth: '2003-02-11',
   }
   const session = await signUpViaApi(details)
+  // Committee only: each portfolio seats one delegate, and this helper runs
+  // several times per test run.
   const registrationId = await registerOnOpenMun(session, {
     committee: OPEN.committees[0].name,
-    portfolio: OPEN.committees[0].portfolios[2],
     pay: true,
   })
   return { session, registrationId, details }
@@ -126,7 +127,7 @@ test.describe('privacy — other students\' records', () => {
     await page.goto(`/register/${OPEN.slug}/confirmation?registrationId=${owner.registrationId}`)
     // The page renders "Page not found" for a registration the viewer can't read.
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(/not found/i)
-    await expect(page.locator('body')).not.toContainText(OPEN.committees[0].portfolios[2])
+    await expect(page.locator('body')).not.toContainText(OPEN.committees[0].name)
     await expect(page.locator('body')).not.toContainText(/you're registered/i)
     await context.close()
   })

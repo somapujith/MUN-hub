@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, Loader2Icon } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
@@ -264,6 +264,14 @@ export function RegistrationForm({
           className="rounded-md border border-destructive/30 bg-destructive/8 px-md py-sm text-body-md text-destructive-text"
         >
           {error}
+          {/profile/i.test(error) && (
+            <>
+              {" "}
+              <Link to="/profile" className="font-medium underline underline-offset-2">
+                Go to your profile
+              </Link>
+            </>
+          )}
         </div>
       )}
 

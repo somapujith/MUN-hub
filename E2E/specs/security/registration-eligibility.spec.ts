@@ -1,6 +1,8 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type APIResponse } from '@playwright/test'
+import postgres from 'postgres'
+import { DATABASE_URL, assertLocalDatabase } from '../../env'
 import { DEMO_PASSWORD, MUNS } from '../../fixtures/accounts'
-import { getMun, signInViaApi, signUpViaApi, type ApiSession } from '../../fixtures/api'
+import { browserContextFor, getMun, signInViaApi, signUpViaApi, type ApiSession } from '../../fixtures/api'
 import { CLOSED, FIXTURE_MUNS, OPEN } from '../../fixtures/fixture-muns'
 
 /**
@@ -8,12 +10,8 @@ import { CLOSED, FIXTURE_MUNS, OPEN } from '../../fixtures/fixture-muns'
  * server, not just hidden in the UI. The UI never offers any of these; each
  * test goes straight at the API the way a scripted client would.
  *
- * Tests marked `test.fail` document real gaps in
- * lib/actions/registration.ts#initiateRegistration, which today only checks
- * that the pass exists, the caller has no other active seat on it, and the
- * pass has capacity. They assert the CORRECT behavior, so they will start
- * "unexpectedly passing" (and fail the run) once the gap is fixed — at which
- * point delete the `test.fail` line.
+ * Enforced in lib/actions/registration.ts#initiateRegistration (inside the
+ * locked transaction) and, for the profile gate, server/routes/registrations.ts.
  */
 
 function register(session: ApiSession, body: Record<string, unknown>) {
@@ -23,27 +21,69 @@ function register(session: ApiSession, body: Record<string, unknown>) {
   })
 }
 
-test('BUG: a MUN that is published but not open for registration refuses registrations', async () => {
-  test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: initiateRegistration never checks muns.status === REGISTRATION_OPEN (lib/actions/registration.ts)')
+/** A deliberate refusal: a 4xx with a readable message, never a 500. */
+async function expectRefused(res: APIResponse, status?: number) {
+  const text = await res.text()
+  expect(res.status(), text).toBeGreaterThanOrEqual(400)
+  expect(res.status(), text).toBeLessThan(500)
+  if (status) expect(res.status(), text).toBe(status)
+  const body = JSON.parse(text) as { error?: { message?: string } }
+  expect(body.error?.message, text).toBeTruthy()
+}
+
+/** Signup always saves a full profile, so remove it to get an incomplete one. */
+async function signUpWithoutProfile(): Promise<ApiSession> {
+  const delegate = await signUpViaApi()
+  assertLocalDatabase()
+  const sql = postgres(DATABASE_URL, { max: 1, prepare: false, onnotice: () => {} })
+  try {
+    await sql`delete from student_profiles where user_id = ${delegate.userId}`
+  } finally {
+    await sql.end()
+  }
+  return delegate
+}
+
+test('the registration page sends a student with an incomplete profile to finish it', async ({ browser }) => {
+  const delegate = await signUpWithoutProfile()
+  const context = await browserContextFor(browser, delegate)
+  const page = await context.newPage()
+  await page.goto(`/register/${OPEN.slug}`)
+  const main = page.getByRole('main')
+  await expect(main.getByRole('heading', { name: 'Complete your profile first' })).toBeVisible()
+  await expect(main.getByRole('button', { name: /continue to details/i })).toHaveCount(0)
+  await main.getByRole('button', { name: 'Complete your profile' }).click()
+  await expect(page).toHaveURL(/\/profile$/)
+  await context.close()
+})
+
+test('a student with an incomplete profile is told to finish it before registering', async () => {
+  const delegate = await signUpWithoutProfile()
+  const open = await getMun(delegate.api, OPEN.slug)
+  const pass = open.registrationProducts.find((p) => p.name === OPEN.products[0].name)!
+  const res = await register(delegate, { munId: open.id, registrationProductId: pass.id })
+  await expectRefused(res, 409)
+  expect((await res.json()).error.message).toMatch(/complete your profile/i)
+})
+
+test('a MUN that is published but not open for registration refuses registrations', async () => {
   const delegate = await signUpViaApi()
   const mun = await getMun(delegate.api, CLOSED.slug)
   expect(mun.status).not.toBe('REGISTRATION_OPEN')
   const pass = mun.registrationProducts[0]
 
   const res = await register(delegate, { munId: mun.id, registrationProductId: pass.id })
-  expect(res.status()).toBeGreaterThanOrEqual(400)
+  await expectRefused(res)
 })
 
-test('BUG: a seeded MUN whose registration has not opened refuses registrations', async () => {
-  test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: initiateRegistration ignores MUN status and registration window')
+test('a seeded MUN whose registration has not opened refuses registrations', async () => {
   const delegate = await signUpViaApi()
   const mun = await getMun(delegate.api, MUNS.open.slug) // Oxford MUN 2027 — not open yet
   const res = await register(delegate, { munId: mun.id, registrationProductId: mun.registrationProducts[0].id })
-  expect(res.status()).toBeGreaterThanOrEqual(400)
+  await expectRefused(res)
 })
 
-test('BUG: an inactive (retired) pass cannot be bought', async () => {
-  test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, "BUG: initiateRegistration never checks registration_products.status === 'active'")
+test('an inactive (retired) pass cannot be bought', async () => {
   // The public API hides inactive passes, so read the id the way the owning organizer sees it.
   const owner = await signInViaApi(FIXTURE_MUNS.ownerEmail, DEMO_PASSWORD)
   const openMun = await getMun(owner.api, OPEN.slug)
@@ -55,11 +95,10 @@ test('BUG: an inactive (retired) pass cannot be bought', async () => {
 
   const delegate = await signUpViaApi()
   const res = await register(delegate, { munId: openMun.id, registrationProductId: retired!.id })
-  expect(res.status()).toBeGreaterThanOrEqual(400)
+  await expectRefused(res)
 })
 
-test('BUG: a pass from one MUN cannot be registered against another MUN', async () => {
-  test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: initiateRegistration never checks the pass belongs to input.munId')
+test('a pass from one MUN cannot be registered against another MUN', async () => {
   const delegate = await signUpViaApi()
   const open = await getMun(delegate.api, OPEN.slug)
   const closed = await getMun(delegate.api, CLOSED.slug)
@@ -69,11 +108,10 @@ test('BUG: a pass from one MUN cannot be registered against another MUN', async 
     munId: open.id,
     registrationProductId: closed.registrationProducts[0].id,
   })
-  expect(res.status()).toBeGreaterThanOrEqual(400)
+  await expectRefused(res)
 })
 
-test("BUG: a committee or portfolio from a different MUN is refused", async () => {
-  test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: initiateRegistration never checks committeeId/portfolioId belong to the MUN')
+test("a committee or portfolio from a different MUN is refused", async () => {
   const delegate = await signUpViaApi()
   const open = await getMun(delegate.api, OPEN.slug)
   const oxford = await getMun(delegate.api, MUNS.open.slug)
@@ -85,11 +123,10 @@ test("BUG: a committee or portfolio from a different MUN is refused", async () =
     committeeId: foreignCommittee.id,
     portfolioId: foreignCommittee.portfolios[0].id,
   })
-  expect(res.status()).toBeGreaterThanOrEqual(400)
+  await expectRefused(res)
 })
 
-test('BUG: a portfolio must belong to the chosen committee', async () => {
-  test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: initiateRegistration never checks portfolioId belongs to committeeId')
+test('a portfolio must belong to the chosen committee', async () => {
   const delegate = await signUpViaApi()
   const open = await getMun(delegate.api, OPEN.slug)
   const ga = open.committees.find((c) => c.name === OPEN.committees[0].name)!
@@ -101,11 +138,10 @@ test('BUG: a portfolio must belong to the chosen committee', async () => {
     committeeId: ga.id,
     portfolioId: sc.portfolios[0].id,
   })
-  expect(res.status()).toBeGreaterThanOrEqual(400)
+  await expectRefused(res)
 })
 
-test('BUG: committee capacity is enforced', async () => {
-  test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: only pass capacity is enforced — committees.capacity is never checked (PRD §22)')
+test('committee capacity is enforced', async () => {
   const probe = await signUpViaApi()
   const open = await getMun(probe.api, OPEN.slug)
   // "E2E Security Council" has capacity 2 and is reserved for this test.
@@ -119,5 +155,6 @@ test('BUG: committee capacity is enforced', async () => {
   }
   // However many seats earlier runs already used, a capacity-2 committee can never accept 3+.
   expect(statuses.filter((s) => s === 201).length).toBeLessThanOrEqual(2)
-  expect(statuses.some((s) => s >= 400)).toBe(true)
+  expect(statuses.some((s) => s === 409)).toBe(true)
+  expect(statuses.every((s) => s === 201 || s === 409), statuses.join(',')).toBe(true)
 })
