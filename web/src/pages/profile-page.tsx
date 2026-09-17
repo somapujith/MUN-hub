@@ -7,6 +7,7 @@ import { getAccountSettings, setEmailNotificationsEnabled } from "@/api/account"
 import { changePassword } from "@/api/auth";
 import { queryKeys } from "@/api/query-keys";
 import { completeStudentProfile, getStudentProfile } from "@/api/student-profile";
+import { PrivacyDataSection } from "@/components/account/privacy-data-section";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { Button } from "@/components/ui/button";
@@ -414,6 +415,10 @@ export function ProfilePage() {
             </CardContent>
           </Card>
         </section>
+
+        <Separator />
+
+        <PrivacyDataSection />
       </main>
       <SiteFooter />
     </div>
