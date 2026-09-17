@@ -117,13 +117,16 @@ function MemberPhotoField({
       upload.mutate(file);
       return;
     }
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(URL.createObjectURL(file));
+    // A blob: URL here would violate the deployed CSP's img-src (self, data:,
+    // https: only — no blob:), so the pending-add preview uses a data: URL
+    // instead of URL.createObjectURL.
+    const reader = new FileReader();
+    reader.onload = () => setPreviewUrl(reader.result as string);
+    reader.readAsDataURL(file);
     onPendingFile(file);
   };
 
   const clearPending = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
     onPendingFile(null);
     if (inputRef.current) inputRef.current.value = "";

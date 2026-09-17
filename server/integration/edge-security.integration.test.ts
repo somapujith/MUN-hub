@@ -311,6 +311,34 @@ describe('body limit', () => {
     })
     expect(res.status).toBe(413)
   })
+
+  // Regression: UPLOAD_ROUTE_PATTERN only matched /muns/:munId/(documents|media)
+  // until this route was added to it — an executive-board photo well within
+  // UPLOAD_RULES.IMAGE's 5MB cap always 413'd under the 1MB default limit.
+  it('gives executive-board photo uploads the upload limit, not the 1 MB default', async () => {
+    const memberId = crypto.randomUUID()
+    const withinDefaultButOverBase64Header = JSON.stringify({
+      contentType: 'image/png',
+      fileBase64: 'A'.repeat(2 * 1024 * 1024), // over the 1MB JSON default, well under the upload limit
+    })
+
+    const res = await app.request(`/api/v1/executive-board/${memberId}/photo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: withinDefaultButOverBase64Header,
+    })
+    // Past the body limit: the anonymous request is stopped by requireAuth
+    // instead, same as the documents/media case above — proves the body was
+    // never rejected as oversized.
+    expect(res.status).toBe(401)
+
+    const tooBig = await app.request(`/api/v1/executive-board/${memberId}/photo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contentType: 'image/png', fileBase64: 'A'.repeat(UPLOAD_BODY_LIMIT_BYTES + 1) }),
+    })
+    expect(tooBig.status).toBe(413)
+  })
 })
 
 describe('sitemap and robots', () => {

@@ -19,9 +19,13 @@ const UPLOAD_JSON_OVERHEAD_BYTES = 64 * 1024
  */
 export const UPLOAD_BODY_LIMIT_BYTES = maxBase64Length(largestUploadBytes()) + UPLOAD_JSON_OVERHEAD_BYTES
 
-// POST /api/v1/muns/:munId/documents (mun-documents.ts) and
-// POST /api/v1/muns/:munId/media (mun-branding.ts).
-const UPLOAD_ROUTE_PATTERN = /^\/api\/v1\/muns\/[^/]+\/(documents|media)\/?$/
+// POST /api/v1/muns/:munId/documents (mun-documents.ts),
+// POST /api/v1/muns/:munId/media (mun-branding.ts), and
+// POST /api/v1/executive-board/:memberId/photo (executive-board.ts). Missing
+// the last of these let a base64-encoded photo well within the 5MB
+// UPLOAD_RULES.IMAGE cap 413 under the 1MB default limit instead.
+const UPLOAD_ROUTE_PATTERN =
+  /^\/api\/v1\/(muns\/[^/]+\/(documents|media)|executive-board\/[^/]+\/photo)\/?$/
 
 function payloadTooLarge(c: Context) {
   return c.json(
