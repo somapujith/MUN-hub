@@ -67,11 +67,24 @@ export function tableRow(page: Page, text: string): Locator {
   return main(page).getByRole('row').filter({ hasText: text })
 }
 
+/** Resolves once the page has painted twice, i.e. React has committed any state already queued. */
+async function afterNextPaint(page: Page): Promise<void> {
+  await page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  )
+}
+
 /**
  * Admin tables paginate 20 at a time and the local DB carries lots of junk
  * rows, so walk "Next" until the row appears (or pages run out).
+ *
+ * The tables keep showing the previous page's rows while the next page loads
+ * (TanStack `placeholderData`), but the "Page N of M" text changes at once.
+ * So each step waits for the next page's list response and a repaint before
+ * reading the rows; otherwise a stale page is searched and the row is
+ * reported on the wrong page.
  */
-export async function findRowAcrossPages(page: Page, text: string, maxPages = 30): Promise<Locator> {
+export async function findRowAcrossPages(page: Page, text: string, maxPages = 60): Promise<Locator> {
   const row = tableRow(page, text)
   await expect(main(page).getByRole('table').or(main(page).getByText(/nothing|no .* pending|no registrations/i)).first()).toBeVisible()
   for (let i = 0; i < maxPages; i += 1) {
@@ -80,8 +93,16 @@ export async function findRowAcrossPages(page: Page, text: string, maxPages = 30
     if ((await next.count()) === 0 || (await next.isDisabled())) break
     const indicator = main(page).getByText(/^Page \d+ of \d+$/)
     const before = await indicator.textContent()
+    const pageLoaded = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname.startsWith('/api/v1/admin/') &&
+        new URL(response.url()).searchParams.has('offset'),
+    )
     await next.click()
     await expect(indicator).not.toHaveText(before ?? '')
+    await (await pageLoaded).finished()
+    await afterNextPaint(page)
   }
   await expect(row, `row "${text}" not found on any page`).toHaveCount(1)
   return row
