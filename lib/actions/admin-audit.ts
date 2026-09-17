@@ -1,6 +1,6 @@
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { users } from '@/lib/db/schema'
+import { muns, users } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { getGoLiveQueue } from '@/lib/lifecycle/go-live'
@@ -20,6 +20,8 @@ export interface AdminOverviewStats {
   openSupportTickets: number
   paymentExceptions: number
   goLiveQueue: number
+  /** MUNs whose conference results are waiting for a MUNHub decision (RESULTS_UNDER_REVIEW). */
+  resultsReview: number
 }
 
 // listTickets only filters on one exact status, and a ticket is "open" for
@@ -32,20 +34,22 @@ const OPEN_TICKET_STATUSES = ['NEW', 'ASSIGNED', 'IN_PROGRESS', 'WAITING'] as co
  * One aggregate read for the /admin overview dashboard cards. Composes the
  * existing per-queue actions (getReviewQueue, getModuleReviewQueue,
  * listTickets, listPaymentExceptions, getGoLiveQueue) rather than
- * duplicating any of their query logic — this function owns none of the
- * underlying queries, only the fan-out + count reduction. `limit: 1` on the
+ * duplicating any of their query logic — this function owns only the fan-out,
+ * the count reduction, and the results-review count (a plain status count;
+ * there is no results queue action). `limit: 1` on the
  * paginated queue reads is just an optimization (we only ever read
  * `.total`); each one still runs a full unfiltered COUNT(*) query.
  */
 export async function getAdminOverviewStats(session: Session | null): Promise<AdminOverviewStats> {
   requireRole(session, [...ADMIN_ROLES])
 
-  const [reviewQueue, moduleQueue, tickets, paymentExceptions, goLiveQueue] = await Promise.all([
+  const [reviewQueue, moduleQueue, tickets, paymentExceptions, goLiveQueue, resultsReview] = await Promise.all([
     getReviewQueue({ limit: 1 }, session),
     getModuleReviewQueue({ limit: 1 }, session),
     listTickets({}, session),
     listPaymentExceptions(session),
     getGoLiveQueue({ limit: 1 }, session),
+    db.$count(muns, eq(muns.status, 'RESULTS_UNDER_REVIEW')),
   ])
 
   const openSupportTickets = tickets.filter((ticket) =>
@@ -58,6 +62,7 @@ export async function getAdminOverviewStats(session: Session | null): Promise<Ad
     openSupportTickets,
     paymentExceptions: paymentExceptions.length,
     goLiveQueue: goLiveQueue.total,
+    resultsReview,
   }
 }
 

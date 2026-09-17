@@ -266,6 +266,35 @@ export async function submitResultsForReview(munId: string, session: Session | n
   return loadResultsState(munId)
 }
 
+export interface ResultsForReview {
+  state: ResultsState
+  /** Every award entered for the MUN, newest first, with the winner's name and email. */
+  awards: AchievementListRow[]
+}
+
+/**
+ * MUNHub staff view of a MUN's results (OPERATIONS/ADMIN/SUPER_ADMIN): where
+ * they stand and the awards to check, for the admin conference page's
+ * results review. `listMunAchievements`/`getResultsState` are the organizer's
+ * reads and don't admit OPERATIONS.
+ */
+export async function getResultsForReview(munId: string, session: Session | null): Promise<ResultsForReview> {
+  requireRole(session, [...STAFF_ROLES])
+  const [state, rows] = await Promise.all([
+    loadResultsState(munId),
+    db
+      .select({ achievement: achievements, delegateName: users.name, delegateEmail: users.email })
+      .from(achievements)
+      .innerJoin(users, eq(users.id, achievements.userId))
+      .where(eq(achievements.munId, munId))
+      .orderBy(desc(achievements.createdAt), desc(achievements.id)),
+  ])
+  return {
+    state,
+    awards: rows.map(({ achievement, delegateName, delegateEmail }) => ({ ...achievement, delegateName, delegateEmail })),
+  }
+}
+
 export type ResultsReviewDecision = 'APPROVE' | 'RETURN'
 
 /**

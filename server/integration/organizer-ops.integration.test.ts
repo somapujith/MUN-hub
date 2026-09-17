@@ -195,4 +195,39 @@ describe('results routes', () => {
     expect(approved.status).toBe(200)
     expect((await approved.json()).munStatus).toBe('COMPLETED')
   })
+
+  it('lets staff read submitted results with their awards, and return them with a note', async () => {
+    const fixture = await makeOpsFixture()
+    const { registration } = await addDelegate(fixture, { name: 'Meera Iyer', status: 'ATTENDED' })
+    const organizerHeaders = await authHeaders(fixture.organizer.id)
+    const base = `/api/v1/organizer/muns/${fixture.mun.id}`
+    await app.request(`${base}/achievements`, json(organizerHeaders, { registrationId: registration.id, award: 'Outstanding Delegate' }))
+    await app.request(`${base}/results/submit`, { method: 'POST', headers: organizerHeaders })
+
+    const adminRead = `/api/v1/admin/muns/${fixture.mun.id}/results`
+    expect((await app.request(adminRead, { headers: organizerHeaders })).status).toBe(403)
+
+    const ops = await makeUser('OPERATIONS')
+    const opsHeaders = await authHeaders(ops.id)
+    const read = await app.request(adminRead, { headers: opsHeaders })
+    expect(read.status).toBe(200)
+    expect(read.headers.get('Cache-Control')).toBe('no-store')
+    const body = await read.json()
+    expect(body.state).toMatchObject({ munStatus: 'RESULTS_UNDER_REVIEW', awardCount: 1, editable: false })
+    expect(body.awards).toEqual([
+      expect.objectContaining({ registrationId: registration.id, award: 'Outstanding Delegate', delegateName: 'Meera Iyer' }),
+    ])
+
+    const review = `/api/v1/admin/muns/${fixture.mun.id}/results/review`
+    expect((await app.request(review, json(opsHeaders, { decision: 'RETURN' }))).status).toBe(400)
+    const returned = await app.request(review, json(opsHeaders, { decision: 'RETURN', note: 'Add the committee for each award' }))
+    expect(returned.status).toBe(200)
+    expect(await returned.json()).toMatchObject({
+      munStatus: 'RESULTS_PENDING',
+      editable: true,
+      returnNote: 'Add the committee for each award',
+    })
+
+    expect((await app.request(`/api/v1/admin/muns/${crypto.randomUUID()}/results`, { headers: opsHeaders })).status).toBe(404)
+  })
 })

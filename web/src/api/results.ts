@@ -1,4 +1,11 @@
-import type { AchievementListRow, AchievementRow, CreateAchievementInput, ResultsState } from "@/types/results";
+import type {
+  AchievementListRow,
+  AchievementRow,
+  AdminResultsReview,
+  CreateAchievementInput,
+  ResultsReviewDecision,
+  ResultsState,
+} from "@/types/results";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -45,4 +52,20 @@ export function getResultsState(munId: string) {
 
 export function submitResultsForReview(munId: string) {
   return request<ResultsState>(`/organizer/muns/${munId}/results/submit`, { method: "POST" });
+}
+
+/** Staff only: where a MUN's results stand, with every award (lib/actions/results.ts#getResultsForReview). */
+export function getAdminResultsReview(munId: string) {
+  return request<AdminResultsReview>(`/admin/muns/${munId}/results`, { cache: "no-store" });
+}
+
+/**
+ * Staff only: APPROVE completes the MUN and verifies its awards; RETURN sends
+ * the results back to the organizer and needs a note.
+ */
+export function reviewResults(munId: string, decision: ResultsReviewDecision, note?: string) {
+  return request<ResultsState>(`/admin/muns/${munId}/results/review`, {
+    method: "POST",
+    body: JSON.stringify(note ? { decision, note } : { decision }),
+  });
 }
