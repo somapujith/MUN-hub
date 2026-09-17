@@ -60,15 +60,18 @@ describe('handleScheduled', () => {
 
   it('passes the cron expression to jobs and logs the run', async () => {
     const crons: Array<string | undefined> = []
+    const scheduledTimes: Array<Date | undefined> = []
 
     await handleScheduled(EVENT, {}, [
-      job('one', async ({ cron }) => {
+      job('one', async ({ cron, scheduledTime }) => {
         crons.push(cron)
+        scheduledTimes.push(scheduledTime)
         return { released: 0 }
       }),
     ])
 
     expect(crons).toEqual(['*/5 * * * *'])
+    expect(scheduledTimes).toEqual([new Date(EVENT.scheduledTime)])
     expect(console.log).toHaveBeenCalledWith(
       expect.objectContaining({
         event: 'scheduled_run.started',

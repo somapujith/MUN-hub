@@ -1,18 +1,104 @@
+import { runScheduledLifecycleTransitions } from '@/lib/lifecycle/registration-lifecycle'
+import { runOrganizerDigest } from '@/lib/notifications/organizer-digest-job'
+import { runConferenceReminders } from '@/lib/notifications/reminder-job'
+import { runSlaNotifications } from '@/lib/notifications/sla-job'
+import { getRuntimeEnv } from '@/lib/runtime-env'
+import { purgeExpiredAuthArtifacts } from './purge-auth-artifacts'
 import { releaseExpiredHoldsJob } from './release-expired-holds'
 import type { JobResult, ScheduledJob } from './types'
 
 /**
- * Every job the API Worker's cron trigger (server/wrangler.jsonc
- * `triggers.crons`) runs, in this order.
- *
- * To register when their lanes merge (2026-09-17 autonomous run):
- * - purgeExpiredAuthArtifacts: lib/jobs/purge-auth-artifacts.ts (privacy lane)
- * - runScheduledLifecycleTransitions: lib/lifecycle/registration-lifecycle.ts
- *   (lifecycle lane). Needs the SYSTEM_ACTOR_USER_ID var set on munhub-api,
- *   since audit rows require a real user id.
- * - the notifications lane's SLA job (SLA_DELAY emails)
+ * Registration/conference lifecycle moves that are due by the clock (open at
+ * `registrationOpensAt`, close at the deadline or start day, start on the
+ * start day). Audit rows need a real `users.id`, so the job needs the
+ * SYSTEM_ACTOR_USER_ID var (a dedicated staff account) on munhub-api. Until
+ * it is set the job logs a warning and does nothing, rather than failing
+ * every run.
  */
-export const SCHEDULED_JOBS: readonly ScheduledJob[] = [releaseExpiredHoldsJob]
+export const scheduledLifecycleTransitionsJob: ScheduledJob = {
+  name: 'runScheduledLifecycleTransitions',
+  async run({ now }): Promise<JobResult> {
+    const actorId = getRuntimeEnv('SYSTEM_ACTOR_USER_ID')?.trim()
+    if (!actorId) {
+      console.warn({
+        level: 'warn',
+        event: 'scheduled_job.skipped',
+        job: 'runScheduledLifecycleTransitions',
+        reason: 'SYSTEM_ACTOR_USER_ID is not set',
+      })
+      return { notConfigured: true }
+    }
+
+    const result = await runScheduledLifecycleTransitions(now, actorId)
+    if (result.skipped.length) {
+      // Mun ids and the organizer-facing reason only; no PII.
+      console.log({
+        level: 'info',
+        event: 'scheduled_lifecycle.skipped',
+        skipped: result.skipped,
+      })
+    }
+    return {
+      opened: result.opened.length,
+      closed: result.closed.length,
+      started: result.started.length,
+      skipped: result.skipped.length,
+    }
+  },
+}
+
+/** Deletes expired sessions, old reset tokens and old organizer sign-in codes. */
+export const purgeExpiredAuthArtifactsJob: ScheduledJob = {
+  name: 'purgeExpiredAuthArtifacts',
+  async run({ now }) {
+    const result = await purgeExpiredAuthArtifacts(now)
+    return { ...result }
+  },
+}
+
+/** SLA_DELAY emails when a go-live submission's review becomes due soon or overdue. */
+export const slaNotificationsJob: ScheduledJob = {
+  name: 'runSlaNotifications',
+  async run({ now }) {
+    return runSlaNotifications(now)
+  },
+}
+
+// The next two send for fixed windows ("start - 24h falls in the last five
+// minutes", "09:00-09:05 IST"), so they measure from the cron's scheduled
+// time: windows measured from each run's start time would overlap or leave
+// gaps whenever a run starts late.
+
+/** Delegate reminders ~24h before their conference starts. */
+export const conferenceRemindersJob: ScheduledJob = {
+  name: 'runConferenceReminders',
+  async run({ now, scheduledTime }) {
+    return runConferenceReminders(scheduledTime ?? now)
+  },
+}
+
+/** Daily organizer digest for REGISTRATION_OPEN muns (no-op outside 09:00-09:05 IST). */
+export const organizerDigestJob: ScheduledJob = {
+  name: 'runOrganizerDigest',
+  async run({ now, scheduledTime }) {
+    return runOrganizerDigest(scheduledTime ?? now)
+  },
+}
+
+/**
+ * Every job the API Worker's cron trigger (server/wrangler.jsonc
+ * `triggers.crons`, every 5 minutes) runs, in this order. Expired seat holds
+ * are released before the lifecycle job can close registration, and
+ * housekeeping runs last.
+ */
+export const SCHEDULED_JOBS: readonly ScheduledJob[] = [
+  releaseExpiredHoldsJob,
+  scheduledLifecycleTransitionsJob,
+  slaNotificationsJob,
+  conferenceRemindersJob,
+  organizerDigestJob,
+  purgeExpiredAuthArtifactsJob,
+]
 
 export interface JobRunReport {
   job: string
@@ -25,6 +111,8 @@ export interface JobRunReport {
 export interface RunScheduledJobsOptions {
   jobs?: readonly ScheduledJob[]
   cron?: string
+  /** The cron trigger's scheduled fire time, passed to every job (see JobContext). */
+  scheduledTime?: Date
   /**
    * Called after a job throws, e.g. to forward the error to an error tracker.
    * If the hook itself fails, that's logged and the run carries on.
@@ -45,13 +133,13 @@ function errorMessage(error: unknown): string {
  * (see server/src/scheduled.ts), and a fixed order keeps runs predictable.
  */
 export async function runScheduledJobs(options: RunScheduledJobsOptions = {}): Promise<JobRunReport[]> {
-  const { jobs = SCHEDULED_JOBS, cron, onError } = options
+  const { jobs = SCHEDULED_JOBS, cron, scheduledTime, onError } = options
   const reports: JobRunReport[] = []
 
   for (const job of jobs) {
     const startedAt = Date.now()
     try {
-      const result = await job.run({ now: new Date(), cron })
+      const result = await job.run({ now: new Date(), cron, scheduledTime })
       const report: JobRunReport = { job: job.name, ok: true, durationMs: Date.now() - startedAt, result }
       console.log({ level: 'info', event: 'scheduled_job.succeeded', cron, ...report })
       reports.push(report)

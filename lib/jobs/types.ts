@@ -17,6 +17,14 @@ export interface JobContext {
   now: Date
   /** The cron expression that fired (server/wrangler.jsonc `triggers.crons`); undefined for manual runs. */
   cron?: string
+  /**
+   * When the cron trigger was scheduled to fire (Workers'
+   * `controller.scheduledTime`, aligned to the cron schedule); undefined for
+   * manual runs. Jobs that send once per fixed time window measure the
+   * window from this instead of `now`, so consecutive runs' windows line up
+   * exactly however late each run starts.
+   */
+  scheduledTime?: Date
 }
 
 /** Small summary counts for the log line, e.g. `{ released: 3 }`. Never PII. */

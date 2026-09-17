@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, registrationProducts, registrations, users } from '@/lib/db/schema'
 import type { RegistrationStatus } from '@/lib/types'
-import { releaseExpiredHolds, releaseExpiredHoldsJob } from './release-expired-holds'
+import { isRecentlyExpired, releaseExpiredHolds, releaseExpiredHoldsJob } from './release-expired-holds'
 
 // The job is global (every product), and the local database is shared with
 // other test files and sessions. To only ever touch this file's rows, the
@@ -113,5 +113,39 @@ describe('releaseExpiredHoldsJob', () => {
 
     expect(result.released).toBeGreaterThanOrEqual(1)
     expect(await statuses([expired])).toEqual({ [expired]: 'CANCELLED' })
+  })
+
+  it('emails only checkout holds that expired within the last hour', async () => {
+    // Its own "as of" instant, a year later than AS_OF, so the other tests'
+    // long-expired fixtures are released silently before this one runs.
+    const asOf = new Date('2001-06-01T12:00:00Z')
+    const product = await createProduct()
+    const recentCheckout = await hold(product, 'PAYMENT_PENDING', new Date(asOf.getTime() - 10 * 60 * 1000))
+    const staleCheckout = await hold(product, 'PAYMENT_PENDING', new Date(asOf.getTime() - 2 * 60 * 60 * 1000))
+    const recentPending = await hold(product, 'PENDING', new Date(asOf.getTime() - 10 * 60 * 1000))
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    try {
+      const result = await releaseExpiredHoldsJob.run({ now: asOf })
+
+      expect(result).toMatchObject({ expiredCheckoutsNotified: 1, notifyFailures: 0 })
+      expect(await statuses([recentCheckout, staleCheckout, recentPending])).toEqual({
+        [recentCheckout]: 'CANCELLED',
+        [staleCheckout]: 'CANCELLED',
+        [recentPending]: 'CANCELLED',
+      })
+    } finally {
+      log.mockRestore()
+    }
+  })
+})
+
+describe('isRecentlyExpired', () => {
+  const now = new Date('2026-09-17T12:00:00Z')
+
+  it('is true up to an hour after expiry and false before that or without an expiry', () => {
+    expect(isRecentlyExpired(new Date(now.getTime() - 60 * 60 * 1000), now)).toBe(true)
+    expect(isRecentlyExpired(new Date(now.getTime() - 60 * 60 * 1000 - 1), now)).toBe(false)
+    expect(isRecentlyExpired(null, now)).toBe(false)
   })
 })

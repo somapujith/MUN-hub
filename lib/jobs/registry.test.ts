@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SCHEDULED_JOBS, runScheduledJobs } from './registry'
+import { SCHEDULED_JOBS, runScheduledJobs, scheduledLifecycleTransitionsJob } from './registry'
 import type { JobContext, ScheduledJob } from './types'
 
 function job(name: string, run: ScheduledJob['run']): ScheduledJob {
@@ -7,8 +7,15 @@ function job(name: string, run: ScheduledJob['run']): ScheduledJob {
 }
 
 describe('SCHEDULED_JOBS', () => {
-  it('registers the expired-hold sweep', () => {
-    expect(SCHEDULED_JOBS.map((j) => j.name)).toContain('releaseExpiredHolds')
+  it('registers every cron job, releasing holds before the lifecycle job and housekeeping last', () => {
+    expect(SCHEDULED_JOBS.map((j) => j.name)).toEqual([
+      'releaseExpiredHolds',
+      'runScheduledLifecycleTransitions',
+      'runSlaNotifications',
+      'runConferenceReminders',
+      'runOrganizerDigest',
+      'purgeExpiredAuthArtifacts',
+    ])
   })
 
   it('has unique job names (they identify jobs in the logs)', () => {
@@ -86,6 +93,24 @@ describe('runScheduledJobs', () => {
     expect(contexts).toHaveLength(1)
     expect(contexts[0].cron).toBe('*/5 * * * *')
     expect(contexts[0].now.getTime()).toBeGreaterThanOrEqual(before)
+    expect(contexts[0].scheduledTime).toBeUndefined()
+  })
+
+  it('passes the cron trigger scheduled time to each job', async () => {
+    const scheduledTime = new Date('2026-09-17T03:30:00Z')
+    const seen: Array<Date | undefined> = []
+
+    await runScheduledJobs({
+      scheduledTime,
+      jobs: [
+        job('capture', async (context) => {
+          seen.push(context.scheduledTime)
+          return {}
+        }),
+      ],
+    })
+
+    expect(seen).toEqual([scheduledTime])
   })
 
   it('keeps going after a job throws, and reports the failure', async () => {
@@ -186,5 +211,28 @@ describe('runScheduledJobs', () => {
     })
 
     expect(reports[0]).toMatchObject({ ok: false, error: 'plain string' })
+  })
+})
+
+describe('scheduledLifecycleTransitionsJob', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it('skips with a warning, without failing the run, while SYSTEM_ACTOR_USER_ID is unset', async () => {
+    vi.stubEnv('SYSTEM_ACTOR_USER_ID', '')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const result = await scheduledLifecycleTransitionsJob.run({ now: new Date() })
+
+    expect(result).toEqual({ notConfigured: true })
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'scheduled_job.skipped',
+        job: 'runScheduledLifecycleTransitions',
+        reason: 'SYSTEM_ACTOR_USER_ID is not set',
+      }),
+    )
   })
 })

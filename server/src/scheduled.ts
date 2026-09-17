@@ -44,11 +44,13 @@ export async function handleScheduled(
   // along but are never read through getRuntimeEnv().
   if (env) setRuntimeEnv(env as Record<string, string | undefined>)
 
-  const scheduledAt = new Date(event.scheduledTime).toISOString()
+  const scheduledTime = new Date(event.scheduledTime)
+  const scheduledAt = scheduledTime.toISOString()
   const run = () =>
     runScheduledJobs({
       jobs,
       cron: event.cron,
+      scheduledTime,
       onError: (error, job) => reportError(error, { source: 'scheduled', job, cron: event.cron }),
     })
 
