@@ -48,6 +48,8 @@ VITE_API_URL=https://munhub-api-staging.somapujith.workers.dev/api/v1 npx vite b
 npx wrangler deploy --env staging
 ```
 
+The web build adds the `VITE_API_URL` origin to `connect-src` in `dist/_headers` (`web/vite-plugins/api-origin-csp.ts`), so the staging bundle's CSP allows the staging API. `env.staging` in `server/wrangler.jsonc` declares its own `ratelimits` (Wrangler doesn't inherit them), with namespace ids separate from production's.
+
 The URLs assume the account's `somapujith.workers.dev` subdomain. If it differs, update `CORS_ORIGINS` and `APP_URL` in `server/wrangler.jsonc` → `env.staging.vars` and the `VITE_API_URL` above.
 
 ### Known limitation: signed-in browser flows

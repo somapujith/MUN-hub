@@ -2,11 +2,13 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { apiOriginCsp } from "./vite-plugins/api-origin-csp.ts";
 
 const PRODUCTION_API_URL = "https://api.munhub.in/api/v1";
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), tailwindcss()],
+  // apiOriginCsp: dist/_headers' CSP allows the API this build calls (e.g. staging).
+  plugins: [react(), tailwindcss(), apiOriginCsp()],
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),

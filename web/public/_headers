@@ -10,6 +10,9 @@
 # - style-src needs 'unsafe-inline' for index.html's <style> block, the <style>
 #   next-themes injects for disableTransitionOnChange, and style attributes.
 # - challenges.cloudflare.com is Cloudflare Turnstile.
+# - connect-src lists the production API. A build against another API (e.g.
+#   staging's VITE_API_URL) gets that origin appended in dist/_headers by
+#   vite-plugins/api-origin-csp.ts; don't hard-code other APIs here.
 # - A real payment gateway (e.g. Razorpay Checkout) needs its script, frame and
 #   connect origins added here and in vercel.json.
 /*
