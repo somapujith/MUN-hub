@@ -20,6 +20,7 @@ export type ErrorCode =
   | 'VALIDATION_FAILED'
   | 'RATE_LIMITED'
   | 'UNAVAILABLE'
+  | 'MFA_UNAVAILABLE'
   | 'INTERNAL'
 
 export interface ApiErrorBody {
@@ -96,7 +97,11 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   if (message === MFA_ERRORS.staffOnly) {
     return { status: 403, code: 'FORBIDDEN', message }
   }
-  if (message === MFA_ERRORS.alreadyEnrolled || message === MFA_ERRORS.notEnrolled) {
+  if (
+    message === MFA_ERRORS.alreadyEnrolled ||
+    message === MFA_ERRORS.notEnrolled ||
+    message === MFA_ERRORS.notConfirmed
+  ) {
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
   if (message === MFA_ERRORS.invalidCode) {
@@ -107,6 +112,9 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   }
   if (message === MFA_ERRORS.tooManyAttempts) {
     return { status: 429, code: 'RATE_LIMITED', message }
+  }
+  if (message === MFA_ERRORS.unavailable) {
+    return { status: 503, code: 'MFA_UNAVAILABLE', message }
   }
 
   if (message === APPLICATION_PENDING) {
@@ -366,7 +374,9 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: MFA_ERRORS.staffOnly, status: 403, code: 'FORBIDDEN' },
   { message: MFA_ERRORS.alreadyEnrolled, status: 409, code: 'CONFLICT_STATE' },
   { message: MFA_ERRORS.notEnrolled, status: 409, code: 'CONFLICT_STATE' },
+  { message: MFA_ERRORS.notConfirmed, status: 409, code: 'CONFLICT_STATE' },
   { message: MFA_ERRORS.invalidCode, status: 401, code: 'UNAUTHORIZED' },
   { message: MFA_ERRORS.expired, status: 400, code: 'VALIDATION_FAILED' },
   { message: MFA_ERRORS.tooManyAttempts, status: 429, code: 'RATE_LIMITED' },
+  { message: MFA_ERRORS.unavailable, status: 503, code: 'MFA_UNAVAILABLE' },
 ]
