@@ -67,3 +67,11 @@ payout execution.
   (`21b6c9c`); 84 added MOCK_PAYMENTS_ENABLED/ALLOW_LOCALHOST_ORIGINS to the E2E API env
   (`6699007`) and reports E2E 297+148 passed, 0 failed.
 - 09:20 User reported the support chat is buggy → new `support` lane agent (audit in browser, then fix end to end). E2E full suite green at 50b19db (84).
+- 09:25 Notification functions committed by 4b (`5559c00`) — wire at merge (each takes one id;
+  adapter defaults to getNotificationsAdapter(); lookup failures throw `Registration not found`,
+  so wrap call sites in try/catch, fire-and-forget after the transaction commits):
+  - `notifyRegistrationConfirmed(registrationId)` → call from `lib/payments/events.ts#onRegistrationConfirmed` (only after CONFIRMED).
+  - `notifyPaymentFailed(registrationId)` → `lib/payments/events.ts#onPaymentFailed`.
+  - `notifySeatHoldExpired(registrationId)` → from the release-expired-holds job for each released PAYMENT_PENDING registration.
+  - `notifyWelcome(userId)` → after a successful delegate signUp (auth route / lib/actions/auth.ts).
+  - `notifySupportReply(ticketId)` → already called in `lib/actions/support.ts#sendMessage` after commit when the sender is staff; the support lane must keep exactly this call when it reworks the file.
