@@ -122,6 +122,8 @@ export default defineConfig({
         // localhost web origin for CORS/CSRF.
         MOCK_PAYMENTS_ENABLED: 'true',
         ALLOW_LOCALHOST_ORIGINS: 'true',
+        // Uploads are really stored (under server/.local-uploads/) and served back.
+        STORAGE_ADAPTER: 'local',
         // Every email the API "sends" is appended here; fixtures/outbox.ts reads it.
         EMAIL_OUTBOX_FILE,
         // Links in emails point at the local web app.

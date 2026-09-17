@@ -54,6 +54,18 @@ async function openDocuments(page: Page) {
 }
 
 test.describe('documents UI', () => {
+  test('the page lists the required documents and offers no refund-policy type', async ({ page }) => {
+    await openDocuments(page)
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Documents & Media')
+    const required = page.getByTestId('required-documents')
+    await expect(required).toContainText('Rules of procedure')
+    await expect(required).toContainText('Code of conduct')
+    const type = main(page).locator('form').getByLabel('Type')
+    // No refunds anywhere in the product.
+    await expect(type.getByRole('option', { name: /refund/i })).toHaveCount(0)
+    await expect(main(page).locator('form').getByLabel('PDF file (max 10MB)')).toBeAttached()
+  })
+
   test('upload a PDF, see it listed with a download link, then delete it', async ({ page }) => {
     const title = `E2E Handbook ${uid()}`
     await openDocuments(page)
@@ -103,17 +115,18 @@ test.describe('documents UI', () => {
 })
 
 test.describe('documents API', () => {
-  test('upload, list publicly, and delete a PDF', async () => {
+  test('upload, list and delete a PDF; the unpublished MUN keeps it private', async () => {
     const title = `E2E Rules ${uid()}`
     const res = await api.post(`muns/${munId}/documents`, {
       data: { kind: 'RULES', title, contentType: 'application/pdf', fileBase64: PDF.toString('base64') },
     })
     expect(res.status(), await res.text()).toBe(201)
     const doc: MunDocument = await res.json()
+    expect((await listDocuments()).map((d) => d.id)).toContain(doc.id)
 
+    // The sandbox isn't published, so its documents are hidden from the public (270680b).
     const anon = await anonApi()
-    const publicDocs: MunDocument[] = await (await anon.get(`muns/${munId}/documents`)).json()
-    expect(publicDocs.map((d) => d.id)).toContain(doc.id)
+    expect((await anon.get(`muns/${munId}/documents`)).status()).toBe(404)
     // Only the owner may delete.
     expect((await anon.delete(`documents/${doc.id}`)).status()).toBe(401)
     await anon.dispose()

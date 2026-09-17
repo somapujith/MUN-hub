@@ -1,9 +1,10 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import { anonApi, organizerApi, sandboxId } from './_helpers'
+import { watchForCrashes } from '../../fixtures/ui'
+import { acceptNextConfirm, anonApi, main, openSection, organizerApi, sandboxId, toast } from './_helpers'
 
 /**
  * Branding & Media module (Onboarding PRD §11: logo + cover required).
- * There is no branding UI in the workspace, so this covers the API only.
+ * The upload UI lives on the Documents & Media page (87d7102).
  * Every upload is deleted again — go-live.spec relies on the sandbox
  * staying incomplete (no logo/cover).
  */
@@ -48,21 +49,87 @@ async function upload(kind: string, displayOrder?: number): Promise<Media> {
   return res.json()
 }
 
-test.fixme('branding (logo, cover, gallery) can be managed from the workspace', async () => {
-  // PRD §11 requires a logo and cover image, and the Branding module is a
-  // required go-live module, but no workspace section offers an upload UI —
-  // an organizer cannot complete it without the API.
+test.describe('branding UI (Documents & Media page)', () => {
+  test('upload, replace and remove the logo and cover image', async ({ page }) => {
+    const crashes = watchForCrashes(page)
+    await openSection(page, munId, 'documents', 'Documents & Media')
+    await expect(main(page).getByRole('heading', { level: 2, name: 'Branding' })).toBeVisible()
+
+    for (const { kind, input, uploadBtn, replaceBtn, alt, uploaded, removed } of [
+      {
+        kind: 'LOGO',
+        input: 'Logo image (max 2MB)',
+        uploadBtn: 'Upload logo',
+        replaceBtn: 'Replace logo',
+        alt: 'Current logo',
+        uploaded: 'Logo uploaded',
+        removed: 'Logo removed',
+      },
+      {
+        kind: 'COVER',
+        input: 'Cover image (max 5MB)',
+        uploadBtn: 'Upload cover image',
+        replaceBtn: 'Replace cover image',
+        alt: 'Current cover image',
+        uploaded: 'Cover image uploaded',
+        removed: 'Cover image removed',
+      },
+    ]) {
+      const section = page.getByTestId(`branding-${kind}`)
+      await expect(section.getByRole('button', { name: uploadBtn })).toBeVisible()
+      await expect(section.getByRole('img', { name: alt })).toHaveCount(0)
+
+      await section.getByLabel(input).setInputFiles({ name: `${kind.toLowerCase()}.png`, mimeType: 'image/png', buffer: PNG })
+      await expect(toast(page, uploaded)).toBeVisible()
+      const preview = section.getByRole('img', { name: alt })
+      await expect(preview).toBeVisible()
+      // The stored file is really served (STORAGE_ADAPTER=local in the E2E API).
+      await expect.poll(() => preview.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
+      await expect(section.getByRole('button', { name: replaceBtn })).toBeVisible()
+      expect((await listMedia()).filter((m) => m.kind === kind)).toHaveLength(1)
+
+      // Replacing keeps exactly one.
+      await section.getByLabel(input).setInputFiles({ name: `${kind.toLowerCase()}-2.png`, mimeType: 'image/png', buffer: PNG })
+      await expect(toast(page, uploaded)).toBeVisible()
+      await expect.poll(async () => (await listMedia()).filter((m) => m.kind === kind).length).toBe(1)
+
+      acceptNextConfirm(page)
+      await section.getByRole('button', { name: 'Remove' }).click()
+      await expect(toast(page, removed)).toBeVisible()
+      await expect(section.getByRole('img', { name: alt })).toHaveCount(0)
+      expect((await listMedia()).filter((m) => m.kind === kind)).toHaveLength(0)
+    }
+    crashes.assertNone()
+  })
+
+  test('a file that is not really an image is refused', async ({ page }) => {
+    await openSection(page, munId, 'documents', 'Documents & Media')
+    const section = page.getByTestId('branding-LOGO')
+    await section
+      .getByLabel('Logo image (max 2MB)')
+      .setInputFiles({ name: 'fake.png', mimeType: 'image/png', buffer: Buffer.from('this is not a png') })
+    await expect(section.getByRole('img', { name: 'Current logo' })).toHaveCount(0)
+    expect((await listMedia()).filter((m) => m.kind === 'LOGO')).toHaveLength(0)
+  })
 })
 
-test('upload a logo and cover, list them publicly, then delete them', async () => {
+test('a mislabelled upload is refused by the API (magic bytes)', async () => {
+  const res = await api.post(`muns/${munId}/media`, {
+    data: { kind: 'LOGO', contentType: 'image/png', fileBase64: Buffer.from('GIF89a not a png').toString('base64') },
+  })
+  expect(res.status()).toBe(400)
+})
+
+test('upload a logo and cover; only the owner can see or delete them before the MUN is public', async () => {
   const logo = await upload('LOGO')
   const cover = await upload('COVER')
   expect(logo.kind).toBe('LOGO')
   expect(logo.url).toBeTruthy()
+  expect((await listMedia()).map((m) => m.id)).toEqual(expect.arrayContaining([logo.id, cover.id]))
 
+  // The sandbox isn't published, so its media is hidden from the public (270680b).
   const anon = await anonApi()
-  const publicMedia: Media[] = await (await anon.get(`muns/${munId}/media`)).json()
-  expect(publicMedia.map((m) => m.id)).toEqual(expect.arrayContaining([logo.id, cover.id]))
+  expect((await anon.get(`muns/${munId}/media`)).status()).toBe(404)
   expect((await anon.delete(`media/${logo.id}`)).status()).toBe(401)
   await anon.dispose()
 
