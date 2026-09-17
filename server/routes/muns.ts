@@ -83,12 +83,18 @@ munsRoutes.get('/facets', async (c) => {
   return c.json(facets)
 })
 
-munsRoutes.get('/:slug/products', async (c) => {
+// This path shape is shared with the organizer's by-id listing,
+// `GET /muns/:munId/products` (server/routes/mun-config.ts), which is mounted
+// after this router. When the segment isn't the slug of a publicly visible
+// mun, fall through to that handler instead of answering "Mun not found" —
+// otherwise the by-id route is unreachable.
+munsRoutes.get('/:slug/products', async (c, next) => {
   const { slug } = slugParamSchema.parse({ slug: c.req.param('slug') })
 
   const mun = await getMunBySlug(slug)
   if (!mun) {
-    throw new Error('Mun not found')
+    await next()
+    return
   }
 
   const includeInactive = await resolveIncludeInactive(

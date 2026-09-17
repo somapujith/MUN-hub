@@ -80,3 +80,50 @@ describe('GET /api/v1/muns/:slug/products?includeInactive=true', () => {
     expect(products.map((p: { id: string }) => p.id).sort()).toEqual([active.id, archived.id].sort())
   })
 })
+
+describe('GET /api/v1/muns/:munId/products (by id)', () => {
+  it('is not shadowed by the public by-slug route: the owner lists an unpublished mun\'s passes by id', async () => {
+    const organizer = await makeUser()
+    const mun = await makeMun(organizer.id)
+    const session = { userId: organizer.id, role: 'ORGANIZER' as const }
+    const headers = await authHeaders(organizer.id)
+
+    const active = await createRegistrationProduct(
+      { munId: mun.id, name: 'Active', price: 1000, capacity: 10 },
+      session,
+    )
+    const archived = await createRegistrationProduct(
+      { munId: mun.id, name: 'Archived', price: 1000, capacity: 10 },
+      session,
+    )
+    await deleteRegistrationProduct(archived.id, session)
+
+    const res = await app.request(`/api/v1/muns/${mun.id}/products?includeInactive=true`, { headers })
+
+    expect(res.status).toBe(200)
+    const products = await res.json()
+    expect(products.map((p: { id: string }) => p.id).sort()).toEqual([active.id, archived.id].sort())
+  })
+
+  it('still resolves a published mun by id (active passes only for anonymous callers)', async () => {
+    const organizer = await makeUser()
+    const mun = await makeMun(organizer.id)
+    await publishMunForProductsTest(mun.id)
+    const session = { userId: organizer.id, role: 'ORGANIZER' as const }
+    const active = await createRegistrationProduct(
+      { munId: mun.id, name: 'Active', price: 1000, capacity: 10 },
+      session,
+    )
+    const archived = await createRegistrationProduct(
+      { munId: mun.id, name: 'Archived', price: 1000, capacity: 10 },
+      session,
+    )
+    await deleteRegistrationProduct(archived.id, session)
+
+    const res = await app.request(`/api/v1/muns/${mun.id}/products?includeInactive=true`)
+
+    expect(res.status).toBe(200)
+    const products = await res.json()
+    expect(products.map((p: { id: string }) => p.id)).toEqual([active.id])
+  })
+})
