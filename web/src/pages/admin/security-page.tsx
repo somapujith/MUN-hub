@@ -285,6 +285,17 @@ function CodeDialog({
 }) {
   const [code, setCode] = useState("");
 
+  // Start every opening empty. The dialog stays mounted between uses and the
+  // parent closes it after a successful regenerate or disable by flipping
+  // `open`, which never reaches `onOpenChange`. Without this the used TOTP —
+  // or a single-use recovery code — would still be in the field the next time
+  // it opens.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setCode("");
+  }
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     onConfirm(code.trim());
