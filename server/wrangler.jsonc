@@ -83,30 +83,19 @@
     }
   ],
   // Uploaded files (organizer logos, covers, PDF documents) — see
-  // lib/storage/select-adapter.ts. R2 is not enabled on the account yet, so
-  // uploads go to Workers KV. The namespace doesn't exist yet (the deploy
-  // token can't create KV namespaces — docs/autonomous-run/USER_ACTIONS.md),
-  // so the binding is commented out. WITHOUT IT EVERY UPLOAD IS REFUSED with
-  // 503 "File storage is not configured" — deliberately, so nothing writes a
-  // row pointing at a file that was never stored. To enable real uploads:
-  //   npx wrangler kv namespace create munhub-uploads
-  // then uncomment this block with the printed id and redeploy.
-  // "kv_namespaces": [
-  //   {
-  //     "binding": "UPLOADS_KV",
-  //     "id": "<munhub-uploads namespace id>"
-  //   }
-  // ],
-  // Once R2 is enabled (`npx wrangler r2 bucket create munhub-uploads`),
-  // uncomment this and keep UPLOADS_KV: new uploads then go to R2, and files
-  // already in KV are still served (reads fall back to KV). See
-  // docs/autonomous-run/changes/lane-storage.md.
-  // "r2_buckets": [
-  //   {
-  //     "binding": "UPLOADS_BUCKET",
-  //     "bucket_name": "munhub-uploads"
-  //   }
-  // ],
+  // lib/storage/select-adapter.ts. R2 enabled + bucket created 2026-09-17.
+  // No UPLOADS_KV binding was ever added (the namespace was never created —
+  // production had zero successful uploads before this), so there is no KV
+  // fallback data to preserve; R2 alone is the whole story here. If a KV
+  // namespace is ever created later for some other reason, uncomment a
+  // kv_namespaces block with binding "UPLOADS_KV" and the adapter will use it
+  // as a read fallback automatically (see the adapter's own doc comment).
+  "r2_buckets": [
+    {
+      "binding": "UPLOADS_BUCKET",
+      "bucket_name": "munhub-uploads"
+    }
+  ],
   "observability": {
     "enabled": true
   },
