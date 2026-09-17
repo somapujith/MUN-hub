@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
 import { munDocuments, munMedia, muns } from '@/lib/db/schema'
 import { setRuntimeEnv } from '@/lib/runtime-env'
@@ -177,9 +177,12 @@ describe('uploads served by /api/v1/files', () => {
   // Regression: with no binding, production used to "store" uploads in the
   // mock adapter (bytes discarded) and still write the rows, so go-live
   // counted a logo and rules PDFs that didn't exist.
-  it('answers 503 and writes no row when a production API has no storage binding', async () => {
+  it('refuses uploads with 503 and writes no row when no storage is configured', async () => {
     const { mun, headers } = await setup()
-    const productionWithoutBinding = { NODE_ENV: 'production' }
+    // No UPLOADS_KV/UPLOADS_BUCKET binding, and STORAGE_ADAPTER overridden
+    // away from .env.test's "mock": what a Worker deployed without a binding sees.
+    const env = { STORAGE_ADAPTER: '' }
+    vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const logo = await app.request(
       `/api/v1/muns/${mun.id}/media`,
@@ -188,7 +191,7 @@ describe('uploads served by /api/v1/files', () => {
         headers,
         body: JSON.stringify({ kind: 'LOGO', contentType: 'image/png', fileBase64: SAMPLE_FILES.png.toString('base64') }),
       },
-      productionWithoutBinding,
+      env,
     )
     expect(logo.status, await logo.clone().text()).toBe(503)
     expect(await logo.json()).toMatchObject({
@@ -207,12 +210,13 @@ describe('uploads served by /api/v1/files', () => {
           fileBase64: SAMPLE_FILES.pdf.toString('base64'),
         }),
       },
-      productionWithoutBinding,
+      env,
     )
     expect(rules.status, await rules.clone().text()).toBe(503)
 
     expect(await db.select({ id: munMedia.id }).from(munMedia).where(eq(munMedia.munId, mun.id))).toEqual([])
     expect(await db.select({ id: munDocuments.id }).from(munDocuments).where(eq(munDocuments.munId, mun.id))).toEqual([])
+    vi.restoreAllMocks()
   })
 })
 

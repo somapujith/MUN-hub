@@ -74,6 +74,11 @@ export const LIMITERS = {
   // could guess passwords 15x faster than at sign-in, and any delegate could
   // make the isolate run 300 scrypt hashes a minute.
   accountDeleteUser: { binding: 'RL_ACCOUNT_DELETE_USER', limit: 5, periodSeconds: 60, perIp: false },
+  // Media/document uploads write real objects (KV/R2) and are checked against
+  // per-MUN caps (lib/actions/upload-limits.ts) on every call — cheap to spam
+  // for someone probing those caps or filling storage. Keyed per user, with
+  // an anon-ip fallback since requireAuth runs after this in the chain.
+  uploadsUser: { binding: 'RL_UPLOADS_USER', limit: 30, periodSeconds: 60, perIp: false },
   availabilityIp: { binding: 'RL_AVAILABILITY_IP', limit: 60, periodSeconds: 60, perIp: true },
   munsListIp: { binding: 'RL_MUNS_LIST_IP', limit: 120, periodSeconds: 60, perIp: true },
   // Uploaded files (logos, covers, PDFs) are fetched by the browser as <img>
@@ -170,6 +175,13 @@ const RULES: LimitRule[] = [
     methods: ['POST'],
     path: '/auth/session/password',
     checks: (facts) => [{ limiter: LIMITERS.changePasswordUser, key: userKey(facts) }],
+  },
+  {
+    // Media/document uploads: checked before requireAuth runs, so an
+    // anonymous caller is skipped here and stopped by the route's own 401.
+    methods: ['POST'],
+    path: /^\/muns\/[^/]+\/(media|documents)\/?$/,
+    checks: ({ sessionUserId }) => perUser(LIMITERS.uploadsUser, sessionUserId),
   },
   {
     methods: ['POST'],

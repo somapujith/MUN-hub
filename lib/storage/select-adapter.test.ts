@@ -38,6 +38,16 @@ describe('selectStorageAdapter', () => {
     expect(selectStorageAdapter()).toBe(mockStorageAdapter)
   })
 
+  it.each([undefined, '', 'r2', 'kv'])('fails closed with no binding when STORAGE_ADAPTER is %j', (value) => {
+    if (value === undefined) delete process.env.STORAGE_ADAPTER
+    else process.env.STORAGE_ADAPTER = value
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(() => selectStorageAdapter()).toThrow(StorageNotConfiguredError)
+    expect(() => selectStorageAdapter()).toThrow(STORAGE_NOT_CONFIGURED)
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('No UPLOADS_BUCKET or UPLOADS_KV binding'))
+  })
+
   it('uses the filesystem when STORAGE_ADAPTER=local', async () => {
     process.env.STORAGE_ADAPTER = 'local'
     const adapter = selectStorageAdapter()
@@ -80,6 +90,7 @@ describe('selectStorageAdapter', () => {
   })
 
   it('does not leak bindings between concurrent requests', async () => {
+    process.env.STORAGE_ADAPTER = 'mock'
     const kvA = createInMemoryKv()
     const kvB = createInMemoryKv()
     const upload = (kv: typeof kvA, key: string) =>
@@ -93,15 +104,13 @@ describe('selectStorageAdapter', () => {
     expect(selectStorageAdapter()).toBe(mockStorageAdapter)
   })
 
-  // Fails closed: an unconfigured environment used to hand back the mock,
-  // which answered 201 and dropped the bytes.
-  it('throws instead of discarding the file when nothing is configured', () => {
-    delete process.env.STORAGE_ADAPTER
+  it('logs an error when production is explicitly configured with the mock', () => {
+    process.env.STORAGE_ADAPTER = 'mock'
+    vi.stubEnv('NODE_ENV', 'production')
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    expect(() => selectStorageAdapter()).toThrow(StorageNotConfiguredError)
-    expect(() => selectStorageAdapter()).toThrow(STORAGE_NOT_CONFIGURED)
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('No UPLOADS_BUCKET or UPLOADS_KV binding'))
+    expect(selectStorageAdapter()).toBe(mockStorageAdapter)
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('STORAGE_ADAPTER=mock in production'))
   })
 
   it('throws in production too, rather than logging and carrying on', () => {
@@ -150,5 +159,15 @@ describe('deleteStoredObjectQuietly', () => {
 
     await expect(deleteStoredObjectQuietly(failing, KEY, 'test')).resolves.toBeUndefined()
     expect(error).toHaveBeenCalledWith(expect.stringContaining(`could not delete object "${KEY}"`), expect.any(Error))
+  })
+
+  it('logs instead of throwing when a lazily picked adapter is not configured', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const unconfigured = () => {
+      throw new StorageNotConfiguredError()
+    }
+
+    await expect(deleteStoredObjectQuietly(unconfigured, KEY, 'test')).resolves.toBeUndefined()
+    expect(error).toHaveBeenCalledWith(expect.stringContaining(`could not delete object "${KEY}"`), expect.any(StorageNotConfiguredError))
   })
 })

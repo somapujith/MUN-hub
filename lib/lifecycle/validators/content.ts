@@ -194,8 +194,11 @@ function imageCheck(
   label: string,
   noun: string,
 ): ValidationCheck {
-  const row = ctx.media.find((m) => m.kind === kind)
-  const stored = row !== undefined && !isDiscardedUploadUrl(row.url)
+  // Every row of this kind, not just the first: a re-upload after a discarded
+  // one leaves both rows in context, and the module must pass once any of
+  // them points at real storage.
+  const rows = ctx.media.filter((m) => m.kind === kind)
+  const stored = rows.some((m) => !isDiscardedUploadUrl(m.url))
   return {
     key,
     label,
@@ -203,7 +206,7 @@ function imageCheck(
     severity: 'BLOCKER',
     message: stored
       ? undefined
-      : row
+      : rows.length > 0
         ? `Upload your ${noun} again — the earlier upload was not stored.`
         : `A ${noun} is required.`,
   }

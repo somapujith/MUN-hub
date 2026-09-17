@@ -205,6 +205,17 @@ describe('validateBranding', () => {
     })
     expect(validateBranding(ctx).passed).toBe(true)
   })
+
+  it('passes once a stored logo sits next to a lost one', () => {
+    const ctx = makeContext({
+      media: [
+        { kind: 'LOGO', url: '/mock-storage/muns/mun-1/branding/a' } as never,
+        { kind: 'LOGO', url: 'https://api.munhub.in/api/v1/files/muns/mun-1/branding/c' } as never,
+        { kind: 'COVER', url: 'https://api.munhub.in/api/v1/files/muns/mun-1/branding/d' } as never,
+      ],
+    })
+    expect(validateBranding(ctx).passed).toBe(true)
+  })
 })
 
 describe('validateContact', () => {

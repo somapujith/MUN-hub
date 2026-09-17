@@ -63,7 +63,8 @@
     { "name": "RL_MFA_MANAGE_USER", "namespace_id": "1020", "simple": { "limit": 5, "period": 60 } },
     { "name": "RL_FILES_IP", "namespace_id": "1021", "simple": { "limit": 1200, "period": 60 } },
     { "name": "RL_VERIFY_RESEND_IP", "namespace_id": "1022", "simple": { "limit": 10, "period": 60 } },
-    { "name": "RL_VERIFY_RESEND_EMAIL", "namespace_id": "1023", "simple": { "limit": 3, "period": 60 } }
+    { "name": "RL_VERIFY_RESEND_EMAIL", "namespace_id": "1023", "simple": { "limit": 3, "period": 60 } },
+    { "name": "RL_UPLOADS_USER", "namespace_id": "1024", "simple": { "limit": 30, "period": 60 } }
   ],
   // Hyperdrive config "munhub-db", created 2026-09-17 against the production
   // Neon instance. Pools/terminates Postgres connections at Cloudflare's edge
@@ -168,7 +169,8 @@
         { "name": "RL_MFA_MANAGE_USER", "namespace_id": "2020", "simple": { "limit": 5, "period": 60 } },
         { "name": "RL_FILES_IP", "namespace_id": "2021", "simple": { "limit": 1200, "period": 60 } },
         { "name": "RL_VERIFY_RESEND_IP", "namespace_id": "2022", "simple": { "limit": 10, "period": 60 } },
-        { "name": "RL_VERIFY_RESEND_EMAIL", "namespace_id": "2023", "simple": { "limit": 3, "period": 60 } }
+        { "name": "RL_VERIFY_RESEND_EMAIL", "namespace_id": "2023", "simple": { "limit": 3, "period": 60 } },
+        { "name": "RL_UPLOADS_USER", "namespace_id": "2024", "simple": { "limit": 30, "period": 60 } }
       ],
       "hyperdrive": [
         {

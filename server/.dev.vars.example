@@ -26,6 +26,10 @@ MOCK_PAYMENT_WEBHOOK_SECRET="dev-webhook-secret-change-me"
 ZEPTOMAIL_TOKEN=""
 
 # Optional
+# Uploads are refused (503) while wrangler.jsonc's UPLOADS_KV binding is
+# commented out. Uncomment it (wrangler dev simulates KV locally), or set this
+# to accept uploads and discard the bytes:
+# STORAGE_ADAPTER="mock"
 # RATE_LIMIT_GLOBAL_PER_MINUTE="300"
 # TRUST_PROXY_HEADERS=""
 # SENTRY_DSN=""

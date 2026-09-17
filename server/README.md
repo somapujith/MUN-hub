@@ -84,7 +84,7 @@ Defined in `src/app.ts`:
 5. security headers (HSTS, nosniff, `default-src 'none'` CSP, …)
 6. logger
 7. CORS (`middleware/cors.ts`, origins from `server/lib/origins.ts`)
-8. body limit (1 MB; 30 MB for document/media uploads; JSON 413)
+8. body limit (1 MB; ~13.4 MB for document/media uploads, sized from the 10 MB PDF cap; JSON 413)
 9. session (`mun_hub_session` → `getSessionByToken`)
 10. `/webhooks/*` (payment provider callbacks, outside CSRF)
 11. CSRF (Origin/Referer check on unsafe methods under `/api/v1`, trusted origins only)

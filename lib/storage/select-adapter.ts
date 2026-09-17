@@ -39,7 +39,12 @@ export function selectStorageAdapter(): StorageAdapter {
 
   const configured = getRuntimeEnv('STORAGE_ADAPTER')
   if (configured === 'local') return createLocalStorageAdapter()
-  if (configured === 'mock') return mockStorageAdapter
+  if (configured === 'mock') {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[storage] STORAGE_ADAPTER=mock in production, so uploaded files are NOT being stored.')
+    }
+    return mockStorageAdapter
+  }
 
   console.error(
     '[storage] No UPLOADS_BUCKET or UPLOADS_KV binding and STORAGE_ADAPTER is ' +
@@ -70,10 +75,18 @@ export function withReadFallback(primary: StorageAdapter, fallback: StorageAdapt
  * Deletes a stored object without failing the caller. Used after the row
  * that referenced the object is gone (or was never written): a leftover
  * object costs storage, not correctness, so it is logged, not thrown.
+ *
+ * When no adapter has been picked yet, pass `selectStorageAdapter` itself
+ * rather than its result, so an unconfigured store is logged here too
+ * instead of failing a request whose row is already deleted.
  */
-export async function deleteStoredObjectQuietly(storage: StorageAdapter, key: string, context: string): Promise<void> {
+export async function deleteStoredObjectQuietly(
+  storage: StorageAdapter | (() => StorageAdapter),
+  key: string,
+  context: string,
+): Promise<void> {
   try {
-    await storage.delete(key)
+    await (typeof storage === 'function' ? storage() : storage).delete(key)
   } catch (error) {
     console.error(`[storage] ${context}: could not delete object "${key}"`, error)
   }

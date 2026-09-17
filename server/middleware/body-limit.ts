@@ -1,11 +1,14 @@
 import type { Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { createMiddleware } from 'hono/factory'
-import { base64LengthForBytes, MAX_UPLOAD_BYTES } from '@/lib/storage/validate'
+import { largestUploadBytes, maxBase64Length } from '@/lib/storage/validate'
 import type { AppVariables } from '../src/types'
 
 /** Every JSON route. Generous for any form payload this API accepts. */
 export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024 // 1 MB
+
+/** Room for the JSON around the base64 string (kind, title, content type). */
+const UPLOAD_JSON_OVERHEAD_BYTES = 64 * 1024
 
 /**
  * Base64 upload routes: the largest allowed file once base64-encoded, plus
@@ -14,7 +17,7 @@ export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024 // 1 MB
  * with it — a stale, far larger limit here let any signed-in caller make the
  * isolate buffer and decode tens of megabytes for a MUN they don't own.
  */
-export const UPLOAD_BODY_LIMIT_BYTES = base64LengthForBytes(MAX_UPLOAD_BYTES) + 64 * 1024
+export const UPLOAD_BODY_LIMIT_BYTES = maxBase64Length(largestUploadBytes()) + UPLOAD_JSON_OVERHEAD_BYTES
 
 // POST /api/v1/muns/:munId/documents (mun-documents.ts) and
 // POST /api/v1/muns/:munId/media (mun-branding.ts).

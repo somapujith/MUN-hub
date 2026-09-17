@@ -1,11 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
 import { muns } from '@/lib/db/schema'
-import {
-  base64LengthForBytes,
-  MAX_IMAGE_UPLOAD_BYTES,
-  UPLOAD_RULES,
-} from '@/lib/storage/validate'
+import { largestUploadBytes, maxBase64Length, UPLOAD_RULES } from '@/lib/storage/validate'
 import { UPLOAD_BODY_LIMIT_BYTES } from '../middleware/body-limit'
 import { createApp } from '../src/app'
 import { authHeaders, makeUser } from './helpers'
@@ -180,31 +176,93 @@ describe('body limit', () => {
     expect(res.status).toBe(413)
   })
 
-  it('lets document and media uploads through, up to the base64 size of the largest allowed file', async () => {
+  it('sizes the upload body limit to the largest file (a 10 MB PDF, base64-encoded) and no more', () => {
+    const largestBase64 = 4 * Math.ceil((10 * 1024 * 1024) / 3)
+    expect(UPLOAD_BODY_LIMIT_BYTES).toBeGreaterThan(largestBase64)
+    expect(UPLOAD_BODY_LIMIT_BYTES).toBeLessThan(14 * 1024 * 1024)
+  })
+
+  it('lets document and media uploads through up to the upload limit', async () => {
     const munId = crypto.randomUUID()
-    const twoMb = JSON.stringify({ fileBase64: 'A'.repeat(2 * 1024 * 1024) })
+    const maxDocument = JSON.stringify({ fileBase64: 'A'.repeat(4 * Math.ceil((10 * 1024 * 1024) / 3)) })
 
     for (const path of [`/api/v1/muns/${munId}/documents`, `/api/v1/muns/${munId}/media`]) {
       const res = await app.request(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: twoMb,
+        body: maxDocument,
       })
       // Past the body limit: the anonymous request is stopped by requireAuth instead.
       expect(res.status, path).toBe(401)
     }
 
-    // The upload limit tracks the 10 MB document cap (~13.3 MB of base64),
-    // not the retired 20 MB one — a 30 MB body never reaches a handler now.
-    expect(UPLOAD_BODY_LIMIT_BYTES).toBeLessThan(15 * 1024 * 1024)
-    expect(UPLOAD_BODY_LIMIT_BYTES).toBeGreaterThan(base64LengthForBytes(UPLOAD_RULES.DOCUMENT.maxBytes))
+    // The old 30 MB allowance (sized for a 20 MB PDF) is gone.
+    for (const size of [UPLOAD_BODY_LIMIT_BYTES + 1, 29 * 1024 * 1024]) {
+      const tooBig = await app.request(`/api/v1/muns/${munId}/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileBase64: 'A'.repeat(size) }),
+      })
+      expect(tooBig.status, String(size)).toBe(413)
+    }
+  })
 
-    const tooBig = await app.request(`/api/v1/muns/${munId}/documents`, {
+  it("refuses an upload to someone else's MUN before parsing the body", async () => {
+    const owner = await makeUser('ORGANIZER')
+    const student = await makeUser('STUDENT')
+    const [mun] = await db
+      .insert(muns)
+      .values({ organizerId: owner.id, name: 'Upload Guard Mun', slug: `upload-guard-${crypto.randomUUID()}`, status: 'ONBOARDING' })
+      .returning()
+    const headers = { ...(await authHeaders(student.id)), 'Content-Type': 'application/json' }
+
+    for (const area of ['media', 'documents']) {
+      // Not even valid JSON: a 400 here would mean the body was parsed first.
+      const res = await app.request(`/api/v1/muns/${mun.id}/${area}`, { method: 'POST', headers, body: '{"fileBase64": "AAAA' })
+      expect(res.status, area).toBe(403)
+    }
+  })
+
+  it('refuses a base64 string longer than the largest file of its kind', async () => {
+    const owner = await makeUser('ORGANIZER')
+    const [mun] = await db
+      .insert(muns)
+      .values({ organizerId: owner.id, name: 'Upload Size Mun', slug: `upload-size-${crypto.randomUUID()}`, status: 'ONBOARDING' })
+      .returning()
+    const headers = { ...(await authHeaders(owner.id)), 'Content-Type': 'application/json' }
+
+    const media = await app.request(`/api/v1/muns/${mun.id}/media`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileBase64: 'A'.repeat(UPLOAD_BODY_LIMIT_BYTES + 1) }),
+      headers,
+      body: JSON.stringify({
+        kind: 'GALLERY',
+        contentType: 'image/png',
+        fileBase64: 'A'.repeat(4 * Math.ceil((5 * 1024 * 1024) / 3) + 4),
+      }),
     })
-    expect(tooBig.status).toBe(413)
+    expect(media.status).toBe(400)
+    expect(await media.json()).toMatchObject({
+      error: { code: 'VALIDATION_FAILED', fields: { fileBase64: ['File too large — maximum allowed size is 5MB'] } },
+    })
+  })
+
+  it('refuses uploads while the MUN application is still in review', async () => {
+    const owner = await makeUser('ORGANIZER')
+    const [mun] = await db
+      .insert(muns)
+      .values({ organizerId: owner.id, name: 'Unapproved Mun', slug: `unapproved-${crypto.randomUUID()}`, status: 'SUBMITTED' })
+      .returning()
+    const headers = { ...(await authHeaders(owner.id)), 'Content-Type': 'application/json' }
+
+    const res = await app.request(`/api/v1/muns/${mun.id}/media`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ kind: 'LOGO', contentType: 'image/png', fileBase64: 'iVBORw0KGgo=' }),
+    })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({
+      error: { code: 'CONFLICT_STATE', message: 'You can upload files once MUN Hub approves your application' },
+    })
   })
 
   // The schema cap is what stops a 13 MB base64 string being decoded into a
@@ -221,7 +279,7 @@ describe('body limit', () => {
       body: JSON.stringify({
         kind: 'LOGO',
         contentType: 'image/png',
-        fileBase64: 'A'.repeat(base64LengthForBytes(MAX_IMAGE_UPLOAD_BYTES) + 4),
+        fileBase64: 'A'.repeat(maxBase64Length(largestUploadBytes(['LOGO', 'COVER', 'IMAGE'])) + 4),
       }),
     })
     expect(overImageCap.status).toBe(400)
@@ -234,7 +292,7 @@ describe('body limit', () => {
         kind: 'RULES',
         title: 'Rules',
         contentType: 'application/pdf',
-        fileBase64: 'A'.repeat(base64LengthForBytes(UPLOAD_RULES.DOCUMENT.maxBytes) + 4),
+        fileBase64: 'A'.repeat(maxBase64Length(UPLOAD_RULES.DOCUMENT.maxBytes) + 4),
       }),
     })
     expect(overDocumentCap.status).toBe(400)

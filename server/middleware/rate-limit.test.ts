@@ -316,6 +316,29 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
     })
   })
 
+  describe('media and document uploads (per signed-in user)', () => {
+    it('limits uploads per signed-in user, across MUNs and addresses', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const paths = (i: number) => `/muns/${crypto.randomUUID()}/${i % 2 === 0 ? 'media' : 'documents'}`
+      const result = await statuses(LIMITERS.uploadsUser.limit + 1, (i) =>
+        send(paths(i), { ip: freshIp(), user, body: {} }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.uploadsUser.limit))
+
+      // Another user is unaffected, and reads of the same routes don't count.
+      expect((await send(paths(0), { ip: freshIp(), user: `user-${crypto.randomUUID()}`, body: {} })).status).toBe(200)
+      expect((await send(paths(0), { ip: freshIp(), user, method: 'GET' })).status).toBe(200)
+    })
+
+    it('does not apply the upload limit to other /muns/:id routes', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const result = await statuses(LIMITERS.uploadsUser.limit + 1, () =>
+        send(`/muns/${crypto.randomUUID()}/media/actions/reorder-gallery`, { ip: freshIp(), user, body: {} }),
+      )
+      expect(result.every((status) => status === 200)).toBe(true)
+    })
+  })
+
   it('keeps the organizer code limits: per IP+email and per IP', async () => {
     const ip = freshIp()
     const email = freshEmail('org-code')

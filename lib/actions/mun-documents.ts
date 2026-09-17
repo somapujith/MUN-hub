@@ -1,10 +1,11 @@
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { munDocuments } from '@/lib/db/schema'
+import { munDocuments, muns } from '@/lib/db/schema'
 import type { MunDocumentKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { assertCanUploadToMun, assertUploadQuota } from '@/lib/actions/upload-limits'
 import { deleteStoredObjectQuietly, selectStorageAdapter } from '@/lib/storage/select-adapter'
 import { validateUpload } from '@/lib/storage/validate'
 
@@ -47,9 +48,13 @@ export async function uploadMunDocument(
   input: UploadMunDocumentInput,
   session: Session | null,
 ): Promise<MunDocumentItem> {
-  await assertOwnsOrAdmin(input.munId, session)
+  await assertCanUploadToMun(input.munId, session)
   await assertModuleNotLocked(input.munId, 'RULES_DOCUMENTS', session)
   validateUpload(input.file, input.contentType, 'DOCUMENT')
+
+  const newBytes = input.file.byteLength
+  // Early refusal, before any bytes are written; re-checked under the lock below.
+  await assertUploadQuota(db, input.munId, { area: 'documents' }, newBytes)
 
   const storage = selectStorageAdapter()
   const key = `muns/${input.munId}/documents/${crypto.randomUUID()}`
@@ -57,18 +62,22 @@ export async function uploadMunDocument(
 
   let created: MunDocumentItem
   try {
-    ;[created] = await db
-      .insert(munDocuments)
-      .values({
-        munId: input.munId,
-        kind: input.kind,
-        title: input.title,
-        url,
-        storageKey: key,
-        contentType: input.contentType,
-        sizeBytes: input.file.byteLength,
-      })
-      .returning()
+    ;[created] = await db.transaction(async (tx) => {
+      await tx.select({ id: muns.id }).from(muns).where(eq(muns.id, input.munId)).for('update')
+      await assertUploadQuota(tx, input.munId, { area: 'documents' }, newBytes)
+      return tx
+        .insert(munDocuments)
+        .values({
+          munId: input.munId,
+          kind: input.kind,
+          title: input.title,
+          url,
+          storageKey: key,
+          contentType: input.contentType,
+          sizeBytes: newBytes,
+        })
+        .returning()
+    })
   } catch (error) {
     // No row points at the new object, so don't leave it behind.
     await deleteStoredObjectQuietly(storage, key, 'uploadMunDocument rollback')
@@ -102,7 +111,7 @@ export async function deleteMunDocument(id: string, session: Session | null): Pr
   await assertModuleNotLocked(existing.munId, 'RULES_DOCUMENTS', session)
 
   await db.delete(munDocuments).where(eq(munDocuments.id, id))
-  await deleteStoredObjectQuietly(selectStorageAdapter(), existing.storageKey, 'deleteMunDocument')
+  await deleteStoredObjectQuietly(selectStorageAdapter, existing.storageKey, 'deleteMunDocument')
 
   await onModuleDataChanged(existing.munId, 'RULES_DOCUMENTS', session!.userId)
 }
