@@ -253,6 +253,13 @@
       "when": 1789619715949,
       "tag": "0035_audit_actions_and_refund_doc_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789657921468,
+      "tag": "0037_registration_groups",
+      "breakpoints": true
     }
   ]
 }

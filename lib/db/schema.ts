@@ -16,6 +16,7 @@ import {
   munStatusEnum,
   paymentStatusEnum,
   paymentVerificationEnum,
+  registrationGroupInvitationStatusEnum,
   registrationStatusEnum,
   roleEnum,
   scheduleItemKindEnum,
@@ -569,6 +570,76 @@ export const registrationProductsRelations = relations(registrationProducts, ({ 
 }))
 
 // ---------------------------------------------------------------------------
+// registrationGroups — group/delegation registration (2026-09-17). A head
+// delegate pays for a whole team in one order; each team member still gets
+// their own `registrations` row (so roster/check-in/results/certificates all
+// keep working per-registration, unmodified) linked back here by
+// `registrations.registrationGroupId`. See
+// docs/autonomous-run/changes/lane-delegation.md for the full design.
+//
+// `headRegistrationId` is set once, right after the head's own registration
+// row is inserted in the same transaction that creates this group — it is
+// the one row in the group that is genuinely the head's own registration.
+// Every OTHER row in the group is created at the same time but temporarily
+// owned by the head (`registrations.userId = headUserId`) until a teammate
+// accepts an invitation and the row's `userId` is reassigned to them — see
+// `lib/actions/registration-group.ts`. Dashboards must never show an
+// unclaimed placeholder row as if it were the head's own registration; they
+// distinguish "head's own" from "unclaimed" by comparing a row's id against
+// `headRegistrationId`, not by its (temporary) `userId`.
+//
+// `paymentId` is set once the group's single order is created — nullable
+// because the group row is inserted before the payment row exists (the
+// payment references the head's registration; this is a convenience
+// pointer so the roster page can show "total paid" with one join instead of
+// following registrations -> payments through the head row).
+// ---------------------------------------------------------------------------
+
+export const registrationGroups = pgTable(
+  'registration_groups',
+  {
+    id: id(),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id, { onDelete: 'cascade' }),
+    registrationProductId: text('registration_product_id')
+      .notNull()
+      .references(() => registrationProducts.id),
+    headUserId: text('head_user_id')
+      .notNull()
+      .references(() => users.id),
+    // Nullable only for the instant between creating this row and inserting
+    // the head's own registration row in the same transaction — every group
+    // a caller can ever observe outside that transaction has this set.
+    headRegistrationId: text('head_registration_id').references((): AnyPgColumn => registrations.id),
+    teamSize: integer('team_size').notNull(),
+    paymentId: text('payment_id').references((): AnyPgColumn => payments.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('registration_groups_mun_id_idx').on(table.munId),
+    index('registration_groups_head_user_id_idx').on(table.headUserId),
+  ],
+)
+
+export const registrationGroupsRelations = relations(registrationGroups, ({ one, many }) => ({
+  mun: one(muns, { fields: [registrationGroups.munId], references: [muns.id] }),
+  registrationProduct: one(registrationProducts, {
+    fields: [registrationGroups.registrationProductId],
+    references: [registrationProducts.id],
+  }),
+  headUser: one(users, { fields: [registrationGroups.headUserId], references: [users.id] }),
+  headRegistration: one(registrations, {
+    fields: [registrationGroups.headRegistrationId],
+    references: [registrations.id],
+    relationName: 'groupHeadRegistration',
+  }),
+  members: many(registrations, { relationName: 'groupMembers' }),
+  invitations: many(registrationGroupInvitations),
+  payment: one(payments, { fields: [registrationGroups.paymentId], references: [payments.id] }),
+}))
+
+// ---------------------------------------------------------------------------
 // registrations
 // ---------------------------------------------------------------------------
 
@@ -608,6 +679,11 @@ export const registrations = pgTable(
     // submit with the same key returns the original registration instead of
     // creating (or rejecting) a second one. Unique per user.
     idempotencyKey: text('idempotency_key'),
+    // Nullable — set only for a row created by the group/delegation flow
+    // (lib/actions/registration.ts#initiateGroupRegistration). See
+    // registrationGroups' header comment above for how a row's `userId` can
+    // be temporarily the head delegate's own id until a teammate claims it.
+    registrationGroupId: text('registration_group_id').references((): AnyPgColumn => registrationGroups.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -621,6 +697,7 @@ export const registrations = pgTable(
       table.status,
     ),
     index('registrations_user_id_idx').on(table.userId),
+    index('registrations_registration_group_id_idx').on(table.registrationGroupId),
   ],
 )
 
@@ -636,6 +713,77 @@ export const registrationsRelations = relations(registrations, ({ one, many }) =
   payment: many(payments),
   certificates: many(certificates),
   achievements: many(achievements),
+  registrationGroup: one(registrationGroups, {
+    fields: [registrations.registrationGroupId],
+    references: [registrationGroups.id],
+    relationName: 'groupMembers',
+  }),
+  headOfGroup: one(registrationGroups, {
+    fields: [registrations.id],
+    references: [registrationGroups.headRegistrationId],
+    relationName: 'groupHeadRegistration',
+  }),
+  // Deliberately no `one(registrationGroupInvitations, ...)` convenience
+  // relation here: a slot can accumulate more than one invitation row over
+  // its life (cancel + re-invite), so "the" invitation for a registration is
+  // never a safe single-row relation — lib/actions/registration-group.ts
+  // always queries registrationGroupInvitations directly, filtered by
+  // status, instead of trusting a `with` shortcut to pick the right one.
+}))
+
+// ---------------------------------------------------------------------------
+// registrationGroupInvitations — one row per invite attempt for one of a
+// group's team slots (`registrationId`, a not-yet-claimed `registrations`
+// row still owned by the head — see registrationGroups' header comment).
+// Cancelling an invitation (status CANCELLED) frees its slot for a fresh
+// invitation to a different email without touching the registration row
+// itself — "the slot" is the registration row; invitations are disposable
+// attempts to fill it. A slot can have at most one PENDING invitation at a
+// time, enforced by `inviteGroupMember` (lib/actions/registration-group.ts),
+// not by a DB constraint (an expired/cancelled invitation must be able to
+// coexist with a fresh one for history).
+//
+// The token is stored only as a SHA-256 hash (`tokenHash`), same convention
+// as `email_verification_tokens` — a leaked table alone can't be replayed.
+// ---------------------------------------------------------------------------
+
+export const registrationGroupInvitations = pgTable(
+  'registration_group_invitations',
+  {
+    id: id(),
+    groupId: text('group_id')
+      .notNull()
+      .references(() => registrationGroups.id, { onDelete: 'cascade' }),
+    registrationId: text('registration_id')
+      .notNull()
+      .references(() => registrations.id),
+    email: text('email').notNull(),
+    invitedName: text('invited_name'),
+    tokenHash: text('token_hash').notNull().unique(),
+    status: registrationGroupInvitationStatusEnum('status').notNull().default('PENDING'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Bumped on resend (a fresh token/expiry) so the resend cooldown has
+    // something to measure that isn't the immutable `createdAt`.
+    lastSentAt: timestamp('last_sent_at', { withTimezone: true }).notNull().defaultNow(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('registration_group_invitations_group_id_idx').on(table.groupId),
+    index('registration_group_invitations_registration_id_idx').on(table.registrationId),
+  ],
+)
+
+export const registrationGroupInvitationsRelations = relations(registrationGroupInvitations, ({ one }) => ({
+  group: one(registrationGroups, {
+    fields: [registrationGroupInvitations.groupId],
+    references: [registrationGroups.id],
+  }),
+  registration: one(registrations, {
+    fields: [registrationGroupInvitations.registrationId],
+    references: [registrations.id],
+  }),
 }))
 
 // ---------------------------------------------------------------------------

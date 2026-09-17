@@ -322,6 +322,18 @@ export const slaStateEnum = pgEnum('sla_state', [
   'COMPLETED',
 ])
 
+// ---------------------------------------------------------------------------
+// Group/delegation registration (2026-09-17). See lib/db/schema.ts's
+// registrationGroups/registrationGroupInvitations header comments.
+// ---------------------------------------------------------------------------
+
+export const registrationGroupInvitationStatusEnum = pgEnum('registration_group_invitation_status', [
+  'PENDING',
+  'ACCEPTED',
+  'EXPIRED',
+  'CANCELLED',
+])
+
 export type Role = (typeof roleEnum.enumValues)[number]
 export type MunStatus = (typeof munStatusEnum.enumValues)[number]
 export type RegistrationStatus = (typeof registrationStatusEnum.enumValues)[number]
@@ -344,3 +356,4 @@ export type ScheduleItemKind = (typeof scheduleItemKindEnum.enumValues)[number]
 export type PaymentVerificationState = (typeof paymentVerificationEnum.enumValues)[number]
 export type SubmissionStatus = (typeof submissionStatusEnum.enumValues)[number]
 export type SlaStateEnumValue = (typeof slaStateEnum.enumValues)[number]
+export type RegistrationGroupInvitationStatus = (typeof registrationGroupInvitationStatusEnum.enumValues)[number]
