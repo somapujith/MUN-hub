@@ -63,6 +63,21 @@ Lane: organizer workspace pages (not settings, finance, communications, registra
   - Documents & Media has logo and cover upload, a required-documents indicator, a 10MB PDF label, and no refund-policy option for new uploads.
   - Checked in a browser against the local API with `STORAGE_ADAPTER=local`, on desktop and at 390px.
 
+- `f73ce26` + `6f3d74f`: item 2 (portfolios).
+  - Portfolio create, update and bulk add refuse duplicate names within a committee (409), ignoring case.
+  - `POST /committees/:id/portfolios/bulk` adds up to 300 portfolios in one transaction.
+  - Each committee card lists its portfolios with add, "Add a list" (paste), inline edit and remove, and shows a no-seat warning.
+  - The page is renamed "Committees & Portfolios". Checked in a browser on desktop and mobile; the mobile overflow was fixed with `min-w-0`.
+- `fc05d9e`: republishing after unpublish (bug found by mun-hub-84, routed by mun-hub-62).
+  - `enqueueForGoLive` opens a fresh APPROVED submission for a previously published MUN that is UNPUBLISHED, or VERIFIED again after re-verification.
+  - Re-queueing is refused while a required section awaits review.
+  - Gate-2 approval now marks every section VERIFIED and resolves open reviewer issues.
+- `aa85127`: item 6 ("Preview as a delegate").
+  - `getMunPreview` and `GET /organizer/muns/:munId/preview` serve owner and staff only.
+  - `/organizer/muns/:munId/preview` renders the public page with a preview banner and registration turned off, marked noindex.
+  - MUN Setup has a button that opens it.
+- All seven lane items are done.
+
 ### Bugs found while mapping (status)
 
 - Done: unmapped lock and confirm errors (now 409).
