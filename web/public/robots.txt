@@ -1,0 +1,12 @@
+# Served by every web host (munhub.in, www, app., publish., admin., per-MUN
+# slug hosts). The sitemap lives on the API host; listing it here is how search
+# engines accept a sitemap hosted on another subdomain.
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /organizer
+Disallow: /dashboard
+Disallow: /register
+Disallow: /profile
+
+Sitemap: https://api.munhub.in/api/v1/sitemap.xml
