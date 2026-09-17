@@ -2,11 +2,11 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { StorageAdapter } from './adapter'
+import { STORAGE_UNAVAILABLE_MESSAGE, type StorageAdapter } from './adapter'
 import { runWithStorageBindings } from './bindings'
 import { createInMemoryKv, createInMemoryR2, SAMPLE_FILES } from './in-memory-bindings'
 import { mockStorageAdapter } from './mock-adapter'
-import { deleteStoredObjectQuietly, selectStorageAdapter } from './select-adapter'
+import { deleteStoredObjectQuietly, selectStorageAdapter, unavailableStorageAdapter } from './select-adapter'
 
 const KEY = 'muns/mun-1/branding/6f1c2b1e-3c4d-4e5f-8a9b-0c1d2e3f4a5b'
 
@@ -24,6 +24,7 @@ describe('selectStorageAdapter', () => {
 
   afterEach(async () => {
     vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
     if (savedAdapter === undefined) delete process.env.STORAGE_ADAPTER
     else process.env.STORAGE_ADAPTER = savedAdapter
@@ -94,13 +95,30 @@ describe('selectStorageAdapter', () => {
     expect(selectStorageAdapter()).toBe(mockStorageAdapter)
   })
 
-  it('logs an error when production falls back to the mock', () => {
-    delete process.env.STORAGE_ADAPTER
-    vi.stubEnv('NODE_ENV', 'production')
+  // Regression: production used to fall back to the mock, which reported
+  // success and discarded the bytes, so go-live counted files that were
+  // never stored.
+  it.each([
+    ['NODE_ENV=production', () => vi.stubEnv('NODE_ENV', 'production')],
+    ['Workers', () => vi.stubGlobal('navigator', { userAgent: 'Cloudflare-Workers' })],
+  ])('refuses uploads in production (%s) with no binding, even with STORAGE_ADAPTER=mock', async (_label, stub) => {
+    process.env.STORAGE_ADAPTER = 'mock'
+    stub()
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    expect(selectStorageAdapter()).toBe(mockStorageAdapter)
+    const adapter = selectStorageAdapter()
+    expect(adapter).toBe(unavailableStorageAdapter)
+    await expect(adapter.upload(SAMPLE_FILES.png, KEY, 'image/png')).rejects.toThrow(STORAGE_UNAVAILABLE_MESSAGE)
+    expect(await adapter.get(KEY)).toBeNull()
+    await expect(adapter.delete(KEY)).resolves.toBeUndefined()
     expect(error).toHaveBeenCalledWith(expect.stringContaining('No UPLOADS_BUCKET or UPLOADS_KV binding in production'))
+  })
+
+  it('still uses a binding in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    const kv = createInMemoryKv()
+    await runWithStorageBindings({ kv }, () => selectStorageAdapter().upload(SAMPLE_FILES.png, KEY, 'image/png'))
+    expect(kv.entries.has(KEY)).toBe(true)
   })
 
   it('does not log outside production', () => {

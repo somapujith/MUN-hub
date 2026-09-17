@@ -129,7 +129,7 @@ npx wrangler secret list --env=""
 | `CORS_ORIGINS` | var | staging | Extra trusted browser origins, comma-separated, exact match (`ALLOWED_ORIGINS` is an older alias). The production web hosts are built in (`server/lib/origins.ts`), so production sets it empty. |
 | `ALLOW_LOCALHOST_ORIGINS` | var | no | `true` trusts any `http://localhost:<port>`. Local development only; never set it on a deployed Worker. |
 | `PUBLIC_API_URL` | var | yes (prod) | Origin used in uploaded-file URLs (`https://api.munhub.in`). Unset: the request origin is used. |
-| `UPLOADS_KV`, `UPLOADS_BUCKET` | binding | for real uploads | Upload storage (`lib/storage/select-adapter.ts`). Both are commented out in `wrangler.jsonc` until the KV namespace / R2 bucket exists; without either, uploads go to the mock store and each one logs an error. |
+| `UPLOADS_KV`, `UPLOADS_BUCKET` | binding | for real uploads | Upload storage (`lib/storage/select-adapter.ts`). Both are commented out in `wrangler.jsonc` until the KV namespace / R2 bucket exists; without either, uploads are refused with 503 (no row is written) and each attempt logs an error. |
 | `ZEPTOMAIL_FROM_ADDRESS` | var | with email | Sender address on a domain verified in ZeptoMail |
 | `ZEPTOMAIL_TOKEN` | secret | for real email | ZeptoMail Send Mail token. Unset: emails (including sign-in codes and reset links) are only written to the log. |
 | `PAYMENT_FIELD_KEY` | secret | yes | AES-256-GCM key for payout details, base64 of 32 bytes. No default, and the code refuses to run without it. |

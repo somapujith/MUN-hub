@@ -6,6 +6,7 @@ import { ORGANIZER_OPS_ERROR_STATUS } from '@/lib/actions/organizer-ops-errors'
 import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
 import { MFA_ERRORS } from '@/lib/actions/staff-mfa'
 import { MODULE_LOCKED_PATTERN } from '@/lib/lifecycle/module-completion'
+import { STORAGE_UNAVAILABLE_MESSAGE } from '@/lib/storage/adapter'
 import type { AppVariables } from '../src/types'
 
 export type ErrorCode =
@@ -84,6 +85,11 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     return { status: 403, code: 'FORBIDDEN', message }
   }
   if (message === ORGANIZER_OTP_ERRORS.deliveryFailed) {
+    return { status: 503, code: 'UNAVAILABLE', message }
+  }
+
+  // lib/storage/select-adapter.ts — a deployed API with no storage binding.
+  if (message === STORAGE_UNAVAILABLE_MESSAGE) {
     return { status: 503, code: 'UNAVAILABLE', message }
   }
 
@@ -305,6 +311,7 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: ORGANIZER_OTP_ERRORS.tooManyAttempts, status: 429, code: 'RATE_LIMITED' },
   { message: ORGANIZER_OTP_ERRORS.delegateAccount, status: 403, code: 'FORBIDDEN' },
   { message: ORGANIZER_OTP_ERRORS.deliveryFailed, status: 503, code: 'UNAVAILABLE' },
+  { message: STORAGE_UNAVAILABLE_MESSAGE, status: 503, code: 'UNAVAILABLE' },
   { message: 'You must accept the Terms of Service to create an account', status: 400, code: 'VALIDATION_FAILED' },
   { message: ONBOARDING_ERRORS.locked, status: 409, code: 'CONFLICT_STATE' },
   { message: ONBOARDING_ERRORS.incomplete, status: 409, code: 'CONFLICT_STATE' },

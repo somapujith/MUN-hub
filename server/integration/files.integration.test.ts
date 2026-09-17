@@ -1,7 +1,9 @@
+import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
-import { muns } from '@/lib/db/schema'
+import { munDocuments, munMedia, muns } from '@/lib/db/schema'
 import { setRuntimeEnv } from '@/lib/runtime-env'
+import { STORAGE_UNAVAILABLE_MESSAGE } from '@/lib/storage/adapter'
 import { createInMemoryKv, SAMPLE_FILES } from '@/lib/storage/in-memory-bindings'
 import { createApp } from '../src/app'
 import { authHeaders, makeUser } from './helpers'
@@ -170,6 +172,47 @@ describe('uploads served by /api/v1/files', () => {
     expect(await notPdf.json()).toMatchObject({ error: { code: 'VALIDATION_FAILED' } })
 
     expect(kv.entries.size).toBe(0)
+  })
+
+  // Regression: with no binding, production used to "store" uploads in the
+  // mock adapter (bytes discarded) and still write the rows, so go-live
+  // counted a logo and rules PDFs that didn't exist.
+  it('answers 503 and writes no row when a production API has no storage binding', async () => {
+    const { mun, headers } = await setup()
+    const productionWithoutBinding = { NODE_ENV: 'production' }
+
+    const logo = await app.request(
+      `/api/v1/muns/${mun.id}/media`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ kind: 'LOGO', contentType: 'image/png', fileBase64: SAMPLE_FILES.png.toString('base64') }),
+      },
+      productionWithoutBinding,
+    )
+    expect(logo.status, await logo.clone().text()).toBe(503)
+    expect(await logo.json()).toMatchObject({
+      error: { code: 'UNAVAILABLE', message: STORAGE_UNAVAILABLE_MESSAGE },
+    })
+
+    const rules = await app.request(
+      `/api/v1/muns/${mun.id}/documents`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          kind: 'RULES',
+          title: 'Rules of Procedure',
+          contentType: 'application/pdf',
+          fileBase64: SAMPLE_FILES.pdf.toString('base64'),
+        }),
+      },
+      productionWithoutBinding,
+    )
+    expect(rules.status, await rules.clone().text()).toBe(503)
+
+    expect(await db.select({ id: munMedia.id }).from(munMedia).where(eq(munMedia.munId, mun.id))).toEqual([])
+    expect(await db.select({ id: munDocuments.id }).from(munDocuments).where(eq(munDocuments.munId, mun.id))).toEqual([])
   })
 })
 
