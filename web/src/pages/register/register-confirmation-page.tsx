@@ -11,7 +11,7 @@ import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
 import { fetchRegistrationById } from "@/api/registration";
 import { NotFoundPage } from "@/pages/not-found-page";
-import type { RegistrationStatus } from "@/types/enums";
+import type { PaymentStatus, RegistrationStatus } from "@/types/enums";
 
 const STATUS_LABEL: Record<RegistrationStatus, string> = {
   PENDING: "Awaiting payment",
@@ -75,7 +75,7 @@ export function RegisterConfirmationPage() {
       <Helmet><title>Registration status</title></Helmet>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-xl px-lg py-xxl sm:px-xl">
-        {renderStatus(registration.status, slug, receipt, registrationId, Boolean(payment))}
+        {renderStatus(registration.status, slug, receipt, registrationId, payment?.status)}
       </main>
       <SiteFooter />
     </div>
@@ -87,7 +87,8 @@ function renderStatus(
   slug: string,
   receipt: ReactNode,
   registrationId: string,
-  paid: boolean,
+  /** Undefined when the pass was free (no payment row). */
+  paymentStatus: PaymentStatus | undefined,
 ) {
   switch (status) {
     case "CONFIRMED":
@@ -95,7 +96,7 @@ function renderStatus(
         <RegistrationNotice
           tone="success"
           title="You're registered"
-          message={paid ? "Payment went through and your seat is confirmed." : "Your seat is confirmed."}
+          message={paymentStatus ? "Payment went through and your seat is confirmed." : "Your seat is confirmed."}
           detail={receipt}
         >
           <Button render={<Link to={`/mun/${slug}`} />}>Back to conference</Button>
@@ -108,6 +109,22 @@ function renderStatus(
         </RegistrationNotice>
       );
     case "CANCELLED":
+      // The money was taken after the seat hold ended. There are no refunds:
+      // staff return it by hand, so paying again would charge the delegate
+      // twice. (Legacy REFUNDED rows predate real payments: mock only.)
+      if (paymentStatus === "PAID") {
+        return (
+          <RegistrationNotice
+            tone="warning"
+            title="Payment received, but no seat was confirmed"
+            message="Your payment arrived after your seat hold ended, so no seat was confirmed. Please don't pay again. Our team will return this payment to you. If you have questions, contact support and quote the reference below."
+            detail={receipt}
+          >
+            <Button render={<Link to="/support/new" />}>Contact support</Button>
+            <Button variant="outline" render={<Link to={`/mun/${slug}`} />}>Back to conference</Button>
+          </RegistrationNotice>
+        );
+      }
       return (
         <RegistrationNotice tone="error" title="Payment didn't go through" message="Your seat has been released." detail={receipt}>
           <Button render={<Link to={`/register/${slug}`} />}>Try again</Button>

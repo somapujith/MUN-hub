@@ -142,10 +142,6 @@ test.describe('late payments', () => {
   })
 
   test('the delegate is told the truth when their payment arrived after the hold lapsed', async ({ browser }) => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      "BUG: web/src/pages/register/register-confirmation-page.tsx shows \"Payment didn't go through\" for every CANCELLED registration, even when its payment was captured (a late payment raised as an exception) — the delegate was charged but is told the payment failed.",
-    )
     const { delegate, registrationId, productId } = await heldSeat()
     await expireSeatHold(registrationId)
     await sweepExpiredHolds(productId)
@@ -156,7 +152,11 @@ test.describe('late payments', () => {
     const page = await context.newPage()
     await page.goto(`/register/${OPEN.slug}/confirmation?registrationId=${registrationId}`)
     await expect(page.getByRole('main')).toContainText('₹1,499')
+    await expect(page.getByRole('main')).toContainText('Payment received, but no seat was confirmed')
+    await expect(page.getByRole('main')).toContainText("Please don't pay again")
     await expect(page.getByRole('main')).not.toContainText("Payment didn't go through")
+    await expect(page.getByRole('main').getByRole('button', { name: 'Try again' })).toHaveCount(0)
+    await expect(page.getByRole('main').getByRole('button', { name: 'Contact support' })).toBeVisible()
     await context.close()
   })
 
