@@ -92,3 +92,8 @@ payout execution.
   `scrypt$N$r$p$…` format that main can't verify yet — resolves when sec-auth merges; at that merge,
   make seed.ts reset seeded demo hashes that don't verify against munhub-demo (local only).
   devops merged (`0e5b00a`); root `tsc --noEmit` clean at `e99a78f`.
+- 11:05 marketplace merged (`186b22b`). f1: republish fix (`fc05d9e`; enqueue works for
+  UNPUBLISHED MUNs published before), portfolios UI (`f73ce26`, `6f3d74f`).
+  POST-MERGE TODO (lead): admin UI "Queue again" button for UNPUBLISHED MUNs → same enqueue
+  endpoint; register 4b's cron jobs; wire assertEmailVerifiedIfRequired + payments/notification
+  hooks + notifyWelcome; seed.ts resets demo hashes that don't verify (local only).
