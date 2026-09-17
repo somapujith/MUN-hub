@@ -128,6 +128,9 @@ export default defineConfig({
         STORAGE_ADAPTER: 'local',
         // Every email the API "sends" is appended here; fixtures/outbox.ts reads it.
         EMAIL_OUTBOX_FILE,
+        // Test-only key for encrypting staff TOTP secrets (local database only;
+        // never used anywhere else). The API refuses 2FA enrollment without one.
+        TOTP_FIELD_KEY: 'iQ0HBpXmBmry9VPSfstOXez8gweh08VhoO8ZxnlO6A0=',
         // Links in emails point at the local web app.
         APP_URL: WEB_URL,
       },

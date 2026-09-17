@@ -89,11 +89,11 @@ test.describe('conference day UI', () => {
     await expect(card).toContainText('E2E Room 101')
     await expect(card).toContainText('Conference-wide')
 
-    // The published schedule is public.
+    // The sandbox isn't published, so its schedule stays private (b411b4b).
     const anon = await anonApi()
-    const publicItems: ScheduleItem[] = await (await anon.get(`muns/${munId}/schedule`)).json()
-    expect(publicItems.find((i) => i.id === saved.id)?.location).toBe('E2E Room 101')
+    expect((await anon.get(`muns/${munId}/schedule`)).status()).toBe(404)
     await anon.dispose()
+    expect((await listItems()).find((i) => i.id === saved.id)?.location).toBe('E2E Room 101')
 
     acceptNextConfirm(page)
     await main(page).getByRole('button', { name: `Delete ${title}` }).click()
