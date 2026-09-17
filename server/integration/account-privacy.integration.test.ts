@@ -43,9 +43,12 @@ describe('GET /api/v1/account/export', () => {
     expect(Object.keys(body).sort()).toEqual(
       [
         'account',
+        'achievements',
         'consents',
         'exportedAt',
         'format',
+        'organizerApplications',
+        'organizerProfile',
         'payments',
         'registrations',
         'studentProfile',

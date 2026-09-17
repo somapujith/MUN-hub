@@ -2,17 +2,21 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { deleteMunDocument, listMunDocuments, uploadMunDocument } from '@/lib/actions/mun-documents'
 import { assertMunReadable } from '@/lib/actions/mun-read-access'
+import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { munDocumentKindEnum } from '@/lib/db/schema-enums'
+import { base64LengthForBytes, UPLOAD_RULES } from '@/lib/storage/validate'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
 
+// Capped at the document byte limit once base64-encoded, so the schema
+// rejects an oversized payload before the handler decodes it.
 const uploadDocumentBodySchema = z
   .object({
     kind: z.enum(munDocumentKindEnum.enumValues),
     title: z.string().min(1),
     contentType: z.literal('application/pdf'),
-    fileBase64: z.string().min(1),
+    fileBase64: z.string().min(1).max(base64LengthForBytes(UPLOAD_RULES.DOCUMENT.maxBytes)),
   })
   .strict()
 
@@ -32,9 +36,14 @@ munDocumentsRoutes.post(
   zValidator('json', uploadDocumentBodySchema),
   async (c) => {
     const body = c.req.valid('json')
+    const munId = c.req.param('munId')
+    // Ownership first, decode second: uploadMunDocument checks this again,
+    // but building the Buffer here would let anyone signed in spend the
+    // isolate's memory on a MUN they have no access to.
+    await assertOwnsOrAdmin(munId, c.get('session'))
     const document = await uploadMunDocument(
       {
-        munId: c.req.param('munId'),
+        munId,
         kind: body.kind,
         title: body.title,
         contentType: body.contentType,

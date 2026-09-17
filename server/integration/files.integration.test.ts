@@ -3,7 +3,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
 import { munDocuments, munMedia, muns } from '@/lib/db/schema'
 import { setRuntimeEnv } from '@/lib/runtime-env'
-import { STORAGE_UNAVAILABLE_MESSAGE } from '@/lib/storage/adapter'
+import { STORAGE_NOT_CONFIGURED } from '@/lib/storage/adapter'
 import { createInMemoryKv, SAMPLE_FILES } from '@/lib/storage/in-memory-bindings'
 import { createApp } from '../src/app'
 import { authHeaders, makeUser } from './helpers'
@@ -192,7 +192,7 @@ describe('uploads served by /api/v1/files', () => {
     )
     expect(logo.status, await logo.clone().text()).toBe(503)
     expect(await logo.json()).toMatchObject({
-      error: { code: 'UNAVAILABLE', message: STORAGE_UNAVAILABLE_MESSAGE },
+      error: { code: 'UNAVAILABLE', message: STORAGE_NOT_CONFIGURED },
     })
 
     const rules = await app.request(

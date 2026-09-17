@@ -1,8 +1,11 @@
 import { db } from '@/lib/db/client'
 import {
   accommodationOptions,
+  achievements,
   committees,
   muns,
+  organizerApplications,
+  organizerProfiles,
   passwordResetTokens,
   payments,
   portfolios,
@@ -169,6 +172,42 @@ export async function makeDelegateWithHistory() {
     })
     .returning()
 
+  const [achievement] = await db
+    .insert(achievements)
+    .values({
+      userId: delegate.id,
+      munId: finished.mun.id,
+      registrationId: finishedConfirmed.id,
+      committee: 'UNSC',
+      portfolio: 'France',
+      award: 'Best Delegate',
+    })
+    .returning()
+
+  // The organizer sees the same "Download my data" button, so their profile
+  // and application have to be exportable too.
+  await db.insert(organizerProfiles).values({
+    userId: organizer.id,
+    firstName: 'Privacy',
+    lastName: 'Organizer',
+    contactPhone: '9876500003',
+    upiId: 'privacy@ybl',
+    upiPhone: '9876500003',
+    agreementVersion: 'test',
+    completedAt: new Date(now),
+  })
+  const [application] = await db
+    .insert(organizerApplications)
+    .values({
+      organizerId: organizer.id,
+      munId: upcoming.mun.id,
+      status: 'APPROVED',
+      reviewNotes: 'Looks good',
+      expectedDelegateCount: 200,
+      websiteUrl: 'https://privacy-mun.test',
+    })
+    .returning()
+
   const [ticket] = await db
     .insert(supportTickets)
     .values({
@@ -208,6 +247,8 @@ export async function makeDelegateWithHistory() {
     accommodation,
     registrations: { upcomingConfirmed, finishedConfirmed, cancelled, unpaidHold },
     payments: { paidPayment, pendingPayment },
+    achievement,
+    application,
     ticket,
     sessionToken: session.token,
   }

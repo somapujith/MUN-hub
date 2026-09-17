@@ -80,8 +80,9 @@
   // lib/storage/select-adapter.ts. R2 is not enabled on the account yet, so
   // uploads go to Workers KV. The namespace doesn't exist yet (the deploy
   // token can't create KV namespaces — docs/autonomous-run/USER_ACTIONS.md),
-  // so the binding is commented out and production refuses uploads (503,
-  // nothing is written, and an error is logged). To enable real uploads:
+  // so the binding is commented out. WITHOUT IT EVERY UPLOAD IS REFUSED with
+  // 503 "File storage is not configured" — deliberately, so nothing writes a
+  // row pointing at a file that was never stored. To enable real uploads:
   //   npx wrangler kv namespace create munhub-uploads
   // then uncomment this block with the printed id and redeploy.
   // "kv_namespaces": [

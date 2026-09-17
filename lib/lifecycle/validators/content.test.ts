@@ -178,6 +178,33 @@ describe('validateBranding', () => {
     const result = validateBranding(ctx)
     expect(result.passed).toBe(false)
   })
+
+  // Rows written while no storage backend was configured point at the mock
+  // store, which kept no bytes — the row exists but the image does not.
+  it('fails when the rows only point at the discarding mock store', () => {
+    const ctx = makeContext({
+      media: [
+        { kind: 'LOGO', url: '/mock-storage/muns/mun-1/branding/a' } as never,
+        { kind: 'COVER', url: '/mock-storage/muns/mun-1/branding/b' } as never,
+      ],
+    })
+    const result = validateBranding(ctx)
+    expect(result.passed).toBe(false)
+    const logo = result.checks.find((c) => c.key === 'logo_present')
+    expect(logo?.passed).toBe(false)
+    expect(logo?.message).toContain('again')
+    expect(result.checks.find((c) => c.key === 'cover_present')?.passed).toBe(false)
+  })
+
+  it('passes for real stored URLs', () => {
+    const ctx = makeContext({
+      media: [
+        { kind: 'LOGO', url: 'https://api.munhub.in/api/v1/files/muns/mun-1/branding/a' } as never,
+        { kind: 'COVER', url: 'https://api.munhub.in/api/v1/files/muns/mun-1/branding/b' } as never,
+      ],
+    })
+    expect(validateBranding(ctx).passed).toBe(true)
+  })
 })
 
 describe('validateContact', () => {

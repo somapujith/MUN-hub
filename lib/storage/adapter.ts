@@ -2,12 +2,6 @@ export interface UploadResult {
   url: string
 }
 
-/**
- * Thrown by an upload when a deployed API has no storage binding. The API
- * maps it to 503 (server/middleware/error.ts), and no row is written.
- */
-export const STORAGE_UNAVAILABLE_MESSAGE = 'File uploads are temporarily unavailable. Please try again later.'
-
 /** What every real adapter records next to the bytes (KV metadata, R2 customMetadata, local sidecar). */
 export interface StoredObjectMetadata {
   contentType: string
@@ -40,4 +34,27 @@ export interface StorageAdapter {
   get(key: string): Promise<StoredObject | null>
   /** Deleting a key that does not exist is not an error. */
   delete(key: string): Promise<void>
+}
+
+/**
+ * Message thrown when no storage backend is configured for this environment.
+ * server/middleware/error.ts maps it to 503 UNAVAILABLE.
+ */
+export const STORAGE_NOT_CONFIGURED = 'File storage is not configured'
+
+/**
+ * Thrown by `selectStorageAdapter()` when there is no R2/KV binding and
+ * STORAGE_ADAPTER names neither `local` nor `mock`.
+ *
+ * Uploads fail closed on purpose. Falling back to the mock adapter accepted
+ * the bytes, threw them away and still wrote a row pointing at a
+ * `/mock-storage/...` URL nothing serves — which then passed the go-live
+ * validators, so a MUN could be published with a broken logo and an
+ * unreachable rules PDF, and adding the binding later did not repair the rows.
+ */
+export class StorageNotConfiguredError extends Error {
+  constructor() {
+    super(STORAGE_NOT_CONFIGURED)
+    this.name = 'StorageNotConfiguredError'
+  }
 }

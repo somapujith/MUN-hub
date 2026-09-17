@@ -1,30 +1,10 @@
-import { STORAGE_UNAVAILABLE_MESSAGE, type StorageAdapter } from './adapter'
+import { StorageNotConfiguredError, type StorageAdapter } from './adapter'
 import { getStorageBindings } from './bindings'
 import { createKvStorageAdapter } from './kv-adapter'
 import { createLocalStorageAdapter } from './local-adapter'
 import { mockStorageAdapter } from './mock-adapter'
 import { createR2StorageAdapter } from './r2-adapter'
 import { getRuntimeEnv } from '@/lib/runtime-env'
-import { isProductionRuntime } from '@/lib/runtime-platform'
-
-/**
- * Used in production when there is no storage binding. Uploads fail with
- * STORAGE_UNAVAILABLE_MESSAGE (503) before any row is written, so a module
- * never counts as complete with a file that was never stored. Reads find
- * nothing and deletes do nothing, so rows written before this change can
- * still be removed.
- */
-export const unavailableStorageAdapter: StorageAdapter = {
-  async upload() {
-    throw new Error(STORAGE_UNAVAILABLE_MESSAGE)
-  },
-  async get() {
-    return null
-  },
-  async delete() {
-    return
-  },
-}
 
 /**
  * Picks the storage backend for the current request, in this order:
@@ -33,13 +13,18 @@ export const unavailableStorageAdapter: StorageAdapter = {
  *   2. KV      — the UPLOADS_KV binding, when present (production today:
  *                R2 is not enabled on the Cloudflare account yet)
  *   3. local   — the filesystem, when STORAGE_ADAPTER=local (Node dev)
- *   4. unavailable — production (Workers, or NODE_ENV=production) with none
- *                of the above: uploads fail with 503
- *   5. mock    — everything else (tests); discards the bytes
+ *   4. mock    — only when STORAGE_ADAPTER=mock (tests); discards the bytes
  *
  * Bindings come from server/middleware/storage.ts via lib/storage/bindings.ts.
- * Production must have one of them. The mock is never used there: it would
- * report a successful upload while discarding the bytes.
+ * Anything else — production without a binding included — throws
+ * `StorageNotConfiguredError`, which the API answers with 503, so the upload
+ * is refused and no row is written.
+ *
+ * This fails closed on purpose. Quietly returning the mock meant an upload
+ * answered 201 while the bytes were dropped, and the `/mock-storage/...` URL
+ * it wrote into mun_media/mun_documents passed the go-live validators: a MUN
+ * could be published with a logo that 404s and a rules PDF delegates can't
+ * open, and adding the binding afterwards did not repair those rows.
  *
  * Called per operation, never cached: the adapters wrap request-scoped
  * binding objects and are cheap to build.
@@ -54,15 +39,14 @@ export function selectStorageAdapter(): StorageAdapter {
 
   const configured = getRuntimeEnv('STORAGE_ADAPTER')
   if (configured === 'local') return createLocalStorageAdapter()
+  if (configured === 'mock') return mockStorageAdapter
 
-  if (isProductionRuntime()) {
-    console.error(
-      '[storage] No UPLOADS_BUCKET or UPLOADS_KV binding in production — uploads are refused (503) until ' +
-        'the binding is added in server/wrangler.jsonc.',
-    )
-    return unavailableStorageAdapter
-  }
-  return mockStorageAdapter
+  console.error(
+    '[storage] No UPLOADS_BUCKET or UPLOADS_KV binding and STORAGE_ADAPTER is ' +
+      `"${configured ?? 'unset'}" — refusing the request instead of discarding the file. ` +
+      'Add the binding in server/wrangler.jsonc, or set STORAGE_ADAPTER=local (Node dev) / mock (tests).',
+  )
+  throw new StorageNotConfiguredError()
 }
 
 /**

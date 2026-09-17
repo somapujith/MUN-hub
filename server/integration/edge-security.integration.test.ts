@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
 import { muns } from '@/lib/db/schema'
+import {
+  base64LengthForBytes,
+  MAX_IMAGE_UPLOAD_BYTES,
+  UPLOAD_RULES,
+} from '@/lib/storage/validate'
+import { UPLOAD_BODY_LIMIT_BYTES } from '../middleware/body-limit'
 import { createApp } from '../src/app'
-import { makeUser } from './helpers'
+import { authHeaders, makeUser } from './helpers'
 
 const app = createApp()
 
@@ -174,7 +180,7 @@ describe('body limit', () => {
     expect(res.status).toBe(413)
   })
 
-  it('lets document and media uploads through up to 30 MB', async () => {
+  it('lets document and media uploads through, up to the base64 size of the largest allowed file', async () => {
     const munId = crypto.randomUUID()
     const twoMb = JSON.stringify({ fileBase64: 'A'.repeat(2 * 1024 * 1024) })
 
@@ -188,12 +194,51 @@ describe('body limit', () => {
       expect(res.status, path).toBe(401)
     }
 
+    // The upload limit tracks the 10 MB document cap (~13.3 MB of base64),
+    // not the retired 20 MB one — a 30 MB body never reaches a handler now.
+    expect(UPLOAD_BODY_LIMIT_BYTES).toBeLessThan(15 * 1024 * 1024)
+    expect(UPLOAD_BODY_LIMIT_BYTES).toBeGreaterThan(base64LengthForBytes(UPLOAD_RULES.DOCUMENT.maxBytes))
+
     const tooBig = await app.request(`/api/v1/muns/${munId}/documents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileBase64: 'A'.repeat(30 * 1024 * 1024) }),
+      body: JSON.stringify({ fileBase64: 'A'.repeat(UPLOAD_BODY_LIMIT_BYTES + 1) }),
     })
     expect(tooBig.status).toBe(413)
+  })
+
+  // The schema cap is what stops a 13 MB base64 string being decoded into a
+  // Buffer for a MUN the caller doesn't own; the byte cap in
+  // lib/storage/validate.ts only applies after that Buffer exists.
+  it('rejects an over-cap fileBase64 on the schema, before any decode', async () => {
+    const student = await makeUser('STUDENT')
+    const cookie = await authHeaders(student.id)
+    const munId = crypto.randomUUID()
+
+    const overImageCap = await app.request(`/api/v1/muns/${munId}/media`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...cookie },
+      body: JSON.stringify({
+        kind: 'LOGO',
+        contentType: 'image/png',
+        fileBase64: 'A'.repeat(base64LengthForBytes(MAX_IMAGE_UPLOAD_BYTES) + 4),
+      }),
+    })
+    expect(overImageCap.status).toBe(400)
+    expect((await overImageCap.json()).error.code).toBe('VALIDATION_FAILED')
+
+    const overDocumentCap = await app.request(`/api/v1/muns/${munId}/documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...cookie },
+      body: JSON.stringify({
+        kind: 'RULES',
+        title: 'Rules',
+        contentType: 'application/pdf',
+        fileBase64: 'A'.repeat(base64LengthForBytes(UPLOAD_RULES.DOCUMENT.maxBytes) + 4),
+      }),
+    })
+    expect(overDocumentCap.status).toBe(400)
+    expect((await overDocumentCap.json()).error.code).toBe('VALIDATION_FAILED')
   })
 
   it('keeps the 1 MB limit on other routes under /muns/:munId', async () => {

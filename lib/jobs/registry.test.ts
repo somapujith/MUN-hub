@@ -15,6 +15,7 @@ describe('SCHEDULED_JOBS', () => {
       'runConferenceReminders',
       'runOrganizerDigest',
       'purgeExpiredAuthArtifacts',
+      'purgeDeletedUserAnswers',
     ])
   })
 

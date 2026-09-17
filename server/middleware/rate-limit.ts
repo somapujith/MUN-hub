@@ -68,8 +68,11 @@ export const LIMITERS = {
   // many tickets.
   supportTicketUser: { binding: 'RL_SUPPORT_TICKET_USER', limit: 10, periodSeconds: 60, perIp: false },
   supportMessageUser: { binding: 'RL_SUPPORT_MESSAGE_USER', limit: 30, periodSeconds: 60, perIp: false },
-  // Account deletion re-checks the password, so this also bounds guessing it
-  // with a stolen session.
+  // Self-service account deletion re-checks the account password with scrypt
+  // (~32MB and tens of ms of CPU per call, lib/auth/password.ts). Without a
+  // rule of its own only the 300/min global cap applied, so a stolen session
+  // could guess passwords 15x faster than at sign-in, and any delegate could
+  // make the isolate run 300 scrypt hashes a minute.
   accountDeleteUser: { binding: 'RL_ACCOUNT_DELETE_USER', limit: 5, periodSeconds: 60, perIp: false },
   availabilityIp: { binding: 'RL_AVAILABILITY_IP', limit: 60, periodSeconds: 60, perIp: true },
   munsListIp: { binding: 'RL_MUNS_LIST_IP', limit: 120, periodSeconds: 60, perIp: true },

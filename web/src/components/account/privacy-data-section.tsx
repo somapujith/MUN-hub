@@ -106,8 +106,9 @@ export function PrivacyDataSection() {
         <CardHeader>
           <CardTitle>Download your data</CardTitle>
           <CardDescription>
-            A JSON file with your account and profile details, consents, registrations, payments and
-            support conversations.
+            A JSON file with your account and profile details, consents, registrations, payments,
+            awards and support conversations. For organizers it also includes your organizer
+            profile and the applications you have submitted.
           </CardDescription>
         </CardHeader>
         <CardContent>

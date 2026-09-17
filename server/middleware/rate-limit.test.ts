@@ -223,12 +223,22 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
       expect((await send(conversation, { ip: freshIp(), user, method: 'GET' })).status).toBe(200)
     })
 
+    // Deletion re-checks the password with scrypt, so it needs its own cap:
+    // the global 300/min per IP alone let a stolen session guess passwords far
+    // faster than sign-in allows, and burn ~32MB of isolate memory per attempt.
     it('limits account deletion attempts per user', async () => {
       const user = `user-${crypto.randomUUID()}`
       const result = await statuses(LIMITERS.accountDeleteUser.limit + 1, () =>
         send('/account/delete', { ip: freshIp(), user, body: { confirmation: 'DELETE', password: 'guess' } }),
       )
       expect(result).toEqual(allowedThenBlocked(LIMITERS.accountDeleteUser.limit))
+
+      const otherUser = await send('/account/delete', {
+        ip: freshIp(),
+        user: `user-${crypto.randomUUID()}`,
+        body: { confirmation: 'DELETE', password: 'guess' },
+      })
+      expect(otherUser.status).toBe(200)
     })
 
     it('does not count anonymous calls against these limits (the routes answer 401)', async () => {
