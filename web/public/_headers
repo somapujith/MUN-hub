@@ -1,0 +1,21 @@
+# Response headers for Cloudflare Workers Static Assets (munhub-web,
+# web/wrangler.jsonc). Vite copies this file into dist/. Keep in sync with
+# web/vercel.json.
+#
+# CSP notes:
+# - No inline scripts: the build emits only external module scripts, and
+#   next-themes' anti-flash <script> is rendered as an inert
+#   type="application/json" block (src/components/theme-provider.tsx), which a
+#   CSP never evaluates, so no hash or nonce is needed.
+# - style-src needs 'unsafe-inline' for index.html's <style> block, the <style>
+#   next-themes injects for disableTransitionOnChange, and style attributes.
+# - challenges.cloudflare.com is Cloudflare Turnstile.
+# - A real payment gateway (e.g. Razorpay Checkout) needs its script, frame and
+#   connect origins added here and in vercel.json.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.munhub.in https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  X-Frame-Options: DENY
