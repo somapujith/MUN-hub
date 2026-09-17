@@ -61,6 +61,16 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
  * VERIFIED -> {PUBLISHED, GO_LIVE_QUEUE} -> PUBLISHING -> PUBLISHED
  *   -> REGISTRATION_OPEN -> REGISTRATION_CLOSED -> CONFERENCE_ACTIVE
  * CONFERENCE_ACTIVE -> RESULTS_PENDING -> RESULTS_UNDER_REVIEW -> COMPLETED -> ARCHIVED
+ * CONFERENCE_ACTIVE -> COMPLETED (conference ended without the results flow)
+ *
+ * CONFERENCE_ACTIVE -> COMPLETED is the "no results to review" exit: results
+ * publishing is optional in the MVP (awards are plain `achievements` rows that
+ * don't depend on mun status), so a conference that never enters
+ * RESULTS_PENDING must still be completable instead of being stranded in
+ * CONFERENCE_ACTIVE forever. Once a mun has entered the results flow it can
+ * only complete through RESULTS_UNDER_REVIEW -> COMPLETED (the results-review
+ * decision). See lib/lifecycle/registration-lifecycle.ts for who may trigger
+ * each registration/conference transition and when.
  *
  * VERIFIED/PUBLISHED/REGISTRATION_OPEN/UNPUBLISHED/SUSPENDED can transition
  * back to VERIFICATION — this is the re-verification trigger path (see
@@ -120,7 +130,7 @@ const ALLOWED_TRANSITIONS: Record<MunStatus, MunStatus[]> = {
   UNPUBLISHED: ['GO_LIVE_QUEUE', 'VERIFICATION', 'CANCELLED'],
   REGISTRATION_OPEN: ['REGISTRATION_CLOSED', 'VERIFICATION', 'SUSPENDED', 'CANCELLED'],
   REGISTRATION_CLOSED: ['CONFERENCE_ACTIVE', 'SUSPENDED', 'CANCELLED'],
-  CONFERENCE_ACTIVE: ['RESULTS_PENDING', 'SUSPENDED', 'CANCELLED'],
+  CONFERENCE_ACTIVE: ['RESULTS_PENDING', 'COMPLETED', 'SUSPENDED', 'CANCELLED'],
   RESULTS_PENDING: ['RESULTS_UNDER_REVIEW'],
   RESULTS_UNDER_REVIEW: ['COMPLETED', 'RESULTS_PENDING'],
   COMPLETED: ['ARCHIVED'],
