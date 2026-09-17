@@ -11,7 +11,7 @@ import { ReservationCountdown } from "@/components/registration/reservation-coun
 import { hasPassed } from "@/components/registration/deadline";
 import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
-import { completeMockPayment, fetchRegistrationById } from "@/api/registration";
+import { MOCK_PAYMENT_PROVIDER, completeMockPayment, fetchRegistrationById } from "@/api/registration";
 import { NotFoundPage } from "@/pages/not-found-page";
 
 export function RegisterPayPage() {
@@ -27,6 +27,8 @@ export function RegisterPayPage() {
     queryKey: queryKeys.registration(registrationId ?? ""),
     queryFn: () => fetchRegistrationById(registrationId!),
     enabled: Boolean(registrationId),
+    // Whether online payments are available can change between visits.
+    refetchOnMount: "always",
   });
   const registration = regQuery.data;
   const settled = registration && registration.status !== "PAYMENT_PENDING" && registration.status !== "PENDING";
@@ -55,6 +57,10 @@ export function RegisterPayPage() {
   const mun = registration.mun;
   const id = registrationId;
   const expired = registration.expiresAt ? hasPassed(registration.expiresAt) : false;
+  // The amount on the order (early-bird and extras included) — the pass's
+  // list price only as a fallback while the order is still being created.
+  const amountDue = registration.payment.at(0)?.amount ?? registration.productPrice;
+  const provider = registration.paymentProvider ?? null;
 
   async function handlePay(outcome: "success" | "failure") {
     setPaying(true);
@@ -86,6 +92,18 @@ export function RegisterPayPage() {
           <RegistrationNotice tone="warning" title="Your seat hold expired" message="Start again to reserve a fresh seat.">
             <Button render={<Link to={`/register/${slug}`} />}>Start over</Button>
           </RegistrationNotice>
+        ) : provider !== MOCK_PAYMENT_PROVIDER ? (
+          // No usable checkout: online payments are switched off (or the
+          // configured provider has no checkout in this app yet). Never fall
+          // back to the mock buttons.
+          <RegistrationNotice
+            tone="neutral"
+            title="Online payments aren't available yet"
+            message="We can't take payments right now, so this seat hold will lapse unpaid. Please try registering again later."
+          >
+            <Button render={<Link to={`/mun/${slug}`} />}>Back to conference</Button>
+            <Button variant="outline" render={<Link to="/dashboard" />}>Your dashboard</Button>
+          </RegistrationNotice>
         ) : (
           <>
             {error === "webhook" && (
@@ -95,8 +113,15 @@ export function RegisterPayPage() {
             <section className="flex flex-col gap-lg rounded-md border border-border p-lg sm:p-xl">
               <div className="flex items-baseline justify-between gap-md border-b border-border pb-md">
                 <span className="text-label-md text-ink">Amount due</span>
-                <span className="font-mono text-title-lg tabular-nums text-ink">{formatPrice(registration.productPrice)}</span>
+                <span className="font-mono text-title-lg tabular-nums text-ink">{formatPrice(amountDue)}</span>
               </div>
+              <p className="text-body-md text-muted-foreground">
+                Includes MUN Hub&apos;s platform fee.{" "}
+                <Link to="/legal/refunds" className="text-link underline-offset-4 hover:underline">
+                  All payments are final
+                </Link>
+                .
+              </p>
               <div className="flex items-start gap-xs rounded-sm bg-surface-soft px-md py-sm text-body-md text-muted-foreground">
                 <ShieldCheckIcon className="mt-px size-4 shrink-0" aria-hidden />
                 <p><span className="font-medium text-ink">Mock provider.</span> No real card is charged.</p>
@@ -104,7 +129,7 @@ export function RegisterPayPage() {
               <div className="flex flex-col gap-sm sm:flex-row">
                 <Button size="lg" className="sm:flex-1" disabled={paying} onClick={() => handlePay("success")}>
                   <CreditCardIcon aria-hidden />
-                  Pay {formatPrice(registration.productPrice)}
+                  Pay {formatPrice(amountDue)}
                 </Button>
                 <Button size="lg" variant="outline" disabled={paying} onClick={() => handlePay("failure")}>
                   Simulate failure

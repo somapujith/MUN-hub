@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { CheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatPrice } from "@/components/shared/currency";
+import { currentPassPrice, formatPriceDeadline } from "@/components/registration/pricing";
 import { cn } from "cn";
 import type { RegistrationProduct } from "@/types";
 
@@ -46,6 +47,7 @@ export function RegistrationProductCard({
   const soldOut = availability !== undefined && availability.available === 0;
   const deadlinePassed = product.deadline !== null && product.deadline.getTime() < Date.now();
   const purchasable = canRegister && !soldOut && !deadlinePassed;
+  const pricing = currentPassPrice(product);
 
   return (
     <div
@@ -60,14 +62,28 @@ export function RegistrationProductCard({
     >
       <h3 className="font-pricing text-pricing-card-title text-pricing-ink">{product.name}</h3>
 
-      <p className="mt-md flex items-baseline gap-xs">
+      <p className="mt-md flex flex-wrap items-baseline gap-x-xs">
         <span className="font-pricing text-pricing-display text-pricing-ink tabular-nums">
-          {formatPrice(product.price)}
+          {formatPrice(pricing.price)}
         </span>
+        {pricing.earlyBird && (
+          <del className="text-body-md tabular-nums text-muted-foreground">
+            <span className="sr-only">Regular price </span>
+            {formatPrice(pricing.regularPrice)}
+          </del>
+        )}
         <span className="text-body-md text-muted-foreground">per delegate</span>
       </p>
 
       <ul className="mt-lg flex list-none flex-col gap-xs p-0 text-body-md text-body">
+        {pricing.earlyBird && pricing.earlyBirdEndsAt && (
+          <Feature>
+            <span className="font-medium text-success-text">
+              Early-bird price until {formatPriceDeadline(pricing.earlyBirdEndsAt)}
+            </span>
+          </Feature>
+        )}
+
         <Feature>
           {availability
             ? soldOut

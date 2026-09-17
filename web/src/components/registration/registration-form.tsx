@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProductOption } from "@/components/registration/product-option";
+import { currentPassPrice } from "@/components/registration/pricing";
 import { StepIndicator } from "@/components/registration/step-indicator";
+import { formatPrice } from "@/components/shared/currency";
 import type { ProductWithAvailability } from "@/components/registration/types";
 import type { CommitteeWithPortfolios, FormField } from "@/types";
 import { initiateRegistration } from "@/api/registration";
@@ -211,6 +213,8 @@ export function RegistrationForm({
   const visibleFields = orderedFields.filter((f) => isVisible(f, answers));
   const selected = products.find((e) => e.product.id === productId);
   const selectedCommittee = committees.find((c) => c.id === committeeId);
+  const selectedPricing = selected ? currentPassPrice(selected.product) : null;
+  const free = selectedPricing?.price === 0;
 
   const detailsComplete =
     core.fullName.trim() !== "" &&
@@ -231,7 +235,7 @@ export function RegistrationForm({
     setPending(true);
     setError(null);
     try {
-      const { registrationId } = await initiateRegistration(
+      const { registrationId, status } = await initiateRegistration(
         {
           munId,
           registrationProductId: productId,
@@ -247,7 +251,9 @@ export function RegistrationForm({
         },
         idempotencyKeyRef.current!,
       );
-      navigate(`/register/${slug}/pay?registrationId=${encodeURIComponent(registrationId)}`);
+      // A free pass comes back already confirmed — there is nothing to pay.
+      const next = status === "CONFIRMED" ? "confirmation" : "pay";
+      navigate(`/register/${slug}/${next}?registrationId=${encodeURIComponent(registrationId)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reserve your seat. Try again.");
       setPending(false);
@@ -415,12 +421,34 @@ export function RegistrationForm({
               <div>
                 <h2 className="text-title-lg text-ink">Review and confirm</h2>
                 <p className="text-body-md text-muted-foreground">
-                  Confirming reserves a seat for 15 minutes while you complete payment.
+                  {free ? (
+                    "This pass is free — confirming books your seat straight away."
+                  ) : (
+                    <>
+                      Confirming reserves a seat for 15 minutes while you complete payment.{" "}
+                      <Link to="/legal/refunds" className="text-link underline-offset-4 hover:underline">
+                        All payments are final
+                      </Link>
+                      .
+                    </>
+                  )}
                 </p>
               </div>
               <dl className="divide-y divide-border rounded-md border border-border text-body-md">
                 <Row label="Conference" value={munName} />
                 <Row label="Pass" value={selected?.product.name ?? "—"} />
+                {selectedPricing && (
+                  <Row
+                    label="Price"
+                    value={
+                      selectedPricing.earlyBird
+                        ? `${formatPrice(selectedPricing.price)} (early bird)`
+                        : free
+                          ? "Free"
+                          : formatPrice(selectedPricing.price)
+                    }
+                  />
+                )}
                 <Row label="Committee" value={selectedCommittee?.name ?? "No preference"} />
                 <Row
                   label="Portfolio"
@@ -447,7 +475,7 @@ export function RegistrationForm({
                 </Button>
                 <Button type="button" onClick={handleConfirm} disabled={pending}>
                   {pending ? <Loader2Icon className="animate-spin" aria-hidden /> : <CheckIcon aria-hidden />}
-                  {pending ? "Reserving your seat…" : "Confirm and pay"}
+                  {pending ? "Reserving your seat…" : free ? "Confirm registration" : "Confirm and pay"}
                 </Button>
               </div>
             </section>

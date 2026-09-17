@@ -57,6 +57,9 @@ export interface RegistrationProduct {
   capacity: number;
   deadline: Date | null;
   isActive: boolean;
+  /** Early-bird price, charged instead of `price` until `earlyBirdDeadline`. */
+  earlyBirdPrice?: number | null;
+  earlyBirdDeadline?: Date | null;
 }
 
 /** Full public detail shape — mirrors fields used by ported UI. */
@@ -115,12 +118,17 @@ export interface RegistrationWithMun {
   };
   committee: { name: string } | null;
   portfolio: { name: string } | null;
-  payment: Array<{ amount: number; status: import("@/types/enums").PaymentStatus }>;
+  payment: Array<{ amount: number; currency?: string; status: import("@/types/enums").PaymentStatus }>;
 }
 
 export interface MockRegistrationDetail extends RegistrationWithMun {
   productName: string;
   productPrice: number;
+  /**
+   * Which checkout to offer: the provider key (`mock_razorpay` for the dev
+   * mock) or null when online payments are unavailable.
+   */
+  paymentProvider?: string | null;
 }
 
 export interface UserProfile {
