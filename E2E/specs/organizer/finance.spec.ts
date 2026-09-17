@@ -1,6 +1,13 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { adminApi } from '../admin/_helpers'
+import { getMun, signUpViaApi } from '../../fixtures/api'
+import { PRICING } from '../../fixtures/fixture-muns'
+import { expectedFeeSplit, registerForPass } from '../../fixtures/payments'
+import { expireSeatHold, paymentFor, recreatePricingMun } from '../../fixtures/payments-fixture-db'
+import { watchForCrashes } from '../../fixtures/ui'
 import {
   anonApi,
+  createFreshOrganizer,
   main,
   openSection,
   organizerApi,
@@ -8,6 +15,10 @@ import {
   toast,
   uid,
 } from './_helpers'
+
+function inr(amount: number) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
+}
 
 /**
  * Payments & Finance — the Payment Settlement module. Bank details are
@@ -120,9 +131,115 @@ test.describe('settlement settings UI', () => {
     await expect(toast(page, 'Account number is required')).toBeVisible()
   })
 
-  test.fixme('shows payments collected, platform fees and settlements', async () => {
-    // Organizer Dashboard PRD "Payments & Finance": the section only has the
-    // settlement-settings form; no collected/fee/settlement figures exist.
+  test('the form has no refund policy (there are no refunds), and the API refuses one', async ({ page }) => {
+    await openFinance(page)
+    await expect(main(page).locator('form')).toBeVisible()
+    await expect(main(page).getByLabel(/refund/i)).toHaveCount(0)
+    await expect(main(page)).not.toContainText(/refund/i)
+    const { pan, accountNumber } = secrets()
+    const res = await api.put(`muns/${munId}/payment-settings`, {
+      data: settlementPayload(pan, accountNumber, { refundPolicy: 'Full refund up to 14 days before' }),
+    })
+    expect(res.status()).toBe(400)
+    expect(await (await api.get(`muns/${munId}/payment-settings`)).json()).not.toHaveProperty('refundPolicy')
+  })
+})
+
+test.describe('payments summary', () => {
+  /*
+   * Paid money on the pricing fixture MUN, recreated here so the totals start
+   * from zero: two paid registrations count; a pending one, a failed one and a
+   * payment that arrived after its hold lapsed (an exception, the seat
+   * released) don't.
+   */
+  const [EARLY, LATE] = PRICING.products
+  const paidAmounts = [EARLY.earlyBird.price, LATE.price]
+  let pricingMunId: string
+
+  function stat(page: Page, label: string) {
+    return main(page).locator('dt', { hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]')
+  }
+
+  test.beforeAll(async () => {
+    pricingMunId = await recreatePricingMun()
+    const paidEarly = await signUpViaApi()
+    await registerForPass(paidEarly, PRICING.slug, EARLY.name, { pay: 'success' })
+    const paidLate = await signUpViaApi()
+    await registerForPass(paidLate, PRICING.slug, LATE.name, { pay: 'success' })
+    const pending = await signUpViaApi()
+    await registerForPass(pending, PRICING.slug, LATE.name)
+    const failed = await signUpViaApi()
+    await registerForPass(failed, PRICING.slug, LATE.name, { pay: 'failure' })
+
+    const late = await signUpViaApi()
+    const lateId = await registerForPass(late, PRICING.slug, EARLY.name)
+    await expireSeatHold(lateId)
+    // An availability read sweeps the lapsed hold.
+    const mun = await getMun(late.api, PRICING.slug)
+    await late.api.get(`products/availability?ids=${mun.registrationProducts.map((p) => p.id).join(',')}`)
+    const pay = await late.api.post(`registrations/${lateId}/mock-payment`, { data: { outcome: 'success' } })
+    expect(await pay.json()).toEqual({ ok: true, exception: true })
+    const payment = await paymentFor(lateId)
+    const admin = await adminApi()
+    await admin.post(`admin/payment-exceptions/${payment!.id}/resolve`, { data: { note: 'Returned (E2E finance fixture)' } })
+    await admin.dispose()
+  })
+
+  function expectedTotals() {
+    const splits = paidAmounts.map((amount) => expectedFeeSplit(amount))
+    const sum = (pick: (s: ReturnType<typeof expectedFeeSplit>) => number) => splits.reduce((total, s) => total + pick(s), 0)
+    return {
+      currency: 'INR',
+      grossCollected: paidAmounts.reduce((a, b) => a + b, 0),
+      platformFee: sum((s) => s.platformFee),
+      platformFeeTax: sum((s) => s.platformFeeTax),
+      organizerNet: sum((s) => s.organizerNet),
+      paidRegistrations: paidAmounts.length,
+    }
+  }
+
+  test('the API totals paid, standing registrations with the platform fee split', async () => {
+    const res = await api.get(`muns/${pricingMunId}/payments-summary`)
+    expect(res.status(), await res.text()).toBe(200)
+    const { totals } = await res.json()
+    const expected = expectedTotals()
+    expect(totals).toEqual([expected])
+    expect(expected.platformFee + expected.platformFeeTax + expected.organizerNet).toBe(expected.grossCollected)
+  })
+
+  test('the finance page shows collected, fee, GST and net, matching the API', async ({ page }) => {
+    const crashes = watchForCrashes(page)
+    const { totals } = await (await api.get(`muns/${pricingMunId}/payments-summary`)).json()
+    const summary = totals[0]
+    await openSection(page, pricingMunId, 'finance', 'Payments & Finance')
+    await expect(main(page).getByText('Payments summary', { exact: true })).toBeVisible()
+    await expect(stat(page, 'Gross collected')).toHaveText(inr(summary.grossCollected))
+    await expect(stat(page, 'Platform fee')).toHaveText(inr(summary.platformFee))
+    await expect(stat(page, 'GST on fee')).toHaveText(inr(summary.platformFeeTax))
+    await expect(stat(page, 'Your net')).toHaveText(inr(summary.organizerNet))
+    await expect(stat(page, 'Paid registrations')).toHaveText(String(summary.paidRegistrations))
+    await expect(main(page)).not.toContainText(/refund/i)
+    crashes.assertNone()
+  })
+
+  test('a MUN with no payments shows zeros', async ({ page }) => {
+    await openFinance(page)
+    await expect(stat(page, 'Gross collected')).toHaveText(inr(0))
+    await expect(stat(page, 'Paid registrations')).toHaveText('0')
+  })
+
+  test('only the owner and staff can read the summary', async () => {
+    const anon = await anonApi()
+    expect((await anon.get(`muns/${pricingMunId}/payments-summary`)).status()).toBe(401)
+    await anon.dispose()
+    const delegate = await signUpViaApi()
+    expect((await delegate.api.get(`muns/${pricingMunId}/payments-summary`)).status()).toBe(403)
+    const stranger = await createFreshOrganizer('E2E Finance Stranger')
+    expect((await stranger.api.get(`muns/${pricingMunId}/payments-summary`)).status()).toBe(403)
+    await stranger.api.dispose()
+    const admin = await adminApi()
+    expect((await admin.get(`muns/${pricingMunId}/payments-summary`)).status()).toBe(200)
+    await admin.dispose()
   })
 })
 
