@@ -3,11 +3,9 @@ import {
   acceptNextConfirm,
   anonApi,
   cardFor,
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
   toast,
   uid,
@@ -66,13 +64,11 @@ async function createOption(data: Record<string, unknown>): Promise<Option> {
 }
 
 async function openAccommodation(page: Page) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, 'accommodation', 'Accommodation')
 }
 
 test.describe('accommodation UI', () => {
   test('add and edit an option, then archive and restore it', async ({ page }) => {
-    expectWorkspaceBug()
     const name = `E2E Twin Room ${uid()}`
     await openAccommodation(page)
 
@@ -113,7 +109,6 @@ test.describe('accommodation UI', () => {
   })
 
   test('manage an option\'s custom fields', async ({ page }) => {
-    expectWorkspaceBug()
     const option = await createOption({ name: `E2E Dorm ${uid()}`, price: 1000, capacity: 20 })
     await openAccommodation(page)
     const card = cardFor(page, REGION, option.name)
@@ -144,7 +139,6 @@ test.describe('accommodation UI', () => {
   })
 
   test('name, price and capacity are validated', async ({ page }) => {
-    expectWorkspaceBug()
     await openAccommodation(page)
     await main(page).getByRole('button', { name: 'Add option' }).first().click()
     const form = main(page).locator('form')
@@ -174,7 +168,6 @@ test.describe('accommodation API', () => {
   })
 
   test('a dropdown field without choices is a validation error, not a server error', async () => {
-    test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: lib/actions/accommodation.ts throws "Field type DROPDOWN requires at least one choice", which server/middleware/error.ts does not map, so the API answers 500 instead of 400')
     const option = await createOption({ name: `E2E Choice Guard ${uid()}`, price: 0, capacity: 1 })
     const res = await api.post(`accommodation/${option.id}/fields`, { data: { fieldType: 'DROPDOWN', label: 'Pick one' } })
     expect(res.status()).toBe(400)

@@ -138,12 +138,12 @@ test.describe('org-wide workspace', () => {
     await expect(pageHeading(page)).toHaveText('Overview')
   })
 
-  test('"Apply to host" opens the host application', async ({ page }) => {
-    test.fixme(true, 'Apply form moves into the onboarding wizard (mun-hub-f1 rebuild); rewrite against the wizard')
+  test('"Apply to host" opens the onboarding wizard, which is the host application', async ({ page }) => {
     await page.goto('/organizer/dashboard/muns')
     await main(page).getByRole('button', { name: 'Apply to host' }).click()
-    await expect(page).toHaveURL(/\/organizer\/apply$/)
-    await expect(pageHeading(page)).toHaveText('Host your MUN on MUN Hub')
+    await expect(page).toHaveURL(/\/organizer\/onboarding$/)
+    // The seeded organizer has finished onboarding, so the wizard shows its finished view.
+    await expect(pageHeading(page)).toHaveText(/You're registered as an organizer|Create your organizer profile/)
   })
 
   test('the conference switcher offers only the organizer\'s own conferences', async ({ page }) => {

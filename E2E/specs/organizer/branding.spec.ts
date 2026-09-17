@@ -85,7 +85,6 @@ test('reorder the gallery', async () => {
 })
 
 test('reordering with an id from elsewhere is a client error, not a server error', async () => {
-  test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: lib/actions/mun-branding.ts#reorderGallery throws "One or more ids do not belong to this mun", which server/middleware/error.ts does not map, so the API answers 500 instead of 400')
   const a = await upload('GALLERY', 0)
   const res = await api.post(`muns/${munId}/media/actions/reorder-gallery`, {
     data: { orderedIds: [a.id, crypto.randomUUID()] },

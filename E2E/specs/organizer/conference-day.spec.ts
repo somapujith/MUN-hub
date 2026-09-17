@@ -4,11 +4,9 @@ import {
   acceptNextConfirm,
   anonApi,
   cardFor,
-  expectWorkspaceBug,
   main,
   openSection,
   organizerApi,
-  prepareWorkspace,
   sandboxId,
   toast,
   uid,
@@ -51,13 +49,11 @@ async function listItems(): Promise<ScheduleItem[]> {
 }
 
 async function openSchedule(page: Page) {
-  await prepareWorkspace(page, api)
   await openSection(page, munId, 'conference-day', /^Conference day$/i)
 }
 
 test.describe('conference day UI', () => {
   test('add, edit and delete a schedule item', async ({ page }) => {
-    expectWorkspaceBug()
     const title = `E2E Opening ${uid()}`
     await openSchedule(page)
 
@@ -106,7 +102,6 @@ test.describe('conference day UI', () => {
   })
 
   test('items are listed in chronological order', async ({ page }) => {
-    expectWorkspaceBug()
     const tag = uid()
     for (const [title, start] of [
       [`E2E Late ${tag}`, '2026-12-17T15:00:00Z'],
@@ -123,7 +118,6 @@ test.describe('conference day UI', () => {
   })
 
   test('an item must end after it starts', async ({ page }) => {
-    expectWorkspaceBug()
     const title = `E2E Backwards ${uid()}`
     await openSchedule(page)
     await main(page).getByRole('button', { name: 'Add schedule item' }).click()
@@ -162,7 +156,6 @@ test.describe('conference day API', () => {
   })
 
   test('an item that ends before it starts is a validation error, not a server error', async () => {
-    test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: lib/actions/mun-schedule.ts throws "endsAt must be after startsAt", which server/middleware/error.ts does not map, so the API answers 500 INTERNAL instead of 400')
     const res = await api.post(`muns/${munId}/schedule`, {
       data: { title: `E2E Backwards API ${uid()}`, kind: 'OTHER', startsAt: '2026-12-16T12:00:00Z', endsAt: '2026-12-16T11:00:00Z' },
     })

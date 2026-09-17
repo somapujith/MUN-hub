@@ -1,37 +1,11 @@
-import { expect, request, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, request, type APIRequestContext, type Page } from '@playwright/test'
 import { API_ORIGIN, WEB_URL } from '../../env'
 import { TEST_LOGIN_CODE, seedOrganizerLoginCode, signUpOrganizerViaApi } from '../../fixtures/api'
 import { STORAGE_STATE } from '../../paths'
 import { SANDBOX } from '../../fixtures/fixture-muns'
 import { uniqueEmail } from '../../fixtures/data'
 
-/**
- * Shared helpers for the organizer workspace specs.
- *
- * KNOWN APP BUG (the reason most UI tests here carry `test.fail`):
- * web/src/layouts/mun-workspace-layout.tsx resolves the current MUN from
- * MOCK_WORKSPACE_MUNS (web/src/mocks/organizer.ts) instead of the organizer's
- * real conferences, so every real MUN id redirects to /organizer/dashboard/muns
- * and no per-MUN section is reachable. The sidebar switcher is fed the same
- * mock list (web/src/layouts/workspace-layout.tsx).
- *
- * E2E_ORG_WORKSPACE_SHIM=1 swaps the mock list for the organizer's real MUNs
- * at the network layer (no app code touched), which is how the per-section
- * flows below were verified end to end. With the shim on, the bug markers are
- * switched off so those flows must genuinely pass.
- */
-export const WORKSPACE_SHIM = process.env.E2E_ORG_WORKSPACE_SHIM === '1'
-
-export const WORKSPACE_BUG =
-  'BUG: per-MUN workspace resolves MUNs from mock data (web/src/layouts/mun-workspace-layout.tsx), so every real MUN id redirects to My MUNs'
-
-/** Marks a test that needs a per-MUN workspace section as blocked by WORKSPACE_BUG. */
-export function expectWorkspaceBug(): void {
-  test.fail(!WORKSPACE_SHIM && !process.env.E2E_SHOW_KNOWN_BUGS, WORKSPACE_BUG)
-}
-
-export const PRODUCTS_LIST_BUG =
-  'BUG: GET /muns/:munId/products is shadowed by the public GET /muns/:slug/products route (server/routes/muns.ts is mounted first), so the organizer products list always shows "Mun not found"'
+/** Shared helpers for the organizer workspace specs. */
 
 export interface OwnedMun {
   id: string
@@ -44,21 +18,11 @@ export interface OwnedMun {
   capacity: number
 }
 
-/**
- * The API rate-limits by client IP (300 req/min global, keyed on
- * X-Forwarded-For). This suite's direct API calls would otherwise share one
- * bucket with the browser under test and starve it, so each helper context
- * presents itself as a separate client (TEST-NET-2 addresses).
- */
-function helperClientIp(): string {
-  return `198.51.100.${1 + Math.floor(Math.random() * 254)}`
-}
-
 /** An API context signed in as the seeded organizer, reusing the saved session (no extra login). */
 export async function organizerApi(): Promise<APIRequestContext> {
   return request.newContext({
     baseURL: `${API_ORIGIN}/api/v1/`,
-    extraHTTPHeaders: { Origin: WEB_URL, 'x-forwarded-for': helperClientIp() },
+    extraHTTPHeaders: { Origin: WEB_URL },
     storageState: STORAGE_STATE.organizer,
   })
 }
@@ -78,23 +42,6 @@ export async function ownedMunBySlug(api: APIRequestContext, slug: string): Prom
 /** The sandbox is ONBOARDING, so it isn't publicly readable — resolve its id through the owner's workspace. */
 export async function sandboxId(api: APIRequestContext): Promise<string> {
   return (await ownedMunBySlug(api, SANDBOX.slug)).id
-}
-
-export async function installWorkspaceShim(page: Page, muns: OwnedMun[]): Promise<void> {
-  if (!WORKSPACE_SHIM) return
-  const injected = JSON.stringify(
-    muns.map(({ id, name, slug, edition, status }) => ({ id, name, slug, edition, status })),
-  )
-  await page.route(/\/src\/mocks\/organizer\.ts(\?.*)?$/, async (route) => {
-    const response = await route.fetch()
-    const body = `${await response.text()}\nMOCK_WORKSPACE_MUNS.splice(0, MOCK_WORKSPACE_MUNS.length, ...${injected});\n`
-    await route.fulfill({ response, body })
-  })
-}
-
-/** Prepares a page for workspace navigation (installs the shim when enabled). */
-export async function prepareWorkspace(page: Page, api: APIRequestContext): Promise<void> {
-  if (WORKSPACE_SHIM) await installWorkspaceShim(page, await ownedMuns(api))
 }
 
 export function sectionPath(munId: string, segment: string): string {
@@ -133,7 +80,7 @@ export function acceptNextConfirm(page: Page): void {
 export async function anonApi(): Promise<APIRequestContext> {
   return request.newContext({
     baseURL: `${API_ORIGIN}/api/v1/`,
-    extraHTTPHeaders: { Origin: WEB_URL, 'x-forwarded-for': helperClientIp() },
+    extraHTTPHeaders: { Origin: WEB_URL },
     storageState: { cookies: [], origins: [] },
   })
 }
@@ -172,10 +119,98 @@ export async function signUpOrganizerThroughUi(page: Page, name = 'E2E Journey O
 }
 
 /** Creates a brand-new ORGANIZER through the real passwordless signup and returns a signed-in API context. */
-export async function createFreshOrganizer(name = 'E2E Organizer') {
-  const session = await signUpOrganizerViaApi(name)
+export async function createFreshOrganizer(name = 'E2E Organizer', { onboarded = true }: { onboarded?: boolean } = {}) {
+  const session = await signUpOrganizerViaApi(name, undefined, { onboarded })
   expect(session.role).toBe('ORGANIZER')
   return { api: session.api, email: session.email, userId: session.userId }
+}
+
+/** Valid answers for the organizer onboarding wizard (lib/actions/organizer-onboarding.ts). */
+export function onboardingAnswers(conferenceName = `E2E Wizard MUN ${uid()}`) {
+  return {
+    contactPhone: '9876543210',
+    munName: conferenceName,
+    munCity: 'Hyderabad',
+    // YYYY-MM-DD, ~4 months out.
+    munStartDate: new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+    expectedDelegateCount: 180,
+    munDescription: 'Three committees, a crisis cabinet, and a press corps. Our first edition on MUN Hub.',
+    previousEditions: '2nd edition, 120 delegates last year',
+    websiteUrl: 'https://example.com/e2e-wizard',
+    upiId: 'e2e.organizer@okhdfcbank',
+    upiPhone: '9123456780',
+  }
+}
+
+export type OnboardingAnswers = ReturnType<typeof onboardingAnswers>
+
+/** A button in the onboarding wizard's stepper ("01 Create profile" … "05 Agreement"). */
+export function onboardingStep(page: Page, label: string) {
+  return page.getByRole('navigation', { name: 'Onboarding steps' }).getByRole('button', { name: new RegExp(label) })
+}
+
+/**
+ * Walks the onboarding wizard at /organizer/onboarding from its current step
+ * (the profile step) through the agreement. Submitting also submits the host
+ * application; the page ends on /organizer/apply/submitted.
+ */
+export async function completeOnboardingThroughUi(page: Page, answers: OnboardingAnswers = onboardingAnswers()) {
+  const form = main(page)
+  const heading = page.getByRole('heading', { level: 1 })
+  const next = form.getByRole('button', { name: 'Continue' })
+
+  await expect(heading).toHaveText('Create your organizer profile')
+  await form.getByLabel('Contact number').fill(answers.contactPhone)
+  await next.click()
+
+  await expect(heading).toHaveText('Tell us about your MUN')
+  await form.getByLabel('Title of your MUN').fill(answers.munName)
+  await form.getByLabel('Host city').fill(answers.munCity)
+  await form.getByLabel('Expected start date').fill(answers.munStartDate)
+  await next.click()
+
+  await expect(heading).toHaveText('Delegates & details')
+  await form.getByLabel('Maximum delegates you expect').fill(String(answers.expectedDelegateCount))
+  await form.getByLabel('About your MUN').fill(answers.munDescription)
+  await form.getByLabel('Previous editions (optional)').fill(answers.previousEditions)
+  await form.getByLabel('Website (optional)').fill(answers.websiteUrl)
+  await next.click()
+
+  await expect(heading).toHaveText('Payment details')
+  await form.getByLabel('UPI ID', { exact: true }).fill(answers.upiId)
+  await form.getByLabel('Mobile number linked to this UPI ID').fill(answers.upiPhone)
+  await next.click()
+
+  await expect(heading).toHaveText('Organizer agreement')
+  await form.getByRole('checkbox', { name: /^I have read and agree to the MUN Hub organizer agreement/ }).check()
+  await form.getByRole('button', { name: 'Submit application' }).click()
+}
+
+/** Completes every onboarding step through the API, in order (the last one submits the application). */
+export async function completeOnboardingViaApi(
+  api: APIRequestContext,
+  answers: OnboardingAnswers = onboardingAnswers(),
+): Promise<void> {
+  const steps: Array<[string, 'put' | 'post', Record<string, unknown>]> = [
+    ['profile', 'put', { firstName: 'E2E', lastName: 'Organizer', contactPhone: answers.contactPhone }],
+    ['mun', 'put', { munName: answers.munName, munCity: answers.munCity, munStartDate: answers.munStartDate }],
+    [
+      'details',
+      'put',
+      {
+        expectedDelegateCount: answers.expectedDelegateCount,
+        munDescription: answers.munDescription,
+        previousEditions: answers.previousEditions,
+        websiteUrl: answers.websiteUrl,
+      },
+    ],
+    ['payment', 'put', { upiId: answers.upiId, upiPhone: answers.upiPhone }],
+    ['agreement', 'post', { accepted: true }],
+  ]
+  for (const [step, method, data] of steps) {
+    const res = await api[method](`organizer/onboarding/${step}`, { data })
+    expect(res.status(), `${step}: ${await res.text()}`).toBe(200)
+  }
 }
 
 export interface ApplicationResult {

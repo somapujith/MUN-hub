@@ -2,13 +2,11 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { getMun, signUpViaApi, type ApiSession } from '../../fixtures/api'
 import { OPEN } from '../../fixtures/fixture-muns'
 import {
-  expectWorkspaceBug,
   main,
   createFreshOrganizer,
   openSection,
   organizerApi,
   ownedMunBySlug,
-  prepareWorkspace,
 } from './_helpers'
 
 /**
@@ -112,7 +110,6 @@ test.describe('registration roster API', () => {
   })
 
   test('the roster never exposes delegates\' credentials or session data', async () => {
-    test.fail(!process.env.E2E_SHOW_KNOWN_BUGS, 'BUG: GET /organizer/muns/:munId/delegates returns the full users row (lib/actions/organizer-dashboard.ts#queryDelegates `user: true`), including passwordHash, to the organizer')
     const row = await findDelegate()
     expect(row).toBeDefined()
     for (const key of Object.keys(row!.user)) {
@@ -151,12 +148,7 @@ test.describe('registration roster API', () => {
 })
 
 test.describe('registration roster UI', () => {
-  test.beforeEach(async ({ page }) => {
-    await prepareWorkspace(page, api)
-  })
-
   test('the Registrations section lists the paid delegate', async ({ page }) => {
-    expectWorkspaceBug()
     await openSection(page, openId, 'registrations', 'Registrations')
     await expect(main(page).getByText(/\d+–\d+ of \d+/)).toBeVisible()
     const row = await rosterRow(page)
@@ -169,10 +161,10 @@ test.describe('registration roster UI', () => {
   })
 
   test('filtering by committee and payment status narrows the roster', async ({ page }) => {
-    expectWorkspaceBug()
     await openSection(page, openId, 'registrations', 'Registrations')
     await main(page).getByLabel('Committee').selectOption({ label: GA.name })
     await main(page).getByLabel('Payment status').selectOption({ label: 'Paid' })
+    await expect(await rosterRow(page)).toHaveCount(1)
     await main(page).getByLabel('Search this page').fill(delegate.email)
     await expect(main(page).getByRole('row').filter({ hasText: delegate.email })).toHaveCount(1)
 
@@ -186,7 +178,6 @@ test.describe('registration roster UI', () => {
   })
 
   test('Analytics shows the pass\'s confirmed registrations and revenue', async ({ page }) => {
-    expectWorkspaceBug()
     await openSection(page, openId, 'analytics', 'Analytics')
     await expect(main(page).getByText('Confirmed registrations', { exact: true })).toBeVisible()
     const row = main(page).getByRole('row').filter({ hasText: PASS.name })
@@ -198,7 +189,6 @@ test.describe('registration roster UI', () => {
   })
 
   test('Communications lists the delegate for manual outreach', async ({ page }) => {
-    expectWorkspaceBug()
     await openSection(page, openId, 'communications', 'Communications')
     await main(page).getByLabel('Committee').selectOption({ label: GA.name })
     await main(page).getByLabel('Payment status').selectOption({ label: 'Paid' })
@@ -207,7 +197,6 @@ test.describe('registration roster UI', () => {
   })
 
   test('Payments & Finance shows no delegate payment data it should not', async ({ page }) => {
-    expectWorkspaceBug()
     await openSection(page, openId, 'finance', 'Payments & Finance')
     await expect(main(page).getByText(/^(Set up|Update) settlement settings$/)).toBeVisible()
     await expect(main(page)).not.toContainText(delegate.email)
