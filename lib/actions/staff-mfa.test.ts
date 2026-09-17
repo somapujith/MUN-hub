@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
-import { mfaPendingChallenges, mfaRecoveryCodes, userMfa, users } from '@/lib/db/schema'
+import { adminActions, mfaPendingChallenges, mfaRecoveryCodes, userMfa, users } from '@/lib/db/schema'
 import { hashPassword } from '@/lib/auth/password'
 import { totp } from '@/lib/auth/totp'
 import type { Session } from '@/lib/auth/adapter'
@@ -197,6 +197,10 @@ describe('resetStaffMfa', () => {
     expect(mfaRow).toBeUndefined()
     const recoveryRows = await db.select().from(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, admin.id))
     expect(recoveryRows).toHaveLength(0)
+
+    const [audit] = await db.select().from(adminActions).where(eq(adminActions.targetId, admin.id))
+    expect(audit).toMatchObject({ actorId: superAdmin.id, action: 'STAFF_MFA_RESET', targetType: 'user' })
+    expect(audit.metadata).toEqual({ event: 'STAFF_MFA_RESET' })
   })
 
   it('rejects a non-SUPER_ADMIN caller', async () => {

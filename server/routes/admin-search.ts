@@ -51,7 +51,7 @@ adminSearchRoutes.get(
     const session = c.get('session')!
     const results = await searchRegistrations(q, session)
     // Rows carry delegate names.
-    recordPiiRead({
+    await recordPiiRead({
       actorId: session.userId,
       route: 'GET /admin/search/registrations',
       targetType: 'registration',
@@ -76,7 +76,7 @@ adminSearchRoutes.get(
     const session = c.get('session')!
     const result = await listPaymentExceptions({ status: query.status, search: query.q, limit: query.limit, offset: query.offset }, session)
     // Rows carry delegate names/emails.
-    recordPiiRead({
+    await recordPiiRead({
       actorId: session.userId,
       route: 'GET /admin/payment-exceptions',
       targetType: 'payment',

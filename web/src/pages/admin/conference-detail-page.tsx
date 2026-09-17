@@ -11,6 +11,7 @@ import { getPaymentSettings, setPaymentVerificationState } from "@/api/payment-s
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
 import { Gate2ReviewDialog } from "@/components/admin/gate2-review-dialog";
 import { ReasonDialog } from "@/components/admin/reason-dialog";
+import { ResultsReviewSection } from "@/components/admin/results-review-section";
 import { getRegistrationStatusMeta } from "@/components/dashboard/registration-status";
 import { MunStatusBadge } from "@/components/mun/mun-status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +44,11 @@ const PUBLIC_STATUSES: MunStatus[] = [
   "ARCHIVED",
 ];
 
-const SUSPENDABLE: MunStatus[] = ["PUBLISHED", "REGISTRATION_OPEN", "REGISTRATION_CLOSED", "CONFERENCE_ACTIVE"];
+// Statuses in which the Results review section shows: results are with the
+// organizer, or waiting for MUNHub.
+const RESULTS_REVIEW_STATUSES: MunStatus[] = ["RESULTS_PENDING", "RESULTS_UNDER_REVIEW"];
+
+const SUSPENDABLE: MunStatus[] =["PUBLISHED", "REGISTRATION_OPEN", "REGISTRATION_CLOSED", "CONFERENCE_ACTIVE"];
 
 // Mirrors the lifecycle's ALLOWED_TRANSITIONS: states that can still move to CANCELLED.
 const CANCELLABLE: MunStatus[] = [
@@ -94,7 +99,9 @@ const LIFECYCLE_STEPS: Array<{ action: Exclude<MunLifecycleAction, "cancel">; la
     label: "Mark completed",
     // Not RESULTS_PENDING: the server refuses that move (results must go
     // through review first; see lib/lifecycle/registration-lifecycle.ts).
-    from: ["CONFERENCE_ACTIVE", "RESULTS_UNDER_REVIEW"],
+    // Not RESULTS_UNDER_REVIEW either: submitted results are completed through
+    // the Results review section, whose approval also verifies the awards.
+    from: ["CONFERENCE_ACTIVE"],
     confirm: "Mark the conference as completed?",
   },
   {
@@ -448,16 +455,28 @@ export function AdminConferenceDetailPage() {
                 {lifecycleButtons.length > 0 ? (
                   <div className="flex flex-wrap gap-sm">{lifecycleButtons}</div>
                 ) : (
-                  <p className="text-body-md text-muted-foreground">This conference has reached the end of its lifecycle.</p>
+                  <p className="text-body-md text-muted-foreground">
+                    {RESULTS_REVIEW_STATUSES.includes(status)
+                      ? "The conference completes once its results are approved in Results review below."
+                      : "This conference has reached the end of its lifecycle."}
+                  </p>
                 )}
               </div>
             </>
           )}
           {!canPublish && !canReview && (
-            <p className="text-body-md text-muted-foreground">No review decision is pending.</p>
+            <p className="text-body-md text-muted-foreground">
+              {status === "RESULTS_UNDER_REVIEW"
+                ? "The conference results are waiting for review below."
+                : "No review decision is pending."}
+            </p>
           )}
         </div>
       </Section>
+
+      {RESULTS_REVIEW_STATUSES.includes(status) && (
+        <ResultsReviewSection munId={mun.id} munName={mun.name} status={status} onDecided={refresh} />
+      )}
 
       <div className="grid grid-cols-1 gap-lg lg:grid-cols-2">
         <Section title="Current submission" description="The latest Gate 2 content submission.">

@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, exists, ilike, inArray, or, sql, sum, type SQL } from 'drizzle-orm'
 import { ATTENDANCE_OPEN_STATUSES } from '@/lib/actions/check-in'
 import { assertMunOwner } from '@/lib/actions/mun-access'
+import { organizerNetAmountSql, REVENUE_REGISTRATION_STATUSES } from '@/lib/actions/mun-analytics'
 import { ORGANIZER_OPS_ERRORS, ROSTER_EXPORT_MAX_ROWS } from '@/lib/actions/organizer-ops-errors'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
@@ -22,7 +23,10 @@ import { countedPaymentsFilter } from '@/lib/payments/counted-payments'
 
 export interface MunOverview {
   totalRegistrations: number
+  /** Gross collected from paid, standing registrations (platform fee and GST included). */
   revenue: number
+  /** Net to the organizer from the same payments (`revenue` minus fee and GST). */
+  organizerNet: number
   pendingPayments: number
   availableSeats: number
 }
@@ -41,7 +45,9 @@ const PENDING_REGISTRATION_STATUSES = ['PENDING', 'PAYMENT_PENDING'] as const
 
 /**
  * Aggregate stats for an organizer's mun dashboard: registration count,
- * revenue collected, payments still pending, and remaining seat capacity.
+ * revenue collected (gross, and net to the organizer — PAID payments on
+ * standing registrations, same rule as mun-analytics.ts), payments still
+ * pending, and remaining seat capacity.
  *
  * Requires the caller-supplied `session` to own the mun or be an
  * ADMIN/SUPER_ADMIN — throws `Forbidden` otherwise. Missing mun throws
@@ -57,10 +63,20 @@ export async function getMunOverview(munId: string, session: Session | null): Pr
       and(eq(registrations.munId, munId), inArray(registrations.status, [...COUNTABLE_REGISTRATION_STATUSES])),
     ),
     db
-      .select({ total: sum(payments.amount) })
+      .select({
+        total: sum(payments.amount),
+        organizerNet: sql<string | null>`sum(${organizerNetAmountSql})`,
+      })
       .from(payments)
       .innerJoin(registrations, eq(payments.registrationId, registrations.id))
-      .where(and(eq(registrations.munId, munId), eq(payments.status, 'PAID'), countedPaymentsFilter()))
+      .where(
+        and(
+          eq(registrations.munId, munId),
+          eq(payments.status, 'PAID'),
+          inArray(registrations.status, REVENUE_REGISTRATION_STATUSES),
+          countedPaymentsFilter(),
+        ),
+      )
       .then((rows) => rows[0]),
     db.$count(
       payments,
@@ -80,6 +96,7 @@ export async function getMunOverview(munId: string, session: Session | null): Pr
   return {
     totalRegistrations,
     revenue: revenueRow?.total ? Number(revenueRow.total) : 0,
+    organizerNet: revenueRow?.organizerNet ? Number(revenueRow.organizerNet) : 0,
     pendingPayments,
     availableSeats: totalCapacity - totalRegistrations,
   }

@@ -64,11 +64,14 @@ const REGISTRATION_STATUS_META: Record<RegistrationStatus, RegistrationStatusMet
     icon: "x-circle",
     hint: "This registration was cancelled and the seat released.",
   },
+  // Legacy status: MUN Hub has no refunds, and nothing sets it any more. Old
+  // rows are payment problems MUN Hub settles by hand (payment exceptions),
+  // so the label says that rather than "Refunded".
   REFUNDED: {
-    label: "Refunded",
+    label: "Payment exception",
     tone: "muted",
     icon: "rotate-ccw",
-    hint: "Your payment was returned.",
+    hint: "There was a problem with this payment. Our support team settles it with you directly.",
   },
   ATTENDED: {
     label: "Attended",
@@ -118,7 +121,11 @@ const PAYMENT_STATUS_META: Record<PaymentStatus, PaymentStatusMeta> = {
   PENDING: { label: "Payment processing", tone: "warning" },
   PAID: { label: "Paid", tone: "success" },
   FAILED: { label: "Payment failed", tone: "destructive" },
-  REFUNDED: { label: "Refunded", tone: "muted" },
+  // Legacy status: before payment exceptions existed, a payment captured with
+  // no valid registration behind it (e.g. after the seat hold expired) was
+  // stored as REFUNDED. MUN Hub has no refunds; these are payment exceptions
+  // that an admin settles.
+  REFUNDED: { label: "Payment exception", tone: "muted" },
 };
 
 export function getPaymentStatusMeta(status: PaymentStatus): PaymentStatusMeta {

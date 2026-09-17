@@ -106,7 +106,7 @@ describe('createStaffAccount', () => {
     expect(result.expiresAt.getTime()).toBeGreaterThanOrEqual(before + STAFF_SET_PASSWORD_TTL_MS - 1000)
 
     const log = await latestAudit(result.staff.id)
-    expect(log).toMatchObject({ actorId: superAdmin.id, action: 'ORGANIZER_REINSTATED', targetType: 'user' })
+    expect(log).toMatchObject({ actorId: superAdmin.id, action: 'STAFF_CREATED', targetType: 'user' })
     expect(log.metadata).toEqual({ event: 'STAFF_CREATED', role: 'OPERATIONS' })
     expect(JSON.stringify(log.metadata)).not.toContain(tokenFrom(result.setPasswordUrl))
 
@@ -179,6 +179,7 @@ describe('changeStaffRole', () => {
     const [row] = await db.select({ role: users.role }).from(users).where(eq(users.id, target.id))
     expect(row.role).toBe('ADMIN')
     const log = await latestAudit(target.id)
+    expect(log.action).toBe('STAFF_ROLE_CHANGED')
     expect(log.metadata).toEqual({ event: 'STAFF_ROLE_CHANGED', fromRole: 'OPERATIONS', toRole: 'ADMIN' })
   })
 
@@ -246,7 +247,7 @@ describe('suspendStaff / reinstateStaff', () => {
     expect(await getSessionByToken(token)).toBeNull()
 
     const log = await latestAudit(target.id)
-    expect(log).toMatchObject({ action: 'USER_SUSPENDED', reason: 'left the team', actorId: superAdmin.id })
+    expect(log).toMatchObject({ action: 'STAFF_SUSPENDED', reason: 'left the team', actorId: superAdmin.id })
     expect(log.metadata).toEqual({ event: 'STAFF_SUSPENDED', role: 'ADMIN' })
   })
 
@@ -258,7 +259,7 @@ describe('suspendStaff / reinstateStaff', () => {
     expect(updated).toMatchObject({ suspended: false, suspendedReason: null, suspendedAt: null })
 
     const log = await latestAudit(target.id)
-    expect(log.action).toBe('ORGANIZER_REINSTATED')
+    expect(log.action).toBe('STAFF_REINSTATED')
     expect(log.metadata).toEqual({ event: 'STAFF_REINSTATED', role: 'OPERATIONS' })
   })
 
@@ -312,6 +313,7 @@ describe('issueStaffSetPasswordLink', () => {
     await resetPassword(tokenFrom(fresh.setPasswordUrl), 'a-strong-password')
 
     const log = await latestAudit(created.staff.id)
+    expect(log.action).toBe('STAFF_SET_PASSWORD_LINK_ISSUED')
     expect((log.metadata as { event: string }).event).toBe('STAFF_SET_PASSWORD_LINK_ISSUED')
   })
 
@@ -348,7 +350,7 @@ describe('bootstrapSuperAdmin', () => {
     expect(row).toMatchObject({ email, role: 'SUPER_ADMIN', name: email.split('@')[0] })
 
     const log = await latestAudit(result.userId)
-    expect(log.actorId).toBe(result.userId)
+    expect(log).toMatchObject({ actorId: result.userId, action: 'SUPER_ADMIN_BOOTSTRAPPED' })
     expect(log.metadata).toMatchObject({ event: 'SUPER_ADMIN_BOOTSTRAPPED', created: true })
 
     await resetPassword(tokenFrom(result.setPasswordUrl), 'a-strong-password')

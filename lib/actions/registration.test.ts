@@ -562,6 +562,43 @@ describe('releaseExpiredReservations', () => {
     const count = await releaseExpiredReservations(product.id)
     expect(count).toBe(1)
   })
+
+  it('emails only delegates whose checkout hold expired within the last hour', async () => {
+    const organizer = await createUser('ORGANIZER')
+    const recentCheckout = await createUser('STUDENT')
+    const staleCheckout = await createUser('STUDENT')
+    const unpaidHold = await createUser('STUDENT')
+    const mun = await createMun(organizer.id)
+    const product = await createProduct(mun.id, 10)
+    const now = Date.now()
+    const base = { munId: mun.id, registrationProductId: product.id }
+    await db.insert(registrations).values([
+      { ...base, userId: recentCheckout.id, status: 'PAYMENT_PENDING', expiresAt: new Date(now - 5 * 60 * 1000) },
+      { ...base, userId: staleCheckout.id, status: 'PAYMENT_PENDING', expiresAt: new Date(now - 2 * 60 * 60 * 1000) },
+      // PENDING never reached checkout: released silently.
+      { ...base, userId: unpaidHold.id, status: 'PENDING', expiresAt: new Date(now - 5 * 60 * 1000) },
+    ])
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const holdEmailRecipients = () =>
+        log.mock.calls
+          .filter(([tag, , subject]) => tag === '[notification]' && String(subject).startsWith('Your seat hold expired'))
+          .map(([, to]) => to)
+
+      expect(await releaseExpiredReservations(product.id)).toBe(3)
+
+      // Sent in the background, after the release has committed.
+      await vi.waitFor(() => expect(holdEmailRecipients()).toContain(recentCheckout.email))
+      expect(holdEmailRecipients().filter((to) => to === staleCheckout.email || to === unpaidHold.email)).toEqual([])
+
+      // Already released: a second sweep releases and emails nothing more.
+      expect(await releaseExpiredReservations(product.id)).toBe(0)
+      expect(holdEmailRecipients().filter((to) => to === recentCheckout.email)).toHaveLength(1)
+    } finally {
+      log.mockRestore()
+    }
+  })
 })
 
 describe('getProductsAvailability', () => {

@@ -307,8 +307,8 @@ export async function disableMfa(code: string, session: Session): Promise<void> 
 /**
  * SUPER_ADMIN-only: clears a staff member's TOTP enrollment and recovery
  * codes (e.g. a lost device) so they can re-enroll from scratch. Audit-logged
- * the same way admin-staff.ts's writes are (closest existing AdminAction enum
- * value, precise event name in metadata).
+ * as STAFF_MFA_RESET (with the same name in `metadata.event`, like
+ * admin-staff.ts's writes).
  */
 export async function resetStaffMfa(targetUserId: string, session: Session): Promise<void> {
   requireRole(session, ['SUPER_ADMIN'])
@@ -316,7 +316,7 @@ export async function resetStaffMfa(targetUserId: string, session: Session): Pro
   await db.transaction(async (tx) => {
     await tx.delete(userMfa).where(eq(userMfa.userId, targetUserId))
     await tx.delete(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, targetUserId))
-    await recordAdminAction(tx, session.userId, 'ORGANIZER_REINSTATED', 'user', targetUserId, undefined, {
+    await recordAdminAction(tx, session.userId, 'STAFF_MFA_RESET', 'user', targetUserId, undefined, {
       event: 'STAFF_MFA_RESET',
     })
   })

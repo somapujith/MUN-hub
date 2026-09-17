@@ -52,9 +52,25 @@ describe('organizer dashboard queries', () => {
       status: 'PENDING',
     })
 
+    // A payment captured after its hold was released is a payment exception,
+    // not revenue.
+    const [releasedReg] = await db
+      .insert(registrations)
+      .values({ userId: student.id, munId: mun.id, registrationProductId: product.id, status: 'CANCELLED' })
+      .returning()
+    await db.insert(payments).values({
+      registrationId: releasedReg.id,
+      providerOrderId: `order-late-${suffix}`,
+      amount: 2000,
+      status: 'PAID',
+      exceptionReason: 'PAYMENT_AFTER_HOLD_EXPIRED',
+    })
+
     const overview = await getMunOverview(mun.id, sess(organizer))
     expect(overview.totalRegistrations).toBe(1) // only CONFIRMED+ATTENDED count
     expect(overview.revenue).toBe(2000)
+    // No fee breakdown on that payment: the whole amount is the organizer's.
+    expect(overview.organizerNet).toBe(2000)
     expect(overview.pendingPayments).toBe(1)
     expect(overview.availableSeats).toBe(4) // capacity 5 - 1 counted registration
 

@@ -161,6 +161,27 @@ export const adminActionEnum = pgEnum('admin_action', [
   // lib/actions/payment-settlement.ts's setPaymentVerificationState — see
   // that file's updated comment.
   'PAYMENT_DETAILS_CHANGED',
+  // Migration 0035. Before these existed, each write below stored the closest
+  // existing value (PAYMENT_DETAILS_CHANGED / USER_SUSPENDED /
+  // ORGANIZER_REINSTATED) with the precise name in `metadata.event` or
+  // `metadata.kind`; rows written before 0035 keep that shape, and the audit
+  // feeds still prefer `metadata.event` when present.
+  // Admin resolved a payment exception (lib/payments/exceptions.ts).
+  'PAYMENT_EXCEPTION_RESOLVED',
+  // Staff console writes (lib/actions/admin-staff.ts, lib/actions/staff-mfa.ts).
+  'STAFF_CREATED',
+  'STAFF_ROLE_CHANGED',
+  'STAFF_SUSPENDED',
+  'STAFF_REINSTATED',
+  'STAFF_SET_PASSWORD_LINK_ISSUED',
+  'STAFF_MFA_RESET',
+  // Break-glass SUPER_ADMIN creation (scripts/create-admin.ts).
+  'SUPER_ADMIN_BOOTSTRAPPED',
+  // A staff read that returned delegates' personal data (lib/actions/admin-pii-read.ts).
+  'PII_READ',
+  // A delegate deleted (anonymized) their own account; the actor is that
+  // account (lib/actions/account-deletion.ts).
+  'ACCOUNT_DELETED',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [

@@ -30,6 +30,8 @@ export function getAdminOverviewStats() {
 export interface AdminAuditListParams {
   limit?: number;
   offset?: number;
+  /** Include staff reads of delegate data (PII_READ rows); the server leaves them out by default. */
+  includeDataAccess?: boolean;
 }
 
 interface RawAdminAuditEntry extends Omit<AdminAuditEntry, "createdAt"> {
@@ -47,6 +49,7 @@ export async function listAdminAuditEntries(
   const query = new URLSearchParams();
   if (params.limit !== undefined) query.set("limit", String(params.limit));
   if (params.offset !== undefined) query.set("offset", String(params.offset));
+  if (params.includeDataAccess) query.set("includeDataAccess", "true");
   const qs = query.toString();
 
   const raw = await request<RawAdminAuditListResult>(`/admin/audit${qs ? `?${qs}` : ""}`);

@@ -8,6 +8,7 @@ export const adminQueryKeys = {
   munsAll: () => ["admin", "muns"] as const,
   mun: (munId: string) => ["admin", "muns", "detail", munId] as const,
   munPaymentSettings: (munId: string) => ["admin", "muns", "payment-settings", munId] as const,
+  munResults: (munId: string) => ["admin", "muns", "results", munId] as const,
   goLiveQueueDetails: (params: Record<string, unknown>) => ["admin", "go-live-queue", "details", params] as const,
   staff: (params: Record<string, unknown>) => ["admin", "staff", params] as const,
   staffAll: () => ["admin", "staff"] as const,

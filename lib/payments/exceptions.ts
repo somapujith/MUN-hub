@@ -171,9 +171,9 @@ export interface ResolvedPaymentException {
  * Row-locks the payment and writes the admin_actions entry in the same
  * transaction. OPERATIONS/ADMIN/SUPER_ADMIN only.
  *
- * Audit action: `PAYMENT_DETAILS_CHANGED` on target type 'payment' with
- * `metadata.kind = 'PAYMENT_EXCEPTION_RESOLVED'` — the closest existing
- * admin_action value; a dedicated enum value needs a migration.
+ * Audit action: `PAYMENT_EXCEPTION_RESOLVED` on target type 'payment'
+ * (migration 0035). `metadata.kind` repeats the name, as rows written before
+ * the dedicated value existed stored `PAYMENT_DETAILS_CHANGED` with it.
  */
 export async function resolvePaymentException(
   paymentId: string,
@@ -228,7 +228,7 @@ export async function resolvePaymentException(
       })
       .where(eq(payments.id, payment.id))
 
-    await recordAdminAction(tx, session.userId, 'PAYMENT_DETAILS_CHANGED', 'payment', payment.id, trimmed, {
+    await recordAdminAction(tx, session.userId, 'PAYMENT_EXCEPTION_RESOLVED', 'payment', payment.id, trimmed, {
       kind: 'PAYMENT_EXCEPTION_RESOLVED',
       exceptionReason: reason,
       registrationId: payment.registrationId,

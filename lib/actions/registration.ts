@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, lt } from 'drizzle-orm'
+import { and, count, eq, inArray, lt, type SQL } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
   accommodationOptions,
@@ -11,10 +11,12 @@ import {
   registrations,
 } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
+import { isRecentlyExpired, notifyExpiredCheckouts } from '@/lib/jobs/release-expired-holds'
 import { onRegistrationConfirmed, runPaymentHook } from '@/lib/payments/events'
 import { computeFeeBreakdown, getPlatformFeeRates, type FeeBreakdown } from '@/lib/payments/fees'
 import { effectivePassPrice } from '@/lib/payments/pricing'
 import { getPaymentsAdapter } from '@/lib/payments/registry'
+import { runInBackground } from '@/lib/runtime-background'
 import type { RegistrationInput, RegistrationStatus } from '@/lib/types'
 
 const RESERVATION_TTL_MS = 15 * 60 * 1000
@@ -23,40 +25,68 @@ const ACTIVE_REGISTRATION_STATUSES: RegistrationStatus[] = ['PENDING', 'PAYMENT_
 const RELEASABLE_STATUSES: RegistrationStatus[] = ['PENDING', 'PAYMENT_PENDING']
 
 /**
- * Marks any PENDING/PAYMENT_PENDING registrations for `registrationProductId`
- * whose 15-minute reservation window has expired as CANCELLED, freeing their
- * seat. Called as a lazy sweep at the top of `initiateRegistration`'s
- * capacity check (no cron needed for MVP).
+ * Lazy seat-hold sweep: cancels the PENDING/PAYMENT_PENDING registrations in
+ * `scope` whose reservation window has expired, freeing their seats, and
+ * returns how many it released. The releasing UPDATE re-checks status and
+ * expiry, so a hold confirmed or released concurrently is left alone (and
+ * never emailed twice).
  *
- * Returns the number of registrations released.
+ * Released checkout holds (PAYMENT_PENDING — the delegate had reached
+ * payment) that expired within the last hour get the seat-hold-expired email
+ * after the UPDATE commits, in the background, the same rule as the
+ * release-expired-holds cron job (lib/jobs/release-expired-holds.ts), which
+ * sweeps every product every five minutes.
  */
-export async function releaseExpiredReservations(registrationProductId: string): Promise<number> {
+async function sweepExpiredHolds(scope: SQL): Promise<number> {
+  const now = new Date()
+  const releasable = and(scope, inArray(registrations.status, RELEASABLE_STATUSES), lt(registrations.expiresAt, now))
+
+  // One read in the common case (nothing expired). The status seen here is
+  // what tells a checkout hold from an unpaid one; UPDATE ... RETURNING only
+  // sees the new status.
+  const expired = await db
+    .select({ id: registrations.id, status: registrations.status, expiresAt: registrations.expiresAt })
+    .from(registrations)
+    .where(releasable)
+  if (expired.length === 0) return 0
+
   const released = await db
     .update(registrations)
-    .set({ status: 'CANCELLED', updatedAt: new Date() })
+    .set({ status: 'CANCELLED', updatedAt: now })
     .where(
       and(
-        eq(registrations.registrationProductId, registrationProductId),
-        inArray(registrations.status, RELEASABLE_STATUSES),
-        lt(registrations.expiresAt, new Date()),
+        inArray(
+          registrations.id,
+          expired.map((row) => row.id),
+        ),
+        releasable,
       ),
     )
     .returning({ id: registrations.id })
 
+  const releasedIds = new Set(released.map((row) => row.id))
+  const toNotify = expired.filter(
+    (row) => releasedIds.has(row.id) && row.status === 'PAYMENT_PENDING' && isRecentlyExpired(row.expiresAt, now),
+  )
+  if (toNotify.length > 0) {
+    // notifyExpiredCheckouts logs its own per-registration failures.
+    void runInBackground('seat-hold-expired emails', () => notifyExpiredCheckouts(toNotify))
+  }
+
   return released.length
 }
 
+/**
+ * Releases expired seat holds for `registrationProductId` (see
+ * `sweepExpiredHolds`). Called as a lazy sweep at the top of
+ * `initiateRegistration`'s capacity check. Returns the number released.
+ */
+export async function releaseExpiredReservations(registrationProductId: string): Promise<number> {
+  return sweepExpiredHolds(eq(registrations.registrationProductId, registrationProductId))
+}
+
 async function releaseExpiredReservationsForMun(munId: string): Promise<void> {
-  await db
-    .update(registrations)
-    .set({ status: 'CANCELLED', updatedAt: new Date() })
-    .where(
-      and(
-        eq(registrations.munId, munId),
-        inArray(registrations.status, RELEASABLE_STATUSES),
-        lt(registrations.expiresAt, new Date()),
-      ),
-    )
+  await sweepExpiredHolds(eq(registrations.munId, munId))
 }
 
 /**
@@ -728,11 +758,12 @@ export async function getProductAvailability(
 }
 
 /**
- * Batched form of `getProductAvailability` — one release-sweep UPDATE and
- * one grouped count query across all `registrationProductIds`, instead of
- * 3 round trips per product. A MUN detail page with N passes previously
- * made ~3N sequential DB calls to render availability; this makes 3 calls
- * total regardless of N.
+ * Batched form of `getProductAvailability` — one release sweep
+ * (`sweepExpiredHolds`: a read, plus an UPDATE only when something expired)
+ * and one grouped count query across all `registrationProductIds`, instead
+ * of 3 round trips per product. A MUN detail page with N passes previously
+ * made ~3N sequential DB calls to render availability; this makes 3 or 4
+ * calls total regardless of N.
  */
 export async function getProductsAvailability(
   registrationProductIds: string[],
@@ -741,16 +772,7 @@ export async function getProductsAvailability(
     return []
   }
 
-  await db
-    .update(registrations)
-    .set({ status: 'CANCELLED', updatedAt: new Date() })
-    .where(
-      and(
-        inArray(registrations.registrationProductId, registrationProductIds),
-        inArray(registrations.status, RELEASABLE_STATUSES),
-        lt(registrations.expiresAt, new Date()),
-      ),
-    )
+  await sweepExpiredHolds(inArray(registrations.registrationProductId, registrationProductIds))
 
   const products = await db
     .select({ id: registrationProducts.id, capacity: registrationProducts.capacity })

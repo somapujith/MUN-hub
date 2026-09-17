@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ClipboardListIcon, LayersIcon, LifeBuoyIcon, AlertTriangleIcon, RocketIcon } from "lucide-react";
+import { ClipboardListIcon, LayersIcon, LifeBuoyIcon, AlertTriangleIcon, RocketIcon, TrophyIcon } from "lucide-react";
 import { getAdminAnalytics } from "@/api/admin-analytics";
 import { getAdminOverviewStats } from "@/api/admin-audit";
 import { queryKeys } from "@/api/query-keys";
@@ -23,6 +23,8 @@ const CARD_DEFS: Array<{
   { key: "openSupportTickets", label: "Open Support Tickets", href: "/admin/support", icon: LifeBuoyIcon },
   { key: "paymentExceptions", label: "Payment Exceptions", href: "/admin/payments", icon: AlertTriangleIcon },
   { key: "goLiveQueue", label: "Go-live queue", href: "/admin/go-live-queue", icon: RocketIcon },
+  // No dedicated queue page: the conferences list filtered to submitted results.
+  { key: "resultsReview", label: "Results to review", href: "/admin/muns?status=RESULTS_UNDER_REVIEW", icon: TrophyIcon },
 ];
 
 const REGISTRATION_ORDER: RegistrationStatus[] = [
@@ -170,7 +172,7 @@ export function AdminOverviewPage() {
         </p>
       )}
       {statsQuery.data && (
-        <div className="grid grid-cols-1 gap-md sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-md sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {CARD_DEFS.map(({ key, label, href, icon: Icon }) => (
             <Link
               key={href}

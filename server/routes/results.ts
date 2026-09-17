@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { recordPiiRead } from '@/lib/actions/admin-pii-read'
 import {
   createAchievement,
   deleteAchievement,
+  getResultsForReview,
   getResultsState,
   listMunAchievements,
   reviewResults,
@@ -63,6 +65,22 @@ resultsRoutes.get('/organizer/muns/:munId/results', requireAuth, async (c) => {
 resultsRoutes.post('/organizer/muns/:munId/results/submit', requireAuth, async (c) => {
   const state = await submitResultsForReview(c.req.param('munId'), c.get('session'))
   return c.json(state)
+})
+
+/** MUNHub staff read a MUN's results for review: state plus every award (role checked in lib). */
+resultsRoutes.get('/admin/muns/:munId/results', requireAuth, async (c) => {
+  const session = c.get('session')!
+  const review = await getResultsForReview(c.req.param('munId'), session)
+  // Awards carry the winners' names and emails.
+  await recordPiiRead({
+    actorId: session.userId,
+    route: 'GET /admin/muns/:munId/results',
+    targetType: 'achievement',
+    targetIds: review.awards.map((award) => award.id),
+    hasQuery: false,
+  })
+  c.header('Cache-Control', 'no-store')
+  return c.json(review)
 })
 
 /** MUNHub staff approve or return submitted results (role checked in lib). */

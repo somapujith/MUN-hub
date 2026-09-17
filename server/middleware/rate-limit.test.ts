@@ -154,6 +154,56 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
     expect(otherUser.status).toBe(200)
   })
 
+  describe('support and account deletion (per signed-in user)', () => {
+    it('shares one ticket budget between new tickets and new conversations', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const result = await statuses(LIMITERS.supportTicketUser.limit + 1, (i) =>
+        send(i % 2 === 0 ? '/support/tickets' : '/support/conversations', { ip: freshIp(), user, body: {} }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.supportTicketUser.limit))
+
+      const otherUser = await send('/support/tickets', { ip: freshIp(), user: `user-${crypto.randomUUID()}`, body: {} })
+      expect(otherUser.status).toBe(200)
+    })
+
+    it('limits messages per user across conversations', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const result = await statuses(LIMITERS.supportMessageUser.limit + 1, () =>
+        send(`/support/conversations/${crypto.randomUUID()}/messages`, { ip: freshIp(), user, body: { body: 'hi' } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.supportMessageUser.limit))
+      // Reading a conversation or marking it read isn't a message.
+      const conversation = `/support/conversations/${crypto.randomUUID()}`
+      expect((await send(`${conversation}/read`, { ip: freshIp(), user, body: {} })).status).toBe(200)
+      expect((await send(conversation, { ip: freshIp(), user, method: 'GET' })).status).toBe(200)
+    })
+
+    it('limits account deletion attempts per user', async () => {
+      const user = `user-${crypto.randomUUID()}`
+      const result = await statuses(LIMITERS.accountDeleteUser.limit + 1, () =>
+        send('/account/delete', { ip: freshIp(), user, body: { confirmation: 'DELETE', password: 'guess' } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.accountDeleteUser.limit))
+    })
+
+    it('does not count anonymous calls against these limits (the routes answer 401)', async () => {
+      const ip = freshIp()
+      const result = await statuses(LIMITERS.accountDeleteUser.limit + 3, () => send('/account/delete', { ip, body: {} }))
+      expect(result.every((status) => status === 200)).toBe(true)
+    })
+
+    it('counts against the user binding when bindings are present', async () => {
+      const env = Object.fromEntries(
+        Object.values(LIMITERS).map((spec) => [spec.binding, { limit: vi.fn(async () => ({ success: true })) }]),
+      )
+      const user = `user-${crypto.randomUUID()}`
+      const res = await send(`/support/conversations/${crypto.randomUUID()}/messages`, { ip: freshIp(), user, env, body: {} })
+      expect(res.status).toBe(200)
+      expect(env.RL_SUPPORT_MESSAGE_USER.limit).toHaveBeenCalledWith({ key: `user:${user}` })
+      expect(env.RL_SUPPORT_TICKET_USER.limit).not.toHaveBeenCalled()
+    })
+  })
+
   it('keeps the organizer code limits: per IP+email and per IP', async () => {
     const ip = freshIp()
     const email = freshEmail('org-code')
@@ -297,27 +347,47 @@ describe('server/wrangler.jsonc ratelimits', () => {
     return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1'))
   }
 
+  type RateLimitEntry = { name: string; namespace_id: string; simple: { limit: number; period: number } }
   const config = parseJsonc(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8')) as {
-    ratelimits?: Array<{ name: string; namespace_id: string; simple: { limit: number; period: number } }>
+    ratelimits?: RateLimitEntry[]
+    env?: { staging?: { ratelimits?: RateLimitEntry[]; vars?: Record<string, string> } }
   }
   const declared = config.ratelimits ?? []
+  // Bindings aren't inherited by named environments, so staging lists its own.
+  const staging = config.env?.staging?.ratelimits ?? []
 
-  it('declares a binding with the same limit and period for every limiter', () => {
-    for (const spec of Object.values(LIMITERS)) {
-      const binding = declared.find((entry) => entry.name === spec.binding)
-      expect(binding, spec.binding).toBeDefined()
-      expect(binding!.simple, spec.binding).toEqual({ limit: spec.limit, period: spec.periodSeconds })
-    }
-    expect(declared).toHaveLength(Object.keys(LIMITERS).length)
+  for (const [environment, entries] of [
+    ['top level', declared],
+    ['env.staging', staging],
+  ] as const) {
+    describe(environment, () => {
+      it('declares a binding with the same limit and period for every limiter', () => {
+        for (const spec of Object.values(LIMITERS)) {
+          const binding = entries.find((entry) => entry.name === spec.binding)
+          expect(binding, spec.binding).toBeDefined()
+          expect(binding!.simple, spec.binding).toEqual({ limit: spec.limit, period: spec.periodSeconds })
+        }
+        expect(entries).toHaveLength(Object.keys(LIMITERS).length)
+      })
+
+      it('uses unique, positive-integer namespace ids', () => {
+        const ids = entries.map((entry) => entry.namespace_id)
+        expect(new Set(ids).size).toBe(ids.length)
+        for (const id of ids) expect(id).toMatch(/^[1-9]\d*$/)
+      })
+
+      it('only uses periods Workers supports', () => {
+        for (const entry of entries) expect([10, 60]).toContain(entry.simple.period)
+      })
+    })
+  }
+
+  it('gives staging namespace ids of its own, so its traffic never counts against production', () => {
+    const productionIds = new Set(declared.map((entry) => entry.namespace_id))
+    expect(staging.filter((entry) => productionIds.has(entry.namespace_id))).toEqual([])
   })
 
-  it('uses unique, positive-integer namespace ids', () => {
-    const ids = declared.map((entry) => entry.namespace_id)
-    expect(new Set(ids).size).toBe(ids.length)
-    for (const id of ids) expect(id).toMatch(/^[1-9]\d*$/)
-  })
-
-  it('only uses periods Workers supports', () => {
-    for (const entry of declared) expect([10, 60]).toContain(entry.simple.period)
+  it('sets COOKIE_SECURE on staging too (vars are not inherited)', () => {
+    expect(config.env?.staging?.vars?.COOKIE_SECURE).toBe('true')
   })
 })

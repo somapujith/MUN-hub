@@ -4,6 +4,8 @@ export interface AdminOverviewStats {
   openSupportTickets: number;
   paymentExceptions: number;
   goLiveQueue: number;
+  /** MUNs whose submitted conference results are waiting for MUNHub (RESULTS_UNDER_REVIEW). */
+  resultsReview: number;
 }
 
 export interface AdminAuditEntry {

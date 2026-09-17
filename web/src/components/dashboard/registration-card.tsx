@@ -1,5 +1,6 @@
 import { Link } from "react-router";
-import { ArrowRightIcon, CalendarIcon, CreditCardIcon, MapPinIcon, ReceiptTextIcon } from "lucide-react";
+import { ArrowRightIcon, CalendarIcon, CalendarXIcon, CreditCardIcon, MapPinIcon, ReceiptTextIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { RegistrationStatusChip } from "@/components/dashboard/registration-status-chip";
@@ -40,6 +41,10 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
     registration.expiresAt !== null &&
     !hasPassed(registration.expiresAt);
   const hasReceipt = RECEIPT_STATUSES.has(registration.status);
+  // A cancelled conference has no public page and no event to show a pass
+  // at, but the registration (and its receipt) stays visible.
+  const conferenceCancelled = mun.status === "CANCELLED";
+  const showPass = !conferenceCancelled && ["CONFIRMED", "ATTENDED", "NO_SHOW"].includes(registration.status);
 
   return (
     <Card
@@ -54,15 +59,25 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
         <div className="flex min-w-0 flex-col gap-xs">
           <div className="flex flex-wrap items-center gap-xs">
             <h3 className="min-w-0 font-display text-title-sm text-balance text-ink">
-              {/* Stretched link: the whole card is the hit target, but the
-                  accessible name stays the MUN title only. */}
-              <Link
-                to={`/mun/${mun.slug}`}
-                className="rounded-sm outline-none after:absolute after:inset-0 after:content-[''] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                {mun.name}
-              </Link>
+              {conferenceCancelled ? (
+                mun.name
+              ) : (
+                // Stretched link: the whole card is the hit target, but the
+                // accessible name stays the MUN title only.
+                <Link
+                  to={`/mun/${mun.slug}`}
+                  className="rounded-sm outline-none after:absolute after:inset-0 after:content-[''] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  {mun.name}
+                </Link>
+              )}
             </h3>
+            {conferenceCancelled && (
+              <Badge variant="outline" className={getToneClassName("destructive")}>
+                <CalendarXIcon className="size-3" strokeWidth={1.75} aria-hidden />
+                Conference cancelled
+              </Badge>
+            )}
             <RegistrationStatusChip status={registration.status} />
           </div>
 
@@ -122,7 +137,7 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
 
           {/* `relative z-10` lifts these above the card's stretched link so
               they stay independently clickable. */}
-          {["CONFIRMED", "ATTENDED", "NO_SHOW"].includes(registration.status) && (
+          {showPass && (
             <Link
               to={`/dashboard/registrations/${registration.id}/pass`}
               className="relative z-10 rounded-sm text-body-md font-medium text-link underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
@@ -153,7 +168,7 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
               Receipt
               <span className="sr-only"> for {mun.name}</span>
             </Link>
-          ) : (
+          ) : conferenceCancelled ? null : (
             <span
               aria-hidden
               className="hidden items-center gap-xxs text-body-md text-link sm:inline-flex"

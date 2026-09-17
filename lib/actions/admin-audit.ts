@@ -1,6 +1,6 @@
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { users } from '@/lib/db/schema'
+import { muns, users } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { getGoLiveQueue } from '@/lib/lifecycle/go-live'
@@ -20,6 +20,8 @@ export interface AdminOverviewStats {
   openSupportTickets: number
   paymentExceptions: number
   goLiveQueue: number
+  /** MUNs whose conference results are waiting for a MUNHub decision (RESULTS_UNDER_REVIEW). */
+  resultsReview: number
 }
 
 // listTickets only filters on one exact status, and a ticket is "open" for
@@ -32,20 +34,22 @@ const OPEN_TICKET_STATUSES = ['NEW', 'ASSIGNED', 'IN_PROGRESS', 'WAITING'] as co
  * One aggregate read for the /admin overview dashboard cards. Composes the
  * existing per-queue actions (getReviewQueue, getModuleReviewQueue,
  * listTickets, listPaymentExceptions, getGoLiveQueue) rather than
- * duplicating any of their query logic — this function owns none of the
- * underlying queries, only the fan-out + count reduction. `limit: 1` on the
+ * duplicating any of their query logic — this function owns only the fan-out,
+ * the count reduction, and the results-review count (a plain status count;
+ * there is no results queue action). `limit: 1` on the
  * paginated queue reads is just an optimization (we only ever read
  * `.total`); each one still runs a full unfiltered COUNT(*) query.
  */
 export async function getAdminOverviewStats(session: Session | null): Promise<AdminOverviewStats> {
   requireRole(session, [...ADMIN_ROLES])
 
-  const [reviewQueue, moduleQueue, tickets, paymentExceptions, goLiveQueue] = await Promise.all([
+  const [reviewQueue, moduleQueue, tickets, paymentExceptions, goLiveQueue, resultsReview] = await Promise.all([
     getReviewQueue({ limit: 1 }, session),
     getModuleReviewQueue({ limit: 1 }, session),
     listTickets({}, session),
     listPaymentExceptions({ status: 'open', limit: 1 }, session),
     getGoLiveQueue({ limit: 1 }, session),
+    db.$count(muns, eq(muns.status, 'RESULTS_UNDER_REVIEW')),
   ])
 
   const openSupportTickets = tickets.filter((ticket) =>
@@ -58,6 +62,7 @@ export async function getAdminOverviewStats(session: Session | null): Promise<Ad
     openSupportTickets,
     paymentExceptions: paymentExceptions.total,
     goLiveQueue: goLiveQueue.total,
+    resultsReview,
   }
 }
 
@@ -79,6 +84,11 @@ export interface AdminAuditListItem {
 export interface AdminAuditListParams {
   limit?: number
   offset?: number
+  /**
+   * Include PII_READ rows (staff reads of delegate data, one per list page
+   * load). Off by default so they don't bury the changes in the feed.
+   */
+  includeDataAccess?: boolean
 }
 
 export interface AdminAuditListResult {
@@ -101,9 +111,10 @@ export const GATE1_AUDIT_ACTIONS = [
  *
  * Two sources:
  * - every `admin_actions` row (suspensions, Gate 2 decisions, publishes, …),
- *   labelled with `metadata.event` when the row carries one. Staff-management
- *   writes (admin-staff.ts) store the closest existing enum value and put the
- *   precise event name (STAFF_CREATED, STAFF_ROLE_CHANGED, …) there;
+ *   labelled with `metadata.event` when the row carries one — staff-management
+ *   writes (admin-staff.ts) repeat their action name there, and rows written
+ *   before migration 0035 have only that name (their action is the closest
+ *   older value);
  * - Gate 1 organizer-application decisions (`reviewMunApplication`), which
  *   are recorded only as `verification_logs` transitions. A row counts as a
  *   Gate 1 decision when it is APPROVED/REJECTED/CHANGES_REQUESTED and the
@@ -113,6 +124,8 @@ export const GATE1_AUDIT_ACTIONS = [
  *   already has its own MUN_* admin_actions row) is never picked up twice.
  *   These are labelled `APPLICATION_<decision>` so they can't be mistaken for
  *   Gate 2's MUN_APPROVED/MUN_REJECTED/MUN_CHANGES_REQUESTED.
+ *
+ * PII_READ rows are left out unless `includeDataAccess` is set.
  *
  * Paginated for the same reason as getReviewQueue/getModuleReviewQueue/
  * getGoLiveQueue: both sources are append-only and grow without bound.
@@ -131,6 +144,7 @@ export async function listAdminActions(
     SELECT aa.id, aa.actor_id, COALESCE(aa.metadata->>'event', aa.action::text) AS action,
       aa.target_type, aa.target_id, aa.reason, aa.created_at
     FROM admin_actions aa
+    ${params.includeDataAccess ? sql`` : sql`WHERE aa.action <> 'PII_READ'`}
     UNION ALL
     SELECT vl.id, vl.reviewer_id, 'APPLICATION_' || vl.action, 'mun', vl.mun_id, vl.notes, vl.created_at
     FROM verification_logs vl

@@ -48,7 +48,9 @@ VITE_API_URL=https://munhub-api-staging.somapujith.workers.dev/api/v1 npx vite b
 npx wrangler deploy --env staging
 ```
 
-The URLs assume the account's `somapujith.workers.dev` subdomain. If it differs, update `CORS_ORIGINS` and `APP_URL` in `server/wrangler.jsonc` → `env.staging.vars` and the `VITE_API_URL` above.
+The URLs assume the account's `somapujith.workers.dev` subdomain. If it differs, update `CORS_ORIGINS`, `APP_URL` and `PUBLIC_API_URL` in `server/wrangler.jsonc` → `env.staging.vars` and the `VITE_API_URL` above.
+
+`vars` and bindings aren't inherited by `env.staging`, so it lists its own: the same vars as production where they apply (including `COOKIE_SECURE`), and the same rate-limit bindings with staging's own namespace ids (2001 and up), so staging traffic never counts against production's limits. `server/middleware/rate-limit.test.ts` checks both lists against the limiters in code.
 
 ### Known limitation: signed-in browser flows
 

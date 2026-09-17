@@ -191,7 +191,7 @@ describe('resolvePaymentException', () => {
       .where(and(eq(adminActions.targetType, 'payment'), eq(adminActions.targetId, payment.id)))
     expect(audit).toMatchObject({
       actorId: ops.id,
-      action: 'PAYMENT_DETAILS_CHANGED',
+      action: 'PAYMENT_EXCEPTION_RESOLVED',
       reason: 'Returned via bank transfer, UTR 1234',
       metadata: expect.objectContaining({
         kind: 'PAYMENT_EXCEPTION_RESOLVED',

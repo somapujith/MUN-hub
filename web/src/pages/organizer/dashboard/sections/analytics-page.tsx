@@ -23,7 +23,7 @@ export function OrganizerAnalyticsPage() {
       <Helmet title="Analytics" />
       <WorkspacePage
         title="Analytics"
-        description="Registration counts and revenue by registration pass."
+        description="Registration counts, and what you've earned, by registration pass."
       >
         {analyticsQuery.isLoading && (
           <p className="text-body-md text-muted-foreground">Loading analytics...</p>
@@ -33,10 +33,12 @@ export function OrganizerAnalyticsPage() {
         )}
         {analytics && (
           <>
-            <div className="grid grid-cols-2 gap-sm lg:grid-cols-3">
+            <div className="grid grid-cols-2 gap-sm lg:grid-cols-4">
               {[
                 { label: "Confirmed registrations", value: analytics.totalRegistrations.toLocaleString("en-IN") },
-                { label: "Revenue collected", value: formatPrice(analytics.totalRevenue) },
+                // What the organizer is owed; gross stays visible next to it.
+                { label: "Net to you", value: formatPrice(analytics.totalOrganizerNet) },
+                { label: "Collected", value: formatPrice(analytics.totalRevenue) },
                 { label: "Registration passes", value: products.length.toLocaleString("en-IN") },
               ].map((stat) => (
                 <div key={stat.label} className="rounded-md border border-border bg-card p-md">
@@ -66,7 +68,8 @@ export function OrganizerAnalyticsPage() {
                         <th scope="col" className="px-md py-sm font-medium text-ink">Capacity</th>
                         <th scope="col" className="px-md py-sm font-medium text-ink">Confirmed</th>
                         <th scope="col" className="px-md py-sm font-medium text-ink">Fill rate</th>
-                        <th scope="col" className="px-md py-sm font-medium text-ink">Revenue</th>
+                        <th scope="col" className="px-md py-sm font-medium text-ink">Collected</th>
+                        <th scope="col" className="px-md py-sm font-medium text-ink">Net to you</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -81,7 +84,8 @@ export function OrganizerAnalyticsPage() {
                             <td className="px-md py-sm tabular-nums text-body">{product.capacity}</td>
                             <td className="px-md py-sm tabular-nums text-body">{product.registrationCount}</td>
                             <td className="px-md py-sm tabular-nums text-body">{fillRate}%</td>
-                            <td className="px-md py-sm tabular-nums text-ink">{formatPrice(product.revenue)}</td>
+                            <td className="px-md py-sm tabular-nums text-body">{formatPrice(product.revenue)}</td>
+                            <td className="px-md py-sm tabular-nums text-ink">{formatPrice(product.organizerNet)}</td>
                           </tr>
                         );
                       })}
@@ -92,7 +96,9 @@ export function OrganizerAnalyticsPage() {
             </section>
 
             <p className="text-caption text-muted-foreground">
-              Counts include CONFIRMED and ATTENDED registrations only; revenue includes PAID payments only.
+              Confirmed registrations count delegates who are confirmed or checked in. Collected is what delegates
+              paid for seats that still stand, including MUN Hub&apos;s platform fee and the GST on it; net to you is
+              what remains after them. See Finance for the full breakdown.
             </p>
           </>
         )}

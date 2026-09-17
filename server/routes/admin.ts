@@ -12,10 +12,15 @@ import { adminStaffRoutes } from './admin-staff'
 
 const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
 
-const paginationQuerySchema = z
+const auditQuerySchema = z
   .object({
     limit: z.coerce.number().int().min(1).max(100).optional(),
     offset: z.coerce.number().int().min(0).optional(),
+    // `?includeDataAccess=true` adds PII_READ rows to the feed.
+    includeDataAccess: z
+      .enum(['true', 'false'])
+      .optional()
+      .transform((value) => value === 'true'),
   })
   .strict()
 
@@ -55,7 +60,7 @@ adminRoutes.get(
   requireAuth,
   requireRole([...ADMIN_ROLES]),
   async (c) => {
-    const params = paginationQuerySchema.parse(c.req.query())
+    const params = auditQuerySchema.parse(c.req.query())
     const result = await listAdminActions(params, c.get('session'))
     return c.json(result)
   },
@@ -75,7 +80,7 @@ adminRoutes.get(
     const session = c.get('session')!
     const result = await getRegistrationsQueue(params, session)
     // Rows carry delegate names and emails.
-    recordPiiRead({
+    await recordPiiRead({
       actorId: session.userId,
       route: 'GET /admin/registrations',
       targetType: 'registration',

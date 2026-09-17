@@ -29,6 +29,15 @@ export interface CreateAchievementInput {
   award: string;
 }
 
+/** MUNHub's decision on submitted results (POST /admin/muns/:munId/results/review). */
+export type ResultsReviewDecision = "APPROVE" | "RETURN";
+
+/** GET /admin/muns/:munId/results — the staff view used by the results review. */
+export interface AdminResultsReview {
+  state: ResultsState;
+  awards: AchievementListRow[];
+}
+
 export interface ResultsState {
   munStatus: MunStatus;
   awardCount: number;

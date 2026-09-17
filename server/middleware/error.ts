@@ -6,6 +6,7 @@ import { ORGANIZER_OPS_ERROR_STATUS } from '@/lib/actions/organizer-ops-errors'
 import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
 import { MFA_ERRORS } from '@/lib/actions/staff-mfa'
 import { MODULE_LOCKED_PATTERN } from '@/lib/lifecycle/module-completion'
+import { reportRequestError } from '../lib/report-error'
 import type { AppVariables } from '../src/types'
 
 export type ErrorCode =
@@ -286,6 +287,8 @@ export function errorHandler(error: unknown, c: Context<{ Variables: AppVariable
     if (error instanceof Error && error.cause) {
       console.error(`[${requestId}] cause:`, error.cause)
     }
+    // Sentry when SENTRY_DSN is set; kept alive with waitUntil, never delays or fails the response.
+    reportRequestError(c, error, { requestId })
   }
 
   const body: ApiErrorBody = {

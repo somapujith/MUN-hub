@@ -50,6 +50,14 @@ export const LIMITERS = {
   organizerCodeIpEmail: { binding: 'RL_ORGANIZER_CODE_IP_EMAIL', limit: 3, periodSeconds: 60, perIp: false },
   organizerVerifyIpEmail: { binding: 'RL_ORGANIZER_VERIFY_IP_EMAIL', limit: 10, periodSeconds: 60, perIp: false },
   registrationsUser: { binding: 'RL_REGISTRATIONS_USER', limit: 10, periodSeconds: 60, perIp: false },
+  // Support: new conversations/tickets, and messages in a conversation, per
+  // signed-in user. The message limit leaves room for staff replying across
+  // many tickets.
+  supportTicketUser: { binding: 'RL_SUPPORT_TICKET_USER', limit: 10, periodSeconds: 60, perIp: false },
+  supportMessageUser: { binding: 'RL_SUPPORT_MESSAGE_USER', limit: 30, periodSeconds: 60, perIp: false },
+  // Account deletion re-checks the password, so this also bounds guessing it
+  // with a stolen session.
+  accountDeleteUser: { binding: 'RL_ACCOUNT_DELETE_USER', limit: 5, periodSeconds: 60, perIp: false },
   availabilityIp: { binding: 'RL_AVAILABILITY_IP', limit: 60, periodSeconds: 60, perIp: true },
   munsListIp: { binding: 'RL_MUNS_LIST_IP', limit: 120, periodSeconds: 60, perIp: true },
 } satisfies Record<string, LimiterSpec>
@@ -67,10 +75,24 @@ type Check = { limiter: LimiterSpec; key: string }
 
 type LimitRule = {
   method: string
-  path: string
+  /** Exact path under /api/v1, or a pattern for paths with parameters. */
+  path: string | RegExp
   readsEmail?: boolean
   readsPendingToken?: boolean
   checks: (facts: RequestFacts) => Check[]
+}
+
+/**
+ * A per-user limit for a signed-in-only route. An anonymous call isn't
+ * counted here: the route answers 401 without doing any work, and the
+ * global per-IP cap still applies.
+ */
+function perUser(limiter: LimiterSpec, sessionUserId: string | null): Check[] {
+  return sessionUserId ? [{ limiter, key: `user:${sessionUserId}` }] : []
+}
+
+function matchesPath(rule: LimitRule, path: string): boolean {
+  return typeof rule.path === 'string' ? rule.path === path : rule.path.test(path)
 }
 
 const RULES: LimitRule[] = [
@@ -142,6 +164,27 @@ const RULES: LimitRule[] = [
       { limiter: LIMITERS.registrationsUser, key: `session:${sessionUserId ?? 'anon'}` },
     ],
   },
+  // Both routes open a new support ticket and share one budget.
+  {
+    method: 'POST',
+    path: '/support/tickets',
+    checks: ({ sessionUserId }) => perUser(LIMITERS.supportTicketUser, sessionUserId),
+  },
+  {
+    method: 'POST',
+    path: '/support/conversations',
+    checks: ({ sessionUserId }) => perUser(LIMITERS.supportTicketUser, sessionUserId),
+  },
+  {
+    method: 'POST',
+    path: /^\/support\/conversations\/[^/]+\/messages$/,
+    checks: ({ sessionUserId }) => perUser(LIMITERS.supportMessageUser, sessionUserId),
+  },
+  {
+    method: 'POST',
+    path: '/account/delete',
+    checks: ({ sessionUserId }) => perUser(LIMITERS.accountDeleteUser, sessionUserId),
+  },
   {
     method: 'GET',
     path: '/products/availability',
@@ -183,7 +226,7 @@ async function readBodyPendingToken(c: Context): Promise<string | undefined> {
 export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   const path = c.req.path.replace(/^\/api\/v1/, '') || '/'
   const method = c.req.method
-  const matched = RULES.filter((rule) => rule.method === method && rule.path === path)
+  const matched = RULES.filter((rule) => rule.method === method && matchesPath(rule, path))
 
   const facts: RequestFacts = {
     ip: getClientIp(c),
