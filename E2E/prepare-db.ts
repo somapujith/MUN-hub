@@ -80,8 +80,9 @@ async function upsertMun(
 async function ensureCommittee(
   tx: Tx,
   munId: string,
-  def: { name: string; capacity: number; portfolios: readonly string[] },
+  def: { name: string; capacity: number; portfolioSeats?: number; portfolios: readonly string[] },
 ): Promise<void> {
+  const availability = def.portfolioSeats ?? 1
   let [committee] = await tx
     .select()
     .from(schema.committees)
@@ -104,6 +105,10 @@ async function ensureCommittee(
       .returning()
   }
 
+  await tx
+    .update(schema.portfolios)
+    .set({ availability })
+    .where(eq(schema.portfolios.committeeId, committee.id))
   const existing = await tx
     .select({ name: schema.portfolios.name })
     .from(schema.portfolios)
@@ -113,7 +118,7 @@ async function ensureCommittee(
   if (missing.length) {
     await tx
       .insert(schema.portfolios)
-      .values(missing.map((name) => ({ committeeId: committee.id, name, type: 'country', availability: 1 })))
+      .values(missing.map((name) => ({ committeeId: committee.id, name, type: 'country', availability })))
   }
 }
 

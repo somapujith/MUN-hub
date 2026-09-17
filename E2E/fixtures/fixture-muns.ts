@@ -14,7 +14,9 @@ export const FIXTURE_MUNS = {
     slug: 'e2e-open-mun',
     name: 'E2E Open MUN',
     committees: [
-      { name: 'E2E General Assembly', capacity: 100, portfolios: ['India', 'Brazil', 'Japan'] },
+      // Portfolios seat many delegates here, so specs can reuse them across runs
+      // that skip the registration wipe (single-seat portfolios are unit-tested).
+      { name: 'E2E General Assembly', capacity: 100, portfolioSeats: 100, portfolios: ['India', 'Brazil', 'Japan'] },
       // Deliberately tiny. Reserved for specs/security/registration-eligibility.spec.ts's
       // committee-capacity test — other specs must not register delegates into it.
       { name: 'E2E Security Council', capacity: 2, portfolios: ['France', 'Germany'] },
