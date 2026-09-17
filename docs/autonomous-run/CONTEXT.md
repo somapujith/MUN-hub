@@ -75,3 +75,10 @@ payout execution.
   - `notifySeatHoldExpired(registrationId)` → from the release-expired-holds job for each released PAYMENT_PENDING registration.
   - `notifyWelcome(userId)` → after a successful delegate signUp (auth route / lib/actions/auth.ts).
   - `notifySupportReply(ticketId)` → already called in `lib/actions/support.ts#sendMessage` after commit when the sender is staff; the support lane must keep exactly this call when it reworks the file.
+- 09:55 Merged: lifecycle (`677362f`), org lane 7 = privacy (`7d70683`), storage (`777f48d`).
+  4b landed email verification (`97e0ce7`, migration 0033; `assertEmailVerifiedIfRequired(userId)`
+  in lib/actions/email-verification.ts → call from the registration path when payments merges).
+  f1 landed the go-live backend (`f6fcb7b`): submit-final-confirmation now requires
+  `{attested:true}`. Uploads KV binding commented out (token can't create namespaces) →
+  USER_ACTIONS §5. Migrations for Neon at deploy: 0030–0033 (+0034 reserved for 4b staff 2FA).
+  Test tip: add `--exclude ".claude/**"` when filtering vitest by file name.
