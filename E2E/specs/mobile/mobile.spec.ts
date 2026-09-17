@@ -19,7 +19,22 @@ async function expectNoHorizontalOverflow(page: Page) {
   expect(scrollWidth, `${page.url()} scrolls sideways`).toBeLessThanOrEqual(clientWidth + 1)
 }
 
-const PUBLIC_PAGES = ['/', '/muns', `/mun/${OPEN.slug}`, '/login', '/signup', '/organizer/signup', '/forgot-password']
+const PUBLIC_PAGES = [
+  '/',
+  '/muns',
+  `/mun/${OPEN.slug}`,
+  '/login',
+  '/signup',
+  '/organizer/signup',
+  '/forgot-password',
+  '/about',
+  '/about/curation',
+  '/contact',
+  '/legal',
+  '/legal/terms',
+  '/legal/privacy',
+  '/legal/refunds',
+]
 
 // Pages with a confirmed sideways-scroll bug. Delete an entry once fixed —
 // its test will otherwise start "unexpectedly passing".
