@@ -104,6 +104,11 @@ export default defineConfig({
         NODE_ENV: 'development',
         CORS_ORIGINS: WEB_URL,
         COOKIE_DOMAIN: '',
+        // Every request in a local run comes from 127.0.0.1, so the default
+        // 300/min per-IP cap would throttle the suite. Only the generic cap
+        // is raised; the login and organizer-code limits stay as in prod.
+        RATE_LIMIT_GLOBAL_PER_MINUTE: '100000',
+        TRUST_PROXY_HEADERS: '',
       },
     },
     {

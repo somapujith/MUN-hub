@@ -1,10 +1,23 @@
 import type { MiddlewareHandler } from 'hono'
+import { getRuntimeEnv } from '@/lib/runtime-env'
 import { checkRateLimit, getClientIp } from '../lib/rate-limit-store'
 import type { AppVariables } from '../src/types'
 
 const WINDOW_MS = 60_000
 /** Caps how many different addresses one IP can send sign-in codes to per window. */
 const ORGANIZER_CODE_IP_LIMIT = 30
+const DEFAULT_GLOBAL_LIMIT = 300
+
+/**
+ * Per-IP cap for routes without a dedicated rule. Overridable through
+ * RATE_LIMIT_GLOBAL_PER_MINUTE (e.g. the E2E suite, where every request
+ * comes from one address). The auth-specific limits in RULES are fixed.
+ */
+function globalLimitPerMinute(): number {
+  const configured = Number.parseInt(getRuntimeEnv('RATE_LIMIT_GLOBAL_PER_MINUTE') ?? '', 10)
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_GLOBAL_LIMIT
+}
+
 const EMAIL_KEYED_PATHS = new Set(['/auth/session', '/auth/organizers/code', '/auth/organizers/session'])
 
 type LimitRule = {
@@ -97,7 +110,7 @@ export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }>
   }
 
   const globalKey = `global:ip:${ip}`
-  const global = checkRateLimit(globalKey, 300, WINDOW_MS)
+  const global = checkRateLimit(globalKey, globalLimitPerMinute(), WINDOW_MS)
   if (!global.allowed) {
     c.header('Retry-After', String(global.retryAfterSec))
     return c.json(

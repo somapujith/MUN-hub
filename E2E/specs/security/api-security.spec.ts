@@ -88,6 +88,21 @@ test.describe('authentication', () => {
     expect(statuses[5]).toBe(429)
   })
 
+  test('spoofing X-Forwarded-For does not reset the login rate limit', async () => {
+    const api = await newApiContext()
+    const email = uniqueEmail('xff-bruteforce')
+    const statuses: number[] = []
+    for (let i = 0; i < 8; i += 1) {
+      const res = await api.post('auth/session', {
+        headers: { 'x-forwarded-for': `203.0.113.${i + 1}`, 'x-real-ip': `203.0.113.${i + 1}` },
+        data: { email, password: `guess-${i}` },
+      })
+      statuses.push(res.status())
+    }
+    expect(statuses.slice(0, 5)).toEqual([401, 401, 401, 401, 401])
+    expect(statuses.slice(5)).toEqual([429, 429, 429])
+  })
+
   test('password-reset requests do not reveal whether an account exists', async () => {
     const api = await newApiContext()
     const known = await api.post('password-reset/request', { data: { email: 'student@munhub.test' } })
