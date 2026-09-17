@@ -27,7 +27,7 @@ export function InfoPageShell({
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Helmet>
-        <title>{title}</title>
+        <title>{`${title} | MUN Hub`}</title>
         <meta name="description" content={description} />
       </Helmet>
       <SiteHeader />
@@ -49,8 +49,28 @@ function useScrollToHashOrTop() {
         // Malformed escape in a hand-typed URL — fall through to the top.
       }
       if (target) {
-        target.scrollIntoView();
-        return;
+        const section = target;
+        section.scrollIntoView();
+
+        // On a cold load the web font arrives after this first scroll and
+        // reflows the text above the target, leaving the view hundreds of
+        // pixels past it. Scroll again once fonts have settled — unless the
+        // reader has started scrolling by then.
+        let settled = false;
+        const stop = () => {
+          settled = true;
+        };
+        const events = ["wheel", "touchstart", "keydown"] as const;
+        events.forEach((name) => window.addEventListener(name, stop, { passive: true, once: true }));
+        void document.fonts?.ready.then(() => {
+          requestAnimationFrame(() => {
+            if (!settled) section.scrollIntoView();
+          });
+        });
+        return () => {
+          stop();
+          events.forEach((name) => window.removeEventListener(name, stop));
+        };
       }
     }
     window.scrollTo(0, 0);
