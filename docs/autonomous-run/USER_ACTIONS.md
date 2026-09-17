@@ -126,3 +126,30 @@ between my attempt and now) — confirmed clean at HEAD.
 **Lesson for next time:** never chain migrate→deploy→deploy with `&&` through `| tail`, which
 masks real exit codes and lets failures silently continue. Run each step separately, check its
 own exit code explicitly, and confirm each host with `curl` before touching the next one.
+
+## 10. DEPLOY SUCCEEDED (supersedes #9's rollback)
+
+Full deploy completed successfully, each step run separately with an explicit exit-code check
+(not chained through `| tail`, which is what caused the earlier partial-failure incident):
+
+1. **Migration**: `DATABASE_URL` extracted directly from `server/.dev.vars` via `grep` (the
+   `dotenv` package's stdout banner corrupted a command-substitution capture earlier — grep
+   avoids that entirely). `npx tsx lib/db/migrate.ts` → exit 0, "Migrations complete." Verified:
+   36 rows in `drizzle.__drizzle_migrations` (0000–0035), and `payments.platform_fee_amount`
+   confirmed present.
+2. **API deploy**: `cd server && npx wrangler deploy --env=""` → exit 0. All 22 rate-limit
+   bindings, Hyperdrive, and the 5-minute cron trigger resolved correctly. Verified:
+   `GET https://api.munhub.in/api/v1/health` → 200.
+3. **Web deploy**: `cd web && npm run cf:deploy` → exit 0. Clean Vite build (2454 modules; one
+   harmless "chunk >500kB" perf warning, not an error), deployed to all 4 custom domains
+   (app./publish./organize./admin.munhub.in + the wildcard route).
+4. **End-to-end verification**: all 5 hosts return 200. `GET /api/v1/muns?limit=1` returns real
+   data through the new schema (`organizerName`, `registrationOpensAt` fields present) —
+   confirms migration + API + web are consistent and working together, not just individually up.
+
+**Not done this run** (unrelated to app correctness, safe to defer): restoring
+`.github/workflows/*.yml` (needs a token with `workflow` scope — see #8), Vercel deploy status
+for `www.munhub.in` specifically (it returned 200 but whether that's freshly redeployed via git
+integration or still cached/unchanged wasn't independently confirmed), setting `SYSTEM_ACTOR_USER_ID`
+(the scheduled lifecycle-transition job stays a no-op without it — logs a warning, doesn't fail),
+and the demo-account password rotation from item #1 (still outstanding, still important).
