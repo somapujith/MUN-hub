@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
 import { munPaymentSettings, muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
 import type { Role } from '@/lib/db/schema-enums'
@@ -31,6 +31,10 @@ async function makeMun(organizerId: string) {
 function sessionFor(user: { id: string; role: Role }): Session {
   return { userId: user.id, role: user.role }
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
 const FULL_PAN = 'ABCDE1234F'
 const FULL_ACCOUNT_NUMBER = '000123456789012'
@@ -257,6 +261,7 @@ describe('payment-settlement actions', () => {
         net?: number | null
         paymentStatus?: 'PAID' | 'PENDING' | 'FAILED'
         registrationStatus?: 'CONFIRMED' | 'ATTENDED' | 'CANCELLED' | 'PAYMENT_PENDING'
+        provider?: string
       },
     ) {
       const delegate = await makeUser('STUDENT')
@@ -277,6 +282,7 @@ describe('payment-settlement actions', () => {
         platformFeeTaxAmount: opts.tax ?? null,
         organizerNetAmount: opts.net ?? null,
         status: opts.paymentStatus ?? 'PAID',
+        ...(opts.provider ? { provider: opts.provider } : {}),
       })
     }
 
@@ -309,6 +315,30 @@ describe('payment-settlement actions', () => {
           platformFeeTax: 14,
           organizerNet: 3910,
           paidRegistrations: 3,
+        },
+      ])
+    })
+
+    it('leaves out mock checkout payments unless the mock adapter is active', async () => {
+      const { organizer, mun, product } = await munWithProduct()
+      await paid(mun.id, product.id, { amount: 1499, fee: 37, tax: 7, net: 1455 })
+      await paid(mun.id, product.id, { amount: 2000, fee: 50, tax: 9, net: 1941, provider: 'razorpay' })
+
+      vi.stubEnv('MOCK_PAYMENTS_ENABLED', 'true')
+      expect(await getMunPaymentsSummary(mun.id, sessionFor(organizer))).toEqual([
+        expect.objectContaining({ grossCollected: 3499, organizerNet: 3396, paidRegistrations: 2 }),
+      ])
+
+      // Deployed with the mock switched off: the mock row moved no money.
+      vi.stubEnv('MOCK_PAYMENTS_ENABLED', 'false')
+      expect(await getMunPaymentsSummary(mun.id, sessionFor(organizer))).toEqual([
+        {
+          currency: 'INR',
+          grossCollected: 2000,
+          platformFee: 50,
+          platformFeeTax: 9,
+          organizerNet: 1941,
+          paidRegistrations: 1,
         },
       ])
     })

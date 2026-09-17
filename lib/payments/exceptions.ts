@@ -5,6 +5,7 @@ import type { PaymentStatus, RegistrationStatus } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
+import { countedPaymentsFilter } from './counted-payments'
 import { PAYMENT_EXCEPTION_REASONS } from './exception-reasons'
 
 /**
@@ -53,7 +54,9 @@ const openException = and(
 /**
  * Open payment exceptions, newest first, capped at 100 (no pagination yet —
  * the queue is expected to stay short, and a fresh exception must always
- * be on the first page). OPERATIONS/ADMIN/SUPER_ADMIN only.
+ * be on the first page). Mock checkout rows (including legacy REFUNDED ones)
+ * are listed only while the mock adapter is active: they took no money, so
+ * there is nothing to return. OPERATIONS/ADMIN/SUPER_ADMIN only.
  */
 export async function listOpenPaymentExceptions(session: Session | null): Promise<PaymentExceptionRow[]> {
   requireRole(session, [...EXCEPTION_ROLES])
@@ -81,7 +84,7 @@ export async function listOpenPaymentExceptions(session: Session | null): Promis
     .innerJoin(registrations, eq(payments.registrationId, registrations.id))
     .innerJoin(users, eq(registrations.userId, users.id))
     .innerJoin(muns, eq(registrations.munId, muns.id))
-    .where(openException)
+    .where(and(openException, countedPaymentsFilter()))
     .orderBy(desc(raisedAt), desc(payments.id))
     .limit(100)
 
