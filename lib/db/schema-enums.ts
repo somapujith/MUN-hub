@@ -271,6 +271,8 @@ export const consentTypeEnum = pgEnum('consent_type', [
   'TERMS_OF_SERVICE',
   'PRIVACY_POLICY',
   'GUARDIAN_ACKNOWLEDGEMENT',
+  // Accepted in the last step of organizer onboarding (lib/actions/organizer-onboarding.ts).
+  'ORGANIZER_AGREEMENT',
 ])
 
 // ---------------------------------------------------------------------------

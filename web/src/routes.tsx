@@ -25,6 +25,7 @@ import { OrganizerApplyPage } from "@/pages/organizer/apply-page";
 import { OrganizerApplySubmittedPage } from "@/pages/organizer/apply-submitted-page";
 import { OrganizerSignupPage } from "@/pages/organizer/organizer-signup-page";
 import { OrganizerWelcomePage } from "@/pages/organizer/organizer-welcome-page";
+import { OrganizerOnboardingPage } from "@/pages/organizer/organizer-onboarding-page";
 import { OrganizerSupportPage } from "@/pages/organizer/support-page";
 import { MunIndexRedirect } from "@/pages/organizer/dashboard/mun-index-redirect";
 import { OrganizerMunsPage } from "@/pages/organizer/dashboard/muns-page";
@@ -118,6 +119,7 @@ export const router = createBrowserRouter([
         ],
       },
       { path: "organizer/welcome", element: <OrganizerWelcomePage /> },
+      { path: "organizer/onboarding", element: <OrganizerOnboardingPage /> },
       { path: "organizer/apply", element: <OrganizerApplyPage /> },
       {
         path: "organizer/apply/submitted",

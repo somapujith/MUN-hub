@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
 import { ZodError } from 'zod'
+import { ONBOARDING_ERRORS } from '@/lib/actions/organizer-onboarding'
 import { ORGANIZER_OTP_ERRORS } from '@/lib/actions/organizer-otp'
 import type { AppVariables } from '../src/types'
 
@@ -80,6 +81,24 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   }
   if (message === ORGANIZER_OTP_ERRORS.deliveryFailed) {
     return { status: 503, code: 'UNAVAILABLE', message }
+  }
+
+  // lib/actions/organizer-onboarding.ts
+  if (
+    message === ONBOARDING_ERRORS.locked ||
+    message === ONBOARDING_ERRORS.incomplete ||
+    message === ONBOARDING_ERRORS.outOfOrder
+  ) {
+    return { status: 409, code: 'CONFLICT_STATE', message }
+  }
+  if (
+    message === 'PAN must look like ABCDE1234F' ||
+    message === 'GSTIN must be a valid 15-character GST number' ||
+    message === 'UPI ID must look like name@bank' ||
+    message === 'You must accept the organizer agreement to continue' ||
+    / must be a 10-digit Indian mobile number$/.test(message)
+  ) {
+    return { status: 400, code: 'VALIDATION_FAILED', message }
   }
 
   // Signup validation (lib/actions/auth.ts, organizer-otp.ts, and the
@@ -200,6 +219,11 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: ORGANIZER_OTP_ERRORS.delegateAccount, status: 403, code: 'FORBIDDEN' },
   { message: ORGANIZER_OTP_ERRORS.deliveryFailed, status: 503, code: 'UNAVAILABLE' },
   { message: 'You must accept the Terms of Service to create an account', status: 400, code: 'VALIDATION_FAILED' },
+  { message: ONBOARDING_ERRORS.locked, status: 409, code: 'CONFLICT_STATE' },
+  { message: ONBOARDING_ERRORS.incomplete, status: 409, code: 'CONFLICT_STATE' },
+  { message: ONBOARDING_ERRORS.outOfOrder, status: 409, code: 'CONFLICT_STATE' },
+  { message: 'PAN must look like ABCDE1234F', status: 400, code: 'VALIDATION_FAILED' },
+  { message: 'UPI mobile number must be a 10-digit Indian mobile number', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Emergency contact name is required', status: 400, code: 'VALIDATION_FAILED' },
   { message: 'Mun not found', status: 404, code: 'NOT_FOUND' },
   { message: 'Committee not found', status: 404, code: 'NOT_FOUND' },

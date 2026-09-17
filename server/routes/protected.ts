@@ -19,6 +19,7 @@ import { organizerAdminRoutes } from './organizer-admin'
 import { organizerApplicationRoutes } from './organizer-application'
 import { organizerConfirmationRoutes } from './organizer-confirmation'
 import { organizerDashboardRoutes } from './organizer-dashboard'
+import { organizerOnboardingRoutes } from './organizer-onboarding'
 import { paymentSettlementRoutes } from './payment-settlement'
 import { registrationFormRoutes } from './registration-form'
 import { registrationsRoutes } from './registrations'
@@ -56,6 +57,7 @@ protectedRoutes.route('/', studentDashboardRoutes)
 protectedRoutes.route('/', studentProfileRoutes)
 protectedRoutes.route('/', organizerDashboardRoutes)
 protectedRoutes.route('/', organizerApplicationRoutes)
+protectedRoutes.route('/', organizerOnboardingRoutes)
 protectedRoutes.route('/', munAnalyticsRoutes)
 protectedRoutes.route('/', resultsRoutes)
 

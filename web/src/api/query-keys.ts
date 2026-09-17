@@ -26,6 +26,7 @@ export const queryKeys = {
   formFields: (munId: string) => ["organizer", "form-fields", munId] as const,
   registrationProducts: (munId: string) => ["organizer", "registration-products", munId] as const,
   organizerWorkspace: () => ["organizer", "workspace", "overview"] as const,
+  organizerOnboarding: () => ["organizer", "onboarding"] as const,
   adminOrganizers: (params: Record<string, unknown>) => ["admin", "organizers", params] as const,
   munSetupDetails: (munId: string) => ["organizer", "setup", munId] as const,
   munContact: (munId: string) => ["organizer", "contact", munId] as const,

@@ -2,6 +2,7 @@ import { zValidator } from '../lib/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { submitOrganizerApplication } from '@/lib/actions/organizer-application'
+import { ONBOARDING_ERRORS, isOrganizerOnboardingComplete } from '@/lib/actions/organizer-onboarding'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
 import type { AppVariables } from '../src/types'
@@ -31,6 +32,11 @@ organizerApplicationRoutes.post(
   async (c) => {
     const body = c.req.valid('json')
     const session = c.get('session')
+    // Hosting needs the organizer's profile, PAN, GST answer, payout UPI and
+    // signed agreement on file first (lib/actions/organizer-onboarding.ts).
+    if (!(await isOrganizerOnboardingComplete(session!.userId))) {
+      throw new Error(ONBOARDING_ERRORS.incomplete)
+    }
     const expectedDate = body.expectedDate instanceof Date ? body.expectedDate : new Date(body.expectedDate)
 
     const application = await submitOrganizerApplication({

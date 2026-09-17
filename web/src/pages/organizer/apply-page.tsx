@@ -3,6 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { Link, useNavigate } from "react-router";
 import { ArrowRightIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { RequireOrganizer } from "@/guards/require-organizer";
+import { RequireOrganizerOnboarding } from "@/guards/require-organizer-onboarding";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
@@ -122,103 +123,105 @@ export function OrganizerApplyPage() {
 
   return (
     <RequireOrganizer>
-      <Helmet title="Host a MUN" />
-      <div className="flex min-h-full flex-1 flex-col">
-        <SiteHeader />
-        <main className="flex-1 pb-section">
-          <div className="content-container">
-            <div className="grid gap-xl py-xxl lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)] lg:gap-section lg:py-section">
-              <div className="flex max-w-2xl flex-col gap-xl">
-                <header className="flex flex-col gap-md">
-                  <p className="text-caption text-muted-foreground">For organizers</p>
-                  <h1 className="font-display text-display-md text-balance text-ink lg:text-display-lg">
-                    Host your MUN on MUN Hub
-                  </h1>
-                  <p className="text-title-md text-body text-pretty dark:text-muted-foreground">
-                    Tell us about your conference. Once approved, you&apos;ll get a public listing,
-                    a delegate roster, and payments handled end to end.
-                  </p>
-                </header>
-                <form onSubmit={handleSubmit} className="flex flex-col gap-md rounded-md border border-border bg-card p-lg">
-                  {submitError && (
-                    <p role="alert" className="flex items-start gap-xs rounded-sm border border-destructive/30 bg-destructive/8 px-sm py-xs text-body-md text-destructive-text">
-                      <TriangleAlertIcon className="mt-px size-4 shrink-0" aria-hidden />
-                      <span>{submitError}</span>
+      <RequireOrganizerOnboarding>
+        <Helmet title="Host a MUN" />
+        <div className="flex min-h-full flex-1 flex-col">
+          <SiteHeader />
+          <main className="flex-1 pb-section">
+            <div className="content-container">
+              <div className="grid gap-xl py-xxl lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)] lg:gap-section lg:py-section">
+                <div className="flex max-w-2xl flex-col gap-xl">
+                  <header className="flex flex-col gap-md">
+                    <p className="text-caption text-muted-foreground">For organizers</p>
+                    <h1 className="font-display text-display-md text-balance text-ink lg:text-display-lg">
+                      Host your MUN on MUN Hub
+                    </h1>
+                    <p className="text-title-md text-body text-pretty dark:text-muted-foreground">
+                      Tell us about your conference. Once approved, you&apos;ll get a public listing,
+                      a delegate roster, and payments handled end to end.
                     </p>
-                  )}
+                  </header>
+                  <form onSubmit={handleSubmit} className="flex flex-col gap-md rounded-md border border-border bg-card p-lg">
+                    {submitError && (
+                      <p role="alert" className="flex items-start gap-xs rounded-sm border border-destructive/30 bg-destructive/8 px-sm py-xs text-body-md text-destructive-text">
+                        <TriangleAlertIcon className="mt-px size-4 shrink-0" aria-hidden />
+                        <span>{submitError}</span>
+                      </p>
+                    )}
 
-                  <div className="flex flex-col gap-xs">
-                    <Label htmlFor="conferenceName">Conference name</Label>
-                    <Input id="conferenceName" placeholder="Hyderabad MUN 2026" value={values.conferenceName} onChange={update("conferenceName")} aria-invalid={Boolean(errors.conferenceName)} required />
-                    {errors.conferenceName && <p className="text-body-md text-destructive-text">{errors.conferenceName}</p>}
-                  </div>
-
-                  <div className="grid gap-md sm:grid-cols-2">
                     <div className="flex flex-col gap-xs">
-                      <Label htmlFor="location">Host city</Label>
-                      <Input id="location" placeholder="Hyderabad" value={values.location} onChange={update("location")} aria-invalid={Boolean(errors.location)} required />
-                      {errors.location && <p className="text-body-md text-destructive-text">{errors.location}</p>}
+                      <Label htmlFor="conferenceName">Conference name</Label>
+                      <Input id="conferenceName" placeholder="Hyderabad MUN 2026" value={values.conferenceName} onChange={update("conferenceName")} aria-invalid={Boolean(errors.conferenceName)} required />
+                      {errors.conferenceName && <p className="text-body-md text-destructive-text">{errors.conferenceName}</p>}
                     </div>
+
+                    <div className="grid gap-md sm:grid-cols-2">
+                      <div className="flex flex-col gap-xs">
+                        <Label htmlFor="location">Host city</Label>
+                        <Input id="location" placeholder="Hyderabad" value={values.location} onChange={update("location")} aria-invalid={Boolean(errors.location)} required />
+                        {errors.location && <p className="text-body-md text-destructive-text">{errors.location}</p>}
+                      </div>
+                      <div className="flex flex-col gap-xs">
+                        <Label htmlFor="expectedDate">Expected start date</Label>
+                        <Input id="expectedDate" type="date" value={values.expectedDate} onChange={update("expectedDate")} aria-invalid={Boolean(errors.expectedDate)} required />
+                        {errors.expectedDate && <p className="text-body-md text-destructive-text">{errors.expectedDate}</p>}
+                      </div>
+                    </div>
+
                     <div className="flex flex-col gap-xs">
-                      <Label htmlFor="expectedDate">Expected start date</Label>
-                      <Input id="expectedDate" type="date" value={values.expectedDate} onChange={update("expectedDate")} aria-invalid={Boolean(errors.expectedDate)} required />
-                      {errors.expectedDate && <p className="text-body-md text-destructive-text">{errors.expectedDate}</p>}
+                      <Label htmlFor="expectedDelegateCount">Expected delegate count</Label>
+                      <Input id="expectedDelegateCount" type="number" min="1" step="1" placeholder="200" value={values.expectedDelegateCount} onChange={update("expectedDelegateCount")} aria-invalid={Boolean(errors.expectedDelegateCount)} required />
+                      {errors.expectedDelegateCount && <p className="text-body-md text-destructive-text">{errors.expectedDelegateCount}</p>}
                     </div>
-                  </div>
 
-                  <div className="flex flex-col gap-xs">
-                    <Label htmlFor="expectedDelegateCount">Expected delegate count</Label>
-                    <Input id="expectedDelegateCount" type="number" min="1" step="1" placeholder="200" value={values.expectedDelegateCount} onChange={update("expectedDelegateCount")} aria-invalid={Boolean(errors.expectedDelegateCount)} required />
-                    {errors.expectedDelegateCount && <p className="text-body-md text-destructive-text">{errors.expectedDelegateCount}</p>}
-                  </div>
+                    <div className="flex flex-col gap-xs">
+                      <Label htmlFor="description">Tell us about your conference</Label>
+                      <textarea id="description" className={textareaClassName} placeholder="Committees, theme, past editions, why delegates should come..." value={values.description} onChange={update("description")} aria-invalid={Boolean(errors.description)} required />
+                      {errors.description && <p className="text-body-md text-destructive-text">{errors.description}</p>}
+                    </div>
 
-                  <div className="flex flex-col gap-xs">
-                    <Label htmlFor="description">Tell us about your conference</Label>
-                    <textarea id="description" className={textareaClassName} placeholder="Committees, theme, past editions, why delegates should come..." value={values.description} onChange={update("description")} aria-invalid={Boolean(errors.description)} required />
-                    {errors.description && <p className="text-body-md text-destructive-text">{errors.description}</p>}
-                  </div>
+                    <div className="flex flex-col gap-xs">
+                      <Label htmlFor="previousEditions">Previous editions (optional)</Label>
+                      <textarea id="previousEditions" className={textareaClassName} placeholder="e.g. 3rd edition, 400 delegates last year" value={values.previousEditions} onChange={update("previousEditions")} />
+                    </div>
 
-                  <div className="flex flex-col gap-xs">
-                    <Label htmlFor="previousEditions">Previous editions (optional)</Label>
-                    <textarea id="previousEditions" className={textareaClassName} placeholder="e.g. 3rd edition, 400 delegates last year" value={values.previousEditions} onChange={update("previousEditions")} />
-                  </div>
+                    <div className="flex flex-col gap-xs">
+                      <Label htmlFor="websiteUrl">Website (optional)</Label>
+                      <Input id="websiteUrl" type="url" placeholder="https://..." value={values.websiteUrl} onChange={update("websiteUrl")} aria-invalid={Boolean(errors.websiteUrl)} />
+                      {errors.websiteUrl && <p className="text-body-md text-destructive-text">{errors.websiteUrl}</p>}
+                    </div>
 
-                  <div className="flex flex-col gap-xs">
-                    <Label htmlFor="websiteUrl">Website (optional)</Label>
-                    <Input id="websiteUrl" type="url" placeholder="https://..." value={values.websiteUrl} onChange={update("websiteUrl")} aria-invalid={Boolean(errors.websiteUrl)} />
-                    {errors.websiteUrl && <p className="text-body-md text-destructive-text">{errors.websiteUrl}</p>}
-                  </div>
-
-                  <Button type="submit" disabled={submitting}>
-                    {submitting ? <Loader2Icon className="animate-spin" aria-hidden /> : null}
-                    {submitting ? "Submitting…" : "Submit application"}
-                  </Button>
-                </form>
-              </div>
-              <aside>
-                <div className="flex flex-col gap-md rounded-md border border-border bg-surface-soft p-lg lg:sticky lg:top-24 dark:bg-card">
-                  <h2 className="font-display text-label-md text-ink">What happens next</h2>
-                  <ol className="flex flex-col gap-sm">
-                    {STEPS.map((step, index) => (
-                      <li key={step} className="flex items-start gap-sm text-body-md text-body dark:text-muted-foreground">
-                        <span aria-hidden className="mt-px flex size-5 shrink-0 items-center justify-center rounded-full border border-border bg-background text-legal tabular-nums text-muted-foreground">
-                          {index + 1}
-                        </span>
-                        <span className="text-pretty">{step}</span>
-                      </li>
-                    ))}
-                  </ol>
-                  <Button variant="outline" size="sm" render={<Link to="/muns" />}>
-                    Browse conferences
-                    <ArrowRightIcon aria-hidden strokeWidth={1.75} />
-                  </Button>
+                    <Button type="submit" disabled={submitting}>
+                      {submitting ? <Loader2Icon className="animate-spin" aria-hidden /> : null}
+                      {submitting ? "Submitting…" : "Submit application"}
+                    </Button>
+                  </form>
                 </div>
-              </aside>
+                <aside>
+                  <div className="flex flex-col gap-md rounded-md border border-border bg-surface-soft p-lg lg:sticky lg:top-24 dark:bg-card">
+                    <h2 className="font-display text-label-md text-ink">What happens next</h2>
+                    <ol className="flex flex-col gap-sm">
+                      {STEPS.map((step, index) => (
+                        <li key={step} className="flex items-start gap-sm text-body-md text-body dark:text-muted-foreground">
+                          <span aria-hidden className="mt-px flex size-5 shrink-0 items-center justify-center rounded-full border border-border bg-background text-legal tabular-nums text-muted-foreground">
+                            {index + 1}
+                          </span>
+                          <span className="text-pretty">{step}</span>
+                        </li>
+                      ))}
+                    </ol>
+                    <Button variant="outline" size="sm" render={<Link to="/muns" />}>
+                      Browse conferences
+                      <ArrowRightIcon aria-hidden strokeWidth={1.75} />
+                    </Button>
+                  </div>
+                </aside>
+              </div>
             </div>
-          </div>
-        </main>
-        <SiteFooter />
-      </div>
+          </main>
+          <SiteFooter />
+        </div>
+      </RequireOrganizerOnboarding>
     </RequireOrganizer>
   );
 }

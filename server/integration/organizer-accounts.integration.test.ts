@@ -6,7 +6,7 @@ import { SESSION_COOKIE_NAME } from '@/lib/auth/session'
 import { consoleNotificationsAdapter } from '@/lib/notifications/console-adapter'
 import type { NotificationPayload } from '@/lib/notifications/adapter'
 import { createApp } from '../src/app'
-import { authHeaders, makeUser } from './helpers'
+import { authHeaders, completeOrganizerOnboarding, makeUser } from './helpers'
 
 const app = createApp()
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -122,8 +122,17 @@ describe('POST /api/v1/organizer/applications', () => {
     expect(unchanged.role).toBe('STUDENT')
   })
 
-  it('accepts an organizer account', async () => {
+  it('refuses an organizer who has not finished onboarding', async () => {
     const organizer = await makeUser('ORGANIZER')
+    const res = await post('/organizer/applications', APPLICATION_BODY, await authHeaders(organizer.id))
+
+    expect(res.status).toBe(409)
+    expect((await res.json()).error.message).toBe('Finish organizer onboarding before applying to host a MUN')
+  })
+
+  it('accepts an organizer who has finished onboarding', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    await completeOrganizerOnboarding(organizer.id)
     const res = await post('/organizer/applications', APPLICATION_BODY, await authHeaders(organizer.id))
 
     expect(res.status).toBe(201)

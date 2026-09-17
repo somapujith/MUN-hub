@@ -217,6 +217,37 @@ export const passwordResetTokensRelations = relations(passwordResetTokens, ({ on
 }))
 
 // ---------------------------------------------------------------------------
+// organizer_profiles — the one-time organizer onboarding (profile, PAN, GST,
+// payout UPI, agreement), 1:1 with an ORGANIZER user and shared by every MUN
+// they host. See lib/actions/organizer-onboarding.ts. The PAN follows the
+// payment write-only rule: ciphertext + last4, never returned in full. The
+// UPI ID is a receiving address, so it is stored as entered and shown back to
+// its owner. `completedAt` is set by the agreement step; a MUN application
+// requires it.
+// ---------------------------------------------------------------------------
+
+export const organizerProfiles = pgTable('organizer_profiles', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  firstName: text('first_name'),
+  lastName: text('last_name'),
+  contactPhone: text('contact_phone'),
+  panName: text('pan_name'),
+  panLast4: text('pan_last4'),
+  panCiphertext: text('pan_ciphertext'),
+  // null until the GST step is answered; false means "no GSTIN".
+  hasGstin: boolean('has_gstin'),
+  gstin: text('gstin'),
+  upiId: text('upi_id'),
+  upiPhone: text('upi_phone'),
+  agreementVersion: text('agreement_version'),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// ---------------------------------------------------------------------------
 // email_login_codes — the 6-digit codes behind passwordless organizer sign-in
 // (lib/actions/organizer-otp.ts). Keyed by email rather than user because a
 // code also verifies an address that has no account yet (organizer signup).
