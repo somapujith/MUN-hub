@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, sql } from 'drizzle-orm'
+import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, payments, registrations, users } from '@/lib/db/schema'
 import type { MunStatus, RegistrationStatus } from '@/lib/db/schema-enums'
@@ -66,7 +66,13 @@ export async function getAdminAnalytics(session: Session | null, now: Date = new
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(users)
-      .where(and(eq(users.role, 'ORGANIZER'), gte(users.createdAt, new Date(now.getTime() - NEW_ORGANIZER_WINDOW_MS)))),
+      .where(
+        and(
+          eq(users.role, 'ORGANIZER'),
+          gte(users.createdAt, new Date(now.getTime() - NEW_ORGANIZER_WINDOW_MS)),
+          lte(users.createdAt, now),
+        ),
+      ),
   ])
 
   const registrationsByStatus = Object.fromEntries(

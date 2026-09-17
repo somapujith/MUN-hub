@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
+import { inArray, like } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
@@ -20,9 +21,11 @@ function sess(user: { id: string; role: AnyRole }): Session {
 }
 
 // The local DB is shared with other test runs, so money assertions use a
-// currency code no other row has.
+// currency code no other row has (removed again in afterAll).
+const TEST_CURRENCY_PREFIX = 'ZZTEST-'
+
 function uniqueCurrency(): string {
-  return `T${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+  return `${TEST_CURRENCY_PREFIX}${crypto.randomUUID().slice(0, 8)}`
 }
 
 async function addPayment(
@@ -90,14 +93,22 @@ describe('getAdminAnalytics', () => {
     // A far-future "now" keeps this window free of rows from other runs.
     const now = new Date(Date.UTC(2150, 0, 1 + Math.floor(Math.random() * 300)))
     const day = 24 * 60 * 60 * 1000
-    await makeUser('ORGANIZER', { createdAt: new Date(now.getTime() - 2 * day) })
-    await makeUser('ORGANIZER', { createdAt: new Date(now.getTime() - 6 * day) })
-    await makeUser('ORGANIZER', { createdAt: new Date(now.getTime() - 8 * day) })
-    await makeUser('STUDENT', { createdAt: new Date(now.getTime() - 1 * day) })
+    const created = [
+      await makeUser('ORGANIZER', { createdAt: new Date(now.getTime() - 2 * day) }),
+      await makeUser('ORGANIZER', { createdAt: new Date(now.getTime() - 6 * day) }),
+      await makeUser('ORGANIZER', { createdAt: new Date(now.getTime() - 8 * day) }),
+      await makeUser('ORGANIZER', { createdAt: new Date(now.getTime() + 1 * day) }),
+      await makeUser('STUDENT', { createdAt: new Date(now.getTime() - 1 * day) }),
+    ]
 
-    const analytics = await getAdminAnalytics(sess(admin), now)
-    expect(analytics.newOrganizersLast7Days).toBe(2)
-    expect(analytics.generatedAt).toEqual(now)
+    try {
+      const analytics = await getAdminAnalytics(sess(admin), now)
+      expect(analytics.newOrganizersLast7Days).toBe(2)
+      expect(analytics.generatedAt).toEqual(now)
+    } finally {
+      // Future-dated rows would skew later runs' windows.
+      await db.delete(users).where(inArray(users.id, created.map((user) => user.id)))
+    }
   })
 
   it.each(['STUDENT', 'ORGANIZER'] as const)('refuses a %s session', async (role) => {
@@ -111,5 +122,8 @@ describe('getAdminAnalytics', () => {
 })
 
 afterAll(async () => {
+  // Drop this file's synthetic-currency payments so the shared dev DB's
+  // overview page never shows them.
+  await db.delete(payments).where(like(payments.currency, `${TEST_CURRENCY_PREFIX}%`))
   await db.$client.end()
 })
