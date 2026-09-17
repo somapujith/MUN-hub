@@ -34,11 +34,40 @@ Lane: organizer workspace pages (not settings, finance, communications, registra
 - Error mapping: the module-lock message and "Cannot confirm — …" now return 409 instead of 500.
 - Shared bright-form primitives moved to `web/src/components/organizer/bright-form.tsx`.
 
-### Bugs found while mapping (to fix in this lane)
+- `f6fcb7b`: item 5 backend.
+  - `getMunProgress` returns each module's checks.
+  - New `GET /muns/:munId/review-feedback` returns the Gate-1 application note, the latest Gate-2 round, staff log notes (never internal notes) and reviewer issues.
+  - New `GET /muns/:munId/confirmation-preview` returns the Gate-3 snapshot and the attestation text.
+  - `POST …/submit-final-confirmation` requires `{attested: true}`. The attestation text is stored in the snapshot.
+  - At Gate 3, sections the organizer hadn't sent for review move to PENDING_REVIEW, and their reviewer issues are marked answered.
+  - Confirmation version numbers now follow the latest one; before, they were always 2 after the first.
+  - Resubmission fixes:
+    - Stale automated issues are cleared before re-validating.
+    - A CHANGES_REQUESTED round is closed (WITHDRAWN) so it no longer blocks with 409.
+    - The progress recompute resolves automated issues whose check now passes.
+    - `confirmModule` resolves reviewer issues on that module.
+  - `updateMunDetails` refuses a registration deadline that isn't after opening, or isn't before the conference start (found by mun-hub-84).
+- `aa2eaf1`: during VERIFICATION, a section a reviewer sent back (CHANGES_REQUESTED) is editable by the organizer. Before, it stayed locked, so the organizer could never fix it. The progress bar also no longer drops to zero while sections show LOCKED.
+- `fc45913`:
+  - RULES_DOCUMENTS no longer requires a refund policy, because MUN Hub has no refunds. The seed was updated to match.
+  - `updateMunDetails` lock-checks BASIC_INFO or DATES_VENUE only when a value in that module actually changes.
+  - review-feedback no longer exposes `rejectionReason`, because the log files it as an internal note.
+- `87d7102`: items 1, 4 and 5 UI.
+  - MUN Setup gained:
+    - address, state, postal code, map link and registration window fields;
+    - a go-live checklist with verification state, checks, section links and per-section "Send … for review";
+    - "Feedback from MUN Hub";
+    - "Confirm your submission" (summary plus attestation checkbox);
+    - a details lock during review.
+  - A review banner shows on every MUN section.
+  - Documents & Media has logo and cover upload, a required-documents indicator, a 10MB PDF label, and no refund-policy option for new uploads.
+  - Checked in a browser against the local API with `STORAGE_ADAPTER=local`, on desktop and at 390px.
 
-- `assertModuleNotLocked`'s message and `submitFinalConfirmation`'s "Cannot confirm — validation now fails" are unmapped, so both surface as 500s.
-- Resubmitting after a failed automated check always fails, because the previous round's AUTOMATED blockers are still unresolved while validation runs.
-- Resubmitting after Gate 2 CHANGES_REQUESTED returns 409, because that submission row still counts as active.
-- REVIEWER issues are never resolved.
-- `getMunProgress` always returns `checks: []`.
-- Uploaded media URLs point at `/mock-storage/…`, which nothing serves.
+### Bugs found while mapping (status)
+
+- Done: unmapped lock and confirm errors (now 409).
+- Done: resubmission after failed checks.
+- Done: resubmission after Gate-2 changes.
+- Done: reviewer issues never resolved.
+- Done: `checks: []`.
+- Handled by mun-hub-62's storage work: uploaded media URLs pointed at `/mock-storage/…`, which nothing served. Local dev needs `STORAGE_ADAPTER=local` to preview uploads.
