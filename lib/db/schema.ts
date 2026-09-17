@@ -613,20 +613,25 @@ export const achievementsRelations = relations(achievements, ({ one }) => ({
 }))
 
 // ---------------------------------------------------------------------------
-// organizerApplications
+// organizerApplications — one row per MUN an organizer applies to host (Gate 1).
+// An organizer may host several MUNs, so organizer_id is not unique (migration
+// 0030); mun_id still is — each MUN has exactly one application.
 // ---------------------------------------------------------------------------
 
-export const organizerApplications = pgTable('organizer_applications', {
-  id: id(),
-  organizerId: text('organizer_id')
-    .notNull()
-    .unique()
-    .references(() => users.id),
-  munId: text('mun_id').unique().references(() => muns.id),
-  status: applicationStatusEnum('status').notNull().default('SUBMITTED'),
-  reviewNotes: text('review_notes'),
-  submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const organizerApplications = pgTable(
+  'organizer_applications',
+  {
+    id: id(),
+    organizerId: text('organizer_id')
+      .notNull()
+      .references(() => users.id),
+    munId: text('mun_id').unique().references(() => muns.id),
+    status: applicationStatusEnum('status').notNull().default('SUBMITTED'),
+    reviewNotes: text('review_notes'),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('organizer_applications_organizer_id_idx').on(table.organizerId)],
+)
 
 export const organizerApplicationsRelations = relations(organizerApplications, ({ one }) => ({
   organizer: one(users, { fields: [organizerApplications.organizerId], references: [users.id] }),

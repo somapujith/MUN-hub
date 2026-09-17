@@ -1,0 +1,2 @@
+ALTER TABLE "organizer_applications" DROP CONSTRAINT "organizer_applications_organizer_id_unique";--> statement-breakpoint
+CREATE INDEX "organizer_applications_organizer_id_idx" ON "organizer_applications" USING btree ("organizer_id");
