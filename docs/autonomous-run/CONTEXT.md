@@ -142,3 +142,23 @@ merge step. To resume safely:
 4. Then re-invoke the review workflow with `resumeFromRunId` (see the tool result from
    when it was launched, or search this file for `wf_9c79e016-ace`) — completed
    agents/merges replay from cache, only the interrupted step re-runs.
+
+## Post-handover feature pass (user decisions + build, 2026-09-17 evening)
+
+User confirmed 4 decisions and asked to build 5 items:
+1. Platform fee: 5% + 18% GST on the fee → set and deployed (`7f1a076`, PLATFORM_FEE_BPS=500,
+   PLATFORM_FEE_TAX_BPS=1800, both top-level and env.staging).
+2. Delegation/group registration: head delegate pays for the whole team in one order (not
+   per-member payment). Building on the existing but unwired `registration_products.allows_delegation`
+   flag. Agent dispatched (isolated worktree).
+3. R2 storage: user will enable R2 + create the bucket themselves, then tell the lead — no
+   agent needed for this one, it's a wait on the user + a 2-line wrangler.jsonc uncomment once
+   they confirm.
+4. Load testing: local only for now (not staging, not production). Agent dispatched.
+5. Admin analytics: expand to a full reporting suite (trends, funnel, top conferences/organizers,
+   geography, fee summary). Agent dispatched.
+
+All 3 agents run in isolated worktrees, each holds its own migration slot if needed (check this
+file's migration table below for the current highest number before generating). None have
+merged yet — merge each into main, verify (tsc x3 + targeted tests), then full suite + deploy,
+same discipline as the earlier merge pass.
