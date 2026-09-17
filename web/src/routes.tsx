@@ -13,6 +13,7 @@ import { AdminGoLiveQueuePage } from "@/pages/admin/go-live-queue-page";
 import { AdminOrganizersPage } from "@/pages/admin/organizers-page";
 import { AdminOverviewPage } from "@/pages/admin/overview-page";
 import { AdminPaymentsPage } from "@/pages/admin/payments-page";
+import { AdminReportingPage } from "@/pages/admin/reporting-page";
 import { AdminSecurityPage } from "@/pages/admin/security-page";
 import { AdminRegistrationsPage } from "@/pages/admin/registrations-page";
 import { AdminReviewPage } from "@/pages/admin/review-page";
@@ -212,6 +213,7 @@ export const router = createBrowserRouter([
         element: <AdminLayout />,
         children: [
           { index: true, element: <AdminOverviewPage /> },
+          { path: "reporting", element: <AdminReportingPage /> },
           { path: "review", element: <AdminReviewPage /> },
           { path: "verification", element: <AdminVerificationPage /> },
           { path: "go-live-queue", element: <AdminGoLiveQueuePage /> },

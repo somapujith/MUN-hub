@@ -1,5 +1,6 @@
 export const ADMIN_NAV_ITEMS = [
   { href: "/admin", label: "Overview", exact: true },
+  { href: "/admin/reporting", label: "Analytics", exact: false },
   { href: "/admin/review", label: "Applications", exact: false },
   { href: "/admin/verification", label: "Verification", exact: false },
   { href: "/admin/go-live-queue", label: "Go-live queue", exact: false },
