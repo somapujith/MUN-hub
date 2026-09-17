@@ -82,3 +82,8 @@ payout execution.
   `{attested:true}`. Uploads KV binding commented out (token can't create namespaces) →
   USER_ACTIONS §5. Migrations for Neon at deploy: 0030–0033 (+0034 reserved for 4b staff 2FA).
   Test tip: add `--exclude ".claude/**"` when filtering vitest by file name.
+- 10:25 Cron jobs exported by 4b (all `(now: Date, adapter?) => Promise<{sent:number}>`), to be
+  registered in lib/jobs/registry.ts: `runSlaNotifications` (lib/notifications/sla-job.ts),
+  `runConferenceReminders` (lib/notifications/reminder-job.ts), `runOrganizerDigest`
+  (lib/notifications/organizer-digest-job.ts). Conference-cancelled emails wired (`e5c6471`).
+  sec-edge merged (`270680b`).
