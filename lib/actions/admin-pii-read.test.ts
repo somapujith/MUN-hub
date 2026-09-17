@@ -1,47 +1,101 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { recordPiiRead } from './admin-pii-read'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { and, eq } from 'drizzle-orm'
+import { db } from '@/lib/db/client'
+import { adminActions, users } from '@/lib/db/schema'
+import { recordPiiRead, toPiiReadRecord } from './admin-pii-read'
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
+afterAll(async () => {
+  await db.$client.end()
+})
+
+async function makeStaff() {
+  const [user] = await db
+    .insert(users)
+    .values({ name: 'PII reader', email: `pii-reader-${crypto.randomUUID()}@test.dev`, role: 'OPERATIONS' })
+    .returning()
+  return user
+}
+
+describe('toPiiReadRecord', () => {
+  it('files a single-record read against that record', () => {
+    expect(
+      toPiiReadRecord({ actorId: 'a', route: 'GET /admin/x', targetType: 'registration', targetIds: ['r1'], hasQuery: false }),
+    ).toEqual({
+      actorId: 'a',
+      targetType: 'registration',
+      targetId: 'r1',
+      metadata: { route: 'GET /admin/x', recordType: 'registration', targetIds: ['r1'], count: 1, hasQuery: false },
+    })
+  })
+
+  it('files a list read against the route', () => {
+    expect(
+      toPiiReadRecord({ actorId: 'a', route: 'GET /admin/x', targetType: 'payment', targetIds: ['p1', 'p2'], hasQuery: true }),
+    ).toMatchObject({ targetType: 'payment_list', targetId: 'GET /admin/x', metadata: { count: 2, hasQuery: true } })
+  })
+
+  it('returns null for a read that returned nothing', () => {
+    expect(
+      toPiiReadRecord({ actorId: 'a', route: 'GET /admin/x', targetType: 'registration', targetIds: [], hasQuery: true }),
+    ).toBeNull()
+  })
+})
+
 describe('recordPiiRead', () => {
-  it('emits one structured pii_read line', () => {
-    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
-    const now = new Date('2026-09-17T08:00:00.000Z')
+  it('writes one PII_READ admin_actions row', async () => {
+    const staff = await makeStaff()
 
-    const line = recordPiiRead(
-      { actorId: 'staff-1', route: 'GET /admin/registrations', targetType: 'registration', targetIds: ['r1', 'r2'], hasQuery: true },
-      now,
-    )
-
-    expect(info).toHaveBeenCalledTimes(1)
-    expect(JSON.parse(info.mock.calls[0][0] as string)).toEqual({
-      event: 'pii_read',
-      actorId: 'staff-1',
+    await recordPiiRead({
+      actorId: staff.id,
       route: 'GET /admin/registrations',
       targetType: 'registration',
-      targetId: null,
+      targetIds: ['r1', 'r2'],
+      hasQuery: true,
+    })
+
+    const rows = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.actorId, staff.id), eq(adminActions.action, 'PII_READ')))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ targetType: 'registration_list', targetId: 'GET /admin/registrations', reason: null })
+    expect(rows[0].metadata).toEqual({
+      route: 'GET /admin/registrations',
+      recordType: 'registration',
       targetIds: ['r1', 'r2'],
       count: 2,
       hasQuery: true,
-      at: '2026-09-17T08:00:00.000Z',
     })
-    expect(line.count).toBe(2)
   })
 
-  it('sets targetId for a single-record read', () => {
-    vi.spyOn(console, 'info').mockImplementation(() => {})
-    const line = recordPiiRead({ actorId: 'a', route: 'r', targetType: 'registration', targetIds: ['only'], hasQuery: false })
-    expect(line.targetId).toBe('only')
+  it('writes nothing for an empty read', async () => {
+    const staff = await makeStaff()
+    expect(
+      await recordPiiRead({ actorId: staff.id, route: 'r', targetType: 'registration', targetIds: [], hasQuery: false }),
+    ).toBeNull()
+    expect(await db.select().from(adminActions).where(eq(adminActions.actorId, staff.id))).toEqual([])
   })
 
-  it('never throws when logging fails', () => {
-    vi.spyOn(console, 'info').mockImplementation(() => {
-      throw new Error('sink down')
+  it('never throws: a failed insert goes to the error log instead', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Not a real user, so the actor foreign key rejects the insert.
+    const actorId = `missing-${crypto.randomUUID()}`
+
+    await expect(
+      recordPiiRead({ actorId, route: 'GET /admin/registrations', targetType: 'registration', targetIds: ['r1'], hasQuery: false }),
+    ).resolves.toMatchObject({ targetId: 'r1' })
+
+    expect(error).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(error.mock.calls[0][0] as string)).toMatchObject({
+      event: 'pii_read.audit_failed',
+      actorId,
+      targetType: 'registration',
+      targetId: 'r1',
+      route: 'GET /admin/registrations',
     })
-    expect(() =>
-      recordPiiRead({ actorId: 'a', route: 'r', targetType: 'registration', targetIds: [], hasQuery: false }),
-    ).not.toThrow()
   })
 })

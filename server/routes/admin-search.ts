@@ -42,7 +42,7 @@ adminSearchRoutes.get(
     const session = c.get('session')!
     const results = await searchRegistrations(q, session)
     // Rows carry delegate names.
-    recordPiiRead({
+    await recordPiiRead({
       actorId: session.userId,
       route: 'GET /admin/search/registrations',
       targetType: 'registration',
@@ -59,7 +59,16 @@ adminSearchRoutes.get(
   requireAuth,
   requireRole([...ADMIN_ROLES]),
   async (c) => {
-    const results = await listPaymentExceptions(c.get('session'))
+    const session = c.get('session')!
+    const results = await listPaymentExceptions(session)
+    // Rows carry delegate names and emails.
+    await recordPiiRead({
+      actorId: session.userId,
+      route: 'GET /admin/payment-exceptions',
+      targetType: 'payment',
+      targetIds: results.map((row) => row.paymentId),
+      hasQuery: false,
+    })
     return c.json(results)
   },
 )

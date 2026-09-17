@@ -79,6 +79,11 @@ export interface AdminAuditListItem {
 export interface AdminAuditListParams {
   limit?: number
   offset?: number
+  /**
+   * Include PII_READ rows (staff reads of delegate data, one per list page
+   * load). Off by default so they don't bury the changes in the feed.
+   */
+  includeDataAccess?: boolean
 }
 
 export interface AdminAuditListResult {
@@ -114,6 +119,8 @@ export const GATE1_AUDIT_ACTIONS = [
  *   These are labelled `APPLICATION_<decision>` so they can't be mistaken for
  *   Gate 2's MUN_APPROVED/MUN_REJECTED/MUN_CHANGES_REQUESTED.
  *
+ * PII_READ rows are left out unless `includeDataAccess` is set.
+ *
  * Paginated for the same reason as getReviewQueue/getModuleReviewQueue/
  * getGoLiveQueue: both sources are append-only and grow without bound.
  * Requires OPERATIONS/ADMIN/SUPER_ADMIN, same bar as every other admin read.
@@ -131,6 +138,7 @@ export async function listAdminActions(
     SELECT aa.id, aa.actor_id, COALESCE(aa.metadata->>'event', aa.action::text) AS action,
       aa.target_type, aa.target_id, aa.reason, aa.created_at
     FROM admin_actions aa
+    ${params.includeDataAccess ? sql`` : sql`WHERE aa.action <> 'PII_READ'`}
     UNION ALL
     SELECT vl.id, vl.reviewer_id, 'APPLICATION_' || vl.action, 'mun', vl.mun_id, vl.notes, vl.created_at
     FROM verification_logs vl

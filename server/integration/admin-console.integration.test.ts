@@ -1,6 +1,7 @@
+import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
-import { munSubmissions, muns, registrationProducts, registrations, users } from '@/lib/db/schema'
+import { adminActions, munSubmissions, muns, payments, registrationProducts, registrations, users } from '@/lib/db/schema'
 import type { MunStatus } from '@/lib/db/schema-enums'
 import { createApp } from '../src/app'
 import { authHeaders } from './helpers'
@@ -149,55 +150,99 @@ describe('staff reads of delegate data are logged', () => {
     return registration
   }
 
-  function piiLines(info: { mock: { calls: unknown[][] } }): Record<string, unknown>[] {
-    return info.mock.calls
-      .map((args) => args[0])
-      .filter((arg): arg is string => typeof arg === 'string' && arg.includes('"pii_read"'))
-      .map((line) => JSON.parse(line) as Record<string, unknown>)
+  /** PII_READ audit rows written with `actorId` as the actor (each test uses a fresh staff user). */
+  function piiReads(actorId: string) {
+    return db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.actorId, actorId), eq(adminActions.action, 'PII_READ')))
   }
 
-  it('GET /admin/registrations logs actor, route and the returned ids, never the search text', async () => {
+  it('GET /admin/registrations records actor, route and the returned ids, never the search text', async () => {
     const ops = await makeUser('OPERATIONS')
     const delegateName = `Piiperson ${crypto.randomUUID()}`
     const registration = await seedRegistration(delegateName)
-    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
 
     const res = await get(ops.id, `/admin/registrations?q=${encodeURIComponent(delegateName)}`)
     expect(res.status).toBe(200)
 
-    const lines = piiLines(info)
-    expect(lines).toHaveLength(1)
-    expect(lines[0]).toMatchObject({
-      event: 'pii_read',
-      actorId: ops.id,
+    const rows = await piiReads(ops.id)
+    expect(rows).toHaveLength(1)
+    // A single-record read is filed against that record.
+    expect(rows[0]).toMatchObject({ targetType: 'registration', targetId: registration.id, reason: null })
+    expect(rows[0].metadata).toEqual({
       route: 'GET /admin/registrations',
-      targetType: 'registration',
-      targetId: registration.id,
+      recordType: 'registration',
       targetIds: [registration.id],
+      count: 1,
       hasQuery: true,
     })
-    expect(JSON.stringify(lines[0])).not.toContain(delegateName)
+    expect(JSON.stringify(rows[0])).not.toContain(delegateName)
   })
 
-  it('GET /admin/search/registrations logs too', async () => {
+  it('a list read is filed against the route, with every returned id', async () => {
+    const ops = await makeUser('OPERATIONS')
+    const delegateName = `Listperson ${crypto.randomUUID()}`
+    const first = await seedRegistration(delegateName)
+    const second = await seedRegistration(delegateName)
+
+    const res = await get(ops.id, `/admin/registrations?q=${encodeURIComponent(delegateName)}`)
+    expect(res.status).toBe(200)
+
+    const [row] = await piiReads(ops.id)
+    expect(row).toMatchObject({ targetType: 'registration_list', targetId: 'GET /admin/registrations' })
+    expect((row.metadata as { targetIds: string[] }).targetIds.sort()).toEqual([first.id, second.id].sort())
+  })
+
+  it('GET /admin/search/registrations records too', async () => {
     const admin = await makeUser('ADMIN')
     const delegateName = `Searchperson ${crypto.randomUUID()}`
     const registration = await seedRegistration(delegateName)
-    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
 
     const res = await get(admin.id, `/admin/search/registrations?q=${encodeURIComponent(delegateName)}`)
     expect(res.status).toBe(200)
 
-    const lines = piiLines(info)
-    expect(lines).toHaveLength(1)
-    expect(lines[0]).toMatchObject({ actorId: admin.id, route: 'GET /admin/search/registrations', targetIds: [registration.id] })
+    const rows = await piiReads(admin.id)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ targetType: 'registration', targetId: registration.id })
+    expect(rows[0].metadata).toMatchObject({ route: 'GET /admin/search/registrations', hasQuery: true })
   })
 
-  it('a refused read logs nothing', async () => {
-    const organizer = await makeUser('ORGANIZER')
-    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+  it('GET /admin/payment-exceptions records the payments whose delegates it returned', async () => {
+    const ops = await makeUser('OPERATIONS')
+    const registration = await seedRegistration(`Exceptionperson ${crypto.randomUUID()}`)
+    const [payment] = await db
+      .insert(payments)
+      .values({
+        registrationId: registration.id,
+        providerOrderId: `order-${crypto.randomUUID()}`,
+        amount: 1000,
+        status: 'PAID',
+        exceptionReason: 'DUPLICATE_PAYMENT',
+        exceptionRaisedAt: new Date(),
+      })
+      .returning()
 
+    const res = await get(ops.id, '/admin/payment-exceptions')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Array<{ paymentId: string }>
+    expect(body.map((row) => row.paymentId)).toContain(payment.id)
+
+    const rows = await piiReads(ops.id)
+    expect(rows).toHaveLength(1)
+    const metadata = rows[0].metadata as { route: string; recordType: string; targetIds: string[] }
+    expect(metadata).toMatchObject({ route: 'GET /admin/payment-exceptions', recordType: 'payment', hasQuery: false })
+    expect(metadata.targetIds).toEqual(body.map((row) => row.paymentId))
+  })
+
+  it('a read that returns nothing, or is refused, records nothing', async () => {
+    const ops = await makeUser('OPERATIONS')
+    const res = await get(ops.id, `/admin/search/registrations?q=${encodeURIComponent(`nobody-${crypto.randomUUID()}`)}`)
+    expect(res.status).toBe(200)
+    expect(await piiReads(ops.id)).toEqual([])
+
+    const organizer = await makeUser('ORGANIZER')
     expect((await get(organizer.id, '/admin/registrations')).status).toBe(403)
-    expect(piiLines(info)).toEqual([])
+    expect(await piiReads(organizer.id)).toEqual([])
   })
 })

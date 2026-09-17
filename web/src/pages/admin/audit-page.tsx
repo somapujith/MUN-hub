@@ -6,12 +6,16 @@ import { listAdminAuditEntries } from "@/api/admin-audit";
 import { queryKeys } from "@/api/query-keys";
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const PAGE_SIZE = 20;
 
 export function AdminAuditPage() {
   const [offset, setOffset] = useState(0);
-  const params = { limit: PAGE_SIZE, offset };
+  // Staff reads of delegate data (one PII_READ row per list page load) would
+  // bury the changes, so they are opt-in.
+  const [includeDataAccess, setIncludeDataAccess] = useState(false);
+  const params = { limit: PAGE_SIZE, offset, includeDataAccess };
 
   const auditQuery = useQuery({
     queryKey: queryKeys.adminAudit(params),
@@ -26,6 +30,19 @@ export function AdminAuditPage() {
 
   return (
     <AdminPageFrame title="Audit log" description="Append-only audit trail across the platform.">
+      <div className="flex items-center gap-xs">
+        <Checkbox
+          id="audit-include-data-access"
+          checked={includeDataAccess}
+          onCheckedChange={(checked) => {
+            setIncludeDataAccess(checked === true);
+            setOffset(0);
+          }}
+        />
+        <label htmlFor="audit-include-data-access" className="text-body-md text-ink">
+          Show staff reads of delegate data
+        </label>
+      </div>
       {auditQuery.isLoading && <p className="text-body-md text-muted-foreground">Loading audit log...</p>}
       {auditQuery.isError && (
         <p className="text-body-md text-destructive">
@@ -40,7 +57,8 @@ export function AdminAuditPage() {
           {results.map((entry) => (
             <li key={entry.id} className="rounded-md border border-border bg-card p-md">
               <Link
-                to={`/admin/audit/${entry.targetType}/${entry.targetId}`}
+                // A list read's target id is a route pattern ("GET /admin/..."), so both parts are encoded.
+                to={`/admin/audit/${encodeURIComponent(entry.targetType)}/${encodeURIComponent(entry.targetId)}`}
                 className="font-medium text-link hover:text-link-active"
               >
                 {entry.action}

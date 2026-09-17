@@ -14,6 +14,7 @@ import {
 import type { Session } from '@/lib/auth/adapter'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { listAdminActions } from './admin-audit'
+import { recordPiiRead } from './admin-pii-read'
 
 import {
   getModuleReviewQueue,
@@ -507,6 +508,26 @@ describe('listAdminActions (platform audit feed)', () => {
     const after = await listAdminActions({ limit: 1 }, __actor)
     expect(after.total).toBeGreaterThanOrEqual(before + 2)
     expect(after.results).toHaveLength(1)
+  })
+
+  it('leaves PII_READ rows out unless includeDataAccess is set', async () => {
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+    const registrationId = `feed-pii-${crypto.randomUUID()}`
+    await recordPiiRead({
+      actorId: admin.id,
+      route: 'GET /admin/registrations',
+      targetType: 'registration',
+      targetIds: [registrationId],
+      hasQuery: false,
+    })
+    const mine = (rows: { actorId: string; action: string; targetId: string }[]) =>
+      rows.filter((row) => row.actorId === admin.id).map((row) => [row.action, row.targetId])
+
+    expect(mine((await listAdminActions({ limit: 100 }, __actor)).results)).toEqual([])
+    expect(mine((await listAdminActions({ limit: 100, includeDataAccess: true }, __actor)).results)).toEqual([
+      ['PII_READ', registrationId],
+    ])
   })
 
   it('rejects a STUDENT session', async () => {
