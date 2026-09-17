@@ -104,6 +104,16 @@ export function RegistrationCard({ registration, muted = false }: RegistrationCa
             )}
           </div>
 
+          {/* Above the stretched MUN link (z-10) so it stays its own target. */}
+          {["CONFIRMED", "ATTENDED", "NO_SHOW"].includes(registration.status) && (
+            <Link
+              to={`/dashboard/registrations/${registration.id}/pass`}
+              className="relative z-10 rounded-sm text-body-md font-medium text-link underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              View pass
+            </Link>
+          )}
+
           <span
             aria-hidden
             className="hidden items-center gap-xxs text-body-md text-link sm:inline-flex"
