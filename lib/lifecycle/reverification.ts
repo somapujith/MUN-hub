@@ -90,12 +90,28 @@ const HIGH_IMPACT_FIELDS: Record<MunModule, string[]> = {
   registration_products: [],
 }
 
+/**
+ * Statuses in which a high-impact edit sends the mun back to VERIFICATION.
+ * Every entry must have a `-> VERIFICATION` edge in mun-state-machine.ts.
+ *
+ * Deliberately excludes REGISTRATION_CLOSED and everything after it.
+ * mun-state-machine.ts's ALLOWED_TRANSITIONS only lets CONFERENCE_ACTIVE be
+ * reached from REGISTRATION_CLOSED, and nothing downstream of VERIFICATION
+ * (VERIFIED, PUBLISHED, ...) has an edge back to REGISTRATION_CLOSED — so
+ * sending an already-closed mun to VERIFICATION for a high-impact edit would
+ * permanently strand it short of CONFERENCE_ACTIVE/COMPLETED/ARCHIVED, not
+ * just delay it. Re-review exists to protect delegates before they buy a
+ * seat; once registration has closed nobody can buy from the listing any
+ * more, so the edit is saved without re-review instead, as it already was
+ * during and after the conference. Bank-detail changes still un-verify the
+ * payment account in any status (payment-settlement.ts) — that check is
+ * independent of this list.
+ */
 const POST_VERIFICATION_STATUSES: MunStatus[] = [
   'VERIFIED',
   'PUBLISHED',
   'UNPUBLISHED',
   'REGISTRATION_OPEN',
-  'REGISTRATION_CLOSED',
 ]
 
 /**

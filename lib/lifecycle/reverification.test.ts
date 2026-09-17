@@ -314,12 +314,14 @@ describe('triggerReverificationIfNeeded', () => {
     expect(paymentSettings.verificationState).toBe('VERIFIED')
   })
 
-  // REGISTRATION_CLOSED is in POST_VERIFICATION_STATUSES, so a high-impact
-  // edit to a closed MUN flips its module and then calls transitionMun. Until
-  // the state machine gained the REGISTRATION_CLOSED -> VERIFICATION edge that
-  // call threw "Invalid transition" (a 409 to the organizer) *after* the edit
-  // had already been written and the module already moved to PENDING_REVIEW.
-  it('moves a REGISTRATION_CLOSED mun back to VERIFICATION instead of throwing', async () => {
+  // REGISTRATION_CLOSED is deliberately NOT in POST_VERIFICATION_STATUSES:
+  // nothing downstream of VERIFICATION (VERIFIED, PUBLISHED, ...) has an edge
+  // back to REGISTRATION_CLOSED in mun-state-machine.ts, so sending an
+  // already-closed mun there for a high-impact edit would permanently strand
+  // it short of CONFERENCE_ACTIVE/COMPLETED/ARCHIVED. A high-impact edit past
+  // that point is saved without re-review instead, same as after the
+  // conference — the module and mun status are both left exactly as they were.
+  it('leaves a REGISTRATION_CLOSED mun alone on a high-impact edit', async () => {
     const organizer = await makeUser()
     const [mun] = await db
       .insert(muns)
@@ -337,13 +339,13 @@ describe('triggerReverificationIfNeeded', () => {
     ).resolves.toBeUndefined()
 
     const [updatedMun] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
-    expect(updatedMun.status).toBe('VERIFICATION')
+    expect(updatedMun.status).toBe('REGISTRATION_CLOSED')
 
     const [moduleState] = await db
       .select({ state: munModuleVerifications.state })
       .from(munModuleVerifications)
       .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'DATES_VENUE')))
-    expect(moduleState.state).toBe('PENDING_REVIEW')
+    expect(moduleState.state).toBe('VERIFIED')
   })
 })
 
