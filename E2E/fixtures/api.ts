@@ -85,6 +85,25 @@ export async function seedOrganizerLoginCode(email: string, code = TEST_LOGIN_CO
 }
 
 /**
+ * An account gets at most one verification email a minute
+ * (lib/actions/email-verification.ts#resendVerificationEmail). Moves the
+ * account's earlier ones two minutes into the past, so a test can request
+ * another straight away.
+ */
+export async function backdateVerificationEmails(userId: string): Promise<void> {
+  assertLocalDatabase()
+  const sql = postgres(DATABASE_URL, { max: 1, prepare: false, onnotice: () => {} })
+  try {
+    await sql`
+      update email_verification_tokens
+      set created_at = created_at - interval '2 minutes'
+      where user_id = ${userId}`
+  } finally {
+    await sql.end()
+  }
+}
+
+/**
  * Marks an organizer's onboarding wizard (lib/actions/organizer-onboarding.ts)
  * as finished, the way server/integration/helpers.ts does. Organizers can't
  * apply to host until this is done. Safe to call twice.

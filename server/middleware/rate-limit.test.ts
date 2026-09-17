@@ -143,6 +143,24 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
     })
   })
 
+  describe('verification email resend', () => {
+    it('limits resends per email, from any address', async () => {
+      const email = freshEmail('verify-email')
+      const result = await statuses(LIMITERS.verifyResendEmail.limit + 1, (i) =>
+        send('/verify-email/resend', { ip: freshIp(), body: { email: i % 2 ? email.toUpperCase() : email } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.verifyResendEmail.limit))
+    })
+
+    it('limits resends per IP across emails', async () => {
+      const ip = freshIp()
+      const result = await statuses(LIMITERS.verifyResendIp.limit + 1, () =>
+        send('/verify-email/resend', { ip, body: { email: freshEmail('verify-ip') } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.verifyResendIp.limit))
+    })
+  })
+
   it('limits password changes per signed-in user, not per address', async () => {
     const user = `user-${crypto.randomUUID()}`
     const result = await statuses(LIMITERS.changePasswordUser.limit + 1, () =>

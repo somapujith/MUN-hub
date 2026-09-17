@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { WEB_URL } from '../../env'
-import { newApiContext, signUpViaApi } from '../../fixtures/api'
+import { backdateVerificationEmails, newApiContext, signUpViaApi } from '../../fixtures/api'
 import { uniqueEmail } from '../../fixtures/data'
-import { expectNoEmail, linkIn, waitForEmail } from '../../fixtures/outbox'
+import { emailsTo, expectNoEmail, linkIn, waitForEmail } from '../../fixtures/outbox'
 import { pageHeading, watchForCrashes } from '../../fixtures/ui'
 
 /**
@@ -70,12 +70,27 @@ test('opening the page without a token shows the resend form', async ({ page }) 
 test('a newer link replaces the older one', async () => {
   const student = await signUpViaApi()
   const first = await requestLink(student.email)
+  await backdateVerificationEmails(student.userId)
   const second = await requestLink(student.email)
   expect(second.token).not.toBe(first.token)
 
   const api = await newApiContext()
   expect((await api.post('verify-email', { data: { token: first.token } })).status()).toBe(400)
   expect((await api.post('verify-email', { data: { token: second.token } })).status()).toBe(204)
+  await api.dispose()
+})
+
+test('a second resend inside a minute sends nothing and keeps the first link working', async () => {
+  const student = await signUpViaApi()
+  const first = await requestLink(student.email)
+
+  const api = await newApiContext()
+  const again = await api.post('verify-email/resend', { data: { email: student.email } })
+  expect(again.status()).toBe(204)
+  await new Promise((resolve) => setTimeout(resolve, 2_000))
+  expect((await emailsTo(student.email)).filter((mail) => mail.subject === SUBJECT)).toHaveLength(1)
+
+  expect((await api.post('verify-email', { data: { token: first.token } })).status()).toBe(204)
   await api.dispose()
 })
 

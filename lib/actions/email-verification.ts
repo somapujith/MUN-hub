@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { and, eq, gt, isNull } from 'drizzle-orm'
+import { and, desc, eq, gt, isNull } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { emailVerificationTokens, users } from '@/lib/db/schema'
 import { getNotificationsAdapter } from '@/lib/notifications/select-adapter'
@@ -7,6 +7,14 @@ import { getRuntimeEnv } from '@/lib/runtime-env'
 import type { NotificationsAdapter } from '@/lib/notifications/adapter'
 
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+
+/** An account gets at most one verification email per this window… */
+export const VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000
+/** …and at most this many per rolling hour. */
+export const VERIFICATION_EMAILS_PER_HOUR = 3
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+type Executor = Tx | typeof db
 
 /**
  * SHA-256, not lib/auth/password.ts's scrypt — the raw token is a 32-byte
@@ -19,40 +27,38 @@ function hashToken(rawToken: string): string {
   return crypto.createHash('sha256').update(rawToken).digest('hex')
 }
 
-/**
- * Creates a fresh verification token for `userId` and emails a verify link
- * built from `appUrl` (caller-supplied, so this file stays framework-
- * agnostic — same pattern lib/actions/password-reset.ts uses, never reading
- * a request context directly). Only the token's SHA-256 hash is ever
- * persisted (schema.ts's email_verification_tokens comment has the full
- * reasoning) — the raw value exists only in memory and the outgoing email.
- * Throws if `userId` doesn't resolve — a caller invoking this right after
- * its own user-creation has a real bug if that lookup fails, not something
- * to silently skip.
- */
-export async function sendVerificationEmail(
-  userId: string,
-  appUrl: string,
-  adapter: NotificationsAdapter = getNotificationsAdapter(),
-): Promise<void> {
-  const [user] = await db.select({ email: users.email, name: users.name }).from(users).where(eq(users.id, userId)).limit(1)
-  if (!user) throw new Error('User not found')
-
+/** Stores the hash of a fresh token for `userId` and returns the raw token, which is the only copy. */
+async function insertVerificationToken(executor: Executor, userId: string, now: Date): Promise<string> {
   const rawToken = crypto.randomBytes(32).toString('hex')
-  await db.insert(emailVerificationTokens).values({
+  await executor.insert(emailVerificationTokens).values({
     userId,
     tokenHash: hashToken(rawToken),
-    expiresAt: new Date(Date.now() + TOKEN_TTL_MS),
+    expiresAt: new Date(now.getTime() + TOKEN_TTL_MS),
+    createdAt: now,
   })
+  return rawToken
+}
 
+/**
+ * The address isn't verified yet, so the email carries nothing the account
+ * holder typed (such as their name). Otherwise someone who signs up with
+ * another person's address could put their own text into a genuine MUN Hub
+ * email sent to that person.
+ */
+async function deliverVerificationEmail(
+  userId: string,
+  to: string,
+  rawToken: string,
+  appUrl: string,
+  adapter: NotificationsAdapter,
+): Promise<void> {
   const verifyUrl = `${appUrl}/verify-email?token=${rawToken}`
-
   try {
     await adapter.send({
-      to: user.email,
+      to,
       subject: 'Verify your MUN Hub email',
       body:
-        `Hi ${user.name},\n\n` +
+        `Hi,\n\n` +
         `Please verify your email address to finish setting up your MUN Hub account. This link expires in 24 hours:\n${verifyUrl}\n\n` +
         `If you didn't create this account, you can ignore this email.`,
     })
@@ -62,26 +68,95 @@ export async function sendVerificationEmail(
 }
 
 /**
- * Resend — invalidates every still-unused token for this email first
- * (deleted outright, not just left to expire) so an earlier email's link
- * stops working the moment a new one is requested, then sends a fresh one.
- * Always resolves successfully whether or not the email matches an account
- * — same no-enumeration stance requestPasswordReset already takes, and for
- * the same reason: this is reachable from a plain "enter your email" form.
+ * Creates a fresh verification token for `userId` and emails a verify link
+ * built from `appUrl` (caller-supplied, so this file stays framework-
+ * agnostic — same pattern lib/actions/password-reset.ts uses, never reading
+ * a request context directly). Only the token's SHA-256 hash is ever
+ * persisted (schema.ts's email_verification_tokens comment has the full
+ * reasoning) — the raw value exists only in memory and the outgoing email.
+ * Throws if `userId` doesn't resolve — a caller invoking this right after
+ * its own user-creation has a real bug if that lookup fails, not something
+ * to silently skip. Not throttled: anything an anonymous request can reach
+ * goes through `resendVerificationEmail` instead.
  */
-export async function resendVerificationEmail(email: string, appUrl: string): Promise<void> {
-  const [user] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.email, email.trim().toLowerCase()))
-    .limit(1)
-  if (!user) return
+export async function sendVerificationEmail(
+  userId: string,
+  appUrl: string,
+  adapter: NotificationsAdapter = getNotificationsAdapter(),
+): Promise<void> {
+  const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1)
+  if (!user) throw new Error('User not found')
 
-  await db
-    .delete(emailVerificationTokens)
-    .where(and(eq(emailVerificationTokens.userId, user.id), isNull(emailVerificationTokens.usedAt)))
+  const rawToken = await insertVerificationToken(db, userId, new Date())
+  await deliverVerificationEmail(userId, user.email, rawToken, appUrl, adapter)
+}
 
-  await sendVerificationEmail(user.id, appUrl)
+/**
+ * Resend, from the unauthenticated "enter your email" form. Always resolves
+ * successfully whether or not the email matches an account — the same
+ * no-enumeration stance requestPasswordReset takes.
+ *
+ * Sends nothing when the address is already verified, when the account got a
+ * verification email in the last minute, or when it got three in the last
+ * hour (the per-account throttle requestPasswordReset also uses; the HTTP
+ * layer adds per-IP and per-email request limits on top). A throttled request
+ * changes nothing, so it can't cancel the link the person was just sent.
+ *
+ * When it does send, every earlier link stops working first. Those tokens are
+ * expired rather than deleted, because the throttle counts their `createdAt`.
+ */
+export async function resendVerificationEmail(
+  email: string,
+  appUrl: string,
+  adapter: NotificationsAdapter = getNotificationsAdapter(),
+): Promise<void> {
+  const normalizedEmail = email.trim().toLowerCase()
+
+  const issued = await db.transaction(async (tx) => {
+    // Row lock on the user serializes concurrent resends for one account, so
+    // the throttle below can't be raced past.
+    const [user] = await tx
+      .select({ id: users.id, email: users.email, emailVerifiedAt: users.emailVerifiedAt })
+      .from(users)
+      .where(eq(users.email, normalizedEmail))
+      .limit(1)
+      .for('update')
+    if (!user || user.emailVerifiedAt) return null
+
+    const now = new Date()
+    const recent = await tx
+      .select({ createdAt: emailVerificationTokens.createdAt })
+      .from(emailVerificationTokens)
+      .where(
+        and(
+          eq(emailVerificationTokens.userId, user.id),
+          gt(emailVerificationTokens.createdAt, new Date(now.getTime() - 60 * 60 * 1000)),
+        ),
+      )
+      .orderBy(desc(emailVerificationTokens.createdAt))
+
+    const coolingDown = recent[0] && now.getTime() - recent[0].createdAt.getTime() < VERIFICATION_RESEND_COOLDOWN_MS
+    if (coolingDown || recent.length >= VERIFICATION_EMAILS_PER_HOUR) {
+      console.info('[email-verification] resend throttled', { userId: user.id })
+      return null
+    }
+
+    await tx
+      .update(emailVerificationTokens)
+      .set({ expiresAt: now })
+      .where(
+        and(
+          eq(emailVerificationTokens.userId, user.id),
+          isNull(emailVerificationTokens.usedAt),
+          gt(emailVerificationTokens.expiresAt, now),
+        ),
+      )
+    const rawToken = await insertVerificationToken(tx, user.id, now)
+    return { userId: user.id, email: user.email, rawToken }
+  })
+
+  if (!issued) return
+  await deliverVerificationEmail(issued.userId, issued.email, issued.rawToken, appUrl, adapter)
 }
 
 /**

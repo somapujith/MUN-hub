@@ -43,6 +43,11 @@ export const LIMITERS = {
   // different tokens from one IP, and hammering one token's endpoint fast.
   mfaVerifyIp: { binding: 'RL_MFA_VERIFY_IP', limit: 20, periodSeconds: 60, perIp: true },
   mfaVerifyToken: { binding: 'RL_MFA_VERIFY_TOKEN', limit: 10, periodSeconds: 60, perIp: false },
+  // Verification-email resends: per IP and per address, for known and
+  // unknown addresses alike. lib/actions/email-verification.ts additionally
+  // sends an account at most one email a minute and three an hour.
+  verifyResendIp: { binding: 'RL_VERIFY_RESEND_IP', limit: 10, periodSeconds: 60, perIp: true },
+  verifyResendEmail: { binding: 'RL_VERIFY_RESEND_EMAIL', limit: 3, periodSeconds: 60, perIp: false },
   // Organizer email-code sign-in. lib/actions/organizer-otp.ts also enforces a
   // per-address resend cooldown and hourly cap, and a per-code attempt limit.
   // The per-IP cap bounds how many different addresses one IP can send codes to.
@@ -108,6 +113,15 @@ const RULES: LimitRule[] = [
     method: 'POST',
     path: '/password-reset/confirm',
     checks: ({ ip }) => [{ limiter: LIMITERS.resetConfirmIp, key: `ip:${ip}` }],
+  },
+  {
+    method: 'POST',
+    path: '/verify-email/resend',
+    readsEmail: true,
+    checks: ({ ip, email }) => [
+      { limiter: LIMITERS.verifyResendIp, key: `ip:${ip}` },
+      ...(email ? [{ limiter: LIMITERS.verifyResendEmail, key: `email:${email}` }] : []),
+    ],
   },
   {
     method: 'POST',
