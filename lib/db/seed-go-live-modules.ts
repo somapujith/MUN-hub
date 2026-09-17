@@ -230,7 +230,8 @@ export async function seedFullGoLiveModules({
       accountType: 'CURRENT',
       gateway: 'RAZORPAY',
       currency: 'INR',
-      refundPolicy: 'Full refund up to 14 days before the conference; no refunds thereafter.',
+      // No refunds on MUN Hub (docs/autonomous-run/PLAN.md), so no refund policy text.
+      refundPolicy: null,
       settlementNotes: 'Seeded demo settlement configuration — fake ciphertext, never decrypted by any code path.',
       verificationState: 'VERIFIED',
       verifiedAt: new Date(),
