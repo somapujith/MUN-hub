@@ -77,7 +77,6 @@ async function addField(
   await main(page).getByRole('button', { name: 'Add field' }).first().click()
   const form = main(page).locator('form')
   await form.getByLabel('Label').fill(field.label)
-  await form.getByLabel('Field key').fill(field.key)
   await form.getByLabel('Field type').selectOption({ label: field.type })
   if (field.choices !== undefined) await form.getByLabel('Choices (comma-separated)').fill(field.choices)
   if (field.showWhen) {
@@ -85,6 +84,10 @@ async function addField(
     await form.getByLabel('Condition').selectOption({ label: field.showWhen.operator })
     await form.getByLabel('Value').fill(field.showWhen.value)
   }
+  // Field key and display order live under "Advanced" (auto-generated from
+  // the label otherwise; opened here to set an explicit e2e_-prefixed key).
+  await form.getByText('Advanced').click()
+  await form.getByLabel('Field key').fill(field.key)
   if (field.order !== undefined) await form.getByLabel('Display order').fill(String(field.order))
   if (field.required) await form.getByLabel('Required').check()
   await form.getByRole('button', { name: 'Add field' }).click()
@@ -96,7 +99,7 @@ test.describe('form builder UI', () => {
     await openForm(page)
     for (const field of DEFAULT_FIELDS) {
       const card = cardFor(page, REGION, field.label)
-      await expect(card).toContainText(`Field key: ${field.key}`)
+      await expect(card).not.toContainText('Field key')
       await expect(card).toContainText(field.type)
       if (field.required) await expect(card).toContainText('Required')
       else await expect(card).not.toContainText('Required')
@@ -143,7 +146,9 @@ test.describe('form builder UI', () => {
 
     await main(page).getByRole('button', { name: `Edit ${field.label}` }).click()
     const form = main(page).locator('form')
+    await form.getByText('Advanced').click()
     await expect(form.getByLabel('Field key')).toHaveValue(field.fieldKey)
+    await expect(form.getByLabel('Field key')).toHaveAttribute('readonly', '')
     await form.getByLabel('Required').check()
     await form.getByRole('button', { name: 'Save changes' }).click()
     await expect(toast(page, 'Field updated')).toBeVisible()
@@ -163,15 +168,16 @@ test.describe('form builder UI', () => {
     const child = { label: `E2E Room type ${tag}`, key: `e2e_room_type_${tag}`, type: 'Short text' }
     await addField(page, { ...child, showWhen: { key: parent.fieldKey, operator: 'equals', value: 'Yes' } })
     await expect(toast(page, 'Field added')).toBeVisible()
-    await expect(cardFor(page, REGION, child.label)).toContainText(`Shown when "${parent.fieldKey}" equals "Yes"`)
+    await expect(cardFor(page, REGION, child.label)).toContainText(`Shown when "${parent.label}" equals "Yes"`)
 
     const saved = (await listFields()).find((f) => f.fieldKey === child.key)
     expect(saved).toMatchObject({ conditionalOn: parent.fieldKey, conditionalOperator: 'EQUALS', conditionalValue: 'Yes' })
 
-    // The parent can't be deleted while the condition depends on it.
-    acceptNextConfirm(page)
+    // The parent can't be deleted while the condition depends on it. This is
+    // caught client-side (no confirm dialog, no API call) with a plain
+    // message naming the dependent field.
     await main(page).getByRole('button', { name: `Delete ${parent.label}` }).click()
-    await expect(toast(page, /referenced by conditionalOn/)).toBeVisible()
+    await expect(toast(page, new RegExp(`can't be deleted yet.*${child.label}`))).toBeVisible()
     await expect(cardFor(page, REGION, parent.label)).toBeVisible()
 
     acceptNextConfirm(page)
@@ -202,7 +208,7 @@ test.describe('form builder UI', () => {
     await openForm(page)
     const before = (await listFields()).length
     const form = await addField(page, { label: `E2E Duplicate ${uid()}`, key: 'grade_class', type: 'Short text' })
-    await expect(toast(page, /already used on this mun/)).toBeVisible()
+    await expect(toast(page, /Another field already uses the key "grade_class"/)).toBeVisible()
     await expect(form).toBeVisible()
     expect(await listFields()).toHaveLength(before)
   })
@@ -210,7 +216,7 @@ test.describe('form builder UI', () => {
   test('client-side checks: key format, missing choices, self-reference', async ({ page }) => {
     await openForm(page)
     const form = await addField(page, { label: 'E2E Bad key', key: 'Bad Key!', type: 'Short text' })
-    await expect(toast(page, /Field key must start with a lowercase letter/)).toBeVisible()
+    await expect(toast(page, /must start with a lowercase letter/)).toBeVisible()
 
     await form.getByLabel('Field key').fill(`e2e_nochoice_${uid()}`)
     await form.getByLabel('Field type').selectOption({ label: 'Multiple choice' })
