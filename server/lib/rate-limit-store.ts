@@ -146,6 +146,46 @@ export function getClientIp(c: Context): string {
   return socketAddress(c) ?? 'unknown'
 }
 
+const HEXTET = /^[0-9a-f]{1,4}$/i
+
+/**
+ * The eight hextets of an IPv6 address, `::` expanded — or null when `ip`
+ * isn't a plain IPv6 literal (IPv4, or an IPv4-mapped/embedded form such as
+ * `::ffff:198.51.100.7`, which identifies one host and needs no grouping).
+ */
+function ipv6Hextets(ip: string): string[] | null {
+  if (!ip.includes(':') || ip.includes('.')) return null
+
+  const halves = ip.split('::')
+  if (halves.length > 2) return null
+  const head = halves[0] ? halves[0].split(':') : []
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : []
+  if (halves.length === 1 ? head.length !== 8 : head.length + tail.length > 7) return null
+  if (![...head, ...tail].every((hextet) => HEXTET.test(hextet))) return null
+
+  const filler = Array<string>(8 - head.length - tail.length).fill('0')
+  return halves.length === 1 ? head : [...head, ...filler, ...tail]
+}
+
+/**
+ * The bucket an address counts against. IPv4 addresses key on themselves; an
+ * IPv6 address keys on its /64 prefix, because a single machine is
+ * routinely handed a whole /64 (2^64 addresses) and could otherwise pick a
+ * fresh source address per request and start every per-IP limit — the global
+ * cap, login, signup, reset, organizer codes, MFA — from zero each time.
+ *
+ * Anything that isn't a parseable IPv6 literal (IPv4, an IPv4-mapped form,
+ * or the 'unknown' placeholder) is returned unchanged. Only rate-limit keys
+ * use this: `getClientIp` still returns the exact address for everything
+ * else (e.g. Turnstile's `remoteip`).
+ */
+export function rateLimitIpKey(ip: string): string {
+  const zoneless = ip.split('%')[0].replace(/^\[|\]$/g, '')
+  const hextets = ipv6Hextets(zoneless)
+  if (!hextets) return ip
+  return `${hextets.slice(0, 4).map((hextet) => hextet.replace(/^0+(?=.)/, '').toLowerCase()).join(':')}::/64`
+}
+
 function socketAddress(c: Context): string | undefined {
   const env = c.env as { incoming?: unknown; server?: { incoming?: unknown } } | undefined
   if (!env || !(env.incoming ?? env.server?.incoming)) return undefined

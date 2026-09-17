@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono'
-import { consumeRateLimit, getClientIp, positiveIntEnv, type LimiterSpec } from '../lib/rate-limit-store'
+import { consumeRateLimit, getClientIp, positiveIntEnv, rateLimitIpKey, type LimiterSpec } from '../lib/rate-limit-store'
 import type { AppVariables } from '../src/types'
 
 /**
@@ -37,6 +37,14 @@ export const LIMITERS = {
   resetRequestIp: { binding: 'RL_RESET_REQUEST_IP', limit: 10, periodSeconds: 60, perIp: true },
   resetRequestEmail: { binding: 'RL_RESET_REQUEST_EMAIL', limit: 3, periodSeconds: 60, perIp: false },
   resetConfirmIp: { binding: 'RL_RESET_CONFIRM_IP', limit: 10, periodSeconds: 60, perIp: true },
+  // "Resend my verification email": the same pair as reset requests above,
+  // for the same reason — each call sends a real email to an address the
+  // caller only has to type, so without these one inbox could be flooded
+  // (and munhub.in's sender reputation burned) at the global cap's 300 a
+  // minute. lib/actions/email-verification.ts adds the per-account cooldown
+  // and hourly cap on top.
+  verifyResendIp: { binding: 'RL_VERIFY_RESEND_IP', limit: 10, periodSeconds: 60, perIp: true },
+  verifyResendEmail: { binding: 'RL_VERIFY_RESEND_EMAIL', limit: 3, periodSeconds: 60, perIp: false },
   changePasswordUser: { binding: 'RL_CHANGE_PASSWORD_USER', limit: 5, periodSeconds: 60, perIp: false },
   // Staff TOTP sign-in challenge (lib/actions/staff-mfa.ts). The pending
   // token itself is single-use and already caps guesses per attempt
@@ -68,6 +76,12 @@ export const LIMITERS = {
 } satisfies Record<string, LimiterSpec>
 
 type RequestFacts = {
+  /**
+   * The client's rate-limit bucket — not always its exact address. An IPv6
+   * client counts against its /64 prefix (server/lib/rate-limit-store.ts
+   * #rateLimitIpKey): one machine normally owns a whole /64, and could
+   * otherwise start every per-IP limit from zero on each request.
+   */
   ip: string
   sessionUserId: string | null
   /** Lower-cased `email` from the JSON body, for rules that set `readsEmail`. */
@@ -135,6 +149,15 @@ const RULES: LimitRule[] = [
     methods: ['POST'],
     path: '/password-reset/confirm',
     checks: ({ ip }) => [{ limiter: LIMITERS.resetConfirmIp, key: `ip:${ip}` }],
+  },
+  {
+    methods: ['POST'],
+    path: '/verify-email/resend',
+    readsEmail: true,
+    checks: ({ ip, email }) => [
+      { limiter: LIMITERS.verifyResendIp, key: `ip:${ip}` },
+      ...(email ? [{ limiter: LIMITERS.verifyResendEmail, key: `email:${email}` }] : []),
+    ],
   },
   {
     methods: ['POST'],
@@ -233,7 +256,7 @@ export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }>
   const matched = RULES.filter((rule) => ruleMatches(rule, method, path))
 
   const facts: RequestFacts = {
-    ip: getClientIp(c),
+    ip: rateLimitIpKey(getClientIp(c)),
     sessionUserId: c.get('session')?.userId ?? null,
   }
   if (matched.some((rule) => rule.readsEmail)) {

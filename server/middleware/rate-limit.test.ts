@@ -143,6 +143,50 @@ describe('rateLimitMiddleware (in-memory fallback)', () => {
     })
   })
 
+  describe('verification-email resend', () => {
+    it('limits resends per email, from any address', async () => {
+      const email = freshEmail('verify-resend-email')
+      const result = await statuses(LIMITERS.verifyResendEmail.limit + 1, () =>
+        send('/verify-email/resend', { ip: freshIp(), body: { email } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.verifyResendEmail.limit))
+    })
+
+    it('limits resends per IP across emails', async () => {
+      const ip = freshIp()
+      const result = await statuses(LIMITERS.verifyResendIp.limit + 1, () =>
+        send('/verify-email/resend', { ip, body: { email: freshEmail('verify-resend-ip') } }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.verifyResendIp.limit))
+    })
+  })
+
+  describe('IPv6 clients', () => {
+    /** A fresh /64's first three hextets, so tests never share in-memory buckets. */
+    function freshV6Block(): string {
+      ipCounter += 1
+      return `2001:db8:${ipCounter.toString(16)}`
+    }
+
+    it('counts a whole /64 as one client', async () => {
+      // One machine normally owns a /64, so keying on the full address would
+      // hand it an endless supply of fresh limits.
+      const block = freshV6Block()
+      const result = await statuses(LIMITERS.signupIp.limit + 1, (i) =>
+        send('/auth/users', { ip: `${block}:1::${i + 1}`, body: {} }),
+      )
+      expect(result).toEqual(allowedThenBlocked(LIMITERS.signupIp.limit))
+    })
+
+    it('keeps a different /64 on its own budget', async () => {
+      const block = freshV6Block()
+      await statuses(LIMITERS.signupIp.limit + 1, (i) => send('/auth/users', { ip: `${block}:1::${i + 1}`, body: {} }))
+
+      const elsewhere = await send('/auth/users', { ip: `${block}:2::1`, body: {} })
+      expect(elsewhere.status).toBe(200)
+    })
+  })
+
   it('limits password changes per signed-in user, not per address', async () => {
     const user = `user-${crypto.randomUUID()}`
     const result = await statuses(LIMITERS.changePasswordUser.limit + 1, () =>
