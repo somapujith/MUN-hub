@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray } from 'drizzle-orm'
+import { fireAndForget } from '@/lib/background-tasks'
 import { db } from '@/lib/db/client'
 import {
   munModuleVerifications,
@@ -28,14 +29,13 @@ import { validateMunForSubmission } from './validation'
 /**
  * Fire-and-forget notification helper — same reasoning as go-live.ts's
  * `notifyAfterCommit` (a notification failure must never surface as a
- * failure of the state change that triggered it), duplicated locally rather
- * than imported since this file has no transaction boundary to wait on (see
- * below) and the two call sites otherwise have nothing else in common.
+ * failure of the state change that triggered it). Goes through
+ * lib/background-tasks.ts so the work is handed to `executionCtx.waitUntil`
+ * on Workers, where a detached promise is otherwise cancelled with the
+ * response and the email silently never sends.
  */
 function notifyFireAndForget(work: () => Promise<void>): void {
-  work().catch((error) => {
-    console.error('[organizer-confirmation] pipeline notification failed', error)
-  })
+  fireAndForget('organizer-confirmation', work)
 }
 
 /**
