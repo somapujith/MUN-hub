@@ -60,7 +60,10 @@ describe('uploads served by /api/v1/files', () => {
     expect(file.headers.get('Content-Type')).toBe('image/png')
     expect(Buffer.from(await file.arrayBuffer()).equals(SAMPLE_FILES.png)).toBe(true)
 
-    const listed = (await (await app.request(`/api/v1/muns/${mun.id}/media`, {}, env)).json()) as Array<{ url: string }>
+    // The MUN is unpublished, so only its owner (or staff) may list its media.
+    const listed = (await (await app.request(`/api/v1/muns/${mun.id}/media`, { headers }, env)).json()) as Array<{
+      url: string
+    }>
     expect(listed.map((m) => m.url)).toEqual([media.url])
 
     const removed = await app.request(`/api/v1/media/${media.id}`, { method: 'DELETE', headers }, env)

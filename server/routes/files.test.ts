@@ -37,6 +37,9 @@ describe('GET /api/v1/files/:key', () => {
     )
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable')
     expect(res.headers.get('Cross-Origin-Resource-Policy')).toBe('cross-origin')
+    // The app-wide security headers still apply around the route's own ones.
+    expect(res.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains')
+    expect(res.headers.get('X-Frame-Options')).toBe('DENY')
     expect(res.headers.get('ETag')).toBe(`"${createHash('sha256').update(SAMPLE_FILES.png).digest('hex')}"`)
   })
 
@@ -51,6 +54,7 @@ describe('GET /api/v1/files/:key', () => {
     )
     const csp = res.headers.get('Content-Security-Policy')!
     expect(csp).toContain("default-src 'none'")
+    expect(csp).toContain("object-src 'self'")
     expect(csp).not.toContain('sandbox')
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff')
   })
