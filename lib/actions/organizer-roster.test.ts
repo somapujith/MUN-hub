@@ -104,6 +104,15 @@ describe('roster search and filters', () => {
     const active = await makeOpsFixture({ status: 'CONFERENCE_ACTIVE' })
     expect((await getDelegateList(active.mun.id, undefined, active.organizerSession)).attendanceOpen).toBe(true)
   })
+
+  // assertOwnsOrAdmin short-circuits for staff without checking the mun
+  // exists, so an admin asking for an unknown id used to read `mun.status`
+  // off `undefined` and answer 500 instead of 404.
+  it('answers "Mun not found" when an admin asks for an unknown mun', async () => {
+    const admin = await makeUser('ADMIN')
+
+    await expect(getDelegateList(crypto.randomUUID(), undefined, sessionFor(admin))).rejects.toThrow('Mun not found')
+  })
 })
 
 describe('getDelegateDetail', () => {

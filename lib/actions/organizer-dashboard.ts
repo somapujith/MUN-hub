@@ -230,6 +230,11 @@ export async function getDelegateList(
     db.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).limit(1),
   ])
 
+  // assertOwnsOrAdmin returns immediately for staff without checking the mun
+  // exists, so an unknown id reaches here with no row — answer the 404 every
+  // other endpoint answers, not a 500 on `mun.status`.
+  if (!mun) throw new Error('Mun not found')
+
   return {
     results,
     total: count,
