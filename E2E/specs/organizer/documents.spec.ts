@@ -14,6 +14,8 @@ import {
 /** Documents & Media — Rules & Documents module (Onboarding PRD §22). Sandbox only; uploads are removed again. */
 
 const REGION = 'Uploaded documents'
+/** The file input, whatever size cap its label states (the cap moved from 20MB to 10MB in 777f48d). */
+const PDF_INPUT = /^PDF file \(max \d+MB\)$/
 const PDF = Buffer.from(
   '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n',
 )
@@ -59,7 +61,7 @@ test.describe('documents UI', () => {
     const form = main(page).locator('form')
     await form.getByLabel('Title').fill(title)
     await form.getByLabel('Type').selectOption({ label: 'Handbook' })
-    await form.getByLabel('PDF file (max 20MB)').setInputFiles({ name: 'handbook.pdf', mimeType: 'application/pdf', buffer: PDF })
+    await form.getByLabel(PDF_INPUT).setInputFiles({ name: 'handbook.pdf', mimeType: 'application/pdf', buffer: PDF })
     await form.getByRole('button', { name: 'Upload' }).click()
 
     await expect(toast(page, 'Document uploaded')).toBeVisible()
@@ -84,16 +86,16 @@ test.describe('documents UI', () => {
     const form = main(page).locator('form')
     await form.evaluate((el) => el.setAttribute('novalidate', ''))
 
-    await form.getByLabel('PDF file (max 20MB)').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('not a pdf') })
+    await form.getByLabel(PDF_INPUT).setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('not a pdf') })
     await expect(toast(page, 'Only PDF files are allowed')).toBeVisible()
 
-    await form.getByLabel('PDF file (max 20MB)').setInputFiles({ name: 'rules.pdf', mimeType: 'application/pdf', buffer: PDF })
+    await form.getByLabel(PDF_INPUT).setInputFiles({ name: 'rules.pdf', mimeType: 'application/pdf', buffer: PDF })
     await form.getByRole('button', { name: 'Upload' }).click()
     await expect(toast(page, 'Title is required')).toBeVisible()
 
     const title = `E2E No File ${uid()}`
     await form.getByLabel('Title').fill(title)
-    await form.getByLabel('PDF file (max 20MB)').setInputFiles([])
+    await form.getByLabel(PDF_INPUT).setInputFiles([])
     await form.getByRole('button', { name: 'Upload' }).click()
     await expect(toast(page, 'Choose a PDF to upload')).toBeVisible()
     expect((await listDocuments()).map((d) => d.title)).not.toContain(title)

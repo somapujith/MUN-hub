@@ -114,8 +114,9 @@ test.describe('MUN setup UI', () => {
   test('the go-live progress panel lists every module', async ({ page }) => {
     await openSetup(page)
     const progress = await (await api.get(`muns/${munId}/progress`)).json()
-    await expect(main(page).getByText(`${progress.requiredComplete}/${progress.requiredTotal} required modules complete`)).toBeVisible()
-    const panel = main(page).getByRole('complementary')
+    await expect(main(page).getByText(`${progress.requiredComplete}/${progress.requiredTotal} required sections complete`)).toBeVisible()
+    await expect(main(page).getByText('Go-live checklist')).toBeVisible()
+    const panel = main(page)
     for (const module of progress.modules as Array<{ label: string }>) {
       await expect(panel.getByRole('listitem').filter({ hasText: module.label }).first()).toBeVisible()
     }
@@ -185,19 +186,30 @@ test.describe('MUN setup API', () => {
     }
   })
 
-  test('a registration deadline before registration opens is refused', async () => {
-    test.fail(
-      !process.env.E2E_SHOW_KNOWN_BUGS,
-      'BUG: updateMunDetails (lib/actions/mun-config.ts) accepts registrationDeadline earlier than registrationOpensAt',
-    )
-    const res = await api.patch(`muns/${munId}`, {
-      data: {
-        registrationOpensAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
-        registrationDeadline: new Date(Date.now() + 7 * 86_400_000).toISOString(),
-      },
-    })
+  test('an inverted or too-late registration window is refused (f6fcb7b)', async () => {
+    const days = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString()
+    const before = await details()
     try {
-      expect(res.status()).toBe(400)
+      const inverted = await api.patch(`muns/${munId}`, {
+        data: { registrationOpensAt: days(30), registrationDeadline: days(7) },
+      })
+      expect(inverted.status()).toBe(400)
+      expect((await inverted.json()).error.message).toBe('Registration deadline must be after registration opens')
+
+      // The sandbox conference starts ~90 days out (prepare-db).
+      const tooLate = await api.patch(`muns/${munId}`, { data: { registrationDeadline: days(200) } })
+      expect(tooLate.status()).toBe(400)
+      expect((await tooLate.json()).error.message).toBe('Registration deadline must be before the conference starts')
+
+      // Moving the start date before a saved deadline is refused too.
+      expect((await api.patch(`muns/${munId}`, { data: { registrationDeadline: days(30) } })).status()).toBe(200)
+      const startTooEarly = await api.patch(`muns/${munId}`, { data: { startDate: days(10) } })
+      expect(startTooEarly.status()).toBe(400)
+      expect((await startTooEarly.json()).error.message).toBe('Registration deadline must be before the conference starts')
+
+      // Clearing the deadline is always allowed.
+      expect((await api.patch(`muns/${munId}`, { data: { registrationDeadline: null } })).status()).toBe(200)
+      expect((await details()).startDate).toBe(before.startDate)
     } finally {
       await api.patch(`muns/${munId}`, { data: { registrationOpensAt: null, registrationDeadline: null } })
     }

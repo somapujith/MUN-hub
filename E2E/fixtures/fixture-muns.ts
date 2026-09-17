@@ -55,9 +55,32 @@ export const FIXTURE_MUNS = {
     name: 'E2E Lifecycle MUN',
     products: [{ name: 'E2E Lifecycle Pass', price: 800, capacity: 50, status: 'active', displayOrder: 0 }],
   },
+
+  /**
+   * ONBOARDING with all 15 go-live modules filled in (lib/db/seed-go-live-modules.ts),
+   * so it can pass automated validation and go through Gate 2 review and publish.
+   * Deleted and recreated every run (new id each time). Reserved for
+   * specs/admin/content-review.spec.ts.
+   */
+  review: {
+    slug: 'e2e-review-mun',
+    name: 'E2E Review MUN',
+    committees: [{ name: 'E2E Review Committee', capacity: 60, portfolios: ['Kenya', 'Chile'] }],
+    products: [{ name: 'E2E Review Pass', price: 1100, capacity: 120, status: 'active', displayOrder: 0 }],
+  },
+
+  /** Same as review, for the suspend/reinstate path (a reinstated MUN goes back to verification). */
+  suspend: {
+    slug: 'e2e-suspend-mun',
+    name: 'E2E Suspend MUN',
+    committees: [{ name: 'E2E Suspend Committee', capacity: 60, portfolios: ['Peru'] }],
+    products: [{ name: 'E2E Suspend Pass', price: 900, capacity: 80, status: 'active', displayOrder: 0 }],
+  },
 } as const
 
 export const OPEN = FIXTURE_MUNS.open
+export const REVIEW = FIXTURE_MUNS.review
+export const SUSPEND = FIXTURE_MUNS.suspend
 export const LIFECYCLE = FIXTURE_MUNS.lifecycle
 export const SANDBOX = FIXTURE_MUNS.sandbox
 export const CLOSED = FIXTURE_MUNS.closed

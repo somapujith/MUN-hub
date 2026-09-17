@@ -124,9 +124,18 @@ test.describe('submitting an incomplete MUN', () => {
   })
 
   test('the final confirmation step is refused before validation passes', async () => {
-    const res = await api.post(`muns/${munId}/actions/submit-final-confirmation`)
+    const res = await api.post(`muns/${munId}/actions/submit-final-confirmation`, { data: { attested: true } })
     expect(res.status()).toBeGreaterThanOrEqual(400)
     expect(res.status()).toBeLessThan(500)
+    expect(IN_REVIEW).not.toContain((await progress()).lifecycleStatus)
+  })
+
+  test('the final confirmation needs an explicit attestation (f6fcb7b)', async () => {
+    const missing = await api.post(`muns/${munId}/actions/submit-final-confirmation`)
+    expect(missing.status()).toBe(400)
+    const refused = await api.post(`muns/${munId}/actions/submit-final-confirmation`, { data: { attested: false } })
+    expect(refused.status()).toBe(400)
+    expect((await refused.json()).error.message).toBe('You must confirm the submission is accurate and complete')
     expect(IN_REVIEW).not.toContain((await progress()).lifecycleStatus)
   })
 

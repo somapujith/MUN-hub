@@ -12,12 +12,16 @@
  *   published MUN sends it back to VERIFICATION, which would silently close
  *   registration for the student specs running in the same suite.
  *
- * So the suite owns three dedicated fixture MUNs, all belonging to the
- * seeded organizer, and resets them to a known state on every run:
- * - OPEN    — REGISTRATION_OPEN, window open; registrations wiped each run.
- * - SANDBOX — ONBOARDING; the only MUN organizer specs are allowed to edit.
- * - CLOSED  — PUBLISHED but not open, with an active pass; used to prove the
- *             API refuses registrations the UI would never offer.
+ * So the suite owns dedicated fixture MUNs, all belonging to the seeded
+ * organizer, and resets them to a known state on every run:
+ * - OPEN      — REGISTRATION_OPEN, window open; registrations wiped each run.
+ * - SANDBOX   — ONBOARDING; the only MUN organizer specs are allowed to edit.
+ * - CLOSED    — PUBLISHED but not open, with an active pass; used to prove the
+ *               API refuses registrations the UI would never offer.
+ * - LIFECYCLE — PUBLISHED with a verified payment account; the lifecycle spec
+ *               opens, closes and cancels it.
+ * - REVIEW    — ONBOARDING with every go-live module filled in; deleted and
+ *               recreated each run for the Gate 2 review/publish spec.
  *
  * Refuses to touch anything but a local database.
  */
@@ -26,6 +30,9 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import * as schema from '../lib/db/schema'
 import { DATABASE_URL, assertLocalDatabase } from './env'
+import { seedFullGoLiveModules } from '../lib/db/seed-go-live-modules'
+import { hashPassword } from '../lib/auth/password'
+import { ACCOUNTS, DEMO_PASSWORD } from './fixtures/accounts'
 import { FIXTURE_MUNS } from './fixtures/fixture-muns'
 
 assertLocalDatabase(DATABASE_URL)
@@ -150,6 +157,56 @@ async function ensureProduct(
   }
 }
 
+/**
+ * Removes a fixture MUN completely so it can be recreated from scratch. Most
+ * child tables cascade; these don't.
+ */
+async function deleteMunBySlug(tx: Tx, slug: string): Promise<void> {
+  const [mun] = await tx.select({ id: schema.muns.id }).from(schema.muns).where(eq(schema.muns.slug, slug))
+  if (!mun) return
+  await wipeRegistrations(tx, mun.id)
+  await tx.delete(schema.certificates).where(eq(schema.certificates.munId, mun.id))
+  await tx.delete(schema.achievements).where(eq(schema.achievements.munId, mun.id))
+  await tx.delete(schema.organizerApplications).where(eq(schema.organizerApplications.munId, mun.id))
+  await tx.update(schema.supportTickets).set({ relatedMunId: null }).where(eq(schema.supportTickets.relatedMunId, mun.id))
+  await tx.update(schema.organizerProfiles).set({ firstMunId: null }).where(eq(schema.organizerProfiles.firstMunId, mun.id))
+  await tx.delete(schema.muns).where(eq(schema.muns.id, mun.id))
+}
+
+/**
+ * Deletes and recreates an ONBOARDING MUN with every go-live module filled in
+ * (the demo seed's full data plus the checks that seed doesn't cover), ready to
+ * pass automated validation and go through Gate 2.
+ */
+async function recreateReadyToSubmitMun(
+  tx: Tx,
+  ownerId: string,
+  def: (typeof FIXTURE_MUNS)['review'] | (typeof FIXTURE_MUNS)['suspend'],
+): Promise<void> {
+  await deleteMunBySlug(tx, def.slug)
+  const munId = await upsertMun(tx, ownerId, def, 'ONBOARDING')
+  for (const c of def.committees) await ensureCommittee(tx, munId, c)
+  for (const p of def.products) await ensureProduct(tx, munId, p)
+  const committees = await tx.select().from(schema.committees).where(eq(schema.committees.munId, munId))
+  await seedFullGoLiveModules({
+    db: tx as unknown as Parameters<typeof seedFullGoLiveModules>[0]['db'],
+    tables: schema,
+    munId,
+    munName: def.name,
+    organizerId: ownerId,
+    committees,
+  })
+  await tx
+    .update(schema.muns)
+    .set({
+      addressLine1: '1 Review Street, Banjara Hills',
+      addressState: 'Telangana',
+      postalCode: '500034',
+      accommodationProvided: 'NOT_PROVIDED',
+    })
+    .where(eq(schema.muns.id, munId))
+}
+
 /** A payout account MUNHub has already verified — opening registration for paid passes needs one. */
 async function ensureVerifiedPaymentAccount(tx: Tx, munId: string): Promise<void> {
   const values = {
@@ -200,7 +257,21 @@ async function wipeRegistrations(tx: Tx, munId: string): Promise<number> {
   return ids.length
 }
 
+/**
+ * The per-role setup signs in as the seeded accounts with the demo password.
+ * Other test suites share this local database and have been seen changing
+ * those passwords, and the seed only fills in a missing hash, so put them back.
+ */
+async function resetSeededLogins(): Promise<void> {
+  const passwordHash = await hashPassword(DEMO_PASSWORD)
+  await db
+    .update(schema.users)
+    .set({ passwordHash, suspended: false })
+    .where(inArray(schema.users.email, Object.values(ACCOUNTS).map((account) => account.email)))
+}
+
 async function main(): Promise<void> {
+  await resetSeededLogins()
   const ownerId = await organizerId()
   // The fixture owner predates the organizer onboarding wizard; mark it done.
   await db
@@ -235,8 +306,11 @@ async function main(): Promise<void> {
     await wipeRegistrations(tx, lifecycleId)
     await ensureVerifiedPaymentAccount(tx, lifecycleId)
 
+    for (const def of [FIXTURE_MUNS.review, FIXTURE_MUNS.suspend]) await recreateReadyToSubmitMun(tx, ownerId, def)
+
     console.log(
-      `[e2e] fixtures ready: ${FIXTURE_MUNS.open.slug} (open, ${wiped} old registrations wiped), ` +
+      `[e2e] fixtures ready: ${FIXTURE_MUNS.review.slug} + ${FIXTURE_MUNS.suspend.slug} (recreated, all modules filled), ` +
+        `${FIXTURE_MUNS.open.slug} (open, ${wiped} old registrations wiped), ` +
         `${FIXTURE_MUNS.sandbox.slug} (onboarding), ${FIXTURE_MUNS.closed.slug} (published, not open), ` +
         `${FIXTURE_MUNS.lifecycle.slug} (published, ready to open)`,
     )

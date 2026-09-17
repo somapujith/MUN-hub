@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { newApiContext } from '../../fixtures/api'
 import { NONEXISTENT_MUN_SLUG } from '../../fixtures/accounts'
-import { CLOSED, OPEN, SANDBOX } from '../../fixtures/fixture-muns'
+import { CLOSED, OPEN, REVIEW, SANDBOX } from '../../fixtures/fixture-muns'
 import { pageHeading, watchForCrashes } from '../../fixtures/ui'
 
 /**
@@ -15,6 +15,15 @@ import { pageHeading, watchForCrashes } from '../../fixtures/ui'
 
 function main(page: Page) {
   return page.getByRole('main')
+}
+
+/** The home page's "Registration open now" row has cards, and every card in it is open for registration. */
+async function expectOnlyOpenMunsInRow(page: Page) {
+  const row = main(page).getByRole('list', { name: 'Registration open now' })
+  const cards = row.getByRole('listitem')
+  await expect(cards.first()).toBeVisible()
+  const count = await cards.count()
+  for (let i = 0; i < count; i += 1) await expect(cards.nth(i)).toContainText('Registration open')
 }
 
 function results(page: Page) {
@@ -46,7 +55,9 @@ test.describe('home page', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
     await expect(main(page).getByRole('region', { name: 'Featured conferences' })).toBeVisible()
     await expect(main(page).getByRole('heading', { level: 2, name: 'Registration open now' })).toBeVisible()
-    await expect(main(page).getByRole('list', { name: 'Registration open now' })).toContainText(OPEN.name)
+    // The row is capped, and the local database holds many open MUNs, so
+    // assert what every card in it has in common rather than which ones made the cut.
+    await expectOnlyOpenMunsInRow(page)
     await expect(main(page).getByRole('link', { name: /see all registration open now/i })).toHaveAttribute(
       'href',
       '/muns',
@@ -64,8 +75,9 @@ test.describe('home page', () => {
 
   test('never lists a MUN that is not public', async ({ page }) => {
     await page.goto('/')
-    await expect(main(page).getByRole('list', { name: 'Registration open now' })).toContainText(OPEN.name)
+    await expectOnlyOpenMunsInRow(page)
     await expect(main(page)).not.toContainText(SANDBOX.name)
+    await expect(main(page)).not.toContainText(REVIEW.name)
   })
 })
 
