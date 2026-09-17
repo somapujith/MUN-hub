@@ -1,17 +1,35 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { deleteMunMedia, listMunMedia, reorderGallery, uploadMunMedia } from '@/lib/actions/mun-branding'
+import {
+  deleteMunMedia,
+  listMunMedia,
+  MEDIA_UPLOAD_PURPOSE,
+  reorderGallery,
+  uploadMunMedia,
+} from '@/lib/actions/mun-branding'
 import { assertMunReadable } from '@/lib/actions/mun-read-access'
+import { assertCanUploadToMun } from '@/lib/actions/upload-limits'
 import { munMediaKindEnum } from '@/lib/db/schema-enums'
+import { largestUploadBytes, maxBase64Length } from '@/lib/storage/validate'
 import { zValidator } from '../lib/zod-validator'
 import { requireAuth } from '../middleware/require-auth'
 import type { AppVariables } from '../src/types'
+
+// The largest media file (a 5MB cover or gallery image). The per-kind cap
+// (logos 2MB) is enforced after decoding, in lib/storage/validate.ts.
+const MEDIA_MAX_BYTES = largestUploadBytes(Object.values(MEDIA_UPLOAD_PURPOSE))
 
 const uploadMediaBodySchema = z
   .object({
     kind: z.enum(munMediaKindEnum.enumValues),
     contentType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
-    fileBase64: z.string().min(1),
+    fileBase64: z
+      .string()
+      .min(1)
+      .max(
+        maxBase64Length(MEDIA_MAX_BYTES),
+        `File too large — maximum allowed size is ${MEDIA_MAX_BYTES / (1024 * 1024)}MB`,
+      ),
     displayOrder: z.number().int().nonnegative().optional(),
   })
   .strict()
@@ -35,6 +53,12 @@ munBrandingRoutes.get('/muns/:munId/media', async (c) => {
 munBrandingRoutes.post(
   '/muns/:munId/media',
   requireAuth,
+  // Ownership and Gate-1 approval before the body is parsed or decoded, so a
+  // caller who may not upload here never gets megabytes of base64 processed.
+  async (c, next) => {
+    await assertCanUploadToMun(c.req.param('munId'), c.get('session'))
+    await next()
+  },
   zValidator('json', uploadMediaBodySchema),
   async (c) => {
     const body = c.req.valid('json')

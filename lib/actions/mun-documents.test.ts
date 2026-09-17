@@ -23,6 +23,8 @@ async function makeMun(organizerId: string, overrides: Partial<typeof muns.$infe
       organizerId,
       name: 'Docs Mun',
       slug: `docs-mun-${crypto.randomUUID()}`,
+      // Past Gate 1: uploads wait for application approval (lib/actions/upload-limits.ts).
+      status: 'ONBOARDING',
       ...overrides,
     })
     .returning()

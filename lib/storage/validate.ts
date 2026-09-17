@@ -42,6 +42,16 @@ export const UPLOAD_RULES = {
 
 export type UploadPurpose = keyof typeof UPLOAD_RULES
 
+/** Length of the standard base64 encoding (padded, no line breaks) of a `bytes`-byte file. */
+export function maxBase64Length(bytes: number): number {
+  return 4 * Math.ceil(bytes / 3)
+}
+
+/** The largest byte cap among `purposes` — what an upload route accepting them has to allow. */
+export function largestUploadBytes(purposes: readonly UploadPurpose[] = Object.keys(UPLOAD_RULES) as UploadPurpose[]): number {
+  return Math.max(...purposes.map((purpose) => UPLOAD_RULES[purpose].maxBytes))
+}
+
 const DESCRIPTIONS: Record<AllowedContentType, string> = {
   'image/png': 'PNG image',
   'image/jpeg': 'JPEG image',

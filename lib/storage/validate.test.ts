@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { mapThrownError } from '@/server/middleware/error'
 import { SAMPLE_FILES, paddedFile } from './in-memory-bindings'
-import { detectContentType, UPLOAD_RULES, UploadValidationError, validateUpload } from './validate'
+import {
+  detectContentType,
+  largestUploadBytes,
+  maxBase64Length,
+  UPLOAD_RULES,
+  UploadValidationError,
+  validateUpload,
+} from './validate'
 
 const MB = 1024 * 1024
 
@@ -136,5 +143,19 @@ describe('validateUpload', () => {
       const mapped = mapThrownError(error)
       expect(mapped, error.message).toMatchObject({ status: 400, code: 'VALIDATION_FAILED', message: error.message })
     }
+  })
+})
+
+describe('base64 sizing helpers', () => {
+  it('maxBase64Length matches what Buffer produces for a file of that size', () => {
+    for (const size of [0, 1, 2, 3, 4, 2 * MB, 5 * MB, 10 * MB]) {
+      expect(maxBase64Length(size), String(size)).toBe(Buffer.alloc(size).toString('base64').length)
+    }
+  })
+
+  it('largestUploadBytes picks the biggest cap among the given purposes', () => {
+    expect(largestUploadBytes()).toBe(10 * MB)
+    expect(largestUploadBytes(['LOGO', 'COVER', 'IMAGE'])).toBe(5 * MB)
+    expect(largestUploadBytes(['LOGO'])).toBe(UPLOAD_RULES.LOGO.maxBytes)
   })
 })

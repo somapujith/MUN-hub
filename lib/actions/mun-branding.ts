@@ -5,6 +5,7 @@ import type { MunMediaKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { onModuleDataChanged } from '@/lib/lifecycle/module-completion'
+import { assertCanUploadToMun, assertUploadQuota } from '@/lib/actions/upload-limits'
 import { deleteStoredObjectQuietly, selectStorageAdapter } from '@/lib/storage/select-adapter'
 import { validateUpload, type UploadPurpose } from '@/lib/storage/validate'
 
@@ -23,12 +24,13 @@ import { validateUpload, type UploadPurpose } from '@/lib/storage/validate'
 // that kind before inserting the new one, inside one transaction that
 // row-locks the mun so two concurrent uploads of the same kind can't both
 // see "no existing row" and leave two. The replaced rows' storage objects are
-// deleted after that transaction commits.
+// deleted after that transaction commits. Uploads also pass
+// lib/actions/upload-limits.ts: Gate-1 approval, and per-MUN row and byte caps.
 
 const UPSERT_KINDS: MunMediaKind[] = ['LOGO', 'COVER']
 
 /** Size/type rules per media kind (lib/storage/validate.ts): logos 2MB, covers and gallery images 5MB. */
-const UPLOAD_PURPOSE: Record<MunMediaKind, UploadPurpose> = {
+export const MEDIA_UPLOAD_PURPOSE: Record<MunMediaKind, UploadPurpose> = {
   LOGO: 'LOGO',
   ORGANIZER_LOGO: 'LOGO',
   SPONSOR: 'LOGO',
@@ -64,8 +66,14 @@ export interface UploadMunMediaInput {
  * that locks the mun row, so it can't race with itself.
  */
 export async function uploadMunMedia(input: UploadMunMediaInput, session: Session | null): Promise<MunMediaItem> {
-  await assertOwnsOrAdmin(input.munId, session)
-  validateUpload(input.file, input.contentType, UPLOAD_PURPOSE[input.kind])
+  await assertCanUploadToMun(input.munId, session)
+  validateUpload(input.file, input.contentType, MEDIA_UPLOAD_PURPOSE[input.kind])
+
+  const replacesKind = UPSERT_KINDS.includes(input.kind)
+  const quotaTarget = { area: 'media', kind: input.kind, replacesKind } as const
+  const newBytes = input.file.byteLength
+  // Early refusal, before any bytes are written; re-checked under the lock below.
+  await assertUploadQuota(db, input.munId, quotaTarget, newBytes)
 
   const storage = selectStorageAdapter()
   const key = `muns/${input.munId}/branding/${crypto.randomUUID()}`
@@ -93,11 +101,16 @@ export async function uploadMunMedia(input: UploadMunMediaInput, session: Sessio
   // Both deletes are best effort (logged, not thrown): a leftover object
   // costs storage, not correctness.
   try {
-    if (!UPSERT_KINDS.includes(input.kind)) {
-      ;[created] = await db.insert(munMedia).values(values).returning()
+    if (!replacesKind) {
+      ;[created] = await db.transaction(async (tx) => {
+        await tx.select({ id: muns.id }).from(muns).where(eq(muns.id, input.munId)).for('update')
+        await assertUploadQuota(tx, input.munId, quotaTarget, newBytes)
+        return tx.insert(munMedia).values(values).returning()
+      })
     } else {
       const result = await db.transaction(async (tx) => {
         await tx.select({ id: muns.id }).from(muns).where(eq(muns.id, input.munId)).for('update')
+        await assertUploadQuota(tx, input.munId, quotaTarget, newBytes)
 
         const existingOfKind = await tx
           .select({ id: munMedia.id, storageKey: munMedia.storageKey })

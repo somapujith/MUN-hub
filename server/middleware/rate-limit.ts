@@ -37,6 +37,9 @@ export const LIMITERS = {
   resetRequestEmail: { binding: 'RL_RESET_REQUEST_EMAIL', limit: 3, periodSeconds: 60, perIp: false },
   resetConfirmIp: { binding: 'RL_RESET_CONFIRM_IP', limit: 10, periodSeconds: 60, perIp: true },
   changePasswordUser: { binding: 'RL_CHANGE_PASSWORD_USER', limit: 5, periodSeconds: 60, perIp: false },
+  // Base64 media/document uploads (up to ~13 MB of JSON each). Per signed-in
+  // user; lib/actions/upload-limits.ts also caps what one MUN can store.
+  uploadsUser: { binding: 'RL_UPLOADS_USER', limit: 30, periodSeconds: 60, perIp: false },
   // Staff TOTP sign-in challenge (lib/actions/staff-mfa.ts). The pending
   // token itself is single-use and already caps guesses per attempt
   // (MFA_MAX_ATTEMPTS in staff-mfa.ts); these bound spraying across many
@@ -67,7 +70,8 @@ type Check = { limiter: LimiterSpec; key: string }
 
 type LimitRule = {
   method: string
-  path: string
+  /** The path after /api/v1: an exact string, or a pattern for routes with an id in them. */
+  path: string | RegExp
   readsEmail?: boolean
   readsPendingToken?: boolean
   checks: (facts: RequestFacts) => Check[]
@@ -93,6 +97,13 @@ const RULES: LimitRule[] = [
     path: '/auth/session/password',
     checks: ({ ip, sessionUserId }) => [
       { limiter: LIMITERS.changePasswordUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
+    ],
+  },
+  {
+    method: 'POST',
+    path: /^\/muns\/[^/]+\/(media|documents)\/?$/,
+    checks: ({ ip, sessionUserId }) => [
+      { limiter: LIMITERS.uploadsUser, key: sessionUserId ? `user:${sessionUserId}` : `anon-ip:${ip}` },
     ],
   },
   {
@@ -183,7 +194,9 @@ async function readBodyPendingToken(c: Context): Promise<string | undefined> {
 export const rateLimitMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   const path = c.req.path.replace(/^\/api\/v1/, '') || '/'
   const method = c.req.method
-  const matched = RULES.filter((rule) => rule.method === method && rule.path === path)
+  const matched = RULES.filter(
+    (rule) => rule.method === method && (typeof rule.path === 'string' ? rule.path === path : rule.path.test(path)),
+  )
 
   const facts: RequestFacts = {
     ip: getClientIp(c),
