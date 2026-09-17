@@ -4,7 +4,7 @@ import { AuthSplitLayout } from "@/components/auth/auth-split-layout";
 import { LoginForm } from "@/components/auth/login-form";
 import { Button } from "@/components/ui/button";
 
-/** Drop the photo at web/public/images/organizer-login.jpg — the layout falls back to a gradient until then. */
+/** Hero photo for both organizer auth pages; the layout falls back to a gradient if it fails to load. */
 const HERO_IMAGE = "/images/organizer-login.jpg";
 const ORGANIZER_SUPPORT_EMAIL = "organizers@munhub.in";
 
