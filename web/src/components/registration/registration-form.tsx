@@ -656,6 +656,7 @@ function StayField({
 }) {
   const invalid = showError && field.required && !value.trim();
   const id = `stay-${field.id}`;
+  const errorId = invalid ? `${id}-error` : undefined;
   const choices = field.choices ?? [];
 
   return (
@@ -675,6 +676,7 @@ function StayField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           aria-invalid={invalid || undefined}
+          aria-describedby={errorId}
         >
           <option value="">Select an option</option>
           {choices.map((choice) => (
@@ -701,10 +703,11 @@ function StayField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           aria-invalid={invalid || undefined}
+          aria-describedby={errorId}
         />
       )}
       {invalid && (
-        <p role="alert" className="text-body-md text-destructive-text">
+        <p id={errorId} role="alert" className="text-body-md text-destructive-text">
           {field.label} is required.
         </p>
       )}

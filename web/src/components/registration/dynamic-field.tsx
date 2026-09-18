@@ -61,7 +61,12 @@ export function DynamicField({
   showError: boolean;
 }) {
   const invalid = showError && field.required && !value.trim();
-  const describedBy = field.helpText ? `${field.fieldKey}-help` : undefined;
+  const helpId = field.helpText ? `${field.fieldKey}-help` : undefined;
+  const errorId = invalid ? `${field.fieldKey}-error` : undefined;
+  // Both ids when both are present, so a screen reader announces the help
+  // text and the "is required" error together — not just whichever the field
+  // happened to declare first.
+  const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined;
   const choices = field.choices ?? [];
   const isChoice = choices.length > 0;
   const isLong = field.fieldType === "LONG_TEXT" || field.fieldType === "MUN_EXPERIENCE";
@@ -125,12 +130,12 @@ export function DynamicField({
       )}
 
       {field.helpText && (
-        <p id={describedBy} className="text-body-md text-muted-foreground">
+        <p id={helpId} className="text-body-md text-muted-foreground">
           {field.helpText}
         </p>
       )}
       {invalid && (
-        <p role="alert" className="text-body-md text-destructive-text">
+        <p id={errorId} role="alert" className="text-body-md text-destructive-text">
           {field.label} is required.
         </p>
       )}

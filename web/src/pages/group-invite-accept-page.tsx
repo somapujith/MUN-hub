@@ -231,9 +231,14 @@ export function GroupInviteAcceptPage() {
               value={core[key]}
               onChange={(e) => setCore((d) => ({ ...d, [key]: e.target.value }))}
               aria-invalid={(showErrors && key !== "phone" && !core[key].trim()) || undefined}
+              aria-describedby={
+                showErrors && key !== "phone" && !core[key].trim() ? `${key}-error` : undefined
+              }
             />
             {showErrors && key !== "phone" && !core[key].trim() && (
-              <p className="text-body-md text-destructive-text">{CORE_LABELS[key]} is required.</p>
+              <p id={`${key}-error`} className="text-body-md text-destructive-text">
+                {CORE_LABELS[key]} is required.
+              </p>
             )}
           </div>
         ))}

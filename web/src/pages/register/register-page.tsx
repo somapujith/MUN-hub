@@ -135,7 +135,13 @@ export function RegisterPage() {
   const dateRange = formatDateRange(mun.startDate, mun.endDate);
   const location = [mun.city, mun.country].filter(Boolean).join(", ");
 
-  if (mun.status !== "REGISTRATION_OPEN") {
+  // A mun's status doesn't flip to REGISTRATION_CLOSED on its own the moment
+  // its deadline lapses (that's an admin action) — so the deadline has to be
+  // checked here too, or a delegate could fill in this entire funnel only to
+  // be rejected by the server's own deadline check on the final submit. See
+  // components/registration/deadline.ts#canRegisterForMun.
+  const munDeadlinePassed = hasPassed(mun.registrationDeadline);
+  if (mun.status !== "REGISTRATION_OPEN" || munDeadlinePassed) {
     return (
       <>
         <Helmet>
@@ -146,7 +152,7 @@ export function RegisterPage() {
             tone="neutral"
             title="Registration isn't open"
             message={
-              mun.status === "REGISTRATION_CLOSED"
+              mun.status === "REGISTRATION_CLOSED" || munDeadlinePassed
                 ? `Registration for ${mun.name} has closed. Watch the conference page for waitlist or late-registration announcements.`
                 : `${mun.name} hasn't opened registration yet. Check the conference page for the announcement date.`
             }
