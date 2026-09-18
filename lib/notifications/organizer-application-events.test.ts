@@ -3,7 +3,7 @@ import { notifyOrganizerApplicationEvent, renderOrganizerApplicationNotification
 import type { NotificationsAdapter } from './adapter'
 
 describe('renderOrganizerApplicationNotification', () => {
-  it('renders APPLICATION_APPROVED to the organizer', () => {
+  it('renders APPLICATION_APPROVED to the organizer with branded HTML and the onboarding next-step sentence', () => {
     const result = renderOrganizerApplicationNotification({
       type: 'APPLICATION_APPROVED',
       munId: 'mun-1',
@@ -12,10 +12,17 @@ describe('renderOrganizerApplicationNotification', () => {
     })
     expect(result.to).toBe('org@test.dev')
     expect(result.subject).toContain('Oxford MUN 2027')
-    expect(result.body).toContain('approved')
+    expect(result.body).toContain('Oxford MUN 2027')
+    // Onboarding call-to-action is the only remaining place that tells a
+    // freshly-approved organizer what to do next (the old dedicated
+    // "onboarding started" email is gone) — must survive in both bodies.
+    expect(result.body).toContain("You can now start onboarding your conference's details.")
+    expect(result.html).toBeTruthy()
+    expect(result.html).toContain('Oxford MUN 2027')
+    expect(result.html).toContain("You can now start onboarding your conference's details.")
   })
 
-  it('renders APPLICATION_CHANGES_REQUESTED with the reason', () => {
+  it('renders APPLICATION_CHANGES_REQUESTED with the reason and branded HTML', () => {
     const result = renderOrganizerApplicationNotification({
       type: 'APPLICATION_CHANGES_REQUESTED',
       munId: 'mun-2',
@@ -23,10 +30,14 @@ describe('renderOrganizerApplicationNotification', () => {
       munName: 'VIT MUN',
       reason: 'Please provide a valid venue address',
     })
+    expect(result.to).toBe('org@test.dev')
+    expect(result.subject).toContain('VIT MUN')
     expect(result.body).toContain('Please provide a valid venue address')
+    expect(result.html).toBeTruthy()
+    expect(result.html).toContain('Please provide a valid venue address')
   })
 
-  it('renders APPLICATION_REJECTED with the reason', () => {
+  it('renders APPLICATION_REJECTED with the reason and branded HTML', () => {
     const result = renderOrganizerApplicationNotification({
       type: 'APPLICATION_REJECTED',
       munId: 'mun-3',
@@ -34,8 +45,11 @@ describe('renderOrganizerApplicationNotification', () => {
       munName: 'BITSMUN',
       reason: 'Does not meet platform criteria',
     })
+    expect(result.to).toBe('org@test.dev')
+    expect(result.subject).toContain('BITSMUN')
     expect(result.body).toContain('Does not meet platform criteria')
-    expect(result.body).toContain('not approved')
+    expect(result.html).toBeTruthy()
+    expect(result.html).toContain('Does not meet platform criteria')
   })
 
   it('never reuses PipelineEvent\'s Gate-2 type literals (APPROVED/CHANGES_REQUESTED)', () => {
@@ -70,6 +84,7 @@ describe('notifyOrganizerApplicationEvent', () => {
       to: 'org@test.dev',
       subject: expect.stringContaining('X'),
       body: expect.stringContaining('no'),
+      html: expect.stringContaining('no'),
     })
   })
 })

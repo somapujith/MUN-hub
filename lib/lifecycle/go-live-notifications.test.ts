@@ -204,24 +204,19 @@ describe('go-live.ts pipeline notification wiring', () => {
     notifyPipelineEventMock.mockClear()
   })
 
-  it('submitMunForReview success path fires SUBMISSION_RECEIVED and NEW_SUBMISSION after commit', async () => {
+  it('submitMunForReview success path fires NEW_SUBMISSION after commit', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeCompleteMun(organizer.id)
 
     const result = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     expect(result.passed).toBe(true)
 
-    // Two events expected on this path (SUBMISSION_RECEIVED + NEW_SUBMISSION).
-    await waitForNotifications(2)
+    // One event expected on this path (NEW_SUBMISSION — organizer-facing
+    // SUBMISSION_RECEIVED was removed).
+    await waitForNotifications(1)
 
     const eventTypes = notifyPipelineEventMock.mock.calls.map((call) => (call[0] as { type: string }).type)
-    expect(eventTypes).toContain('SUBMISSION_RECEIVED')
     expect(eventTypes).toContain('NEW_SUBMISSION')
-
-    const submissionReceivedCall = notifyPipelineEventMock.mock.calls.find(
-      (call) => (call[0] as { type: string }).type === 'SUBMISSION_RECEIVED',
-    )
-    expect(submissionReceivedCall?.[0]).toMatchObject({ type: 'SUBMISSION_RECEIVED', munId: mun.id })
   })
 
   it('submitMunForReview does NOT notify on the automated-validation-failure path', async () => {
@@ -246,10 +241,12 @@ describe('go-live.ts pipeline notification wiring', () => {
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
-    // Drain the submission's own SUBMISSION_RECEIVED/NEW_SUBMISSION/UNDER_REVIEW
-    // calls before clearing, so a late-arriving one from THIS setup doesn't
-    // bleed into the assertion below.
-    await waitForNotifications(3)
+    // Drain the submission's own NEW_SUBMISSION call (submitFinalConfirmation
+    // fires no pipeline event of its own — the old UNDER_REVIEW "process
+    // narration" event was removed outright) before clearing, so a
+    // late-arriving one from THIS setup doesn't bleed into the assertion
+    // below.
+    await waitForNotifications(1)
     notifyPipelineEventMock.mockClear()
 
     await reviewSubmission(mun.id, 'APPROVED', {}, { userId: admin.id, role: 'ADMIN' })
@@ -266,7 +263,7 @@ describe('go-live.ts pipeline notification wiring', () => {
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
-    await waitForNotifications(3)
+    await waitForNotifications(1) // NEW_SUBMISSION only — submitFinalConfirmation fires nothing
     notifyPipelineEventMock.mockClear()
 
     await reviewSubmission(mun.id, 'CHANGES_REQUESTED', { notes: 'Fix the venue address' }, { userId: admin.id, role: 'ADMIN' })
@@ -283,7 +280,7 @@ describe('go-live.ts pipeline notification wiring', () => {
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
-    await waitForNotifications(3)
+    await waitForNotifications(1) // NEW_SUBMISSION only — submitFinalConfirmation fires nothing
     notifyPipelineEventMock.mockClear()
 
     await reviewSubmission(mun.id, 'REJECTED', { reason: 'Fabricated committee list' }, { userId: admin.id, role: 'ADMIN' })
@@ -293,14 +290,14 @@ describe('go-live.ts pipeline notification wiring', () => {
     expect(call?.[0]).toMatchObject({ reason: 'Fabricated committee list' })
   })
 
-  it('publishFromQueue success (non-replay) path fires PUBLISHING then PUBLISHED with a publicUrl', async () => {
+  it('publishFromQueue success (non-replay) path fires PUBLISHED with a publicUrl', async () => {
     const organizer = await makeUser('ORGANIZER')
     const admin = await makeUser('ADMIN')
     const mun = await makeCompleteMun(organizer.id)
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
-    await waitForNotifications(3) // SUBMISSION_RECEIVED, NEW_SUBMISSION, UNDER_REVIEW
+    await waitForNotifications(1) // NEW_SUBMISSION only — submitFinalConfirmation fires nothing
     notifyPipelineEventMock.mockClear()
 
     await reviewSubmission(mun.id, 'APPROVED', {}, { userId: admin.id, role: 'ADMIN' })
@@ -313,29 +310,27 @@ describe('go-live.ts pipeline notification wiring', () => {
     const result = await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })
     expect(result.replay).toBe(false)
 
-    // Two events expected on this path (PUBLISHING + PUBLISHED).
-    await waitForNotifications(2)
+    // One event expected on this path (PUBLISHED — the PUBLISHING event was
+    // removed).
+    await waitForNotifications(1)
 
     const eventTypes = notifyPipelineEventMock.mock.calls.map((call) => (call[0] as { type: string }).type)
-    expect(eventTypes).toContain('PUBLISHING')
     expect(eventTypes).toContain('PUBLISHED')
 
-    const publishingCall = notifyPipelineEventMock.mock.calls.find((c) => (c[0] as { type: string }).type === 'PUBLISHING')
-    expect(publishingCall?.[0]).toMatchObject({ type: 'PUBLISHING', munId: mun.id })
-
     const publishedCall = notifyPipelineEventMock.mock.calls.find((c) => (c[0] as { type: string }).type === 'PUBLISHED')
-    expect(publishedCall?.[0]).toMatchObject({ type: 'PUBLISHED', munId: mun.id })
-    expect((publishedCall?.[0] as { publicUrl: string }).publicUrl).toContain(`/mun/${mun.slug}`)
+    const publishedEvent = publishedCall?.[0] as { publicUrl: string } | undefined
+    expect(publishedEvent).toMatchObject({ type: 'PUBLISHED', munId: mun.id })
+    expect(publishedEvent?.publicUrl).toContain(`/mun/${mun.slug}`)
   })
 
-  it('publishFromQueue replay does NOT re-fire PUBLISHING or PUBLISHED', async () => {
+  it('publishFromQueue replay does NOT re-fire PUBLISHED', async () => {
     const organizer = await makeUser('ORGANIZER')
     const admin = await makeUser('ADMIN')
     const mun = await makeCompleteMun(organizer.id)
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
-    await waitForNotifications(3)
+    await waitForNotifications(1) // NEW_SUBMISSION only — submitFinalConfirmation fires nothing
     notifyPipelineEventMock.mockClear()
 
     await reviewSubmission(mun.id, 'APPROVED', {}, { userId: admin.id, role: 'ADMIN' })
@@ -346,7 +341,7 @@ describe('go-live.ts pipeline notification wiring', () => {
     notifyPipelineEventMock.mockClear()
 
     await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })
-    await waitForNotifications(2)
+    await waitForNotifications(1)
     notifyPipelineEventMock.mockClear()
 
     const replayResult = await publishFromQueue(mun.id, { userId: admin.id, role: 'ADMIN' })
@@ -357,20 +352,22 @@ describe('go-live.ts pipeline notification wiring', () => {
     expect(notifyPipelineEventMock).not.toHaveBeenCalled()
   })
 
-  it('submitFinalConfirmation fires UNDER_REVIEW to the organizer after the VERIFICATION transition commits', async () => {
+  it('submitFinalConfirmation fires no pipeline event after the VERIFICATION transition commits', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeCompleteMun(organizer.id)
     const submitResult = await submitMunForReview(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     if (!submitResult.passed) throw new Error('fixture setup failed')
-    await waitForNotifications(2) // SUBMISSION_RECEIVED, NEW_SUBMISSION
+    await waitForNotifications(1) // NEW_SUBMISSION
     notifyPipelineEventMock.mockClear()
 
+    // The old organizer-facing UNDER_REVIEW "process narration" event was
+    // removed outright — organizer-confirmation.ts no longer calls
+    // notifyPipelineEvent at all, so this transition sends nothing.
     const updated = await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
     expect(updated.status).toBe('VERIFICATION')
-    await waitForNotifications(1)
+    await waitForNotifications(0)
 
-    const call = notifyPipelineEventMock.mock.calls.find((c) => (c[0] as { type: string }).type === 'UNDER_REVIEW')
-    expect(call?.[0]).toMatchObject({ type: 'UNDER_REVIEW', munId: mun.id })
+    expect(notifyPipelineEventMock).not.toHaveBeenCalled()
   })
 
   it('submitMunForReview fires RESUBMISSION (not NEW_SUBMISSION) to admins when a prior submission already exists', async () => {
@@ -396,7 +393,7 @@ describe('go-live.ts pipeline notification wiring', () => {
     expect(result.passed).toBe(true)
     expect(result.isResubmission).toBe(true)
 
-    await waitForNotifications(2) // SUBMISSION_RECEIVED, RESUBMISSION
+    await waitForNotifications(1) // RESUBMISSION
 
     const eventTypes = notifyPipelineEventMock.mock.calls.map((call) => (call[0] as { type: string }).type)
     expect(eventTypes).toContain('RESUBMISSION')
@@ -406,23 +403,23 @@ describe('go-live.ts pipeline notification wiring', () => {
     expect(call?.[0]).toMatchObject({ type: 'RESUBMISSION', munId: mun.id })
   })
 
-  it('onModuleDataChanged fires READY_FOR_SUBMISSION when it flips a mun from ONBOARDING, but not on a no-op recompute', async () => {
+  it('onModuleDataChanged flips a mun from ONBOARDING to READY_FOR_SUBMISSION without firing any pipeline notification', async () => {
     const organizer = await makeUser('ORGANIZER')
     // makeCompleteMun always seeds status: 'ONBOARDING' — every required
     // module already satisfies its validator, so one onModuleDataChanged
-    // call is enough to flip it straight to READY_FOR_SUBMISSION.
+    // call is enough to flip it straight to READY_FOR_SUBMISSION. The
+    // READY_FOR_SUBMISSION PipelineEvent variant was removed outright (only
+    // review-decision and published emails go out now) — this is a silent
+    // status materialization, not a notification trigger.
     const mun = await makeCompleteMun(organizer.id)
 
     await onModuleDataChanged(mun.id, 'COMMITTEES', organizer.id)
-    await waitForNotifications(1)
-
-    const call = notifyPipelineEventMock.mock.calls.find((c) => (c[0] as { type: string }).type === 'READY_FOR_SUBMISSION')
-    expect(call?.[0]).toMatchObject({ type: 'READY_FOR_SUBMISSION', munId: mun.id })
-    notifyPipelineEventMock.mockClear()
+    await waitForNotifications(0)
+    expect(notifyPipelineEventMock).not.toHaveBeenCalled()
 
     // Mun is already READY_FOR_SUBMISSION — a second call recomputes the
     // same target status, which is a no-op transition (not a real flip), so
-    // it must NOT re-fire the notification.
+    // it must still not fire anything.
     await onModuleDataChanged(mun.id, 'COMMITTEES', organizer.id)
     await waitForNotifications(0)
 

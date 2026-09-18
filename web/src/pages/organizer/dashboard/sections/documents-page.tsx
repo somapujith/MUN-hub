@@ -40,7 +40,13 @@ const KIND_OPTIONS = (Object.keys(KIND_LABELS) as MunDocumentKind[])
   .filter((kind) => kind !== "REFUND_POLICY")
   .map((value) => ({ value, label: KIND_LABELS[value] }));
 
-/** Required before submitting for review (lib/lifecycle/validators/operations.ts). */
+/**
+ * Shown as a checklist, but not enforced: validateRulesDocuments
+ * (lib/lifecycle/validators/operations.ts) makes this a MEDIUM-severity
+ * advisory check, not a BLOCKER, so missing one never blocks submission or
+ * going live — organizers can upload these any time, including after
+ * publishing.
+ */
 const REQUIRED_KINDS: MunDocumentKind[] = ["RULES", "CODE_OF_CONDUCT"];
 
 function kindLabel(kind: MunDocumentKind): string {
@@ -146,22 +152,27 @@ export function OrganizerDocumentsPage() {
         <BrandingUploads munId={munId} />
         <div className="grid gap-lg xl:grid-cols-[minmax(0,1fr)_22rem]">
           <section aria-label="Uploaded documents" className="flex flex-col gap-md">
-            <div className="flex flex-wrap items-center gap-x-md gap-y-xxs text-body-md" data-testid="required-documents">
-              <span className="text-muted-foreground">Required to go live:</span>
-              {REQUIRED_KINDS.map((requiredKind) => {
-                const done = documents.some((document) => document.kind === requiredKind);
-                return (
-                  <span key={requiredKind} className="inline-flex items-center gap-xxs text-ink">
-                    {done ? (
-                      <CheckCircle2 className="size-4 text-success-text" aria-hidden />
-                    ) : (
-                      <Circle className="size-4 text-muted-foreground" aria-hidden />
-                    )}
-                    {kindLabel(requiredKind)}
-                    <span className="sr-only">{done ? " (uploaded)" : " (missing)"}</span>
-                  </span>
-                );
-              })}
+            <div className="flex flex-col gap-xxs" data-testid="required-documents">
+              <div className="flex flex-wrap items-center gap-x-md gap-y-xxs text-body-md">
+                <span className="text-muted-foreground">Recommended before going live:</span>
+                {REQUIRED_KINDS.map((requiredKind) => {
+                  const done = documents.some((document) => document.kind === requiredKind);
+                  return (
+                    <span key={requiredKind} className="inline-flex items-center gap-xxs text-ink">
+                      {done ? (
+                        <CheckCircle2 className="size-4 text-success-text" aria-hidden />
+                      ) : (
+                        <Circle className="size-4 text-muted-foreground" aria-hidden />
+                      )}
+                      {kindLabel(requiredKind)}
+                      <span className="sr-only">{done ? " (uploaded)" : " (missing)"}</span>
+                    </span>
+                  );
+                })}
+              </div>
+              <p className="text-[12px] text-muted-foreground">
+                Optional — you can go live without these and add them any time, including after publishing.
+              </p>
             </div>
             {documentsQuery.isLoading && (
               <p className="text-body-md text-muted-foreground">Loading documents...</p>

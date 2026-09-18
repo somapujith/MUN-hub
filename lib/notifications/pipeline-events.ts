@@ -1,8 +1,30 @@
 import { getNotificationsAdapter } from './select-adapter'
 import type { NotificationsAdapter } from './adapter'
+import {
+  renderOrganizerDecisionEmailHtml,
+  renderOrganizerDecisionEmailText,
+} from './templates/organizer-decision-email'
+import {
+  renderOrganizerPublishedEmailHtml,
+  renderOrganizerPublishedEmailText,
+} from './templates/organizer-published-email'
+
+// Mirrors the literal in lib/actions/organizer-otp.ts's own
+// ORGANIZER_SUPPORT_EMAIL constant — kept as a separate local literal
+// (not imported) so this framework-agnostic notifications module doesn't
+// pull in that action's db/auth-layer dependency graph.
+const ORGANIZER_SUPPORT_EMAIL = 'organizers@munhub.in'
+
+// -----------------------------------------------------------------------------
+// PipelineEvent — the organizer-facing variants here are deliberately just
+// the terminal/actionable ones (APPROVED, CHANGES_REQUESTED,
+// MODULE_ACTION_REQUIRED, PUBLISHED). The earlier "process narration" events
+// (ONBOARDING_STARTED, READY_FOR_SUBMISSION, SUBMISSION_RECEIVED,
+// UNDER_REVIEW, PUBLISHING, SLA_DELAY) were removed outright — a product
+// decision, not something to re-add without asking first.
+// -----------------------------------------------------------------------------
 
 export type PipelineEvent =
-  | { type: 'ONBOARDING_STARTED'; munId: string; organizerEmail: string; munName: string }
   | {
       type: 'MODULE_ACTION_REQUIRED'
       munId: string
@@ -11,9 +33,6 @@ export type PipelineEvent =
       moduleName: string
       issues: string[]
     }
-  | { type: 'READY_FOR_SUBMISSION'; munId: string; organizerEmail: string; munName: string }
-  | { type: 'SUBMISSION_RECEIVED'; munId: string; organizerEmail: string; munName: string }
-  | { type: 'UNDER_REVIEW'; munId: string; organizerEmail: string; munName: string }
   | {
       type: 'CHANGES_REQUESTED'
       munId: string
@@ -23,9 +42,7 @@ export type PipelineEvent =
       reason: string
     }
   | { type: 'APPROVED'; munId: string; organizerEmail: string; munName: string }
-  | { type: 'PUBLISHING'; munId: string; organizerEmail: string; munName: string }
   | { type: 'PUBLISHED'; munId: string; organizerEmail: string; munName: string; publicUrl: string }
-  | { type: 'SLA_DELAY'; munId: string; organizerEmail: string; munName: string }
   // admin-facing
   | { type: 'NEW_SUBMISSION'; munId: string; munName: string; adminEmails: string[] }
   | { type: 'RESUBMISSION'; munId: string; munName: string; adminEmails: string[] }
@@ -42,6 +59,13 @@ export interface RenderedNotification {
   to: string[]
   subject: string
   body: string
+  /**
+   * Pre-rendered HTML for the branded organizer-decision/published emails.
+   * Set for MODULE_ACTION_REQUIRED, CHANGES_REQUESTED, APPROVED and
+   * PUBLISHED; left `undefined` for every other (plain-text, admin-facing)
+   * case.
+   */
+  html?: string
 }
 
 /**
@@ -52,66 +76,64 @@ export interface RenderedNotification {
  */
 export function renderPipelineNotification(event: PipelineEvent): RenderedNotification {
   switch (event.type) {
-    case 'ONBOARDING_STARTED':
-      return {
-        to: [event.organizerEmail],
-        subject: `Welcome — let's get ${event.munName} live`,
-        body: `Your MUN "${event.munName}" (${event.munId}) has started onboarding. Complete the required modules to submit for review.`,
+    case 'MODULE_ACTION_REQUIRED': {
+      const reason = event.issues.map((issue) => `- ${issue}`).join('\n')
+      const input = {
+        munName: event.munName,
+        area: `the ${event.moduleName} section`,
+        decision: 'CHANGES_REQUESTED' as const,
+        reason,
+        supportEmail: ORGANIZER_SUPPORT_EMAIL,
       }
-    case 'MODULE_ACTION_REQUIRED':
       return {
         to: [event.organizerEmail],
         subject: `Action required on ${event.moduleName} — ${event.munName}`,
-        body: `The "${event.moduleName}" module for "${event.munName}" (${event.munId}) needs attention:\n${event.issues.map((issue) => `- ${issue}`).join('\n')}`,
+        body: renderOrganizerDecisionEmailText(input),
+        html: renderOrganizerDecisionEmailHtml(input),
       }
-    case 'READY_FOR_SUBMISSION':
+    }
+    case 'CHANGES_REQUESTED': {
+      const input = {
+        munName: event.munName,
+        area: 'your MUN submission',
+        decision: 'CHANGES_REQUESTED' as const,
+        reason: event.reason,
+        supportEmail: ORGANIZER_SUPPORT_EMAIL,
+      }
       return {
         to: [event.organizerEmail],
-        subject: `${event.munName} is ready to submit`,
-        body: `All required modules for "${event.munName}" (${event.munId}) are complete. You can now submit for MUNHub review.`,
+        subject: `Changes requested — ${event.munName}`,
+        body: renderOrganizerDecisionEmailText(input),
+        html: renderOrganizerDecisionEmailHtml(input),
       }
-    case 'SUBMISSION_RECEIVED':
+    }
+    case 'APPROVED': {
+      const input = {
+        munName: event.munName,
+        area: 'your MUN submission',
+        decision: 'APPROVED' as const,
+        supportEmail: ORGANIZER_SUPPORT_EMAIL,
+      }
       return {
         to: [event.organizerEmail],
-        subject: `Submission received — ${event.munName}`,
-        body: `We've received your submission for "${event.munName}" (${event.munId}). Our team will begin review shortly.`,
+        subject: `${event.munName} approved — you're on your way to going live`,
+        body: renderOrganizerDecisionEmailText(input),
+        html: renderOrganizerDecisionEmailHtml(input),
       }
-    case 'UNDER_REVIEW':
+    }
+    case 'PUBLISHED': {
+      const input = {
+        munName: event.munName,
+        publicUrl: event.publicUrl,
+        supportEmail: ORGANIZER_SUPPORT_EMAIL,
+      }
       return {
         to: [event.organizerEmail],
-        subject: `${event.munName} is under review`,
-        body: `"${event.munName}" (${event.munId}) is now under review by the MUNHub team.`,
+        subject: `"${event.munName}" is live!`,
+        body: renderOrganizerPublishedEmailText(input),
+        html: renderOrganizerPublishedEmailHtml(input),
       }
-    case 'CHANGES_REQUESTED':
-      return {
-        to: [event.organizerEmail],
-        subject: `Changes requested on ${event.moduleName} — ${event.munName}`,
-        body: `The "${event.moduleName}" module for "${event.munName}" (${event.munId}) needs changes: ${event.reason}`,
-      }
-    case 'APPROVED':
-      return {
-        to: [event.organizerEmail],
-        subject: `${event.munName} approved`,
-        body: `"${event.munName}" (${event.munId}) has been approved and is now in the go-live queue.`,
-      }
-    case 'PUBLISHING':
-      return {
-        to: [event.organizerEmail],
-        subject: `${event.munName} is publishing`,
-        body: `"${event.munName}" (${event.munId}) is being published to the marketplace.`,
-      }
-    case 'PUBLISHED':
-      return {
-        to: [event.organizerEmail],
-        subject: `${event.munName} is live!`,
-        body: `"${event.munName}" (${event.munId}) is now live at ${event.publicUrl}.`,
-      }
-    case 'SLA_DELAY':
-      return {
-        to: [event.organizerEmail],
-        subject: `Update on ${event.munName}'s review`,
-        body: `Review of "${event.munName}" (${event.munId}) is taking longer than our usual turnaround. We appreciate your patience.`,
-      }
+    }
     case 'NEW_SUBMISSION':
       return {
         to: event.adminEmails,
@@ -160,7 +182,7 @@ export async function notifyPipelineEvent(
   await Promise.all(
     rendered.to.map(async (to) => {
       try {
-        await adapter.send({ to, subject: rendered.subject, body: rendered.body })
+        await adapter.send({ to, subject: rendered.subject, body: rendered.body, html: rendered.html })
       } catch (error) {
         console.error('[pipeline-notification] delivery failed', { event: event.type, to, error })
       }

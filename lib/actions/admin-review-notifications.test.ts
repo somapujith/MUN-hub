@@ -57,7 +57,7 @@ describe('reviewMunApplication Gate-1 decision notification wiring', () => {
     notifyPipelineEventMock.mockClear()
   })
 
-  it('APPROVED fires APPLICATION_APPROVED and ONBOARDING_STARTED after commit', async () => {
+  it('APPROVED fires only APPLICATION_APPROVED after commit (no separate pipeline event)', async () => {
     const organizer = await makeUser('ORGANIZER')
     const admin = await makeUser('ADMIN')
     const mun = await makeMun(organizer.id, 'UNDER_REVIEW')
@@ -66,17 +66,18 @@ describe('reviewMunApplication Gate-1 decision notification wiring', () => {
     expect(result.status).toBe('ONBOARDING')
 
     await waitForCalls(notifyOrganizerApplicationEventMock, 1)
-    await waitForCalls(notifyPipelineEventMock, 1)
 
     expect(notifyOrganizerApplicationEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'APPLICATION_APPROVED', munId: mun.id }),
     )
-    expect(notifyPipelineEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'ONBOARDING_STARTED', munId: mun.id }),
-    )
+    // The old separate ONBOARDING_STARTED pipeline event was removed
+    // outright — Gate 1 approval now sends exactly one organizer email
+    // (APPLICATION_APPROVED, via the shared decision-email template), never
+    // a second one through notifyPipelineEvent.
+    expect(notifyPipelineEventMock).not.toHaveBeenCalled()
   })
 
-  it('CHANGES_REQUESTED fires APPLICATION_CHANGES_REQUESTED with the notes as reason, and never ONBOARDING_STARTED', async () => {
+  it('CHANGES_REQUESTED fires APPLICATION_CHANGES_REQUESTED with the notes as reason, and never a pipeline event', async () => {
     const organizer = await makeUser('ORGANIZER')
     const admin = await makeUser('ADMIN')
     const mun = await makeMun(organizer.id, 'UNDER_REVIEW')
@@ -91,7 +92,7 @@ describe('reviewMunApplication Gate-1 decision notification wiring', () => {
     expect(notifyPipelineEventMock).not.toHaveBeenCalled()
   })
 
-  it('REJECTED fires APPLICATION_REJECTED with the notes as reason, and never ONBOARDING_STARTED', async () => {
+  it('REJECTED fires APPLICATION_REJECTED with the notes as reason, and never a pipeline event', async () => {
     const organizer = await makeUser('ORGANIZER')
     const admin = await makeUser('ADMIN')
     const mun = await makeMun(organizer.id, 'SUBMITTED')

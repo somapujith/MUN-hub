@@ -3,21 +3,7 @@ import { notifyPipelineEvent, renderPipelineNotification, type PipelineEvent } f
 import type { NotificationsAdapter } from './adapter'
 
 describe('renderPipelineNotification', () => {
-  it('renders ONBOARDING_STARTED with organizer email and mun name', () => {
-    const event: PipelineEvent = {
-      type: 'ONBOARDING_STARTED',
-      munId: 'mun-1',
-      organizerEmail: 'org@test.dev',
-      munName: 'Oxford MUN 2027',
-    }
-    const result = renderPipelineNotification(event)
-    expect(result.to).toEqual(['org@test.dev'])
-    expect(result.subject).toContain('Oxford MUN 2027')
-    expect(result.body).toContain('Oxford MUN 2027')
-    expect(result.body).toContain('mun-1')
-  })
-
-  it('renders MODULE_ACTION_REQUIRED including module name and each issue', () => {
+  it('renders MODULE_ACTION_REQUIRED with branded HTML including module name and each issue', () => {
     const event: PipelineEvent = {
       type: 'MODULE_ACTION_REQUIRED',
       munId: 'mun-2',
@@ -27,61 +13,33 @@ describe('renderPipelineNotification', () => {
       issues: ['Chair missing', 'Vice-chair missing'],
     }
     const result = renderPipelineNotification(event)
+    expect(result.to).toEqual(['org@test.dev'])
     expect(result.subject).toContain('Executive Board')
     expect(result.body).toContain('Chair missing')
     expect(result.body).toContain('Vice-chair missing')
+    expect(result.html).toBeTruthy()
+    expect(result.html).toContain('Executive Board')
+    expect(result.html).toContain('Chair missing')
   })
 
-  it('renders READY_FOR_SUBMISSION', () => {
-    const event: PipelineEvent = {
-      type: 'READY_FOR_SUBMISSION',
-      munId: 'mun-3',
-      organizerEmail: 'org@test.dev',
-      munName: 'BITSMUN',
-    }
-    const result = renderPipelineNotification(event)
-    expect(result.to).toEqual(['org@test.dev'])
-    expect(result.subject).toContain('BITSMUN')
-  })
-
-  it('renders SUBMISSION_RECEIVED', () => {
-    const event: PipelineEvent = {
-      type: 'SUBMISSION_RECEIVED',
-      munId: 'mun-4',
-      organizerEmail: 'org@test.dev',
-      munName: 'CBITMUN',
-    }
-    const result = renderPipelineNotification(event)
-    expect(result.body).toContain('CBITMUN')
-    expect(result.body).toContain('mun-4')
-  })
-
-  it('renders UNDER_REVIEW', () => {
-    const event: PipelineEvent = {
-      type: 'UNDER_REVIEW',
-      munId: 'mun-5',
-      organizerEmail: 'org@test.dev',
-      munName: 'HMUN',
-    }
-    const result = renderPipelineNotification(event)
-    expect(result.subject).toContain('HMUN')
-  })
-
-  it('renders CHANGES_REQUESTED with module name and reason', () => {
+  it('renders CHANGES_REQUESTED with branded HTML including the reason', () => {
     const event: PipelineEvent = {
       type: 'CHANGES_REQUESTED',
       munId: 'mun-6',
       organizerEmail: 'org@test.dev',
       munName: 'Vista MUN',
-      moduleName: 'Pricing',
+      moduleName: 'FINAL_REVIEW',
       reason: 'Capacity exceeds venue limit',
     }
     const result = renderPipelineNotification(event)
-    expect(result.subject).toContain('Pricing')
+    expect(result.to).toEqual(['org@test.dev'])
+    expect(result.subject).toContain('Vista MUN')
     expect(result.body).toContain('Capacity exceeds venue limit')
+    expect(result.html).toBeTruthy()
+    expect(result.html).toContain('Capacity exceeds venue limit')
   })
 
-  it('renders APPROVED', () => {
+  it('renders APPROVED with branded HTML', () => {
     const event: PipelineEvent = {
       type: 'APPROVED',
       munId: 'mun-7',
@@ -89,22 +47,15 @@ describe('renderPipelineNotification', () => {
       munName: 'St. Francis MUN',
     }
     const result = renderPipelineNotification(event)
+    expect(result.to).toEqual(['org@test.dev'])
     expect(result.subject).toContain('approved')
+    expect(result.subject).toContain('St. Francis MUN')
     expect(result.body).toContain('St. Francis MUN')
+    expect(result.html).toBeTruthy()
+    expect(result.html).toContain('St. Francis MUN')
   })
 
-  it('renders PUBLISHING', () => {
-    const event: PipelineEvent = {
-      type: 'PUBLISHING',
-      munId: 'mun-8',
-      organizerEmail: 'org@test.dev',
-      munName: 'M-UN',
-    }
-    const result = renderPipelineNotification(event)
-    expect(result.body).toContain('M-UN')
-  })
-
-  it('renders PUBLISHED with the public URL', () => {
+  it('renders PUBLISHED with branded HTML including the public URL', () => {
     const event: PipelineEvent = {
       type: 'PUBLISHED',
       munId: 'mun-9',
@@ -113,22 +64,14 @@ describe('renderPipelineNotification', () => {
       publicUrl: 'https://munhub.in/mun/oxford-mun-2027',
     }
     const result = renderPipelineNotification(event)
+    expect(result.to).toEqual(['org@test.dev'])
     expect(result.body).toContain('https://munhub.in/mun/oxford-mun-2027')
     expect(result.subject.toLowerCase()).toContain('live')
+    expect(result.html).toBeTruthy()
+    expect(result.html).toContain('https://munhub.in/mun/oxford-mun-2027')
   })
 
-  it('renders SLA_DELAY', () => {
-    const event: PipelineEvent = {
-      type: 'SLA_DELAY',
-      munId: 'mun-10',
-      organizerEmail: 'org@test.dev',
-      munName: 'VIT MUN',
-    }
-    const result = renderPipelineNotification(event)
-    expect(result.body).toContain('VIT MUN')
-  })
-
-  it('renders NEW_SUBMISSION to all admin emails', () => {
+  it('renders NEW_SUBMISSION to all admin emails, plain text only', () => {
     const event: PipelineEvent = {
       type: 'NEW_SUBMISSION',
       munId: 'mun-11',
@@ -138,9 +81,10 @@ describe('renderPipelineNotification', () => {
     const result = renderPipelineNotification(event)
     expect(result.to).toEqual(['admin1@munhub.test', 'admin2@munhub.test'])
     expect(result.subject).toContain('Oxford MUN 2027')
+    expect(result.html).toBeUndefined()
   })
 
-  it('renders RESUBMISSION to all admin emails', () => {
+  it('renders RESUBMISSION to all admin emails, plain text only', () => {
     const event: PipelineEvent = {
       type: 'RESUBMISSION',
       munId: 'mun-12',
@@ -150,9 +94,10 @@ describe('renderPipelineNotification', () => {
     const result = renderPipelineNotification(event)
     expect(result.to).toEqual(['admin1@munhub.test'])
     expect(result.subject.toLowerCase()).toContain('resubmission')
+    expect(result.html).toBeUndefined()
   })
 
-  it('renders PAYMENT_VERIFICATION_ISSUE to all admin emails', () => {
+  it('renders PAYMENT_VERIFICATION_ISSUE to all admin emails, plain text only', () => {
     const event: PipelineEvent = {
       type: 'PAYMENT_VERIFICATION_ISSUE',
       munId: 'mun-13',
@@ -162,9 +107,10 @@ describe('renderPipelineNotification', () => {
     const result = renderPipelineNotification(event)
     expect(result.to).toEqual(['finance@munhub.test'])
     expect(result.subject.toLowerCase()).toContain('payment')
+    expect(result.html).toBeUndefined()
   })
 
-  it('renders CRITICAL_VALIDATION_FAILURE including every blocker', () => {
+  it('renders CRITICAL_VALIDATION_FAILURE including every blocker, plain text only', () => {
     const event: PipelineEvent = {
       type: 'CRITICAL_VALIDATION_FAILURE',
       munId: 'mun-14',
@@ -175,6 +121,7 @@ describe('renderPipelineNotification', () => {
     const result = renderPipelineNotification(event)
     expect(result.body).toContain('No committees defined')
     expect(result.body).toContain('No registration products')
+    expect(result.html).toBeUndefined()
   })
 
   it('is a pure function — same event always renders identical content', () => {
@@ -209,6 +156,20 @@ describe('notifyPipelineEvent', () => {
     )
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({ to: 'admin2@munhub.test', subject: expect.stringContaining('Oxford MUN 2027') }),
+    )
+  })
+
+  it('passes the rendered html through to the adapter for a templated event', async () => {
+    const send = vi.fn().mockResolvedValue(undefined)
+    const adapter: NotificationsAdapter = { send }
+
+    await notifyPipelineEvent(
+      { type: 'APPROVED', munId: 'mun-1', organizerEmail: 'org@test.dev', munName: 'Oxford MUN 2027' },
+      adapter,
+    )
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'org@test.dev', html: expect.stringContaining('Oxford MUN 2027') }),
     )
   })
 

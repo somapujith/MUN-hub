@@ -1,7 +1,6 @@
 import { and, desc, eq, inArray, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
-  adminActions,
   munModuleVerifications,
   muns,
   munSubmissions,
@@ -112,8 +111,8 @@ function notifyAfterCommit(work: () => Promise<void>): void {
  * the common (non-racing) case throw a friendlier message — it is NOT the
  * primary defense; the DB constraint is.
  *
- * On the PASSES path, fires `SUBMISSION_RECEIVED` to the organizer and
- * `NEW_SUBMISSION` to admins/ops AFTER the transaction commits (Task 12).
+ * On the PASSES path, fires `NEW_SUBMISSION`/`RESUBMISSION` to admins/ops
+ * AFTER the transaction commits (Task 12).
  */
 export async function submitMunForReview(munId: string, session: Session | null): Promise<SubmitMunForReviewResult> {
   if (!session) throw new Error('Forbidden')
@@ -271,16 +270,10 @@ export async function submitMunForReview(munId: string, session: Session | null)
   // Outside the transaction, after commit (Task 12 Step 5). Only on the
   // PASSES path — a failed submission stays in ACTION_REQUIRED, which is
   // covered by the existing progress-engine MODULE_ACTION_REQUIRED path
-  // elsewhere, not a SUBMISSION_RECEIVED/NEW_SUBMISSION event here.
+  // elsewhere, not a NEW_SUBMISSION/RESUBMISSION event here.
   if (result.passed) {
     notifyAfterCommit(async () => {
       const context = await resolveMunNotificationContext(munId)
-      await notifyPipelineEvent({
-        type: 'SUBMISSION_RECEIVED',
-        munId,
-        organizerEmail: context.organizerEmail,
-        munName: context.munName,
-      })
       const adminEmails = await resolveAdminEmails()
       // NEW_SUBMISSION and RESUBMISSION are mutually exclusive per the
       // PipelineEvent union's own copy ("has been submitted" vs "has been
@@ -989,13 +982,6 @@ export async function publishFromQueue(
   if (!result.replay) {
     notifyAfterCommit(async () => {
       const context = await resolveMunNotificationContext(munId)
-      // PUBLISHING and PUBLISHED both happened inside the transaction above
-      // (steps 4 and 6) — the house rule that notifications only fire after
-      // commit (see file header) means there's no earlier point to fire
-      // PUBLISHING at, so it's sent here, immediately before PUBLISHED,
-      // preserving their transaction-order sequence rather than firing
-      // PUBLISHED first.
-      await notifyPipelineEvent({ type: 'PUBLISHING', munId, organizerEmail: context.organizerEmail, munName: context.munName })
       await notifyPipelineEvent({
         type: 'PUBLISHED',
         munId,
