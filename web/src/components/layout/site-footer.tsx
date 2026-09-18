@@ -66,8 +66,11 @@ export function SiteFooter() {
               to="/"
               className="-mx-2 inline-flex items-center gap-2 rounded-sm px-2 py-1 text-label-md font-medium tracking-[-0.01em] text-ink transition-colors duration-150 hover:text-body focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
             >
-              <span aria-hidden className="size-2 rounded-full bg-signature-coral" />
-              <span className="font-display">MUN Hub</span>
+              <img
+                src="/images/logo-lockup.png"
+                alt="MUN Hub"
+                className="h-16 w-auto"
+              />
             </Link>
             <p className="mt-sm text-body-md text-muted-foreground">
               A curated marketplace for Model United Nations conferences — every

@@ -3,11 +3,11 @@
 // -----------------------------------------------------------------------------
 //
 // Structure mirrors the reference the user provided (District by Zomato's OTP
-// email): dark page background, a white card, a tinted header band with the
-// wordmark, "Your OTP for <purpose> is", a large code, an expiry note, and a
-// "have questions" footer. Colors are MUN Hub's own (web/src/index.css) —
-// ink #181d26 for the outer background, signature coral #aa2d00 for the
-// header band and code, not a copy of the reference's purple.
+// email): dark page background, a white card, a white header band with the
+// MUN Hub logo lockup, "Your OTP for <purpose> is", a large code, an expiry
+// note, and a "have questions" footer. Colors are MUN Hub's own
+// (web/src/index.css) — ink #181d26 for the outer background, signature
+// coral #aa2d00 for the code, not a copy of the reference's purple.
 //
 // All styles are inline (`style="..."` on every element) — email clients
 // strip <style> blocks and ignore most CSS selectors, so nothing here can
@@ -45,11 +45,8 @@ export function renderOtpEmailHtml(input: OtpEmailInput): string {
         <td align="center">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:420px; background-color:#ffffff; border-radius:12px; overflow:hidden;">
             <tr>
-              <td style="background-color:#aa2d00; padding:24px; text-align:center;">
-                <span style="display:inline-flex; align-items:center; gap:8px;">
-                  <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:#ffffff;"></span>
-                  <span style="font-size:20px; font-weight:700; color:#ffffff; letter-spacing:-0.01em;">MUN Hub</span>
-                </span>
+              <td style="background-color:#ffffff; padding:24px; text-align:center; border-bottom:1px solid #eef0f3;">
+                <img src="https://www.munhub.in/images/logo-lockup.png" width="160" alt="MUN Hub" style="display:block; margin:0 auto; width:160px; max-width:100%; height:auto; border:0;" />
               </td>
             </tr>
             <tr>

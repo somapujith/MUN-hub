@@ -83,13 +83,11 @@ export function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) 
             to="/"
             className="-mx-2 flex shrink-0 items-center gap-2 rounded-sm px-2 py-1 text-label-md font-medium tracking-[-0.01em] text-ink transition-colors duration-150 hover:text-body focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
           >
-            {/* Wordmark: the only place the coral signature color is allowed at
-                small scale — as a 8px dot, not a surface. */}
-            <span
-              aria-hidden
-              className="size-2 rounded-full bg-signature-coral"
+            <img
+              src="/images/logo-mark.png"
+              alt="MUN Hub"
+              className="block h-7 w-auto shrink-0"
             />
-            <span className="font-display">MUN Hub</span>
           </Link>
   
           {showCityPicker && (
