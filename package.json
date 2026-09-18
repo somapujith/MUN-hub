@@ -14,6 +14,7 @@
     "typecheck:e2e": "tsc --noEmit -p E2E/tsconfig.json",
     "lint": "npm --prefix web run lint && npm run lint:shared",
     "lint:shared": "node web/node_modules/oxlint/bin/oxlint lib server E2E",
+    "lint:colors": "node scripts/check-hex-colors.mjs",
     "check": "npm run typecheck && npm run lint",
     "db:up": "docker compose up -d",
     "db:generate": "drizzle-kit generate",
