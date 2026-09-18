@@ -15,11 +15,28 @@ import { useEffect } from "react";
  * review-page.tsx (Gate 1) and verification-page.tsx (Gate 2) — every list
  * here that pairs a mutation with a default non-"all" status filter can
  * shrink its own `total` this way.
+ *
+ * `onClamp`, when given, fires only on the render where a clamp actually
+ * happens (not on every render, and not on the initial mount) — callers use
+ * it to surface an unobtrusive notice, since otherwise the page number
+ * changes with no indication why.
  */
-export function usePageClamp(hasData: boolean, page: number, setPage: (page: number) => void, totalPages: number) {
+export function usePageClamp(
+  hasData: boolean,
+  page: number,
+  setPage: (page: number) => void,
+  totalPages: number,
+  onClamp?: (newPage: number) => void,
+) {
   useEffect(() => {
     if (hasData && page > 0 && page >= totalPages) {
-      setPage(totalPages - 1);
+      const newPage = totalPages - 1;
+      setPage(newPage);
+      onClamp?.(newPage);
     }
+    // onClamp is intentionally excluded: callers often pass an inline
+    // function, which would re-run this effect (and could re-fire the
+    // notice) on every render if it were a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasData, page, totalPages, setPage]);
 }

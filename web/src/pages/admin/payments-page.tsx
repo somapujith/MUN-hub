@@ -118,7 +118,9 @@ export function AdminPaymentsPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const trimmedNote = note.trim();
 
-  usePageClamp(Boolean(exceptionsQuery.data), page, setPage, totalPages);
+  usePageClamp(Boolean(exceptionsQuery.data), page, setPage, totalPages, (newPage) =>
+    toast.message(`Moved to page ${newPage + 1} — no more results on the page you were viewing.`),
+  );
 
   const openResolve = (row: PaymentExceptionRow) => {
     setTarget(row);

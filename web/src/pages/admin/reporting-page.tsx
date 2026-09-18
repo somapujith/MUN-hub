@@ -373,7 +373,7 @@ export function AdminReportingPage() {
                     </thead>
                     <tbody>
                       {geographyQuery.data.map((row) => (
-                        <tr key={`${row.city ?? "—"}-${row.country ?? "—"}`} className="border-b border-border last:border-0">
+                        <tr key={row.city ?? "—"} className="border-b border-border last:border-0">
                           <td className="px-md py-sm text-ink">{row.city ?? "Unknown"}</td>
                           <td className="px-md py-sm text-body">{row.country ?? "—"}</td>
                           <td className="px-md py-sm tabular-nums text-body">{row.registrationCount.toLocaleString("en-IN")}</td>

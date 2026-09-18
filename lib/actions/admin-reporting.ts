@@ -494,11 +494,22 @@ export interface GeographyRow {
 }
 
 /**
- * Registrations and revenue by MUN city/country, over the selected range.
- * One query: revenue is a left join whose ON clause carries the "counts as
- * revenue" conditions, so an unmatched or non-revenue registration
- * contributes 0 rather than being dropped or double-counted (`payments`
- * is at most one row per registration).
+ * Registrations and revenue by MUN city, over the selected range. One query:
+ * revenue is a left join whose ON clause carries the "counts as revenue"
+ * conditions, so an unmatched or non-revenue registration contributes 0
+ * rather than being dropped or double-counted (`payments` is at most one row
+ * per registration).
+ *
+ * Grouped by city alone, not by (city, country): some organizer-created MUNs
+ * only ever capture a city (the onboarding wizard's "host city" step has no
+ * country field — see `lib/actions/organizer-application.ts`'s `city:
+ * input.location`), leaving `muns.country` null, while other MUNs for the
+ * same real-world city do have it set. Grouping by the raw tuple split one
+ * city into two rows — e.g. "Hyderabad"/"India" and "Hyderabad"/null — purely
+ * because of that missing field, not because they're different places.
+ * `country` here is a best-effort display value (the newest non-null value
+ * for the city, via `max()`, which SQL aggregates already skip nulls for)
+ * rather than a second grouping key.
  */
 export async function getGeographyBreakdown(
   params: { days: ReportingRangeDays },
@@ -511,7 +522,7 @@ export async function getGeographyBreakdown(
   const rows = await db
     .select({
       city: muns.city,
-      country: muns.country,
+      country: sql<string | null>`max(${muns.country})`,
       registrationCount: sql<number>`count(distinct ${registrations.id})::int`,
       revenue: sql<number>`coalesce(sum(${payments.amount}), 0)::bigint`,
     })
@@ -527,7 +538,7 @@ export async function getGeographyBreakdown(
       ),
     )
     .where(and(gte(registrations.createdAt, start), lte(registrations.createdAt, now)))
-    .groupBy(muns.city, muns.country)
+    .groupBy(muns.city)
     .orderBy(desc(sql`count(distinct ${registrations.id})`))
     .limit(50)
 
