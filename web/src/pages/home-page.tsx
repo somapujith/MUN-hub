@@ -163,7 +163,7 @@ export function HomePage() {
           </section>
         )}
 
-        <section className="pb-section">
+        <section className={featured.length > 0 ? "pb-section" : "pt-xxl pb-section"}>
           <div className="content-container">
             <div className="flex flex-col gap-sm border-b border-border pb-lg">
               <h1 className="font-display text-display-md font-normal tracking-[-0.011em] text-balance text-ink">
@@ -282,7 +282,7 @@ export function HomePage() {
           </section>
         ) : null}
 
-        <section>
+        <section className="pb-section">
           <div className="content-container">
             <SignatureCard variant="dark" className="items-center">
               <div className="max-w-2xl text-center">
