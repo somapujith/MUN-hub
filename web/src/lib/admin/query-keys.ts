@@ -7,6 +7,10 @@ export const adminQueryKeys = {
   muns: (params: Record<string, unknown>) => ["admin", "muns", "list", params] as const,
   munsAll: () => ["admin", "muns"] as const,
   mun: (munId: string) => ["admin", "muns", "detail", munId] as const,
+  // Prefixed the same as the other "admin","muns" keys above so the
+  // existing `munsAll()` invalidation (every mutation on this page already
+  // calls it) also refreshes this query — no separate invalidation needed.
+  munModuleContent: (munId: string) => ["admin", "muns", "module-content", munId] as const,
   munPaymentSettings: (munId: string) => ["admin", "muns", "payment-settings", munId] as const,
   munResults: (munId: string) => ["admin", "muns", "results", munId] as const,
   goLiveQueueDetails: (params: Record<string, unknown>) => ["admin", "go-live-queue", "details", params] as const,

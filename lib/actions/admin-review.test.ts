@@ -3,6 +3,7 @@ import { and, eq, notInArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
   adminActions,
+  committees,
   muns,
   munModuleVerifications,
   munSubmissions,
@@ -19,6 +20,7 @@ import { listAdminActions } from './admin-audit'
 import { recordPiiRead } from './admin-pii-read'
 
 import {
+  getAdminMunModuleContent,
   getModuleReviewQueue,
   getMunForReview,
   getRegistrationsQueue,
@@ -543,6 +545,74 @@ describe('getModuleReviewQueue', () => {
 
     const byNoMatch = await getModuleReviewQueue({ search: `no-such-thing-${crypto.randomUUID()}` }, __actor)
     expect(byNoMatch.results.some((row) => row.munId === mun.id)).toBe(false)
+  })
+})
+
+describe('getAdminMunModuleContent', () => {
+  it('rejects a STUDENT session', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'VERIFICATION')
+    const student = await makeUser('STUDENT')
+
+    await expect(getAdminMunModuleContent(mun.id, sess(student))).rejects.toThrow('Forbidden')
+  })
+
+  it('rejects with no session', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'VERIFICATION')
+
+    await expect(getAdminMunModuleContent(mun.id, null)).rejects.toThrow('Forbidden')
+  })
+
+  // This is the exact case that would break if this action used
+  // assertOwnsOrAdmin instead of a direct role check — that helper does not
+  // cover OPERATIONS (see CLAUDE.md's LOCKED-enforcement section).
+  it('succeeds for an OPERATIONS session', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'VERIFICATION')
+    const ops = await makeUser('OPERATIONS')
+
+    const result = await getAdminMunModuleContent(mun.id, sess(ops))
+    expect(result.munId).toBe(mun.id)
+    expect(result.munName).toBe(mun.name)
+  })
+
+  it('returns the loadValidationContext batch verbatim, including seeded committees and registration products', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'VERIFICATION')
+    const [committee] = await db
+      .insert(committees)
+      .values({ munId: mun.id, name: 'UNSC', agenda: 'Nuclear disarmament', capacity: 20 })
+      .returning()
+    const [product] = await db
+      .insert(registrationProducts)
+      .values({ munId: mun.id, name: 'Delegate pass', price: 500, capacity: 20 })
+      .returning()
+
+    const admin = await makeUser('ADMIN')
+    const result = await getAdminMunModuleContent(mun.id, sess(admin))
+
+    expect(result.munId).toBe(mun.id)
+    expect(result.munName).toBe(mun.name)
+    expect(result.context.mun.id).toBe(mun.id)
+    expect(result.context.committees.map((c) => c.id)).toContain(committee.id)
+    expect(result.context.registrationProducts.map((p) => p.id)).toContain(product.id)
+    // A batched read of everything loadValidationContext loads, not just the
+    // two modules seeded above.
+    expect(result.context).toHaveProperty('portfolios')
+    expect(result.context).toHaveProperty('ebMembers')
+    expect(result.context).toHaveProperty('formFields')
+    expect(result.context).toHaveProperty('paymentSettings')
+    expect(result.context).toHaveProperty('documents')
+    expect(result.context).toHaveProperty('scheduleItems')
+    expect(result.context).toHaveProperty('contact')
+    expect(result.context).toHaveProperty('media')
+    expect(result.context).toHaveProperty('accommodationOptions')
+  })
+
+  it('throws Mun not found for a non-existent mun', async () => {
+    const admin = await makeUser('ADMIN')
+    await expect(getAdminMunModuleContent('does-not-exist', sess(admin))).rejects.toThrow('not found')
   })
 })
 

@@ -1,4 +1,9 @@
-import type { AdminMunDetail, AdminMunListParams, AdminMunListResult } from "@/types/admin-muns";
+import type {
+  AdminMunDetail,
+  AdminMunListParams,
+  AdminMunListResult,
+  AdminMunModuleContent,
+} from "@/types/admin-muns";
 import type { MunStatus } from "@/types/enums";
 
 /** The trimmed mun row the visibility actions return. */
@@ -41,6 +46,19 @@ export function listAdminMuns(params: AdminMunListParams = {}) {
 /** Staff view of one MUN (`GET /admin/muns/:munId`). SLA state is computed on read, so never cached. */
 export function getAdminMunDetail(munId: string) {
   return request<AdminMunDetail>(`/admin/muns/${munId}`, { cache: "no-store" });
+}
+
+/**
+ * Everything the organizer submitted for one MUN across all 15 tracked
+ * modules (`GET /admin/muns/:munId/content`,
+ * lib/actions/admin-review.ts#getAdminMunModuleContent) — the actual field
+ * content behind `getAdminMunDetail`'s status-only `modules` array. Dates in
+ * `context` travel as ISO strings, same as every other date field in this
+ * file — no normalization to `Date` objects, matching this file's existing
+ * convention (see the doc comment atop `@/types/admin-muns`).
+ */
+export function getAdminMunModuleContent(munId: string) {
+  return request<AdminMunModuleContent>(`/admin/muns/${munId}/content`, { cache: "no-store" });
 }
 
 // The four visibility actions below are ADMIN/SUPER_ADMIN only on the server

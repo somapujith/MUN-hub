@@ -16,7 +16,7 @@ import { recordAdminAction } from '@/lib/audit/log'
 import { runInBackground } from '@/lib/background-tasks'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { openReviewRound, publishFromQueue, type PublishFromQueueResult } from '@/lib/lifecycle/go-live'
-import { notifyPipelineEvent } from '@/lib/notifications/pipeline-events'
+import { loadValidationContext, type MunValidationContext } from '@/lib/lifecycle/validation'
 import { notifyOrganizerApplicationEvent } from '@/lib/notifications/organizer-application-events'
 import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
 import type { ApplicationStatus, ModuleVerificationState } from '@/lib/db/schema-enums'
@@ -208,10 +208,7 @@ export async function reviewMunApplication(
   // convention — see lib/lifecycle/go-live.ts's file header). The Gate-1
   // decision itself is an OrganizerApplicationEvent, never PipelineEvent's
   // Gate-2-scoped APPROVED/CHANGES_REQUESTED (see that file's header for
-  // why). ONBOARDING_STARTED is separately a real PipelineEvent — it's a
-  // mun-lifecycle event (entering ONBOARDING), not a review-decision event,
-  // and only fires on the APPROVED path since that's the only decision that
-  // reaches ONBOARDING at all.
+  // why).
   notifyReviewDecisionAfterCommit(munId, decision, trimmedNotes)
 
   return updated
@@ -233,7 +230,6 @@ function notifyReviewDecisionAfterCommit(
         organizerEmail: context.organizerEmail,
         munName: context.munName,
       })
-      await notifyPipelineEvent({ type: 'ONBOARDING_STARTED', munId, organizerEmail: context.organizerEmail, munName: context.munName })
       return
     }
 
@@ -432,6 +428,48 @@ export async function getModuleReviewQueue(
     .where(whereClause)
 
   return { results, total: count }
+}
+
+export interface AdminMunModuleContent {
+  munId: string
+  munName: string
+  context: MunValidationContext
+}
+
+/**
+ * Everything an organizer has submitted for one MUN, across all 15 tracked
+ * modules, in one batched read — the Verification Console today only shows
+ * per-module status metadata (`getAdminMunDetail`'s `modules` array: state/
+ * completion%/blocking-issue-count), never the actual field content a
+ * reviewer needs to check. `loadValidationContext` (lib/lifecycle/
+ * validation.ts) already does exactly this "one batched read" for the
+ * automated validation engine — this just exposes that same context to
+ * admins verbatim, rather than re-fetching or duplicating any of what it
+ * already loads (mun row, committees, portfolios, registration products,
+ * executive board, form fields, masked payment settings, documents,
+ * schedule, contact, media, accommodation options+fields).
+ *
+ * Requires OPERATIONS/ADMIN/SUPER_ADMIN — same bar as `getModuleReviewQueue`.
+ * Deliberately checks the role directly rather than going through
+ * `assertOwnsOrAdmin` (lib/lifecycle/module-completion.ts): that helper does
+ * not cover OPERATIONS (a documented, pre-existing scope boundary — see
+ * CLAUDE.md's LOCKED-enforcement section), which would silently lock ops
+ * staff out of this console. Throws 'Mun not found' (propagated from
+ * `loadValidationContext`) for a non-existent mun.
+ */
+export async function getAdminMunModuleContent(
+  munId: string,
+  session: Session | null,
+): Promise<AdminMunModuleContent> {
+  requireRole(session, [...REVIEW_ROLES])
+
+  const context = await loadValidationContext(munId)
+
+  return {
+    munId,
+    munName: context.mun.name,
+    context,
+  }
 }
 
 export interface RegistrationsQueueParams {

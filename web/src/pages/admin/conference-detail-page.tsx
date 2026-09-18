@@ -1,15 +1,17 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeftIcon, ExternalLinkIcon, HistoryIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon, HistoryIcon } from "lucide-react";
 import { toast } from "sonner";
-import { getAdminMunDetail, publishMun, reinstateMun, suspendMun, unpublishMun } from "@/api/admin-muns";
+import { getAdminMunDetail, getAdminMunModuleContent, publishMun, reinstateMun, suspendMun, unpublishMun } from "@/api/admin-muns";
 import { enqueueForGoLive } from "@/api/go-live";
 import { setModuleRequirement } from "@/api/module-verification";
 import { runLifecycleAction } from "@/api/mun-lifecycle";
 import { getPaymentSettings, setPaymentVerificationState } from "@/api/payment-settlement";
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
 import { Gate2ReviewDialog } from "@/components/admin/gate2-review-dialog";
+import { ModuleContentView } from "@/components/admin/module-content-view";
+import { ModuleReviewForm } from "@/components/admin/module-review-form";
 import { ReasonDialog } from "@/components/admin/reason-dialog";
 import { ResultsReviewSection } from "@/components/admin/results-review-section";
 import { getRegistrationStatusMeta } from "@/components/dashboard/registration-status";
@@ -30,7 +32,7 @@ import {
 } from "@/lib/admin/go-live-labels";
 import { useAdminPermissions } from "@/lib/admin/permissions";
 import { adminQueryKeys } from "@/lib/admin/query-keys";
-import type { AdminMunDetail, MunLifecycleAction } from "@/types/admin-muns";
+import type { AdminMunDetail, AdminMunModuleContent, MunLifecycleAction } from "@/types/admin-muns";
 import type { MunModule, MunStatus, RegistrationStatus } from "@/types/enums";
 import type { PaymentVerificationState } from "@/types/payment-settlement";
 
@@ -169,6 +171,15 @@ export function AdminConferenceDetailPage() {
     enabled: Boolean(munId),
   });
   const detail = detailQuery.data;
+
+  // Everything the organizer submitted across all 15 tracked modules, fetched
+  // ONCE per page load and shared by every row in ModulesSection below — not
+  // one fetch per expanded row.
+  const moduleContentQuery = useQuery({
+    queryKey: adminQueryKeys.munModuleContent(munId),
+    queryFn: () => getAdminMunModuleContent(munId),
+    enabled: Boolean(munId),
+  });
 
   // Masked payout details (never the full account number); admins only.
   const paymentDetailsQuery = useQuery({
@@ -433,7 +444,9 @@ export function AdminConferenceDetailPage() {
               <Button size="sm" onClick={() => setReviewOpen(true)}>
                 Review submission
               </Button>
-              <span className="text-body-md text-muted-foreground">Gate 2: approve, request changes or reject.</span>
+              <span className="text-body-md text-muted-foreground">
+                Approving verifies every module at once and moves this MUN forward.
+              </span>
             </div>
           )}
           {canPublish && (
@@ -581,11 +594,30 @@ export function AdminConferenceDetailPage() {
         </dl>
       </Section>
 
+      {canReview && (
+        <div className="flex flex-col gap-sm rounded-md border border-border bg-surface-soft p-lg sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-body-md font-medium text-ink">Ready to decide on the whole submission?</p>
+            <p className="text-body-md text-muted-foreground">
+              Review what the organizer submitted in Modules below, then approve, request changes or reject the whole
+              thing at once.
+            </p>
+          </div>
+          <Button size="sm" onClick={() => setReviewOpen(true)}>
+            Review submission
+          </Button>
+        </div>
+      )}
+
       <ModulesSection
         detail={detail}
+        moduleContent={moduleContentQuery.data}
+        moduleContentLoading={moduleContentQuery.isLoading}
+        moduleContentError={moduleContentQuery.isError}
         canToggle={canPublish}
         pendingModule={requirementMutation.isPending ? requirementMutation.variables?.moduleName : undefined}
         onToggle={(moduleName, isRequired) => requirementMutation.mutate({ moduleName, isRequired })}
+        onDecided={refresh}
       />
 
       <Section title="History" description="Lifecycle transitions and admin actions on this MUN, newest first.">
@@ -641,30 +673,70 @@ export function AdminConferenceDetailPage() {
   );
 }
 
+/** Reads `#module-<MunModule>` from the current URL hash, if it names a tracked module key. */
+function moduleFromHash(hash: string, modules: AdminMunDetail["modules"]): MunModule | null {
+  const match = /^#module-(.+)$/.exec(hash);
+  if (!match) return null;
+  const found = modules.find((module) => module.moduleName === match[1]);
+  return found ? found.moduleName : null;
+}
+
 function ModulesSection({
   detail,
+  moduleContent,
+  moduleContentLoading,
+  moduleContentError,
   canToggle,
   pendingModule,
   onToggle,
+  onDecided,
 }: {
   detail: AdminMunDetail;
+  moduleContent: AdminMunModuleContent | undefined;
+  moduleContentLoading: boolean;
+  moduleContentError: boolean;
   canToggle: boolean;
   pendingModule: MunModule | undefined;
   onToggle: (moduleName: MunModule, isRequired: boolean) => void;
+  onDecided: () => void;
 }) {
+  const [expanded, setExpanded] = useState<Set<MunModule>>(new Set());
+
+  // Deep-link support from AdminVerificationPage's flat queue
+  // (/admin/muns/:munId#module-<key>): auto-expand and scroll to that row
+  // once, on mount.
+  useEffect(() => {
+    const target = moduleFromHash(window.location.hash, detail.modules);
+    if (!target) return;
+    setExpanded((prev) => new Set(prev).add(target));
+    document.getElementById(`module-${target}`)?.scrollIntoView({ block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const toggleExpanded = (moduleName: MunModule) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(moduleName)) next.delete(moduleName);
+      else next.add(moduleName);
+      return next;
+    });
+
   return (
     <Section
       title="Modules"
       description={
         canToggle
-          ? "Completion is the organizer's progress; verification is MUNHub's review. Optional modules don't block submission."
-          : "Completion is the organizer's progress; verification is MUNHub's review."
+          ? "Completion is the organizer's progress; verification is MUNHub's review. Optional modules don't block submission. Expand a module to see what the organizer submitted."
+          : "Completion is the organizer's progress; verification is MUNHub's review. Expand a module to see what the organizer submitted."
       }
     >
       <div className="overflow-x-auto">
         <table className="w-full min-w-[44rem] text-left text-body-md">
           <thead className="border-b border-border text-muted-foreground">
             <tr>
+              <th className="py-sm pr-xs font-medium">
+                <span className="sr-only">Expand</span>
+              </th>
               <th className="py-sm pr-md font-medium">Module</th>
               <th className="py-sm pr-md font-medium">Required</th>
               <th className="py-sm pr-md font-medium">Completion</th>
@@ -679,47 +751,90 @@ function ModulesSection({
               const checkboxId = `module-required-${module.moduleName}`;
               // FINAL_REVIEW can never be optional (server rule).
               const locked = module.moduleName === "FINAL_REVIEW";
+              const isExpanded = expanded.has(module.moduleName);
               return (
-                <tr key={module.moduleName} className="border-b border-border last:border-0">
-                  <td className="py-sm pr-md">
-                    <span className="font-medium text-ink">{module.label}</span>
-                    {module.blockingIssueCount > 0 && (
-                      <span className="block text-body-md text-destructive">
-                        {module.blockingIssueCount} blocking {module.blockingIssueCount === 1 ? "issue" : "issues"}
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-sm pr-md">
-                    {canToggle ? (
-                      <div className="flex items-center gap-xs">
-                        <Checkbox
-                          id={checkboxId}
-                          checked={module.isRequired}
-                          disabled={locked || pendingModule === module.moduleName}
-                          onCheckedChange={(checked) => onToggle(module.moduleName, checked === true)}
-                        />
-                        <label htmlFor={checkboxId} className="text-body-md text-ink">
-                          {module.isRequired ? "Required" : "Optional"}
-                          <span className="sr-only"> — {module.label}</span>
-                        </label>
-                      </div>
-                    ) : (
-                      <span className="text-ink">{module.isRequired ? "Required" : "Optional"}</span>
-                    )}
-                  </td>
-                  <td className="py-sm pr-md">
-                    <Badge variant={completion.variant}>{completion.label}</Badge>{" "}
-                    <span className="tabular-nums text-muted-foreground">{module.completionPercentage}%</span>
-                  </td>
-                  <td className="py-sm pr-md">
-                    <Badge variant={state.variant}>{state.label}</Badge>
-                  </td>
-                  <td className="py-sm text-muted-foreground">
-                    {module.lastReviewedAt
-                      ? `${formatAdminDate(module.lastReviewedAt)}${module.lastReviewedByName ? ` · ${module.lastReviewedByName}` : ""}`
-                      : "—"}
-                  </td>
-                </tr>
+                <Fragment key={module.moduleName}>
+                  <tr id={`module-${module.moduleName}`} className="scroll-mt-lg border-b border-border last:border-0">
+                    <td className="py-sm pr-xs align-top">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-expanded={isExpanded}
+                        aria-label={isExpanded ? `Collapse ${module.label}` : `Expand ${module.label}`}
+                        onClick={() => toggleExpanded(module.moduleName)}
+                      >
+                        {isExpanded ? <ChevronDownIcon aria-hidden /> : <ChevronRightIcon aria-hidden />}
+                      </Button>
+                    </td>
+                    <td className="py-sm pr-md">
+                      <span className="font-medium text-ink">{module.label}</span>
+                      {module.blockingIssueCount > 0 && (
+                        <span className="block text-body-md text-destructive">
+                          {module.blockingIssueCount} blocking {module.blockingIssueCount === 1 ? "issue" : "issues"}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-sm pr-md">
+                      {canToggle ? (
+                        <div className="flex items-center gap-xs">
+                          <Checkbox
+                            id={checkboxId}
+                            checked={module.isRequired}
+                            disabled={locked || pendingModule === module.moduleName}
+                            onCheckedChange={(checked) => onToggle(module.moduleName, checked === true)}
+                          />
+                          <label htmlFor={checkboxId} className="text-body-md text-ink">
+                            {module.isRequired ? "Required" : "Optional"}
+                            <span className="sr-only"> — {module.label}</span>
+                          </label>
+                        </div>
+                      ) : (
+                        <span className="text-ink">{module.isRequired ? "Required" : "Optional"}</span>
+                      )}
+                    </td>
+                    <td className="py-sm pr-md">
+                      <Badge variant={completion.variant}>{completion.label}</Badge>{" "}
+                      <span className="tabular-nums text-muted-foreground">{module.completionPercentage}%</span>
+                    </td>
+                    <td className="py-sm pr-md">
+                      <Badge variant={state.variant}>{state.label}</Badge>
+                    </td>
+                    <td className="py-sm text-muted-foreground">
+                      {module.lastReviewedAt
+                        ? `${formatAdminDate(module.lastReviewedAt)}${module.lastReviewedByName ? ` · ${module.lastReviewedByName}` : ""}`
+                        : "—"}
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr className="border-b border-border bg-surface-soft/40 last:border-0">
+                      <td colSpan={6} className="px-md py-lg">
+                        {moduleContentLoading ? (
+                          <Skeleton className="h-24 w-full" />
+                        ) : moduleContentError || !moduleContent ? (
+                          <p className="text-body-md text-destructive">
+                            Unable to load this module&apos;s submitted content.
+                          </p>
+                        ) : (
+                          <div className="flex flex-col gap-lg">
+                            <ModuleContentView moduleName={module.moduleName} context={moduleContent.context} />
+                            {module.state === "PENDING_REVIEW" && (
+                              <div className="flex flex-col gap-sm border-t border-border pt-lg">
+                                <h4 className="text-body-md font-medium text-ink">Gate 2 decision — {module.label}</h4>
+                                <ModuleReviewForm
+                                  munId={detail.mun.id}
+                                  moduleName={module.moduleName}
+                                  munName={detail.mun.name}
+                                  onDecided={onDecided}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>

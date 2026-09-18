@@ -10,5 +10,6 @@ services:
       - "5432:5432"
     volumes:
       - mun_hub_pgdata:/var/lib/postgresql/data
+      - ./scripts/docker-init/create-test-db.sql:/docker-entrypoint-initdb.d/create-test-db.sql:ro
 volumes:
   mun_hub_pgdata:

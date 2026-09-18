@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { getAdminMunDetail, getGoLiveQueueDetails, listAdminMuns } from '@/lib/actions/admin-muns'
+import { getAdminMunModuleContent } from '@/lib/actions/admin-review'
 import { munStatusEnum } from '@/lib/db/schema-enums'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
@@ -41,6 +42,15 @@ adminMunsRoutes.get('/admin/muns/:munId', requireAuth, requireRole([...REVIEW_RO
   // SLA state is computed on read; never let a browser cache serve a stale one.
   c.header('Cache-Control', 'no-store')
   return c.json(detail)
+})
+
+// Everything the organizer submitted across all 15 tracked modules, in one
+// batched read (lib/actions/admin-review.ts#getAdminMunModuleContent) — the
+// content behind the status-only `modules` array above.
+adminMunsRoutes.get('/admin/muns/:munId/content', requireAuth, requireRole([...REVIEW_ROLES]), async (c) => {
+  const content = await getAdminMunModuleContent(c.req.param('munId'), c.get('session'))
+  c.header('Cache-Control', 'no-store')
+  return c.json(content)
 })
 
 // The go-live queue with each submission's reviewer and payment-account state.
