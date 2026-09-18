@@ -59,15 +59,15 @@ export function AdminAuditPage() {
               <Link
                 // A list read's target id is a route pattern ("GET /admin/..."), so both parts are encoded.
                 to={`/admin/audit/${encodeURIComponent(entry.targetType)}/${encodeURIComponent(entry.targetId)}`}
-                className="font-medium text-link hover:text-link-active"
+                className="font-medium text-link hover:text-link-active break-words"
               >
                 {entry.action}
               </Link>
-              <p className="text-body-md text-muted-foreground">
+              <p className="break-words text-body-md text-muted-foreground">
                 {entry.targetType}/{entry.targetId} · {entry.actorName} · {entry.createdAt.toLocaleString()}
               </p>
               {entry.reason && (
-                <p className="mt-xxs text-body-md text-body">{entry.reason}</p>
+                <p className="mt-xxs break-words text-body-md text-body">{entry.reason}</p>
               )}
             </li>
           ))}

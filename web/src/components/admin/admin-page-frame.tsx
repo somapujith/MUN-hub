@@ -18,7 +18,7 @@ export function AdminPageFrame({ title, description, children }: AdminPageFrameP
               Operations
             </span>
             <h1 className="font-display text-display-md text-ink">{title}</h1>
-            <p className="text-body-md text-muted-foreground">{description}</p>
+            <p className="break-words text-body-md text-muted-foreground">{description}</p>
           </header>
           {children}
         </div>

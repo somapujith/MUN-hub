@@ -353,7 +353,7 @@ function RecoveryCodesDialog({ codes, onClose }: { codes: string[] | null; onClo
         if (!next) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Your recovery codes</DialogTitle>
           <DialogDescription>

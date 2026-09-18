@@ -37,11 +37,11 @@ export function AdminAuditDetailPage() {
         <ol className="flex flex-col gap-sm">
           {entries.map((entry, index) => (
             <li key={`${entry.action}-${entry.createdAt.toISOString()}-${index}`} className="rounded-md border border-border bg-card p-md">
-              <p className="font-medium text-ink">{entry.action}</p>
-              <p className="text-body-md text-muted-foreground">
+              <p className="break-words font-medium text-ink">{entry.action}</p>
+              <p className="break-words text-body-md text-muted-foreground">
                 {entry.createdAt.toLocaleString()} · actor {entry.actorId}
               </p>
-              {entry.reason && <p className="mt-xxs text-body-md text-body">{entry.reason}</p>}
+              {entry.reason && <p className="mt-xxs break-words text-body-md text-body">{entry.reason}</p>}
             </li>
           ))}
         </ol>

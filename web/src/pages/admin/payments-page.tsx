@@ -304,14 +304,19 @@ export function AdminPaymentsPage() {
           if (!open) setTarget(null);
         }}
       >
-        <DialogContent>
-          <form onSubmit={handleResolve} className="flex flex-col gap-lg">
+        <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-lg">
+          <form onSubmit={handleResolve} className="flex min-h-0 flex-1 flex-col gap-lg">
             <DialogHeader>
               <DialogTitle>Resolve payment exception</DialogTitle>
               <DialogDescription>
                 {target ? `${reasonMeta(target.reason).hint} ${returnGuidance(target)}` : ""}
               </DialogDescription>
             </DialogHeader>
+
+            {/* Only this middle section scrolls — the header and the footer's
+                submit/cancel buttons stay on screen at any dialog height,
+                matching review-page.tsx's Gate 1 dialog. */}
+            <div className="flex min-h-0 flex-1 flex-col gap-lg overflow-y-auto">
             {target && (
               <dl className="grid grid-cols-[auto_1fr] gap-x-md gap-y-xxs text-body-md">
                 <dt className="text-muted-foreground">Delegate</dt>
@@ -340,6 +345,8 @@ export function AdminPaymentsPage() {
               />
               <p className="text-caption text-muted-foreground">Recorded in the audit log with your name.</p>
             </div>
+            </div>
+
             <DialogFooter>
               <Button type="button" variant="outline" size="sm" onClick={() => setTarget(null)}>
                 Cancel
