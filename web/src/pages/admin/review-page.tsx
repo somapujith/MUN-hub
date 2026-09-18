@@ -133,7 +133,9 @@ export function AdminReviewPage() {
   const results = queueQuery.data?.results ?? [];
   const total = queueQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  usePageClamp(Boolean(queueQuery.data), page, setPage, totalPages);
+  usePageClamp(Boolean(queueQuery.data), page, setPage, totalPages, (newPage) =>
+    toast.message(`Moved to page ${newPage + 1} — no more results on the page you were viewing.`),
+  );
 
   return (
     <AdminPageFrame

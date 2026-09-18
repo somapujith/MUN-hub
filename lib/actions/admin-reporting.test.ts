@@ -328,6 +328,34 @@ describe('getGeographyBreakdown', () => {
     expect(row?.registrationCount).toBe(3)
     expect(row?.revenue).toBe(2000)
   })
+
+  it('merges a city split across a null-country MUN and a set-country MUN into one row', async () => {
+    // Regression: some organizer-created MUNs only ever capture a city (the
+    // onboarding wizard has no country field), leaving muns.country null,
+    // while other MUNs for the same city do have it set. Grouping by the raw
+    // (city, country) tuple used to produce two rows for one real place.
+    const organizer = await makeUser('ORGANIZER')
+    const admin = await makeUser('ADMIN')
+    const now = farFutureNow()
+    const city = `Geo Split City ${crypto.randomUUID()}`
+
+    const munWithCountry = await makeMun(organizer.id, { city, country: 'India' })
+    const munWithoutCountry = await makeMun(organizer.id, { city, country: null })
+    const productWithCountry = await makeProduct(munWithCountry.id)
+    const productWithoutCountry = await makeProduct(munWithoutCountry.id)
+
+    const reg1 = await makeRegistration(munWithCountry.id, productWithCountry.id, 'CONFIRMED', now)
+    await makePayment(reg1.id, 'PAID', now, { amount: 1500 })
+    const reg2 = await makeRegistration(munWithoutCountry.id, productWithoutCountry.id, 'CONFIRMED', now)
+    await makePayment(reg2.id, 'PAID', now, { amount: 500 })
+
+    const rows = await getGeographyBreakdown({ days: 7 }, sess(admin), now)
+    const matches = rows.filter((r) => r.city === city)
+    expect(matches).toHaveLength(1)
+    expect(matches[0].country).toBe('India')
+    expect(matches[0].registrationCount).toBe(2)
+    expect(matches[0].revenue).toBe(2000)
+  })
 })
 
 describe('getPlatformFeeSummary', () => {

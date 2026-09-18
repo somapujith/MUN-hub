@@ -101,7 +101,9 @@ export function AdminGoLiveQueuePage() {
   const results = queueQuery.data?.results ?? [];
   const total = queueQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  usePageClamp(Boolean(queueQuery.data), page, setPage, totalPages);
+  usePageClamp(Boolean(queueQuery.data), page, setPage, totalPages, (newPage) =>
+    toast.message(`Moved to page ${newPage + 1} — no more results on the page you were viewing.`),
+  );
   const awaitingReviewCount = results.filter((row) => row.munStatus === "VERIFICATION").length;
   const readyToPublishCount = results.filter((row) => row.munStatus === "GO_LIVE_QUEUE").length;
   const overdueCount = results.filter((row) => row.slaState === "OVERDUE").length;

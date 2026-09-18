@@ -30,6 +30,7 @@ import { formatAdminDate, formatAdminDateTime } from "@/lib/admin/go-live-labels
 import { STAFF_ROLE_LABELS, STAFF_ROLES, useAdminPermissions } from "@/lib/admin/permissions";
 import { adminQueryKeys } from "@/lib/admin/query-keys";
 import { adminSelectClassName } from "@/lib/admin/styles";
+import { usePageClamp } from "@/lib/admin/use-page-clamp";
 import type { SetPasswordLink, StaffRole, StaffRow } from "@/types/admin-staff";
 
 const PAGE_SIZE = 50;
@@ -58,16 +59,20 @@ export function AdminStaffPage() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<StaffRole | "">("");
+  const [page, setPage] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [suspendTarget, setSuspendTarget] = useState<StaffRow | null>(null);
   const [issuedLink, setIssuedLink] = useState<IssuedLink | null>(null);
 
   useEffect(() => {
-    const handle = setTimeout(() => setSearch(searchInput.trim()), 300);
+    const handle = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(0);
+    }, 300);
     return () => clearTimeout(handle);
   }, [searchInput]);
 
-  const params = { q: search || undefined, role: roleFilter || undefined, limit: PAGE_SIZE };
+  const params = { q: search || undefined, role: roleFilter || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE };
   const staffQuery = useQuery({
     queryKey: adminQueryKeys.staff(params),
     queryFn: () => listStaff(params),
@@ -124,12 +129,20 @@ export function AdminStaffPage() {
 
   const results = staffQuery.data?.results ?? [];
   const total = staffQuery.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const busy =
     roleMutation.isPending ||
     suspendMutation.isPending ||
     reinstateMutation.isPending ||
     linkMutation.isPending ||
     resetMfaMutation.isPending;
+
+  // A role change or suspension can drop someone out of the current
+  // filtered/paged view (e.g. changing the last row's role away from an
+  // active role filter), which can strand the page past the new last page.
+  usePageClamp(Boolean(staffQuery.data), page, setPage, totalPages, (newPage) =>
+    toast.message(`Moved to page ${newPage + 1} — no more results on the page you were viewing.`),
+  );
 
   return (
     <AdminPageFrame
@@ -160,7 +173,10 @@ export function AdminStaffPage() {
             id="staff-role-filter"
             className={adminSelectClassName}
             value={roleFilter}
-            onChange={(event) => setRoleFilter(event.target.value as StaffRole | "")}
+            onChange={(event) => {
+              setRoleFilter(event.target.value as StaffRole | "");
+              setPage(0);
+            }}
           >
             <option value="">All roles</option>
             {STAFF_ROLES.map((role) => (
@@ -343,10 +359,18 @@ export function AdminStaffPage() {
               })}
             </tbody>
           </table>
-          {total > results.length && (
-            <p className="border-t border-border px-md py-sm text-body-md text-muted-foreground">
-              Showing {results.length} of {total}. Narrow the search to find someone.
-            </p>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-md border-t border-border px-md py-sm">
+              <Button variant="outline" size="sm" disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>
+                Previous
+              </Button>
+              <p className="text-body-md tabular-nums text-muted-foreground">
+                Showing {page * PAGE_SIZE + 1}–{Math.min(total, (page + 1) * PAGE_SIZE)} of {total}
+              </p>
+              <Button variant="outline" size="sm" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                Next
+              </Button>
+            </div>
           )}
         </div>
       )}
