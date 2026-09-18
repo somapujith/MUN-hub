@@ -1,12 +1,17 @@
 import { Link } from "react-router";
-import { CalendarDaysIcon, LockIcon, MapPinIcon, UsersIcon } from "lucide-react";
+import { CalendarDaysIcon, HourglassIcon, LockIcon, MapPinIcon, UsersIcon } from "lucide-react";
 import { MunStatusBadge } from "@/components/mun/mun-status-badge";
 import { formatDateRange } from "@/components/shared/date-range";
 import { formatPrice } from "@/components/shared/currency";
 import { Button } from "@/components/ui/button";
 import { safeLinkUrl } from "@/components/mun/mun-format";
 import { RemoteImage } from "@/components/mun/remote-image";
-import { canRegisterForMun } from "@/components/registration/deadline";
+import {
+  DEADLINE_URGENCY_WINDOW_DAYS,
+  canRegisterForMun,
+  daysUntilDeadline,
+} from "@/components/registration/deadline";
+import { cn } from "cn";
 import type { MunDetail } from "@/types";
 
 /**
@@ -36,6 +41,20 @@ export function MunHero({ mun, fromPrice }: MunHeroProps) {
   const committeeCount = mun.committees.length;
   const cover = safeLinkUrl(mun.coverImage);
   const logo = safeLinkUrl(mun.logo);
+
+  // Advance warning that the deadline is coming up — only while registration
+  // is actually open, so this never contradicts the disabled/closed CTA
+  // below (canRegister already folds in `!hasPassed`, so a stale
+  // `daysUntilDeadline` reading can't show up alongside "Registration
+  // closed").
+  const daysLeft = canRegister ? daysUntilDeadline(mun.registrationDeadline) : null;
+  const showDeadlineUrgency = daysLeft !== null && daysLeft <= DEADLINE_URGENCY_WINDOW_DAYS;
+  const deadlineUrgencyLabel =
+    daysLeft === 0
+      ? "Registration closes today"
+      : daysLeft === 1
+        ? "Registration closes tomorrow"
+        : `Registration closes in ${daysLeft} days`;
 
   return (
     <section className="border-b border-border bg-background">
@@ -163,6 +182,19 @@ export function MunHero({ mun, fromPrice }: MunHeroProps) {
                 View passes
               </Button>
             </div>
+
+            {showDeadlineUrgency && (
+              <p
+                role="status"
+                className={cn(
+                  "inline-flex items-center gap-xs text-body-md",
+                  daysLeft !== null && daysLeft <= 2 ? "text-destructive-text" : "text-warning-text",
+                )}
+              >
+                <HourglassIcon className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                {deadlineUrgencyLabel}
+              </p>
+            )}
           </div>
         </div>
       </div>

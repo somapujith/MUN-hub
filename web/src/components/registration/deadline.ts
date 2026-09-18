@@ -38,3 +38,20 @@ export function hasPassed(deadline: Date | null): boolean {
 export function canRegisterForMun(mun: { status: string; registrationDeadline: Date | null }): boolean {
   return mun.status === "REGISTRATION_OPEN" && !hasPassed(mun.registrationDeadline);
 }
+
+/** Show the urgency indicator once the deadline is within this many days. */
+export const DEADLINE_URGENCY_WINDOW_DAYS = 7;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Whole days remaining until `deadline`, rounded up — anything from just now
+ * up to 24h out reads as "1 day left". Null for a deadline that's null or
+ * has already passed (checked via `hasPassed`, the same source of truth the
+ * hero's own disabled-CTA logic already uses) rather than a negative number,
+ * so callers can treat "not null" as "still meaningful to show".
+ */
+export function daysUntilDeadline(deadline: Date | null): number | null {
+  if (deadline === null || hasPassed(deadline)) return null;
+  return Math.ceil((deadline.getTime() - Date.now()) / MS_PER_DAY);
+}
