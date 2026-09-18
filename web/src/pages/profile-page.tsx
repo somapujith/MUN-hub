@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useScrollFadeRef } from "@/hooks/use-scroll-fade";
 import { cn } from "cn";
 import type { StudentProfileInput } from "@/types/student-profile";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 const EMPTY_PASSWORD_FORM = { currentPassword: "", newPassword: "", confirmPassword: "" };
 const MIN_PASSWORD_LENGTH = 8;
@@ -75,6 +76,7 @@ const NAV_ITEM_IDLE = "text-muted-foreground hover:bg-surface-soft hover:text-in
 const NAV_ITEM_ACTIVE = "relative bg-surface-soft text-ink before:absolute before:inset-y-2 before:-left-px before:w-[3px] before:rounded-pill before:bg-primary before:content-['']";
 
 export function ProfilePage() {
+  useScrollToTop();
   const queryClient = useQueryClient();
   const mobileSectionNavRef = useScrollFadeRef<HTMLElement>("x");
   // Set by the signup page (router state, so the URL stays /profile): the

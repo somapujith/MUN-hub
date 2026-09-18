@@ -22,9 +22,14 @@ export function StepIndicator({ steps, current }: StepIndicatorProps) {
         const active = index === current;
 
         return (
-          <li key={label} className="flex flex-1 items-center gap-xs">
+          // min-w-0 on this <li> and the two wrappers below lets a long label
+          // (e.g. group-register-page's "Your details") ellipsis instead of
+          // forcing the row past 320px — flex items default to min-width:auto
+          // (their content's natural width), so without this the step rail
+          // pushed the whole page into horizontal scroll at narrow widths.
+          <li key={label} className="flex min-w-0 flex-1 items-center gap-xs">
             <span
-              className="flex items-center gap-xs"
+              className="flex min-w-0 items-center gap-xs"
               aria-current={active ? "step" : undefined}
             >
               <span
@@ -39,7 +44,7 @@ export function StepIndicator({ steps, current }: StepIndicatorProps) {
               </span>
               <span
                 className={cn(
-                  "text-caption whitespace-nowrap transition-colors",
+                  "min-w-0 overflow-hidden text-caption text-ellipsis whitespace-nowrap transition-colors",
                   active || complete ? "text-ink" : "text-muted-foreground",
                 )}
               >

@@ -5,11 +5,13 @@ import { SupportForm } from "@/components/support/support-form";
 import { SupportRedirect } from "@/components/support/support-redirect";
 import { useSession } from "@/hooks/use-session";
 import { resolveZoneUrl } from "@/lib/host-routing";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 const STAFF_ROLES = new Set(["OPERATIONS", "ADMIN", "SUPER_ADMIN"]);
 
 /** /support/new — the full support form. Route-guarded by RequireAuth. */
 export function SupportNewPage() {
+  useScrollToTop();
   const { data: session } = useSession();
   if (session && STAFF_ROLES.has(session.role)) return <SupportRedirect url={resolveZoneUrl("admin", "/admin/support")} />;
 

@@ -12,6 +12,7 @@ import { EmailVerificationNotice } from "@/components/dashboard/email-verificati
 import { queryKeys } from "@/api/query-keys";
 import { fetchPastRegistrations, fetchUpcomingRegistrations } from "@/api/student-dashboard";
 import { getAccountSettings } from "@/api/account";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 function firstName(fullName: string): string {
   return fullName.trim().split(/\s+/)[0] || fullName;
@@ -27,6 +28,11 @@ function DashboardSkeleton() {
 }
 
 export function StudentDashboardPage() {
+  // See use-scroll-to-top.ts — commonly reached via "Your registrations"/
+  // "Back to your dashboard" links from other (often tall, scrolled-down)
+  // registration-flow pages.
+  useScrollToTop();
+
   // The signed-in account (name + institution live on `users`).
   const profileQuery = useQuery({
     queryKey: queryKeys.account(),

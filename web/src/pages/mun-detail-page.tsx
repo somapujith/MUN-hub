@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, type ReactNode } from "react";
 import { EyeIcon } from "lucide-react";
-import { Link, useParams } from "react-router";
+import { Link, useLocation, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
@@ -124,6 +124,19 @@ export function MunDetailPage({
 } = {}) {
   const { slug: slugParam } = useParams<{ slug: string }>();
   const slug = previewMunId ? previewMunId : (slugOverride ?? slugParam);
+  const { hash } = useLocation();
+
+  // The router has no global <ScrollRestoration /> (see use-scroll-to-top.ts
+  // and components/content/info-page.tsx's copy of this same fix) — a click
+  // through from a scrolled-down marketplace listing otherwise lands here at
+  // that same offset instead of the top. Measured: scrollY carried over from
+  // 6531 to 194 on a 320px-wide load. Skipped when the URL already carries a
+  // `#section` hash (a shared deep link, or MunSectionNav's own
+  // `history.replaceState` on same-page section clicks, which never remounts
+  // this component) so that case's own scroll target isn't fought.
+  useLayoutEffect(() => {
+    if (!hash) window.scrollTo(0, 0);
+  }, [slug, hash]);
 
   const munQuery = useQuery({
     queryKey: previewMunId ? queryKeys.munPreview(previewMunId) : queryKeys.mun(slug ?? ""),

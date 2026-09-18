@@ -10,8 +10,10 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 export function ForgotPasswordPage() {
+  useScrollToTop();
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
 

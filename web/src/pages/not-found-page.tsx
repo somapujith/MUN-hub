@@ -4,6 +4,7 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { PageMeta } from "@/components/seo/page-meta";
 import { Button } from "@/components/ui/button";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 /**
  * 404 — also what a MUN page renders for an unknown or unpublished slug.
@@ -19,6 +20,7 @@ const HELPFUL_LINKS = [
 ] as const;
 
 export function NotFoundPage() {
+  useScrollToTop();
   return (
     <div className="flex min-h-full flex-1 flex-col bg-background">
       <PageMeta
