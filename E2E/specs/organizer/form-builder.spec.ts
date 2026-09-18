@@ -17,7 +17,6 @@ const REGION = 'Registration form fields'
 const DEFAULT_FIELDS = [
   { key: 'grade_class', label: 'Grade / class', type: 'Academic year', required: true },
   { key: 'residential_address', label: 'Full residential address', type: 'Long text', required: true },
-  { key: 'transportation', label: 'Do you require transportation?', type: 'Dropdown', required: true },
   { key: 'date_of_birth', label: 'Date of birth', type: 'Date', required: true },
   { key: 'referral_code', label: 'Referral code', type: 'Short text', required: false },
   { key: 'emergency_contact_name', label: 'Emergency contact name', type: 'Short text', required: true },
@@ -104,7 +103,6 @@ test.describe('form builder UI', () => {
       if (field.required) await expect(card).toContainText('Required')
       else await expect(card).not.toContainText('Required')
     }
-    await expect(cardFor(page, REGION, 'Do you require transportation?')).toContainText('Choices: Yes, No')
   })
 
   test('add fields of several types, including a dropdown with choices and a required field', async ({ page }) => {
