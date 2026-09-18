@@ -2,6 +2,23 @@ import type { MockRegistrationDetail, PaymentStatus, RegistrationCheckout, Regis
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
+/**
+ * Thrown by `request()` — carries the HTTP status so callers can branch on it
+ * (e.g. `fetchRegistrationReceipt` treats a 404 as "not found" rather than a
+ * transient failure), same convention as `MarketplaceApiError`/
+ * `CheckInApiError`/`SupportApiError`, and matching the shape
+ * `web/src/api/query-client.ts`'s retry logic already expects
+ * (`error instanceof Error && "status" in error`).
+ */
+export class RegistrationApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "RegistrationApiError";
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -12,7 +29,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
-    throw new Error(body?.error?.message ?? `Request failed (${response.status})`);
+    throw new RegistrationApiError(body?.error?.message ?? `Request failed (${response.status})`, response.status);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -249,13 +266,28 @@ type RawReceipt = Omit<RegistrationReceipt, "registeredAt" | "mun" | "payment"> 
 
 const toDate = (value: string | null) => (value ? new Date(value) : null);
 
-/** Wraps `GET /registrations/:id/receipt` — owner-only; anyone else gets a 404. */
-export async function fetchRegistrationReceipt(id: string): Promise<RegistrationReceipt> {
-  const raw = await request<RawReceipt>(`/registrations/${encodeURIComponent(id)}/receipt`);
-  return {
-    ...raw,
-    registeredAt: new Date(raw.registeredAt),
-    mun: { ...raw.mun, startDate: toDate(raw.mun.startDate), endDate: toDate(raw.mun.endDate) },
-    payment: raw.payment ? { ...raw.payment, paidAt: toDate(raw.payment.paidAt) } : null,
-  };
+/**
+ * Wraps `GET /registrations/:id/receipt` — owner-only; anyone else gets a
+ * 404 (deliberate — the API doesn't distinguish "doesn't exist" from "not
+ * yours" for privacy). Resolves to `null` (not a thrown error) for that 404,
+ * same contract as `getMunBySlug` (web/src/api/marketplace.ts), so the page
+ * can tell "genuinely doesn't exist / isn't yours" (query succeeds, no data)
+ * apart from a real network/server failure (query throws, surfaced via
+ * `isError`) instead of collapsing both into the same not-found screen.
+ */
+export async function fetchRegistrationReceipt(id: string): Promise<RegistrationReceipt | null> {
+  try {
+    const raw = await request<RawReceipt>(`/registrations/${encodeURIComponent(id)}/receipt`);
+    return {
+      ...raw,
+      registeredAt: new Date(raw.registeredAt),
+      mun: { ...raw.mun, startDate: toDate(raw.mun.startDate), endDate: toDate(raw.mun.endDate) },
+      payment: raw.payment ? { ...raw.payment, paidAt: toDate(raw.payment.paidAt) } : null,
+    };
+  } catch (error) {
+    if (error instanceof RegistrationApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }
