@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router";
 import { ChevronRightIcon } from "lucide-react";
+import { cn } from "cn";
 import {
   WORKSPACE_NAV_ITEMS,
   getMunNavSection,
@@ -31,11 +32,29 @@ export function WorkspaceBreadcrumb({ currentMun }: WorkspaceBreadcrumbProps) {
 
   const section = currentMun && sectionSegment ? getMunNavSection(sectionSegment) : undefined;
 
+  // Deeper crumbs exist whenever this isn't the root "Overview" page itself.
+  const hasDeeperCrumb = Boolean(currentMun || orgWideItem);
+
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
       <ol className="flex list-none items-center gap-xs">
-        <li className="flex items-center gap-xs">
-          {currentMun || orgWideItem ? (
+        <li
+          className={cn(
+            "flex items-center gap-xs",
+            // "Overview" never truncates (no `min-w-0`), so on a narrow
+            // viewport with a mun name AND a section crumb after it, this
+            // segment kept its full width and forced BOTH truncatable
+            // crumbs to absorb all the shrinking — squeezing the current
+            // page's own name (the one crumb that actually matters once
+            // you're this deep) down to an unreadable ~21px, invisible in
+            // practice. Confirmed at 320/375px on any per-mun workspace
+            // page. "Overview" duplicates the sidebar's "MUN Hub" home
+            // link, so it's the safest one to drop below `sm` rather than
+            // making every crumb fight over the same starved space.
+            hasDeeperCrumb && "hidden sm:flex",
+          )}
+        >
+          {hasDeeperCrumb ? (
             <Link to="/organizer/dashboard" className={LINK_CLASS}>Overview</Link>
           ) : (
             <span aria-current="page" className="text-body-md font-medium text-ink">Overview</span>
