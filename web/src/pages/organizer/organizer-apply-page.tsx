@@ -18,6 +18,7 @@ import {
   DATE_INPUT_FORMAT,
   WEBSITE_FORMAT,
 } from "@/components/organizer/bright-form";
+import { OrganizerBrightApplySkeleton } from "@/components/organizer/organizer-bright-skeleton";
 import { OrganizerBrightShell } from "@/components/organizer/organizer-bright-shell";
 import { RequireOrganizer } from "@/guards/require-organizer";
 import { cn } from "cn";
@@ -57,10 +58,10 @@ function ApplyContent() {
     enabled: completed,
   });
 
-  if (onboarding.isPending) return <div className="flex-1" aria-busy="true" />;
+  if (onboarding.isPending) return <OrganizerBrightApplySkeleton />;
   // The first MUN is applied for as part of onboarding.
   if (onboarding.data && !completed) return <Navigate to={`/organizer/onboarding${search}`} replace />;
-  if (completed && applications.isPending) return <div className="flex-1" aria-busy="true" />;
+  if (completed && applications.isPending) return <OrganizerBrightApplySkeleton />;
 
   const mine = applications.data ?? [];
   const pending = mine.find((application) => application.status === "SUBMITTED");

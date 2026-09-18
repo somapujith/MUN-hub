@@ -9,6 +9,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
 import { RegistrationForm } from "@/components/registration/registration-form";
 import { RegistrationNotice } from "@/components/registration/registration-notice";
+import { RegistrationFormSkeleton, RegistrationPageSkeleton } from "@/components/registration/registration-page-skeleton";
 import { EmailVerificationNotice } from "@/components/dashboard/email-verification-notice";
 import { hasPassed } from "@/components/registration/deadline";
 import type { ProductWithAvailability } from "@/components/registration/types";
@@ -124,7 +125,7 @@ export function RegisterPage() {
     return (
       <div className="flex min-h-full flex-1 flex-col">
         <SiteHeader />
-        <main className="mx-auto w-full max-w-5xl flex-1 px-lg py-xl" aria-busy="true" />
+        <RegistrationPageSkeleton />
         <SiteFooter />
       </div>
     );
@@ -202,8 +203,8 @@ export function RegisterPage() {
         <Helmet>
           <title>{`Register — ${mun.name} | MUN Hub`}</title>
         </Helmet>
-        <RegistrationShell munName={mun.name} dateRange={dateRange} location={location} narrow>
-          <div aria-busy="true" className="py-xxl" />
+        <RegistrationShell munName={mun.name} dateRange={dateRange} location={location}>
+          <RegistrationFormSkeleton />
         </RegistrationShell>
       </>
     );

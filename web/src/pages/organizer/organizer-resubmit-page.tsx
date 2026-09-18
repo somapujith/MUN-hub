@@ -18,6 +18,7 @@ import {
   DATE_INPUT_FORMAT,
   WEBSITE_FORMAT,
 } from "@/components/organizer/bright-form";
+import { OrganizerBrightFormSkeleton } from "@/components/organizer/organizer-bright-skeleton";
 import { OrganizerBrightShell } from "@/components/organizer/organizer-bright-shell";
 import { RequireOrganizer } from "@/guards/require-organizer";
 import { cn } from "cn";
@@ -46,7 +47,7 @@ function ResubmitContent() {
   const { munId = "" } = useParams();
   const applications = useQuery({ queryKey: queryKeys.organizerApplications(), queryFn: listMyOrganizerApplications });
 
-  if (applications.isPending) return <div className="flex-1" aria-busy="true" />;
+  if (applications.isPending) return <OrganizerBrightFormSkeleton />;
 
   const application = (applications.data ?? []).find((a) => a.munId === munId);
   // Nothing to resubmit here: either it's not this organizer's application,
