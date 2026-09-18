@@ -1,8 +1,14 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, organizerApplications, users } from '@/lib/db/schema'
-import { APPLICATION_PENDING, listMyOrganizerApplications, submitOrganizerApplication } from './organizer-application'
+import { muns, organizerApplications, users, verificationLogs } from '@/lib/db/schema'
+import type { Session } from '@/lib/auth/adapter'
+import {
+  APPLICATION_PENDING,
+  listMyOrganizerApplications,
+  resubmitOrganizerApplication,
+  submitOrganizerApplication,
+} from './organizer-application'
 
 describe('submitOrganizerApplication', () => {
   async function makeOrganizer() {
@@ -136,8 +142,147 @@ describe('submitOrganizerApplication', () => {
 
     expect(munA?.slug).not.toBe(munB?.slug)
   })
+})
 
-  afterAll(async () => {
-    await db.$client.end()
+describe('resubmitOrganizerApplication', () => {
+  function sess(user: { id: string }): Session {
+    return { userId: user.id, role: 'ORGANIZER' }
+  }
+
+  async function makeChangesRequestedApplication(reviewNotes = 'Please clarify your delegate count.') {
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'Resubmit Org', email: `resubmitorg-${crypto.randomUUID()}@test.com`, role: 'ORGANIZER' })
+      .returning()
+    const [mun] = await db
+      .insert(muns)
+      .values({
+        organizerId: organizer.id,
+        name: 'Needs Fixing MUN',
+        slug: `needs-fixing-${crypto.randomUUID()}`,
+        description: 'Original description that was too vague for review.',
+        startDate: new Date('2027-10-01'),
+        city: 'Chennai',
+        status: 'CHANGES_REQUESTED',
+      })
+      .returning()
+    await db.insert(organizerApplications).values({
+      organizerId: organizer.id,
+      munId: mun.id,
+      status: 'CHANGES_REQUESTED',
+      reviewNotes,
+      expectedDelegateCount: 50,
+    })
+    return { organizer, mun }
+  }
+
+  const resubmitInputFor = (munId: string) => ({
+    munId,
+    conferenceName: 'Fixed MUN Name',
+    expectedDate: new Date('2027-11-01'),
+    location: 'Bengaluru',
+    expectedDelegateCount: 250,
+    description: 'A much more detailed description addressing the reviewer feedback in full.',
+    previousEditions: '2 editions',
+    websiteUrl: 'https://fixedmun.example.com',
   })
+
+  it('rejects a signed-out / non-organizer caller', async () => {
+    const { mun } = await makeChangesRequestedApplication()
+    await expect(resubmitOrganizerApplication(resubmitInputFor(mun.id), null)).rejects.toThrow('Forbidden')
+  })
+
+  it('rejects a caller who does not own the application', async () => {
+    const { mun } = await makeChangesRequestedApplication()
+    const [stranger] = await db
+      .insert(users)
+      .values({ name: 'Stranger', email: `stranger-${crypto.randomUUID()}@test.com`, role: 'ORGANIZER' })
+      .returning()
+
+    await expect(resubmitOrganizerApplication(resubmitInputFor(mun.id), sess(stranger))).rejects.toThrow('Forbidden')
+
+    const [unchanged] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(unchanged.status).toBe('CHANGES_REQUESTED')
+  })
+
+  it('rejects a munId with no application at all', async () => {
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'No App Org', email: `noapp-${crypto.randomUUID()}@test.com`, role: 'ORGANIZER' })
+      .returning()
+
+    await expect(
+      resubmitOrganizerApplication(resubmitInputFor(crypto.randomUUID()), sess(organizer)),
+    ).rejects.toThrow('Application not found')
+  })
+
+  it('rejects an application that is no longer CHANGES_REQUESTED (via the state machine, not a duplicated check)', async () => {
+    const { organizer, mun } = await makeChangesRequestedApplication()
+    // Simulate MUN Hub having already approved it and moved it into ONBOARDING.
+    await db.update(muns).set({ status: 'ONBOARDING' }).where(eq(muns.id, mun.id))
+    await db.update(organizerApplications).set({ status: 'APPROVED' }).where(eq(organizerApplications.munId, mun.id))
+
+    await expect(resubmitOrganizerApplication(resubmitInputFor(mun.id), sess(organizer))).rejects.toThrow(
+      'Invalid transition from ONBOARDING to SUBMITTED',
+    )
+  })
+
+  it('resubmits: mun + application flip to SUBMITTED, edited fields are saved, reviewNotes clears, and an audit log is written', async () => {
+    const { organizer, mun } = await makeChangesRequestedApplication('Fix your description — too vague.')
+    const input = resubmitInputFor(mun.id)
+
+    const updated = await resubmitOrganizerApplication(input, sess(organizer))
+
+    expect(updated.status).toBe('SUBMITTED')
+    expect(updated.reviewNotes).toBeNull()
+    expect(updated.expectedDelegateCount).toBe(250)
+    expect(updated.previousEditions).toBe('2 editions')
+    expect(updated.websiteUrl).toBe('https://fixedmun.example.com')
+
+    const [refreshedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+    expect(refreshedMun.status).toBe('SUBMITTED')
+    expect(refreshedMun.name).toBe('Fixed MUN Name')
+    expect(refreshedMun.city).toBe('Bengaluru')
+    expect(refreshedMun.description).toBe(input.description)
+    expect(refreshedMun.startDate?.toISOString()).toBe(new Date('2027-11-01').toISOString())
+
+    // transitionMun's own audit-log convention — the same one reviewMunApplication relies on.
+    const logs = await db
+      .select()
+      .from(verificationLogs)
+      .where(eq(verificationLogs.munId, mun.id))
+      .orderBy(verificationLogs.createdAt)
+    expect(logs).toHaveLength(1)
+    expect(logs[0].action).toBe('SUBMITTED')
+    expect(logs[0].reviewerId).toBe(organizer.id)
+  })
+
+  it('is a real loop: a resubmitted application can be sent through CHANGES_REQUESTED and resubmitted again', async () => {
+    const { organizer, mun } = await makeChangesRequestedApplication()
+    await resubmitOrganizerApplication(resubmitInputFor(mun.id), sess(organizer))
+
+    // A second Gate-1 review round also asks for changes.
+    await db.update(muns).set({ status: 'CHANGES_REQUESTED' }).where(eq(muns.id, mun.id))
+    await db
+      .update(organizerApplications)
+      .set({ status: 'CHANGES_REQUESTED', reviewNotes: 'Still not enough detail.' })
+      .where(eq(organizerApplications.munId, mun.id))
+
+    const second = await resubmitOrganizerApplication(
+      { ...resubmitInputFor(mun.id), conferenceName: 'Fixed Again MUN' },
+      sess(organizer),
+    )
+    expect(second.status).toBe('SUBMITTED')
+
+    const logs = await db
+      .select({ action: verificationLogs.action })
+      .from(verificationLogs)
+      .where(eq(verificationLogs.munId, mun.id))
+      .orderBy(verificationLogs.createdAt)
+    expect(logs.map((l) => l.action)).toEqual(['SUBMITTED', 'SUBMITTED'])
+  })
+})
+
+afterAll(async () => {
+  await db.$client.end()
 })

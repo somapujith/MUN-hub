@@ -45,6 +45,14 @@ export interface MyOrganizerApplication {
   /** The Gate-1 reviewer's note to the organizer, if any. */
   reviewNotes: string | null;
   submittedAt: string;
+  // The organizer's own editable answers — used to pre-fill the resubmit
+  // form when status is CHANGES_REQUESTED.
+  munDescription: string | null;
+  munCity: string | null;
+  munStartDate: string | null;
+  expectedDelegateCount: number | null;
+  previousEditions: string | null;
+  websiteUrl: string | null;
 }
 
 /**
@@ -62,4 +70,17 @@ export function submitOrganizerApplication(input: SubmitOrganizerApplicationInpu
 /** GET /organizer/applications: the signed-in organizer's applications, newest first. */
 export function listMyOrganizerApplications() {
   return request<MyOrganizerApplication[]>("/organizer/applications");
+}
+
+/**
+ * POST /organizer/applications/:munId/resubmit — the Gate-1 loop: puts an
+ * existing CHANGES_REQUESTED application back to SUBMITTED. Refused (403) if
+ * the mun isn't the caller's own, or (409) if it isn't currently
+ * CHANGES_REQUESTED.
+ */
+export function resubmitOrganizerApplication(munId: string, input: SubmitOrganizerApplicationInput) {
+  return request<OrganizerApplication>(`/organizer/applications/${munId}/resubmit`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }

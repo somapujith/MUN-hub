@@ -387,6 +387,7 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'Mun not found', status: 404, code: 'NOT_FOUND' },
   { message: 'Committee not found', status: 404, code: 'NOT_FOUND' },
   { message: 'Ticket not found', status: 404, code: 'NOT_FOUND' },
+  { message: 'Application not found', status: 404, code: 'NOT_FOUND' },
   { message: 'Registration product is at capacity', status: 409, code: 'CONFLICT_CAPACITY' },
   { message: 'You already have an active registration for this product', status: 409, code: 'CONFLICT_DUPLICATE' },
   { message: 'Message cannot be empty', status: 400, code: 'VALIDATION_FAILED' },

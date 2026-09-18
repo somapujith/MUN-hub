@@ -152,6 +152,15 @@ export interface OrganizerApplicationSummary {
   /** The Gate-1 reviewer's note to the organizer, if any. */
   reviewNotes: string | null
   submittedAt: Date
+  // The organizer's own editable answers — surfaced so a CHANGES_REQUESTED
+  // application can be re-opened for editing before resubmission (see
+  // resubmitOrganizerApplication below) instead of resubmitting blind.
+  munDescription: string | null
+  munCity: string | null
+  munStartDate: Date | null
+  expectedDelegateCount: number | null
+  previousEditions: string | null
+  websiteUrl: string | null
 }
 
 /** The signed-in organizer's own host applications, newest first. */
@@ -167,9 +176,104 @@ export async function listMyOrganizerApplications(session: Session | null): Prom
       status: organizerApplications.status,
       reviewNotes: organizerApplications.reviewNotes,
       submittedAt: organizerApplications.submittedAt,
+      munDescription: muns.description,
+      munCity: muns.city,
+      munStartDate: muns.startDate,
+      expectedDelegateCount: organizerApplications.expectedDelegateCount,
+      previousEditions: organizerApplications.previousEditions,
+      websiteUrl: organizerApplications.websiteUrl,
     })
     .from(organizerApplications)
     .leftJoin(muns, eq(muns.id, organizerApplications.munId))
     .where(eq(organizerApplications.organizerId, session.userId))
     .orderBy(desc(organizerApplications.submittedAt))
+}
+
+export interface ResubmitOrganizerApplicationInput {
+  munId: string
+  conferenceName: string
+  expectedDate: Date
+  location: string
+  expectedDelegateCount: number
+  description: string
+  previousEditions?: string
+  websiteUrl?: string
+}
+
+/**
+ * Gate-1 loop: resubmits an EXISTING mun's organizer application after
+ * MUN Hub requested changes (mun-state-machine.ts's already-declared
+ * `CHANGES_REQUESTED -> SUBMITTED` transition — this is its first real call
+ * site; see that file's header comment before touching any of this).
+ *
+ * Before this existed, a CHANGES_REQUESTED application was a permanent dead
+ * end: `submitOrganizerApplication` only creates a brand-new mun, so calling
+ * it again just left the original stuck forever and orphaned a second,
+ * unrelated mun (docs/review-to-claude.md item #1).
+ *
+ * Ownership: the caller must be the ORGANIZER who owns this application —
+ * checked here explicitly, since `transitionMun` itself has no notion of
+ * ownership and will happily transition any mun id it's given. State:
+ * enforced by `transitionMun`'s own `canTransition` check against the mun's
+ * *current* status (it throws `Invalid transition from X to SUBMITTED`,
+ * already mapped to 409 CONFLICT_STATE in server/middleware/error.ts) rather
+ * than duplicating that check here — `organizer_applications.status` and
+ * `muns.status` are kept in lockstep by `reviewMunApplication`, so the two
+ * can't drift apart at a CHANGES_REQUESTED application.
+ *
+ * Everything (the mun field edits, the state transition, and the
+ * application row update) commits as one transaction; `transitionMun` writes
+ * its own `verificationLogs` audit row as part of that same transaction,
+ * same convention `reviewMunApplication` uses.
+ */
+export async function resubmitOrganizerApplication(
+  input: ResubmitOrganizerApplicationInput,
+  session: Session | null,
+): Promise<OrganizerApplication> {
+  if (!session || session.role !== 'ORGANIZER') throw new Error('Forbidden')
+
+  return db.transaction(async (tx) => {
+    const [application] = await tx
+      .select()
+      .from(organizerApplications)
+      .where(eq(organizerApplications.munId, input.munId))
+      .limit(1)
+    if (!application) throw new Error('Application not found')
+    if (application.organizerId !== session.userId) throw new Error('Forbidden')
+
+    // The organizer gets to fix whatever the reviewer flagged before it goes
+    // back into the queue — same fields `submitOrganizerApplication` accepts
+    // for a new application. The mun's slug is intentionally left untouched
+    // (never published, but not worth destabilizing a URL over a re-review).
+    await tx
+      .update(muns)
+      .set({
+        name: input.conferenceName,
+        description: input.description,
+        startDate: input.expectedDate,
+        city: input.location,
+        updatedAt: new Date(),
+      })
+      .where(eq(muns.id, input.munId))
+
+    await transitionMun(input.munId, 'SUBMITTED', session.userId, undefined, undefined, tx)
+
+    const [updated] = await tx
+      .update(organizerApplications)
+      .set({
+        status: 'SUBMITTED',
+        // The old reviewer note applied to the previous round; carrying it
+        // forward next to a freshly-"Under review" badge would read like
+        // unresolved feedback. Full history still lives in verificationLogs.
+        reviewNotes: null,
+        expectedDelegateCount: input.expectedDelegateCount,
+        previousEditions: input.previousEditions?.trim() || null,
+        websiteUrl: input.websiteUrl?.trim() || null,
+        submittedAt: new Date(),
+      })
+      .where(eq(organizerApplications.id, application.id))
+      .returning()
+
+    return updated
+  })
 }
