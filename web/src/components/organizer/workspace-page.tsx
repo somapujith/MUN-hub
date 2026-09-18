@@ -35,7 +35,12 @@ export function WorkspacePage({
           )}
         </div>
         {actions && (
-          <div className="flex shrink-0 flex-wrap items-center gap-xs">{actions}</div>
+          // shrink-0 only from `sm` up: below that, the title block already takes
+          // the full width of its own wrapped line, so this group is alone on its
+          // line too and needs to be free to shrink (and let its own flex-wrap
+          // apply) instead of forcing a fixed content width past a narrow
+          // viewport (e.g. a status badge + button together at 320px).
+          <div className="flex flex-wrap items-center gap-xs sm:shrink-0">{actions}</div>
         )}
       </header>
       {children}

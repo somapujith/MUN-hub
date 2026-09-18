@@ -56,7 +56,7 @@ export function OrganizerMunsPage() {
                   to={munSectionHref(mun.id, "setup")}
                   className="flex h-full flex-col gap-sm rounded-md border border-border bg-card p-lg transition-colors hover:bg-surface-soft"
                 >
-                  <div className="flex items-start justify-between gap-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-sm">
                     <h2 className="font-display text-title-md text-ink">{mun.name}</h2>
                     <MunStatusBadge status={mun.status} />
                   </div>
