@@ -98,7 +98,7 @@ export function OrganizerAnalyticsPage() {
             <p className="text-caption text-muted-foreground">
               Confirmed registrations count delegates who are confirmed or checked in. Collected is what delegates
               paid for seats that still stand, including MUN Hub&apos;s platform fee and the GST on it; net to you is
-              what remains after them. See Finance for the full breakdown.
+              what remains after them.
             </p>
           </>
         )}

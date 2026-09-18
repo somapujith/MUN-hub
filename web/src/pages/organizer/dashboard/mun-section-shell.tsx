@@ -10,7 +10,6 @@ const SECTION_DESCRIPTIONS: Record<string, string> = {
   form: "Custom fields delegates fill in during registration.",
   accommodation: "Paid add-ons and lodging options sold with registration.",
   registrations: "Delegate roster, payment status, and check-in readiness.",
-  finance: "Payments collected, platform fees, and settlement settings.",
   communications: "Email templates and announcements to delegates.",
   documents: "Background guides, rules of procedure, and media assets.",
   "conference-day": "Schedule, venue logistics, and on-site operations.",

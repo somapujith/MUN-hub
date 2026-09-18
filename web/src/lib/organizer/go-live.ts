@@ -43,7 +43,11 @@ export const MODULE_SECTION: Partial<Record<MunModule, string>> = {
   REGISTRATION_TYPES: "products",
   REGISTRATION_FORM: "form",
   PRICING_CAPACITY: "products",
-  PAYMENT_SETTLEMENT: "finance",
+  // As of the minimum-required-fields cut, this module checks the
+  // organizer's account-level UPI payout (set on the Settings page), not the
+  // old per-mun "Payments & Finance" section that c431ded removed — see
+  // lib/lifecycle/validators/commerce.ts#validatePaymentSettlement.
+  PAYMENT_SETTLEMENT: "settings",
   RULES_DOCUMENTS: "documents",
   SCHEDULE: "conference-day",
   ACCOMMODATION: "accommodation",
