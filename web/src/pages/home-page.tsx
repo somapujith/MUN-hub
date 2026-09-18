@@ -21,6 +21,7 @@ import { getMarketplaceFacets, searchMuns, type MunSearchParams } from "@/api/ma
 import { queryKeys } from "@/api/query-keys";
 import { DEFAULT_DESCRIPTION } from "@/lib/seo";
 import type { MunSearchResult, MunSummary } from "@/types";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 /**
  * "Closing soon": the registration deadline falls within this many days. A MUN
@@ -54,6 +55,7 @@ function isClosingSoon(mun: MunSummary, now: number): boolean {
 }
 
 export function HomePage() {
+  useScrollToTop();
   const [searchParams] = useSearchParams();
   const listYourMunHref = useListYourMunHref();
   const facetsQuery = useQuery({

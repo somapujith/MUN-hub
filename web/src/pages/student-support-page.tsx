@@ -6,11 +6,13 @@ import { SupportRedirect } from "@/components/support/support-redirect";
 import { inboxUrlForRole } from "@/components/support/support-labels";
 import { useSession } from "@/hooks/use-session";
 import { resolveZoneUrl } from "@/lib/host-routing";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 const STAFF_ROLES = new Set(["OPERATIONS", "ADMIN", "SUPER_ADMIN"]);
 
 /** /dashboard/support — a delegate's support inbox. Route-guarded by RequireAuth. */
 export function StudentSupportPage() {
+  useScrollToTop();
   const { data: session } = useSession();
 
   // Organizers and staff each have their own support screen.

@@ -22,6 +22,7 @@ import { getProfileFormDefaults } from "@/api/student-profile";
 import { acceptGroupInvitation, fetchInvitationPreview } from "@/api/registration-group";
 import { useSession } from "@/hooks/use-session";
 import { NotFoundPage } from "@/pages/not-found-page";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 /**
  * Landing page for a group/delegation invitation link
@@ -39,6 +40,7 @@ import { NotFoundPage } from "@/pages/not-found-page";
  * those two steps.
  */
 export function GroupInviteAcceptPage() {
+  useScrollToTop();
   const { data: session } = useSession();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();

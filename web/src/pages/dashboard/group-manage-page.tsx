@@ -23,6 +23,7 @@ import {
   type GroupRosterSlot,
 } from "@/api/registration-group";
 import { NotFoundPage } from "@/pages/not-found-page";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 function SlotStatus({ slot }: { slot: GroupRosterSlot }) {
   if (slot.member) {
@@ -74,6 +75,13 @@ function SlotStatus({ slot }: { slot: GroupRosterSlot }) {
 export function GroupManagePage() {
   const { groupId = "" } = useParams();
   const queryClient = useQueryClient();
+  // See use-scroll-to-top.ts — this page's most common entry point is the
+  // "Invite your team" link on the (often tall, scrolled-down) registration
+  // confirmation page; without this the browser landed here still scrolled
+  // to that offset (measured: scrollY carried over at 215px on a 320px-wide
+  // load, showing the roster mid-list instead of "Your team" at the top).
+  useScrollToTop();
+
   const [email, setEmail] = useState("");
   const [invitedName, setInvitedName] = useState("");
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -217,7 +225,7 @@ export function GroupManagePage() {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-sm">
+                <div className="flex flex-wrap items-center gap-sm">
                   <SlotStatus slot={slot} />
                   {slot.invitation?.status === "PENDING" && !slot.member && (
                     <div className="flex gap-xxs">

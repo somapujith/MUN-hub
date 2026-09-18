@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { LoginForm } from "@/components/auth/login-form";
 import { safeRedirectTo } from "@/lib/redirect";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 /**
  * The general-purpose door. `expectedRoles: null` — it accepts any account and
@@ -14,6 +15,7 @@ import { safeRedirectTo } from "@/lib/redirect";
  * signposting, not for gatekeeping.
  */
 export function LoginPage() {
+  useScrollToTop();
   const [searchParams] = useSearchParams();
   const redirectTo = safeRedirectTo(searchParams.get("redirectTo") ?? searchParams.get("redirect"));
   // reset-password-page sends people here after a successful reset. Neutral

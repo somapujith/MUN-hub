@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { useTurnstile } from "@/hooks/use-turnstile";
 import { cn } from "cn";
 import { safeRedirectTo } from "@/lib/redirect";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 // Mirrors lib/actions/auth.ts's MIN_PASSWORD_LENGTH — checked client-side for
 // fast feedback, but the server re-validates regardless.
@@ -245,6 +246,7 @@ function toSignUpInput(form: FormState): SignUpInput {
 }
 
 export function SignupPage() {
+  useScrollToTop();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();

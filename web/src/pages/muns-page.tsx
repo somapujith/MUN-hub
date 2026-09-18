@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { getMarketplaceFacets, searchMuns } from "@/api/marketplace";
 import { queryKeys } from "@/api/query-keys";
 import { FILTER_PARAM_KEYS, resolveMarketplaceSearch } from "@/lib/marketplace-filters";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 const PAGE_SIZE = 24;
 
@@ -23,6 +24,7 @@ function pageHref(searchParams: URLSearchParams, page: number): string {
 }
 
 export function MunsPage() {
+  useScrollToTop();
   const [searchParams] = useSearchParams();
 
   const parsedPage = Number.parseInt(searchParams.get("page") ?? "1", 10);

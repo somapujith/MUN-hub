@@ -10,6 +10,7 @@ import { formatDateRange } from "@/components/shared/date-range";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 /**
  * A delegate's conference pass: where and when, their seat, and the check-in
@@ -21,6 +22,9 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export function RegistrationPassPage() {
   const { registrationId = "" } = useParams();
+  // See use-scroll-to-top.ts — commonly reached via "View your pass" on the
+  // (often tall, scrolled-down) registration confirmation page.
+  useScrollToTop();
   const passQuery = useQuery({
     queryKey: checkInKeys.pass(registrationId),
     queryFn: () => getRegistrationPass(registrationId),

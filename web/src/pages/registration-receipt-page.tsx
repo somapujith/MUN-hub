@@ -13,6 +13,7 @@ import { formatDateRange } from "@/components/shared/date-range";
 import { queryKeys } from "@/api/query-keys";
 import { fetchRegistrationReceipt } from "@/api/registration";
 import { NotFoundPage } from "@/pages/not-found-page";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 function formatAmount(amount: number, currency: string): string {
   return new Intl.NumberFormat("en-IN", {
@@ -38,6 +39,9 @@ function formatDateTime(date: Date): string {
  */
 export function RegistrationReceiptPage() {
   const { registrationId = "" } = useParams();
+  // See use-scroll-to-top.ts — commonly reached via "View receipt" on the
+  // (often tall, scrolled-down) registration confirmation page.
+  useScrollToTop();
   const receiptQuery = useQuery({
     queryKey: queryKeys.registrationReceipt(registrationId),
     queryFn: () => fetchRegistrationReceipt(registrationId),

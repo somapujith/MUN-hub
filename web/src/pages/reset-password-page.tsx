@@ -9,6 +9,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useScrollToTop } from "@/hooks/use-scroll-to-top";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -28,6 +29,7 @@ function ErrorAlert({ id, message }: { id: string; message: string }) {
 }
 
 export function ResetPasswordPage() {
+  useScrollToTop();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const token = searchParams.get("token") ?? "";
