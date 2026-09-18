@@ -31,6 +31,13 @@ interface RegistrationProductCardProps {
   availability?: ProductAvailability;
   /** Whether the MUN is currently accepting registrations. */
   canRegister: boolean;
+  /**
+   * True once registration has definitively ended (status REGISTRATION_CLOSED,
+   * or the mun's overall deadline has passed) as opposed to merely not having
+   * started yet — so the disabled button can say "Closed" instead of the
+   * misleading "Not yet open" for a mun whose window has already come and gone.
+   */
+  closed?: boolean;
   /** MUN slug, used to build the registration link. */
   munSlug: string;
   /** Renders on the `surface-soft` tone — the doc's only "featured" signal. */
@@ -41,6 +48,7 @@ export function RegistrationProductCard({
   product,
   availability,
   canRegister,
+  closed = false,
   munSlug,
   featured = false,
 }: RegistrationProductCardProps) {
@@ -143,7 +151,7 @@ export function RegistrationProductCard({
             // stays readable; the hairline carries the unavailable signal.
             className="w-full disabled:opacity-100 disabled:border-border-strong disabled:text-muted-foreground"
           >
-            {soldOut ? "Sold out" : deadlinePassed ? "Closed" : "Not yet open"}
+            {soldOut ? "Sold out" : deadlinePassed || closed ? "Closed" : "Not yet open"}
           </Button>
         )}
       </div>

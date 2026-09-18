@@ -164,7 +164,12 @@ export function GroupRegisterPage() {
     </div>
   );
 
-  if (mun.status !== "REGISTRATION_OPEN") {
+  // A mun's status doesn't flip to REGISTRATION_CLOSED on its own the moment
+  // its deadline lapses (that's an admin action) — so the deadline has to be
+  // checked here too, or a head delegate could fill in this whole funnel only
+  // to be rejected by the server's own deadline check on the final submit.
+  // See components/registration/deadline.ts#canRegisterForMun.
+  if (mun.status !== "REGISTRATION_OPEN" || hasPassed(mun.registrationDeadline)) {
     return shell(
       <RegistrationNotice tone="neutral" title="Registration isn't open" message={`${mun.name} isn't open for registration right now.`}>
         <Button render={<Link to={`/mun/${slug}`} />}>View conference</Button>
@@ -359,9 +364,14 @@ export function GroupRegisterPage() {
                   value={core[key]}
                   onChange={(e) => setCore((d) => ({ ...d, [key]: e.target.value }))}
                   aria-invalid={(showErrors && key !== "phone" && !core[key].trim()) || undefined}
+                  aria-describedby={
+                    showErrors && key !== "phone" && !core[key].trim() ? `${key}-error` : undefined
+                  }
                 />
                 {showErrors && key !== "phone" && !core[key].trim() && (
-                  <p className="text-body-md text-destructive-text">{CORE_LABELS[key]} is required.</p>
+                  <p id={`${key}-error`} className="text-body-md text-destructive-text">
+                    {CORE_LABELS[key]} is required.
+                  </p>
                 )}
               </div>
             ))}

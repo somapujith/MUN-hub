@@ -23,3 +23,18 @@ export function hasPassed(deadline: Date | null): boolean {
   if (deadline === null) return false;
   return deadline.getTime() <= Date.now();
 }
+
+/**
+ * Whether a delegate can start registering for this MUN, mirroring both
+ * checks `lib/actions/registration.ts#initiateRegistration` makes before it
+ * ever looks at a specific pass: the mun must be open, and — separately from
+ * any per-pass `registrationProducts.deadline` — its own overall
+ * `registrationDeadline` must not have passed. A mun's status is admin-set
+ * and doesn't flip to REGISTRATION_CLOSED on its own the moment the deadline
+ * lapses, so without this check the marketplace/detail/registration pages
+ * kept offering "Register now" (and let a delegate fill in the whole funnel)
+ * right up until the server's own deadline check rejected the final submit.
+ */
+export function canRegisterForMun(mun: { status: string; registrationDeadline: Date | null }): boolean {
+  return mun.status === "REGISTRATION_OPEN" && !hasPassed(mun.registrationDeadline);
+}

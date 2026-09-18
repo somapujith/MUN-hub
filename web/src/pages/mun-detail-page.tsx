@@ -45,6 +45,7 @@ import {
 } from "@/api/marketplace";
 import { listMunFaqsForOrganizer } from "@/api/mun-faq";
 import { queryKeys } from "@/api/query-keys";
+import { canRegisterForMun, hasPassed } from "@/components/registration/deadline";
 import { munSectionHref } from "@/lib/organizer/nav-config";
 import { absoluteHttpUrl, buildMunEventJsonLd, metaDescription } from "@/lib/seo";
 import { cn } from "cn";
@@ -187,7 +188,10 @@ export function MunDetailPage({
     return <NotFoundPage />;
   }
 
-  const canRegister = !previewMunId && mun.status === "REGISTRATION_OPEN";
+  const canRegister = !previewMunId && canRegisterForMun(mun);
+  // Distinguishes "closed" from "not yet open" for the disabled pass buttons
+  // below — canRegister alone collapses both into one boolean.
+  const registrationClosed = mun.status === "REGISTRATION_CLOSED" || hasPassed(mun.registrationDeadline);
   const products = mun.registrationProducts;
   const availability = new Map(Object.entries(availabilityQuery.data ?? {}));
   const soldOutProductIds = new Set(
@@ -445,6 +449,7 @@ export function MunDetailPage({
                     product={product}
                     availability={availability.get(product.id)}
                     canRegister={canRegister}
+                    closed={registrationClosed}
                     munSlug={mun.slug}
                     featured={product.id === featuredProductId}
                   />

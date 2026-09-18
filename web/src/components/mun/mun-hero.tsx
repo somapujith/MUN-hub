@@ -6,6 +6,7 @@ import { formatPrice } from "@/components/shared/currency";
 import { Button } from "@/components/ui/button";
 import { safeLinkUrl } from "@/components/mun/mun-format";
 import { RemoteImage } from "@/components/mun/remote-image";
+import { canRegisterForMun } from "@/components/registration/deadline";
 import type { MunDetail } from "@/types";
 
 /**
@@ -30,7 +31,7 @@ interface MunHeroProps {
 }
 
 export function MunHero({ mun, fromPrice }: MunHeroProps) {
-  const canRegister = mun.status === "REGISTRATION_OPEN";
+  const canRegister = canRegisterForMun(mun);
   const location = [mun.venue, mun.city, mun.country].filter(Boolean).join(", ");
   const committeeCount = mun.committees.length;
   const cover = safeLinkUrl(mun.coverImage);
@@ -151,7 +152,8 @@ export function MunHero({ mun, fromPrice }: MunHeroProps) {
                   className="disabled:opacity-100 disabled:border-border-strong disabled:text-muted-foreground"
                 >
                   <LockIcon className="size-4" strokeWidth={1.75} />
-                  {mun.status === "REGISTRATION_CLOSED"
+                  {mun.status === "REGISTRATION_CLOSED" ||
+                  (mun.status === "REGISTRATION_OPEN" && !canRegister)
                     ? "Registration closed"
                     : "Registration not open yet"}
                 </Button>
