@@ -418,6 +418,12 @@ async function loadRegistrationReadiness(reader: Reader, munId: string, now: Dat
   }
 }
 
+interface ApplyPlanResult {
+  status: MunStatus
+  /** Only populated for `cancel` — the registrations this call swept PENDING/PAYMENT_PENDING -> CANCELLED, for notifyConferenceCancelled to email separately from already-CONFIRMED delegates. */
+  justCancelledRegistrationIds: string[]
+}
+
 async function applyPlan(
   tx: Tx,
   munId: string,
@@ -427,8 +433,9 @@ async function applyPlan(
   actorId: string,
   note: string | undefined,
   now: Date,
-): Promise<MunStatus> {
+): Promise<ApplyPlanResult> {
   let status: MunStatus | undefined
+  let justCancelledRegistrationIds: string[] = []
   for (const step of steps) {
     const updated = await transitionMun(munId, step.to, actorId, step.note ?? note, undefined, tx)
     status = updated.status
@@ -447,10 +454,12 @@ async function applyPlan(
   }
 
   if (action === 'cancel') {
-    await tx
+    const swept = await tx
       .update(registrations)
       .set({ status: 'CANCELLED', updatedAt: now })
       .where(and(eq(registrations.munId, munId), inArray(registrations.status, [...IN_FLIGHT_REGISTRATION_STATUSES])))
+      .returning({ id: registrations.id })
+    justCancelledRegistrationIds = swept.map((row) => row.id)
 
     await tx
       .update(munSubmissions)
@@ -460,7 +469,7 @@ async function applyPlan(
       )
   }
 
-  return status
+  return { status, justCancelledRegistrationIds }
 }
 
 function normalizeReason(reason: string | null | undefined): string | undefined {
@@ -515,7 +524,7 @@ export async function runLifecycleAction(
   const reason = normalizeReason(input.reason)
   if (action === 'cancel' && !reason) throw new LifecycleActionError(LIFECYCLE_ERRORS.reasonRequired, 400)
 
-  const status = await db.transaction(async (tx) => {
+  const { status, justCancelledRegistrationIds } = await db.transaction(async (tx) => {
     const mun = await lockMun(tx, munId)
     const actor = describeActor(mun, session)
     if (!isPermitted(action, actor)) throw new Error('Forbidden')
@@ -531,7 +540,7 @@ export async function runLifecycleAction(
   })
 
   if (action === 'cancel') {
-    await runAfterCommit('conference cancelled', () => notifyConferenceCancelled(munId))
+    await runAfterCommit('conference cancelled', () => notifyConferenceCancelled(munId, { justCancelledRegistrationIds }))
   }
 
   return { munId, status }
