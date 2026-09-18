@@ -27,6 +27,7 @@ import {
   DATE_INPUT_FORMAT,
   WEBSITE_FORMAT,
 } from "@/components/organizer/bright-form";
+import { OrganizerBrightWizardSkeleton } from "@/components/organizer/organizer-bright-skeleton";
 import { OrganizerBrightShell } from "@/components/organizer/organizer-bright-shell";
 import { RequireOrganizer } from "@/guards/require-organizer";
 import { cn } from "cn";
@@ -66,7 +67,7 @@ function OnboardingWizard() {
   const [revisiting, setRevisiting] = React.useState<OnboardingStep | null>(null);
 
   if (onboarding.isPending) {
-    return <div className="flex-1" aria-busy="true" />;
+    return <OrganizerBrightWizardSkeleton />;
   }
   if (onboarding.isError) {
     return (

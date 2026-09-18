@@ -19,6 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useScrollFadeRef } from "@/hooks/use-scroll-fade";
 import { cn } from "cn";
 import type { StudentProfileInput } from "@/types/student-profile";
 
@@ -75,6 +76,7 @@ const NAV_ITEM_ACTIVE = "relative bg-surface-soft text-ink before:absolute befor
 
 export function ProfilePage() {
   const queryClient = useQueryClient();
+  const mobileSectionNavRef = useScrollFadeRef<HTMLElement>("x");
   // Set by the signup page (router state, so the URL stays /profile): the
   // account was just created, and the copy says so instead of leaving the
   // delegate wondering whether anything happened.
@@ -232,7 +234,11 @@ export function ProfilePage() {
 
         <div className="grid gap-xl lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start">
           {/* Mobile: horizontal scrollable pill row. Desktop: vertical sidebar (see lg:hidden / hidden lg:flex below). */}
-          <nav aria-label="Profile sections" className="flex gap-xs overflow-x-auto pb-xxs lg:hidden">
+          <nav
+            ref={mobileSectionNavRef}
+            aria-label="Profile sections"
+            className="flex gap-xs overflow-x-auto pb-xxs lg:hidden"
+          >
             {PROFILE_SECTIONS.map((section) => {
               const active = section.key === activeSection;
               const Icon = section.icon;

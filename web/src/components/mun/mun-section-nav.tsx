@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { cn } from "cn";
 import { SECTION_SCROLL_OFFSET_PX } from "@/components/mun/mun-page-section";
+import { attachScrollFade } from "@/lib/scroll-fade";
 
 /**
  * In-page section nav for the public MUN page — a sticky strip under the site
@@ -75,6 +76,18 @@ export function MunSectionNav({ items }: { items: MunSectionNavItem[] }) {
       list.scrollLeft = right - list.clientWidth + 16;
     }
   }, [activeId]);
+
+  // Fade hint at whichever edge still has hidden sections. `idsKey` (not `[]`)
+  // as the dependency: `items` can start empty and populate once the mun's
+  // sections are known, after this component's first render (see the
+  // `items.length === 0` early return below) — a mount-only effect would
+  // miss the list's later appearance the same way a plain useRef effect
+  // would (see attachScrollFade's own header comment on this).
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    return attachScrollFade(list, "x");
+  }, [idsKey]);
 
   const onClick = (event: MouseEvent<HTMLAnchorElement>, id: string) => {
     const target = document.getElementById(id);

@@ -5,6 +5,7 @@ import { RequireRole } from "@/guards/require-role";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { ADMIN_NAV_ITEMS, ADMIN_REVIEW_ROLES } from "@/lib/admin/nav-config";
+import { attachScrollFade } from "@/lib/scroll-fade";
 
 function isNavActive(pathname: string, href: string, exact: boolean): boolean {
   if (exact) return pathname === href;
@@ -41,6 +42,9 @@ export function AdminLayout() {
     scrollerRef.current = el;
     if (!el) return;
     revealActiveTab(el);
+    // Fade hint at whichever edge still has hidden tabs (e.g. "Audit Log"/
+    // "Security" clipped off the right at common laptop widths — see above).
+    const detachFade = attachScrollFade(el, "x");
     // Redirect vertical wheel input to horizontal scroll, same as GitHub's
     // and Notion's horizontally-scrolling tab strips — a trackpad or a
     // click-drag on the (hidden-until-hover) scrollbar already works, but a
@@ -56,7 +60,10 @@ export function AdminLayout() {
       event.preventDefault();
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      detachFade();
+    };
   };
 
   // Once mounted, later client-side navigation (e.g. clicking "Audit Log"

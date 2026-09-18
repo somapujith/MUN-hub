@@ -6,6 +6,7 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Button } from "@/components/ui/button";
 import { RegistrationNotice } from "@/components/registration/registration-notice";
+import { RegistrationPageSkeleton } from "@/components/registration/registration-page-skeleton";
 import { formatDateRange } from "@/components/shared/date-range";
 import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
@@ -47,7 +48,7 @@ export function RegisterConfirmationPage() {
     return (
       <div className="flex min-h-full flex-1 flex-col">
         <SiteHeader />
-        <main className="mx-auto w-full max-w-2xl flex-1 px-lg py-xxl" aria-busy="true" />
+        <RegistrationPageSkeleton />
         <SiteFooter />
       </div>
     );

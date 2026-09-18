@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Link } from "react-router";
 import { InfoPageShell, PageHero, Prose } from "@/components/content/info-page";
+import { useScrollFadeRef } from "@/hooks/use-scroll-fade";
 import { LEGAL_DOCUMENTS, type LegalHref } from "@/lib/legal-documents";
 import { SITE_INFO } from "@/lib/site-info";
 
@@ -132,8 +133,9 @@ const SWITCHER_LINK_CLASS =
   "block rounded-md px-md py-xs text-body-md whitespace-nowrap transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
 
 function LegalSwitcher({ current }: { current: LegalHref }) {
+  const scrollRef = useScrollFadeRef<HTMLElement>("x");
   return (
-    <nav aria-label="Legal documents" className="-mx-xxs overflow-x-auto">
+    <nav ref={scrollRef} aria-label="Legal documents" className="-mx-xxs overflow-x-auto">
       <ul className="flex w-max gap-xxs rounded-lg bg-surface-soft p-xxs">
         {LEGAL_DOCUMENTS.map((doc) => {
           const isCurrent = doc.href === current;
