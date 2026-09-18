@@ -190,7 +190,10 @@ test.describe('payments summary', () => {
     const sum = (pick: (s: ReturnType<typeof expectedFeeSplit>) => number) => splits.reduce((total, s) => total + pick(s), 0)
     return {
       currency: 'INR',
-      grossCollected: paidAmounts.reduce((a, b) => a + b, 0),
+      // Additive fee model (docs/payments/SPEC.md §4.4): grossCollected sums
+      // payments.amount, which is the total charged (listed price + fee +
+      // GST on the fee), not the listed price alone.
+      grossCollected: sum((s) => s.totalCharge),
       platformFee: sum((s) => s.platformFee),
       platformFeeTax: sum((s) => s.platformFeeTax),
       organizerNet: sum((s) => s.organizerNet),

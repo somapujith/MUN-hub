@@ -26,18 +26,24 @@ export interface FeeBreakdown {
   organizerNet: number
 }
 
-const BPS_DENOMINATOR = 10_000
+export const BPS_DENOMINATOR = 10_000
 
 /**
  * `value * bps / 10000`, rounded half-up to a whole unit, in integer
  * arithmetic (no floating point): floor((value * bps + 5000) / 10000).
  * Amounts are whole currency units (rupees), so the fee and its tax are too.
+ *
+ * Exported so `fees-additive.ts` (additive fee model) shares this rounding
+ * rule instead of duplicating it — the two models differ only in how
+ * `platformFee`/`platformFeeTax` combine with the base amount, not in how
+ * each individual bps application rounds.
  */
-function applyBps(value: number, bps: number): number {
+export function applyBps(value: number, bps: number): number {
   return Math.floor((value * bps + BPS_DENOMINATOR / 2) / BPS_DENOMINATOR)
 }
 
-function assertBps(name: string, bps: number): void {
+/** Exported for the same reason as `applyBps` — shared by `fees-additive.ts`. */
+export function assertBps(name: string, bps: number): void {
   if (!Number.isInteger(bps) || bps < 0 || bps > BPS_DENOMINATOR) {
     throw new Error(`${name} must be a whole number of basis points from 0 to ${BPS_DENOMINATOR}`)
   }

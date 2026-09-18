@@ -12,6 +12,7 @@ describe('SCHEDULED_JOBS', () => {
     expect(SCHEDULED_JOBS.map((j) => j.name)).toEqual([
       'releaseExpiredHolds',
       'runScheduledLifecycleTransitions',
+      'reconcileGuruPayOrders',
       'runSlaNotifications',
       'runConferenceReminders',
       'runOrganizerDigest',

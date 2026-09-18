@@ -14,6 +14,9 @@ export const queryKeys = {
   registrationReceipt: (id: string) => ["registration", id, "receipt"] as const,
   productAvailability: (productIds: string[]) =>
     ["registration", "availability", productIds] as const,
+  // Public, non-sensitive additive platform fee rates — see
+  // server/routes/registrations.ts's GET /registrations/fee-rates.
+  feeRates: () => ["registration", "fee-rates"] as const,
   executiveBoard: (munId: string) => ["organizer", "executive-board", munId] as const,
   committees: (munId: string) => ["organizer", "committees", munId] as const,
   portfolios: (committeeId: string) => ["organizer", "portfolios", committeeId] as const,

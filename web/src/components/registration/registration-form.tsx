@@ -8,15 +8,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProductOption } from "@/components/registration/product-option";
 import { currentPassPrice } from "@/components/registration/pricing";
+import { previewFeeBreakdownAdditive } from "@/components/registration/fees-preview";
 import { RegistrationSummary } from "@/components/registration/registration-summary";
 import { StepIndicator } from "@/components/registration/step-indicator";
 import { formatPrice } from "@/components/shared/currency";
+import { queryKeys } from "@/api/query-keys";
 import type { ProductWithAvailability } from "@/components/registration/types";
 import type { CommitteeWithPortfolios, FormField } from "@/types";
 import type { PublicAccommodationOption } from "@/types/public-mun";
 import type { AccommodationOptionField } from "@/types/accommodation";
 import { listAccommodationOptionFields } from "@/api/accommodation";
-import { initiateRegistration } from "@/api/registration";
+import { fetchFeeRates, initiateRegistration } from "@/api/registration";
 import {
   CORE_KEYS,
   CORE_LABELS,
@@ -129,6 +131,10 @@ export function RegistrationForm({
     queryFn: () => listAccommodationOptionFields(accommodationOptionId),
     enabled: accommodationOptionId !== "",
   });
+  // Fee-inclusive total preview (docs/payments/SPEC.md §4.4/§5 — the amount
+  // shown at commit time must match what's actually charged). The server
+  // remains authoritative regardless of what this preview shows.
+  const feeRatesQuery = useQuery({ queryKey: queryKeys.feeRates(), queryFn: fetchFeeRates, staleTime: 5 * 60 * 1000 });
   const stayFields: AccommodationOptionField[] = React.useMemo(
     () => [...(stayFieldsQuery.data ?? [])].sort((a, b) => a.displayOrder - b.displayOrder),
     [stayFieldsQuery.data],
@@ -147,8 +153,17 @@ export function RegistrationForm({
   const selectedPricing = selected ? currentPassPrice(selected.product) : null;
   const passPrice = selectedPricing?.price ?? 0;
   const stayPrice = selectedStay?.price ?? 0;
-  const total = passPrice + stayPrice;
-  const free = total === 0;
+  // The listed price alone (pass + accommodation) — what the organizer is
+  // owed, unchanged by the fee (additive model, docs/payments/SPEC.md
+  // §0/§4.4). This is NOT what the delegate is actually charged.
+  const passAmount = passPrice + stayPrice;
+  const free = passAmount === 0;
+  const feePreview = free ? null : previewFeeBreakdownAdditive(passAmount, feeRatesQuery.data);
+  // Fee-inclusive total the delegate will actually be charged. Falls back to
+  // the pre-fee amount only while the fee-rates preview hasn't loaded yet —
+  // the real charge computed server-side in initiateRegistration is what
+  // ultimately matters either way.
+  const total = feePreview?.totalCharge ?? passAmount;
 
   const detailsComplete =
     core.fullName.trim() !== "" &&
@@ -502,9 +517,13 @@ export function RegistrationForm({
                     value={(stayAnswers[field.id] ?? "").trim() || "—"}
                   />
                 ))}
-                {selectedStay && (
-                  <Row label="Total" value={free ? "Free" : formatPrice(total)} strong />
+                {feePreview && (
+                  <Row
+                    label="Platform fee (incl. GST)"
+                    value={formatPrice(feePreview.platformFee + feePreview.platformFeeTax)}
+                  />
                 )}
+                <Row label="Total" value={free ? "Free" : formatPrice(total)} strong />
               </dl>
 
               {error && (

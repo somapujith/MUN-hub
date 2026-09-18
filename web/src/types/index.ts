@@ -165,14 +165,59 @@ export interface RegistrationWithMun {
   isGroupHead?: boolean;
 }
 
-export interface MockRegistrationDetail extends RegistrationWithMun {
+/**
+ * GuruPay's redirect-based checkout for one registration (server/routes/
+ * registrations.ts's `GET /registrations/:id` `checkout` field). Present
+ * only while `paymentProvider === 'gurupay'` and the registration is still
+ * `PAYMENT_PENDING` — otherwise null.
+ */
+export interface RegistrationCheckout {
+  paymentUrl: string;
+  orderId: string;
+  /** Whole rupees, includes the platform fee (`totalCharge`). */
+  amount: number;
+  currency: string;
+  /** The organizer's listed price alone (whole rupees), before the fee. */
+  passAmount: number | null;
+  /** MUN Hub's platform fee (whole rupees). `passAmount + platformFeeAmount + platformFeeTaxAmount === amount`. */
+  platformFeeAmount: number | null;
+  /** GST on the platform fee (whole rupees). */
+  platformFeeTaxAmount: number | null;
+  /**
+   * MUN Hub's OWN reservation hold deadline (registrations.expiresAt) — NOT
+   * anything GuruPay returns. GuruPay's real API has no order-expiry field;
+   * this is mirrored from the registration's own `expiresAt`, which is the
+   * sole authoritative deadline (docs/payments/SPEC.md §4.5).
+   */
+  expiresAt: Date | null;
+}
+
+export interface MockRegistrationDetail extends Omit<RegistrationWithMun, "payment"> {
   productName: string;
   productPrice: number;
   /**
    * Which checkout to offer: the provider key (`mock_razorpay` for the dev
-   * mock) or null when online payments are unavailable.
+   * mock, `gurupay` for the live gateway) or null when online payments are
+   * unavailable.
    */
   paymentProvider?: string | null;
+  /** GuruPay's hosted-page redirect target, or null (see RegistrationCheckout). */
+  checkout?: RegistrationCheckout | null;
+  /**
+   * Extends RegistrationWithMun.payment with the fee-breakdown fields
+   * (docs/payments/SPEC.md §11 Q7) so the checkout/pay pages can itemize
+   * "Registration · Platform fee (incl. GST) · Total" for every provider,
+   * not only gurupay's `checkout` object. Null on rows with no stored
+   * breakdown (pre-fee-model rows, or a free pass with no payment at all).
+   */
+  payment: Array<{
+    amount: number;
+    currency?: string;
+    status: import("@/types/enums").PaymentStatus;
+    passAmount: number | null;
+    platformFeeAmount: number | null;
+    platformFeeTaxAmount: number | null;
+  }>;
 }
 
 export interface UserProfile {

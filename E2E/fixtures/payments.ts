@@ -64,14 +64,29 @@ export function apiEnv(name: string): string | undefined {
   return process.env[name] || serverEnvFile()[name] || undefined
 }
 
-/** lib/payments/fees.ts#computeFeeBreakdown with the API's configured rates. */
-export function expectedFeeSplit(amount: number) {
+/**
+ * lib/payments/fees-additive.ts#computeFeeBreakdownAdditive with the API's
+ * configured rates (docs/payments/SPEC.md §4.4 — additive model, shipped
+ * with GuruPay: `passAmount` is the listed price the caller passes in;
+ * `totalCharge` is what's actually stored as payments.amount and what the
+ * delegate is charged; `organizerNet` is `passAmount` unchanged, never a
+ * subtractive remainder).
+ */
+export function expectedFeeSplit(passAmount: number) {
   const feeBps = Number(apiEnv('PLATFORM_FEE_BPS') ?? '0')
   const taxBps = Number(apiEnv('PLATFORM_FEE_TAX_BPS') ?? '1800')
   const applyBps = (value: number, bps: number) => Math.floor((value * bps + 5000) / 10000)
-  const platformFee = applyBps(amount, feeBps)
+  const platformFee = applyBps(passAmount, feeBps)
   const platformFeeTax = applyBps(platformFee, taxBps)
-  return { feeBps, taxBps, platformFee, platformFeeTax, organizerNet: amount - platformFee - platformFeeTax }
+  return {
+    feeBps,
+    taxBps,
+    passAmount,
+    platformFee,
+    platformFeeTax,
+    totalCharge: passAmount + platformFee + platformFeeTax,
+    organizerNet: passAmount,
+  }
 }
 
 export interface WebhookEvent {

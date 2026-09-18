@@ -13,14 +13,31 @@ import {
 } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { isRecentlyExpired, notifyExpiredCheckouts } from '@/lib/jobs/release-expired-holds'
+import type { PaymentOrder } from '@/lib/payments/adapter'
 import { onRegistrationConfirmed, runPaymentHook } from '@/lib/payments/events'
-import { computeFeeBreakdown, getPlatformFeeRates, type FeeBreakdown } from '@/lib/payments/fees'
+import { computeFeeBreakdownAdditive, type FeeBreakdownAdditive } from '@/lib/payments/fees-additive'
+import { getPlatformFeeRates } from '@/lib/payments/fees'
 import { effectivePassPrice } from '@/lib/payments/pricing'
 import { getPaymentsAdapter } from '@/lib/payments/registry'
 import { runInBackground } from '@/lib/runtime-background'
+import { getRuntimeEnv } from '@/lib/runtime-env'
 import type { RegistrationInput, RegistrationStatus } from '@/lib/types'
 
 const RESERVATION_TTL_MS = 15 * 60 * 1000
+
+/**
+ * The real, browser-facing MUN Hub page a redirect-based provider's
+ * `callback_url` should send the student's browser to after paying
+ * (docs/payments/SPEC.md §4.1 step 6, bug fix — this must never be the
+ * webhook endpoint, which is a completely separate, server-to-server
+ * concept configured once in the provider's own dashboard). The pay page
+ * itself never trusts this redirect to mean anything: it polls
+ * `GET /registrations/:id` to learn the real outcome (register-pay-page.tsx).
+ */
+function buildPaymentReturnUrl(munSlug: string, registrationId: string): string {
+  const webOrigin = (getRuntimeEnv('APP_URL') || 'http://localhost:5173').replace(/\/+$/, '')
+  return `${webOrigin}/register/${encodeURIComponent(munSlug)}/pay?registrationId=${encodeURIComponent(registrationId)}`
+}
 
 /**
  * Every status that holds a seat: the two in-flight holds, a confirmed
@@ -322,6 +339,7 @@ async function reserveAndStartPayment(
     const [mun] = await tx
       .select({
         id: muns.id,
+        slug: muns.slug,
         status: muns.status,
         registrationOpensAt: muns.registrationOpensAt,
         registrationDeadline: muns.registrationDeadline,
@@ -525,12 +543,17 @@ async function reserveAndStartPayment(
     // Checked before anything is inserted, so an unpayable request holds no
     // seat. Fee rates are parsed here for the same reason: a malformed
     // PLATFORM_FEE_BPS fails the request before a seat is reserved.
-    let fees: FeeBreakdown | null = null
+    //
+    // Additive fee model (docs/payments/SPEC.md §4.4): the delegate pays
+    // `total` (the listed price) PLUS the platform fee PLUS GST on the fee;
+    // the organizer is owed `total` exactly, unchanged. `fees.totalCharge` —
+    // not `total` — is what's actually charged and stored as payments.amount.
+    let fees: FeeBreakdownAdditive | null = null
     if (!free) {
       if (!adapter) {
         throw new Error(REGISTRATION_ERRORS.paymentsUnavailable)
       }
-      fees = computeFeeBreakdown(total, getPlatformFeeRates())
+      fees = computeFeeBreakdownAdditive(total, getPlatformFeeRates())
     }
 
     const [created] = await tx
@@ -551,14 +574,14 @@ async function reserveAndStartPayment(
       })
       .returning({ id: registrations.id, status: registrations.status })
 
-    return { kind: 'created' as const, registration: created, total, currency: product.currency, fees }
+    return { kind: 'created' as const, registration: created, total, currency: product.currency, fees, munSlug: mun.slug }
   })
 
   if (reservation.kind === 'replay') {
     return toReplay(reservation.existing, input)
   }
 
-  const { registration, total, currency, fees } = reservation
+  const { registration, total, currency, fees, munSlug } = reservation
 
   if (!fees || !adapter) {
     // Awaited (it never rejects): the hook sends the confirmation email, and
@@ -567,9 +590,14 @@ async function reserveAndStartPayment(
     return { registrationId: registration.id, orderId: null, status: registration.status, replayed: false }
   }
 
-  let order: { orderId: string }
+  let order: PaymentOrder
   try {
-    order = await adapter.createOrder({ amount: total, currency, registrationId: registration.id })
+    order = await adapter.createOrder({
+      amount: fees.totalCharge,
+      currency,
+      registrationId: registration.id,
+      returnUrl: buildPaymentReturnUrl(munSlug, registration.id),
+    })
   } catch (error) {
     // Don't make the delegate wait out a 15-minute hold on a seat that can't
     // be paid for. Clearing the key lets the client retry with the same one.
@@ -591,11 +619,16 @@ async function reserveAndStartPayment(
       registrationId: registration.id,
       provider: adapter.provider,
       providerOrderId: order.orderId,
-      amount: total,
+      // Stored once, at order creation, never regenerated on a later read —
+      // see the checkoutUrl column's own doc comment in lib/db/schema.ts.
+      checkoutUrl: order.checkoutUrl ?? null,
+      amount: fees.totalCharge,
       currency,
       platformFeeAmount: fees.platformFee,
       platformFeeTaxAmount: fees.platformFeeTax,
-      organizerNetAmount: fees.organizerNet,
+      // Additive model: the organizer is owed the full listed price, always,
+      // never derived by subtracting anything from the total charged.
+      organizerNetAmount: fees.passAmount,
       status: 'PENDING',
     })
   })
@@ -722,6 +755,7 @@ async function reserveGroupAndStartPayment(
     const [mun] = await tx
       .select({
         id: muns.id,
+        slug: muns.slug,
         status: muns.status,
         registrationOpensAt: muns.registrationOpensAt,
         registrationDeadline: muns.registrationDeadline,
@@ -799,12 +833,13 @@ async function reserveGroupAndStartPayment(
     const total = effectivePassPrice(product, now).price * input.teamSize
     const free = total === 0
 
-    let fees: FeeBreakdown | null = null
+    // Additive fee model — see the matching comment in reserveAndStartPayment above.
+    let fees: FeeBreakdownAdditive | null = null
     if (!free) {
       if (!adapter) {
         throw new Error(REGISTRATION_ERRORS.paymentsUnavailable)
       }
-      fees = computeFeeBreakdown(total, getPlatformFeeRates())
+      fees = computeFeeBreakdownAdditive(total, getPlatformFeeRates())
     }
 
     const [group] = await tx
@@ -863,6 +898,7 @@ async function reserveGroupAndStartPayment(
       total,
       currency: product.currency,
       fees,
+      munSlug: mun.slug,
     }
   })
 
@@ -870,7 +906,7 @@ async function reserveGroupAndStartPayment(
     return toGroupReplay(reservation.existing)
   }
 
-  const { groupId, headRegistration, total, currency, fees } = reservation
+  const { groupId, headRegistration, total, currency, fees, munSlug } = reservation
 
   if (!fees || !adapter) {
     await runPaymentHook(onRegistrationConfirmed, headRegistration.id)
@@ -883,9 +919,14 @@ async function reserveGroupAndStartPayment(
     }
   }
 
-  let order: { orderId: string }
+  let order: PaymentOrder
   try {
-    order = await adapter.createOrder({ amount: total, currency, registrationId: headRegistration.id })
+    order = await adapter.createOrder({
+      amount: fees.totalCharge,
+      currency,
+      registrationId: headRegistration.id,
+      returnUrl: buildPaymentReturnUrl(munSlug, headRegistration.id),
+    })
   } catch (error) {
     console.error(`[payments] createOrder failed for group ${groupId} (head registration ${headRegistration.id})`, error)
     // Release every seat in the group together — a group hold is all-or-nothing.
@@ -910,11 +951,12 @@ async function reserveGroupAndStartPayment(
         registrationId: headRegistration.id,
         provider: adapter.provider,
         providerOrderId: order.orderId,
-        amount: total,
+        checkoutUrl: order.checkoutUrl ?? null,
+        amount: fees.totalCharge,
         currency,
         platformFeeAmount: fees.platformFee,
         platformFeeTaxAmount: fees.platformFeeTax,
-        organizerNetAmount: fees.organizerNet,
+        organizerNetAmount: fees.passAmount,
         status: 'PENDING',
       })
       .returning({ id: payments.id })

@@ -1,5 +1,6 @@
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import type { PaymentsAdapter } from './adapter'
+import { createGuruPayAdapter } from './gurupay-adapter'
 import { getMockWebhookSecret, mockPaymentsAdapter } from './mock-adapter'
 
 /**
@@ -28,6 +29,21 @@ export function getPaymentsAdapter(): PaymentsAdapter | null {
       return getRuntimeEnv('MOCK_PAYMENTS_ENABLED') === 'true' && getMockWebhookSecret()
         ? mockPaymentsAdapter
         : null
+    case 'gurupay': {
+      const apiKey = getRuntimeEnv('GURUPAY_API_KEY')
+      if (!apiKey) return null
+      // `callback_url` is GuruPay's post-payment BROWSER redirect target —
+      // never the webhook endpoint (GuruPay's webhook delivery is configured
+      // once in GuruPay's own dashboard, entirely separately from any API
+      // request; confirmed 2026-09-18). Every real call from
+      // lib/actions/registration.ts supplies its own per-registration
+      // `CreateOrderInput.returnUrl` (a real `/register/:slug/pay` page); this
+      // is only the adapter-level fallback if one is ever missing. APP_URL is
+      // the web app's own origin (production: https://www.munhub.in) — the
+      // same var lib/notifications/* already uses for web-facing links.
+      const webOrigin = (getRuntimeEnv('APP_URL') || 'http://localhost:5173').replace(/\/$/, '')
+      return createGuruPayAdapter({ apiKey, callbackUrl: webOrigin })
+    }
     default:
       console.error(`[payments] unknown PAYMENTS_ADAPTER "${name}" — online payments are unavailable`)
       return null

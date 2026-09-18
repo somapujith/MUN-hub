@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { getMun, signUpViaApi, type ApiSession } from '../../fixtures/api'
 import { OPEN } from '../../fixtures/fixture-muns'
-import { deliverWebhook, signedWebhook } from '../../fixtures/payments'
+import { deliverWebhook, expectedFeeSplit, signedWebhook } from '../../fixtures/payments'
 import { expireSeatHold, paymentFor, registrationCount, registrationStatus, type StoredPayment } from '../../fixtures/payments-fixture-db'
 import { adminApi } from '../admin/_helpers'
 
@@ -49,7 +49,15 @@ async function pendingOrder(): Promise<Registered> {
   const { registrationId } = (await res.json()) as { registrationId: string }
   const payment = await paymentFor(registrationId)
   expect(payment, 'a payment order was created').toBeTruthy()
-  expect(payment).toMatchObject({ status: 'PENDING', amount: DELEGATE_PASS.price, currency: 'INR', exceptionReason: null })
+  // Additive fee model (docs/payments/SPEC.md §4.4): payments.amount is the
+  // total charged (listed price + platform fee + GST on the fee), not the
+  // listed price alone.
+  expect(payment).toMatchObject({
+    status: 'PENDING',
+    amount: expectedFeeSplit(DELEGATE_PASS.price).totalCharge,
+    currency: 'INR',
+    exceptionReason: null,
+  })
   return { delegate, munId: ids.munId, registrationId, payment: payment! }
 }
 

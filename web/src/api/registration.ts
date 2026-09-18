@@ -1,4 +1,4 @@
-import type { MockRegistrationDetail, PaymentStatus, RegistrationStatus } from "@/types";
+import type { MockRegistrationDetail, PaymentStatus, RegistrationCheckout, RegistrationStatus } from "@/types";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -20,6 +20,19 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 /** Provider key of the dev/test mock checkout (lib/payments/mock-adapter.ts). */
 export const MOCK_PAYMENT_PROVIDER = "mock_razorpay";
+/** Provider key of the live GuruPay gateway (lib/payments/gurupay-adapter.ts). */
+export const GURUPAY_PROVIDER = "gurupay";
+
+/**
+ * Wraps `GET /registrations/fee-rates` — public, non-sensitive additive
+ * platform fee config (basis points), used to preview a fee-inclusive total
+ * before `initiateRegistration`/`initiateGroupRegistration` is ever called
+ * (see web/src/components/registration/fees-preview.ts). The server remains
+ * the sole source of truth for the real charge either way.
+ */
+export function fetchFeeRates(): Promise<{ feeBps: number; taxBps: number }> {
+  return request<{ feeBps: number; taxBps: number }>("/registrations/fee-rates");
+}
 
 export interface InitiateRegistrationInput {
   munId: string;
@@ -88,8 +101,25 @@ interface RawRegistrationDetail {
   };
   committee: { name: string } | null;
   portfolio: { name: string } | null;
-  payment: Array<{ amount: number; currency: string; status: PaymentStatus }>;
+  payment: Array<{
+    amount: number;
+    currency: string;
+    status: PaymentStatus;
+    passAmount: number | null;
+    platformFeeAmount: number | null;
+    platformFeeTaxAmount: number | null;
+  }>;
   paymentProvider: string | null;
+  checkout: {
+    paymentUrl: string;
+    orderId: string;
+    amount: number;
+    currency: string;
+    passAmount: number | null;
+    platformFeeAmount: number | null;
+    platformFeeTaxAmount: number | null;
+    expiresAt: string | null;
+  } | null;
 }
 
 function toRegistrationDetail(raw: RawRegistrationDetail): MockRegistrationDetail {
@@ -116,8 +146,30 @@ function toRegistrationDetail(raw: RawRegistrationDetail): MockRegistrationDetai
     },
     committee: raw.committee ? { name: raw.committee.name } : null,
     portfolio: raw.portfolio ? { name: raw.portfolio.name } : null,
-    payment: raw.payment.map((p) => ({ amount: p.amount, currency: p.currency, status: p.status })),
+    payment: raw.payment.map((p) => ({
+      amount: p.amount,
+      currency: p.currency,
+      status: p.status,
+      passAmount: p.passAmount,
+      platformFeeAmount: p.platformFeeAmount,
+      platformFeeTaxAmount: p.platformFeeTaxAmount,
+    })),
     paymentProvider: raw.paymentProvider,
+    checkout: toCheckout(raw.checkout),
+  };
+}
+
+function toCheckout(raw: RawRegistrationDetail["checkout"]): RegistrationCheckout | null {
+  if (!raw) return null;
+  return {
+    paymentUrl: raw.paymentUrl,
+    orderId: raw.orderId,
+    amount: raw.amount,
+    currency: raw.currency,
+    passAmount: raw.passAmount,
+    platformFeeAmount: raw.platformFeeAmount,
+    platformFeeTaxAmount: raw.platformFeeTaxAmount,
+    expiresAt: raw.expiresAt ? new Date(raw.expiresAt) : null,
   };
 }
 

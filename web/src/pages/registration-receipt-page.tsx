@@ -103,7 +103,8 @@ export function RegistrationReceiptPage() {
           </div>
           {payment && (
             <p className="text-body-md text-muted-foreground">
-              Includes MUN Hub&apos;s platform fee and applicable GST on that fee.{" "}
+              {/* TODO(user): confirm exact fee-breakdown copy wording (docs/payments/SPEC.md §11 Q3). */}
+              Includes MUN Hub&apos;s platform fee (incl. GST), charged on top of the registration price.{" "}
               <Link to="/legal/refunds" className="text-link underline-offset-4 hover:underline">
                 All payments are final
               </Link>

@@ -145,8 +145,18 @@ describe('GET /registrations/:id', () => {
     const res = await app.request(`/api/v1/registrations/${registrationId}`, { headers })
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.payment).toEqual([{ amount: 1499, currency: 'INR', status: 'PENDING' }])
+    // Fee-breakdown fields (docs/payments/SPEC.md §5/§11 Q7) are included for
+    // every provider, not only gurupay — 0/0 here since PLATFORM_FEE_BPS
+    // defaults to 0 in tests (.env.test), but passAmount still equals the
+    // listed price.
+    expect(body.payment).toEqual([
+      { amount: 1499, currency: 'INR', status: 'PENDING', passAmount: 1499, platformFeeAmount: 0, platformFeeTaxAmount: 0 },
+    ])
     expect(body.paymentProvider).toBe('mock_razorpay')
+    // The `checkout` redirect object is gurupay-only (docs/payments/SPEC.md
+    // §4.4.3) — the mock provider's own checkout is the buttons UI, not a
+    // hosted-page redirect, so this stays null even mid-PAYMENT_PENDING.
+    expect(body.checkout).toBeNull()
 
     disablePayments()
     const without = await (await app.request(`/api/v1/registrations/${registrationId}`, { headers })).json()

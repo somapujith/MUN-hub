@@ -4,6 +4,7 @@ import postgres from 'postgres'
 import { DATABASE_URL, assertLocalDatabase } from '../../env'
 import { getMun, signUpViaApi, type ApiSession } from '../../fixtures/api'
 import { OPEN } from '../../fixtures/fixture-muns'
+import { expectedFeeSplit } from '../../fixtures/payments'
 import { watchForCrashes } from '../../fixtures/ui'
 import { filterPaymentExceptions, heading, main, tableRow, uniqueName } from './_helpers'
 
@@ -153,7 +154,11 @@ test.describe('admin payments', () => {
     await expect(row).toHaveCount(1)
     await expect(row).toContainText(name)
     await expect(row).toContainText(OPEN.name)
-    await expect(row).toContainText('₹1,499')
+    // Additive fee model (docs/payments/SPEC.md §4.4): the displayed amount
+    // is the total charged (listed price + platform fee + GST), not the
+    // listed price alone.
+    const totalCharge = expectedFeeSplit(DELEGATE_PASS.price).totalCharge
+    await expect(row).toContainText(`₹${totalCharge.toLocaleString('en-IN')}`)
     await expect(row).toContainText('Paid after hold expired')
 
     await row.getByRole('button', { name: /resolve/i }).click()

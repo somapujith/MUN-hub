@@ -92,6 +92,14 @@ export const LIMITERS = {
   // request method, so a rule matching only GET would miss it and let it fall
   // through to (and exhaust) the much smaller global budget instead.
   filesIp: { binding: 'RL_FILES_IP', limit: 1200, periodSeconds: 60, perIp: true },
+  // Payments webhook (server/routes/webhooks.ts, mounted OUTSIDE /api/v1 and
+  // this middleware's RULES table — applied directly in that route instead).
+  // Every hit triggers a real outbound authenticated call to GuruPay's
+  // check-status, so this endpoint needs its own throttle: generous enough
+  // for real webhook/retry volume, but bounded so it can't be used to
+  // amplify calls against GuruPay's API with MUNHub's key, or exhaust
+  // Workers resources.
+  webhooksPaymentsIp: { binding: 'RL_WEBHOOKS_PAYMENTS_IP', limit: 60, periodSeconds: 60, perIp: true },
 } satisfies Record<string, LimiterSpec>
 
 type RequestFacts = {

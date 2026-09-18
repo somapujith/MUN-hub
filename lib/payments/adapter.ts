@@ -17,11 +17,29 @@ export interface CreateOrderInput {
   currency: string
   /** Our registration id — sent to the provider as the order's receipt/reference. */
   registrationId: string
+  /**
+   * Where the student's BROWSER should land after paying, for a
+   * redirect-based provider (GuruPay's `callback_url`) — a real MUN Hub page
+   * (e.g. `${APP_URL}/register/:slug/pay?registrationId=...`), never the
+   * webhook endpoint. This redirect is never trusted to confirm anything
+   * (see GuruPayAdapter.verifyAndParseWebhook) — it only returns the student
+   * to a page that polls `GET /registrations/:id`. Optional: the mock
+   * adapter and any non-redirect-based provider ignore it.
+   */
+  returnUrl?: string
 }
 
 export interface PaymentOrder {
   /** Provider's order id — stored as `payments.provider_order_id`. */
   orderId: string
+  /**
+   * Hosted checkout page to redirect the browser to, for a redirect-based
+   * provider (GuruPay: `payment_url`). Optional and additive — the mock
+   * adapter and any future embedded-widget adapter (Razorpay's Checkout.js)
+   * are not forced to supply it; `PaymentOrder` without this field stays a
+   * valid return value for either of those.
+   */
+  checkoutUrl?: string
 }
 
 export type PaymentWebhookEventType = 'payment.captured' | 'payment.failed'

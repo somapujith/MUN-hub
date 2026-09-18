@@ -847,7 +847,7 @@ describe('initiateRegistration — payments', () => {
     return payment
   }
 
-  it('stores the provider, currency and platform-fee split on the payment', async () => {
+  it('stores the provider, currency and additive platform-fee split on the payment', async () => {
     process.env.PLATFORM_FEE_BPS = '250'
     process.env.PLATFORM_FEE_TAX_BPS = '1800'
     const { mun, product, session } = await setup()
@@ -855,14 +855,19 @@ describe('initiateRegistration — payments', () => {
     const result = await initiateRegistration({ munId: mun.id, registrationProductId: product.id }, session)
     expect(result).toMatchObject({ status: 'PAYMENT_PENDING', replayed: false })
 
+    // Additive model (docs/payments/SPEC.md §4.4): the delegate pays the
+    // listed price PLUS the fee PLUS GST on the fee; the organizer is owed
+    // the full listed price, unchanged — never a subtractive remainder.
+    // 1499 listed; fee = round(1499*250/10000) = 37; tax = round(37*1800/10000) = 7;
+    // amount charged = 1499 + 37 + 7 = 1543; organizerNet = 1499 exactly.
     expect(await paymentFor(result.registrationId)).toMatchObject({
       provider: 'mock_razorpay',
       providerOrderId: result.orderId,
-      amount: 1499,
+      amount: 1543,
       currency: 'INR',
       platformFeeAmount: 37,
       platformFeeTaxAmount: 7,
-      organizerNetAmount: 1455,
+      organizerNetAmount: 1499,
       status: 'PENDING',
     })
   })

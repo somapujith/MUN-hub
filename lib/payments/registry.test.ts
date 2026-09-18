@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setRuntimeEnv } from '@/lib/runtime-env'
+import { GURUPAY_PROVIDER } from './gurupay-adapter'
 import { mockPaymentsAdapter } from './mock-adapter'
 import { getPaymentsAdapter } from './registry'
 
-const KEYS = ['PAYMENTS_ADAPTER', 'MOCK_PAYMENTS_ENABLED', 'MOCK_PAYMENT_WEBHOOK_SECRET'] as const
+const KEYS = [
+  'PAYMENTS_ADAPTER',
+  'MOCK_PAYMENTS_ENABLED',
+  'MOCK_PAYMENT_WEBHOOK_SECRET',
+  'GURUPAY_API_KEY',
+  'APP_URL',
+] as const
 const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]))
 
 afterEach(() => {
@@ -54,5 +61,27 @@ describe('getPaymentsAdapter', () => {
     delete process.env.MOCK_PAYMENTS_ENABLED
     setRuntimeEnv({ MOCK_PAYMENTS_ENABLED: 'true' })
     expect(getPaymentsAdapter()).toBe(mockPaymentsAdapter)
+  })
+
+  it('returns a GuruPay adapter when GURUPAY_API_KEY is present via getRuntimeEnv', () => {
+    process.env.PAYMENTS_ADAPTER = 'gurupay'
+    setRuntimeEnv({ GURUPAY_API_KEY: 'test-key', APP_URL: 'https://www.munhub.in' })
+    const adapter = getPaymentsAdapter()
+    expect(adapter?.provider).toBe(GURUPAY_PROVIDER)
+  })
+
+  it('returns null for gurupay when GURUPAY_API_KEY is missing (never falls back to the mock)', () => {
+    process.env.PAYMENTS_ADAPTER = 'gurupay'
+    delete process.env.GURUPAY_API_KEY
+    setRuntimeEnv({})
+    expect(getPaymentsAdapter()).toBeNull()
+  })
+
+  it('builds a fresh gurupay adapter instance per call (never cached at module scope)', () => {
+    process.env.PAYMENTS_ADAPTER = 'gurupay'
+    setRuntimeEnv({ GURUPAY_API_KEY: 'test-key' })
+    const first = getPaymentsAdapter()
+    const second = getPaymentsAdapter()
+    expect(first).not.toBe(second)
   })
 })

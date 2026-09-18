@@ -115,9 +115,11 @@ const SECTIONS: LegalSection[] = [
           <li>continued improvements to the platform</li>
         </ul>
         <p>
-          The platform fee is included in the price shown on the listing, and
-          applicable taxes such as GST apply to it. We deduct it from the
-          registration fee before the organizer is paid.
+          The platform fee is <strong>added on top of</strong> the price shown
+          on the listing, along with GST on the fee. Checkout shows the
+          registration price, the platform fee, and the total you'll be
+          charged before you pay. The organizer receives the full listed
+          price — the fee is never deducted from what they're owed.
         </p>
         <p>
           Like the rest of your payment, the platform fee isn't refundable. The
@@ -172,9 +174,10 @@ const SECTIONS: LegalSection[] = [
           in your listing or anywhere else, for payments made through MUN Hub.
         </li>
         <li>
-          Your payouts are the registration fees you collect, minus MUN Hub's
-          platform fee and applicable taxes, at the rate we agree with you
-          before your conference is published.
+          Your payouts are the full registration price shown on your listing.
+          MUN Hub's platform fee and applicable taxes are charged to the
+          delegate on top of that price at checkout, not deducted from your
+          payout.
         </li>
         <li>
           If you change or cancel your conference, tell registered delegates
@@ -214,7 +217,7 @@ export function RefundPolicyPage() {
         "Once a registration is paid and confirmed, there are no refunds.",
         "That applies whatever happens: if you cancel, don't attend, or the conference is changed, postponed, or cancelled.",
         "The only exception is a payment error, such as a double charge or a payment that didn't create a registration. We return that money.",
-        "Every registration includes MUN Hub's platform fee, which pays for our service. It isn't refundable either.",
+        "Every paid registration adds MUN Hub's platform fee (plus GST) on top of the listed price at checkout, shown before you pay. It isn't refundable either.",
         "Check the conference details carefully before you pay.",
       ]}
       sections={SECTIONS}

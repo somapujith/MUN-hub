@@ -15,6 +15,8 @@ import {
 import { isProfileComplete } from '@/lib/actions/student-profile'
 import { db } from '@/lib/db/client'
 import { payments, registrations } from '@/lib/db/schema'
+import { getPlatformFeeRates } from '@/lib/payments/fees'
+import { GURUPAY_PROVIDER } from '@/lib/payments/gurupay-adapter'
 import { MOCK_PROVIDER, simulatePaymentOutcome } from '@/lib/payments/mock-adapter'
 import { getPaymentsAdapter } from '@/lib/payments/registry'
 import { processPaymentWebhook } from '@/lib/payments/webhook'
@@ -55,6 +57,25 @@ function notFound(c: Context<{ Variables: AppVariables }>) {
 }
 
 export const registrationsRoutes = new Hono<{ Variables: AppVariables }>()
+
+/**
+ * Public, non-sensitive additive platform fee rates (basis points) — pure
+ * config, not per-registration data. Lets the registration funnel (group and
+ * solo review steps, before `initiateRegistration` is ever called) show a
+ * fee-inclusive total that matches what will actually be charged, instead of
+ * the raw listed price alone (docs/payments/SPEC.md §4.4/§5 — bug fix: the
+ * client had no way to preview the additive fee before this). The server
+ * remains the sole source of truth for the real charge either way — this is
+ * a display preview only.
+ */
+registrationsRoutes.get('/registrations/fee-rates', (c) => {
+  try {
+    return c.json(getPlatformFeeRates())
+  } catch (error) {
+    console.error('[payments] getPlatformFeeRates failed while serving /registrations/fee-rates', error)
+    return c.json({ error: { code: 'INTERNAL', message: 'Fee rates are not configured' } }, 503)
+  }
+})
 
 registrationsRoutes.get('/products/:productId/availability', async (c) => {
   const productId = c.req.param('productId')
@@ -186,7 +207,10 @@ registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
       mun: true,
       committee: true,
       portfolio: true,
-      payment: true,
+      // Newest first: a registration can carry more than one payment row
+      // (e.g. a failed attempt followed by a retry) — `.at(0)` below must
+      // always be the current/most-recent attempt, never an arbitrary one.
+      payment: { orderBy: (p, { desc }) => [desc(p.createdAt)] },
       registrationProduct: true,
       // Just enough to tell the head delegate's own row apart from an
       // accepted teammate's — see `isGroupHead` below.
@@ -197,6 +221,38 @@ registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
   if (!detail) {
     return notFound(c)
   }
+
+  const paymentProvider = getPaymentsAdapter()?.provider ?? null
+  const payment = detail.payment.at(0)
+  // GuruPay's redirect-based checkout (docs/payments/SPEC.md §4.4.3): the
+  // browser needs the already-stored payment_url to redirect to. Only
+  // offered while the registration is still PAYMENT_PENDING and the active
+  // provider is gurupay — a settled registration or a provider switch never
+  // hands back a stale checkout target.
+  const checkout =
+    paymentProvider === GURUPAY_PROVIDER && detail.status === 'PAYMENT_PENDING' && payment?.checkoutUrl
+      ? {
+          paymentUrl: payment.checkoutUrl,
+          orderId: payment.providerOrderId,
+          amount: payment.amount,
+          currency: payment.currency,
+          // Itemized breakdown (docs/payments/SPEC.md §5 "Checkout total
+          // display") so the client can show "Registration: ₹X · Platform
+          // fee (incl. GST): ₹Y · Total: ₹Z" instead of only the total.
+          // Additive model (lib/payments/fees-additive.ts): passAmount +
+          // platformFee + platformFeeTax === amount, always, by construction.
+          passAmount: payment.organizerNetAmount,
+          platformFeeAmount: payment.platformFeeAmount,
+          platformFeeTaxAmount: payment.platformFeeTaxAmount,
+          // MUN Hub's OWN reservation hold deadline (registrations.expiresAt,
+          // already elsewhere in this response) — NOT anything GuruPay
+          // returns. GuruPay's confirmed real create-order/check-status
+          // responses (docs/payments/SPEC.md) don't even include an
+          // order-expiry field; MUN Hub's 15-minute hold is the sole
+          // authoritative deadline (see §4.5).
+          expiresAt: detail.expiresAt,
+        }
+      : null
 
   return c.json({
     id: detail.id,
@@ -225,8 +281,20 @@ registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
     },
     committee: detail.committee ? { name: detail.committee.name } : null,
     portfolio: detail.portfolio ? { name: detail.portfolio.name } : null,
-    payment: detail.payment.map((p) => ({ amount: p.amount, currency: p.currency, status: p.status })),
-    paymentProvider: getPaymentsAdapter()?.provider ?? null,
+    // Fee-breakdown fields included for every provider (not just gurupay's
+    // `checkout` object) so the pay page's mock branch can itemize the same
+    // way (docs/payments/SPEC.md §11 Q7 — consistent copy across providers).
+    // Null on rows created before the fee model existed.
+    payment: detail.payment.map((p) => ({
+      amount: p.amount,
+      currency: p.currency,
+      status: p.status,
+      passAmount: p.organizerNetAmount,
+      platformFeeAmount: p.platformFeeAmount,
+      platformFeeTaxAmount: p.platformFeeTaxAmount,
+    })),
+    paymentProvider,
+    checkout,
   })
 })
 

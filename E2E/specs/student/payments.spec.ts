@@ -93,23 +93,27 @@ test.describe('early-bird pricing', () => {
     await expect(reviewValue(page, 'Price')).toHaveText(`${rupees(EARLY.earlyBird.price)} (early bird)`)
     await expect(main(page)).toContainText('All payments are final')
 
+    // Additive fee model (docs/payments/SPEC.md §4.4): every amount shown at
+    // and after checkout is the total charged (listed price + platform fee +
+    // GST on the fee), not the listed price alone.
+    const split = expectedFeeSplit(EARLY.earlyBird.price)
+
     await main(page).getByRole('button', { name: /confirm and pay/i }).click()
     await expect(page).toHaveURL(/\/pay\?registrationId=/)
     const registrationId = new URL(page.url()).searchParams.get('registrationId')!
-    await expect(main(page)).toContainText(`Amount due${rupees(EARLY.earlyBird.price)}`)
-    await expect(main(page)).toContainText("Includes MUN Hub's platform fee.")
-    await main(page).getByRole('button', { name: `Pay ${rupees(EARLY.earlyBird.price)}` }).click()
+    await expect(main(page)).toContainText(`Amount due${rupees(split.totalCharge)}`)
+    await expect(main(page)).toContainText("Includes MUN Hub's platform fee (incl. GST), itemized on your receipt.")
+    await main(page).getByRole('button', { name: `Pay ${rupees(split.totalCharge)}` }).click()
 
     await expect(page).toHaveURL(/\/confirmation\?registrationId=/)
     await expect(main(page)).toContainText(/you're registered/i)
-    await expect(reviewValue(page, 'Amount')).toHaveText(rupees(EARLY.earlyBird.price))
+    await expect(reviewValue(page, 'Amount')).toHaveText(rupees(split.totalCharge))
 
     // Stored with the fee split the API is configured for.
     const payment = await paymentFor(registrationId)
-    const split = expectedFeeSplit(EARLY.earlyBird.price)
     expect(payment).toMatchObject({
       status: 'PAID',
-      amount: EARLY.earlyBird.price,
+      amount: split.totalCharge,
       currency: 'INR',
       platformFeeAmount: split.platformFee,
       platformFeeTaxAmount: split.platformFeeTax,
@@ -119,7 +123,7 @@ test.describe('early-bird pricing', () => {
 
     await main(page).getByRole('button', { name: 'View receipt' }).click()
     await expect(page).toHaveURL(new RegExp(`/dashboard/registrations/${registrationId}/receipt$`))
-    await expect(main(page)).toContainText(`Amount paid${rupees(EARLY.earlyBird.price)}`)
+    await expect(main(page)).toContainText(`Amount paid${rupees(split.totalCharge)}`)
     expect((await session.api.get(`registrations/${registrationId}`)).ok()).toBe(true)
     crashes.assertNone()
     await context.close()
@@ -137,10 +141,10 @@ test.describe('early-bird pricing', () => {
     expect(new Date(byName(EARLY.name).earlyBirdDeadline!).getTime()).toBeGreaterThan(Date.now())
     expect(new Date(byName(LATE.name).earlyBirdDeadline!).getTime()).toBeLessThan(Date.now())
 
-    for (const [pass, charged] of [
-      [LATE, LATE.price],
-      [ODD, ODD.price],
-    ] as const) {
+    for (const pass of [LATE, ODD] as const) {
+      // Additive fee model: the stored/displayed amount is totalCharge, not
+      // the listed price alone (docs/payments/SPEC.md §4.4).
+      const charged = expectedFeeSplit(pass.price).totalCharge
       const registrationId = await registerForPass(session, PRICING.slug, pass.name)
       expect((await paymentFor(registrationId))?.amount, pass.name).toBe(charged)
       const detail = await (await session.api.get(`registrations/${registrationId}`)).json()
@@ -154,6 +158,8 @@ test.describe('resuming a payment', () => {
   test('"Complete payment" on the dashboard takes the delegate back to pay for a held seat', async ({ browser }) => {
     const { context, page, session } = await freshStudentPage(browser)
     const registrationId = await registerForPass(session, PRICING.slug, EARLY.name)
+    // Additive fee model: the amount shown throughout is totalCharge.
+    const totalCharge = expectedFeeSplit(EARLY.earlyBird.price).totalCharge
 
     await page.goto('/dashboard')
     const card = registrationCard(page)
@@ -163,12 +169,12 @@ test.describe('resuming a payment', () => {
 
     await expect(page).toHaveURL(new RegExp(`/register/${PRICING.slug}/pay\\?registrationId=${registrationId}$`))
     await expect(pageHeading(page)).toHaveText('Complete your payment')
-    await main(page).getByRole('button', { name: `Pay ${rupees(EARLY.earlyBird.price)}` }).click()
+    await main(page).getByRole('button', { name: `Pay ${rupees(totalCharge)}` }).click()
     await expect(main(page)).toContainText(/you're registered/i)
 
     await page.goto('/dashboard')
     await expect(card).toContainText('Confirmed')
-    await expect(card).toContainText(rupees(EARLY.earlyBird.price))
+    await expect(card).toContainText(rupees(totalCharge))
     await expect(card.getByRole('button', { name: 'Complete payment' })).toHaveCount(0)
     await card.getByRole('link', { name: `Receipt for ${PRICING.name}` }).click()
     await expect(page).toHaveURL(new RegExp(`/dashboard/registrations/${registrationId}/receipt$`))
@@ -192,13 +198,15 @@ test.describe('receipt', () => {
     const crashes = watchForCrashes(page)
     const registrationId = await registerForPass(session, PRICING.slug, LATE.name, { pay: 'success', committee: COMMITTEE.name })
     const payment = await paymentFor(registrationId)
+    // Additive fee model: the amount shown/stored is totalCharge.
+    const totalCharge = expectedFeeSplit(LATE.price).totalCharge
 
     await page.goto(`/dashboard/registrations/${registrationId}/receipt`)
     await expect(pageHeading(page)).toHaveText(PRICING.name)
     await expect(main(page)).toContainText('Registration receipt')
     await expect(main(page).getByRole('heading', { name: 'Amount paid' })).toBeVisible()
-    await expect(main(page)).toContainText(`Amount paid${rupees(LATE.price)}`)
-    await expect(main(page)).toContainText("Includes MUN Hub's platform fee and applicable GST on that fee.")
+    await expect(main(page)).toContainText(`Amount paid${rupees(totalCharge)}`)
+    await expect(main(page)).toContainText("Includes MUN Hub's platform fee (incl. GST), charged on top of the registration price.")
     await expect(main(page).getByRole('link', { name: 'All payments are final' })).toBeVisible()
     await expect(main(page)).not.toContainText(/refund/i)
 
@@ -220,7 +228,7 @@ test.describe('receipt', () => {
       registrationId,
       status: 'CONFIRMED',
       passName: LATE.name,
-      payment: { amount: LATE.price, currency: 'INR', status: 'PAID', reference: payment!.providerPaymentId, orderId: payment!.providerOrderId },
+      payment: { amount: totalCharge, currency: 'INR', status: 'PAID', reference: payment!.providerPaymentId, orderId: payment!.providerOrderId },
     })
     expect(JSON.stringify(receipt)).not.toMatch(/platformFee|organizerNet|refund/i)
 

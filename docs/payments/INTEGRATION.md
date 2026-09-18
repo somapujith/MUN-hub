@@ -1,5 +1,20 @@
 # Payments: how the seam works and how to add Razorpay
 
+> **Status (2026-09-18): superseded as the shipped provider.** GuruPay, not
+> Razorpay, is the payment gateway that actually shipped —
+> `docs/payments/SPEC.md` ("SPEC: GuruPay Payment Gateway Integration +
+> Additive Platform Fee") is the authoritative doc for the real
+> implementation (`lib/payments/gurupay-adapter.ts`,
+> `lib/jobs/reconcile-gurupay-orders.ts`, `lib/payments/fees-additive.ts`).
+> The interface seam, webhook processor, registry pattern and fee module
+> described below were reused largely unchanged (see SPEC.md §0 for the four
+> points where GuruPay's real API forced a deviation from this Razorpay
+> recipe — caller-generated order ids, no webhook signature, no per-order
+> payout routing, and an additive rather than included platform fee). This
+> document's Razorpay-specific sections (§2 "Adding Razorpay") are kept as
+> historical reference only — Razorpay was never actually built, and no
+> future work should follow its recipe without re-reading SPEC.md first.
+
 Status (2026-09-17): the payment path is **gateway-ready but has no real gateway**.
 The only adapter is the dev/test mock, which works only with
 `MOCK_PAYMENTS_ENABLED=true`. In production (flag unset) paid passes are refused

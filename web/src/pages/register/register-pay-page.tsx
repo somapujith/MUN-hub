@@ -11,8 +11,20 @@ import { ReservationCountdown } from "@/components/registration/reservation-coun
 import { hasPassed } from "@/components/registration/deadline";
 import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
-import { MOCK_PAYMENT_PROVIDER, completeMockPayment, fetchRegistrationById } from "@/api/registration";
+import { GURUPAY_PROVIDER, MOCK_PAYMENT_PROVIDER, completeMockPayment, fetchRegistrationById } from "@/api/registration";
+import { GuruPayCheckoutRedirect } from "@/components/registration/gurupay-checkout-redirect";
 import { NotFoundPage } from "@/pages/not-found-page";
+
+/**
+ * Return-poll window (docs/payments/SPEC.md §5 "On return from GuruPay"): a
+ * redirect back from GuruPay's hosted page carries no trust signal on its
+ * own (§6 "GuruPay redirect returns... with no clear success signal") — the
+ * only way to learn the real outcome is to keep polling
+ * `GET /registrations/:id` until it reaches a terminal state or this budget
+ * runs out. ~2s cadence for ~30s, matching the spec's own numbers.
+ */
+const PAY_PAGE_POLL_INTERVAL_MS = 2_000;
+const PAY_PAGE_POLL_BUDGET_MS = 30_000;
 
 export function RegisterPayPage() {
   const { slug = "" } = useParams();
@@ -22,6 +34,7 @@ export function RegisterPayPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [paying, setPaying] = React.useState(false);
+  const pollDeadlineRef = React.useRef<number>(Date.now() + PAY_PAGE_POLL_BUDGET_MS);
 
   const regQuery = useQuery({
     queryKey: queryKeys.registration(registrationId ?? ""),
@@ -29,6 +42,17 @@ export function RegisterPayPage() {
     enabled: Boolean(registrationId),
     // Whether online payments are available can change between visits.
     refetchOnMount: "always",
+    // Bounded auto-poll for a student landing back on this page after
+    // GuruPay's hosted checkout: stops as soon as the registration reaches a
+    // terminal state (the query itself flips `enabled` off via `settled`
+    // below and this component navigates away) or once the time budget
+    // expires, whichever comes first — never polls forever.
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      const isTerminal = status !== undefined && status !== "PAYMENT_PENDING" && status !== "PENDING";
+      if (isTerminal) return false;
+      return Date.now() < pollDeadlineRef.current ? PAY_PAGE_POLL_INTERVAL_MS : false;
+    },
   });
   const registration = regQuery.data;
   const settled = registration && registration.status !== "PAYMENT_PENDING" && registration.status !== "PENDING";
@@ -59,8 +83,18 @@ export function RegisterPayPage() {
   const expired = registration.expiresAt ? hasPassed(registration.expiresAt) : false;
   // The amount on the order (early-bird and extras included) — the pass's
   // list price only as a fallback while the order is still being created.
-  const amountDue = registration.payment.at(0)?.amount ?? registration.productPrice;
+  const currentPayment = registration.payment.at(0);
+  const amountDue = currentPayment?.amount ?? registration.productPrice;
   const provider = registration.paymentProvider ?? null;
+  // Itemized breakdown for the mock checkout branch (docs/payments/SPEC.md
+  // §11 Q7 — consistent copy across providers), only when the stored payment
+  // row actually has a fee breakdown (older/pre-fee-model rows don't).
+  const mockFeeBreakdown =
+    currentPayment?.passAmount != null &&
+    currentPayment?.platformFeeAmount != null &&
+    currentPayment?.platformFeeTaxAmount != null
+      ? { passAmount: currentPayment.passAmount, fee: currentPayment.platformFeeAmount + currentPayment.platformFeeTaxAmount }
+      : null;
 
   async function handlePay(outcome: "success" | "failure") {
     setPaying(true);
@@ -92,6 +126,17 @@ export function RegisterPayPage() {
           <RegistrationNotice tone="warning" title="Your seat hold expired" message="Start again to reserve a fresh seat.">
             <Button render={<Link to={`/register/${slug}`} />}>Start over</Button>
           </RegistrationNotice>
+        ) : provider === GURUPAY_PROVIDER ? (
+          <>
+            {registration.expiresAt && <ReservationCountdown expiresAt={registration.expiresAt} />}
+            <GuruPayCheckoutRedirect registration={registration} />
+            <p className="text-body-md text-muted-foreground">
+              <Link to="/legal/refunds" className="text-link underline-offset-4 hover:underline">
+                All payments are final
+              </Link>
+              .
+            </p>
+          </>
         ) : provider !== MOCK_PAYMENT_PROVIDER ? (
           // No usable checkout: online payments are switched off (or the
           // configured provider has no checkout in this app yet). Never fall
@@ -111,12 +156,28 @@ export function RegisterPayPage() {
             )}
             {registration.expiresAt && <ReservationCountdown expiresAt={registration.expiresAt} />}
             <section className="flex flex-col gap-lg rounded-md border border-border p-lg sm:p-xl">
-              <div className="flex items-baseline justify-between gap-md border-b border-border pb-md">
-                <span className="text-label-md text-ink">Amount due</span>
-                <span className="font-mono text-title-lg tabular-nums text-ink">{formatPrice(amountDue)}</span>
-              </div>
+              {mockFeeBreakdown ? (
+                <dl className="flex flex-col gap-xs border-b border-border pb-md text-body-md">
+                  <div className="flex items-baseline justify-between gap-md">
+                    <dt className="text-muted-foreground">Registration</dt>
+                    <dd className="font-mono tabular-nums text-ink">{formatPrice(mockFeeBreakdown.passAmount)}</dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-md">
+                    <dt className="text-muted-foreground">Platform fee (incl. GST)</dt>
+                    <dd className="font-mono tabular-nums text-ink">{formatPrice(mockFeeBreakdown.fee)}</dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-md pt-xs">
+                    <dt className="text-label-md text-ink">Total</dt>
+                    <dd className="font-mono text-title-lg tabular-nums text-ink">{formatPrice(amountDue)}</dd>
+                  </div>
+                </dl>
+              ) : (
+                <div className="flex items-baseline justify-between gap-md border-b border-border pb-md">
+                  <span className="text-label-md text-ink">Amount due</span>
+                  <span className="font-mono text-title-lg tabular-nums text-ink">{formatPrice(amountDue)}</span>
+                </div>
+              )}
               <p className="text-body-md text-muted-foreground">
-                Includes MUN Hub&apos;s platform fee.{" "}
                 <Link to="/legal/refunds" className="text-link underline-offset-4 hover:underline">
                   All payments are final
                 </Link>

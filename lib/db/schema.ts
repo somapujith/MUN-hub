@@ -810,6 +810,14 @@ export const payments = pgTable(
     provider: text('provider').notNull().default('mock_razorpay'),
     providerOrderId: text('provider_order_id').notNull().unique(),
     providerPaymentId: text('provider_payment_id'),
+    // GuruPay's hosted checkout page for this order (PaymentOrder.checkoutUrl,
+    // lib/payments/adapter.ts). Null for a provider with no redirect checkout
+    // (mock, and any future embedded-widget adapter). Stored at createOrder
+    // time and served back unchanged by GET /registrations/:id's `checkout`
+    // object (docs/payments/SPEC.md §4.4.3) — never re-fetched or
+    // regenerated, so a re-render/re-poll of the pay page never triggers a
+    // second GuruPay order (§6 "Double-submit").
+    checkoutUrl: text('checkout_url'),
     amount: integer('amount').notNull(),
     currency: text('currency').notNull().default('INR'),
     // Fee breakdown, computed server-side when the order is created (same

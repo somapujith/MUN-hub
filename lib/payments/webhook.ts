@@ -387,30 +387,29 @@ async function applyEvent(
   }
 }
 
-export async function processPaymentWebhook(
-  adapter: PaymentsAdapter,
-  rawBody: string,
-  headers: Headers,
-  now: Date = new Date(),
+/**
+ * Applies an already-verified, normalized `PaymentWebhookEvent` — the
+ * replay-window check, dedupe/claim, settlement transaction and post-commit
+ * hooks that used to be the back half of `processPaymentWebhook` itself.
+ *
+ * Extracted (docs/payments/SPEC.md §4.4.2/§12) so the GuruPay reconciliation
+ * job (`lib/jobs/reconcile-gurupay-orders.ts`) can feed it an event obtained
+ * directly from `checkOrderStatus` — a real normalized event, not raw
+ * bytes — without fabricating a fake `rawBody`/`Headers` pair just to
+ * round-trip through `verifyAndParseWebhook` again. `provider` is passed
+ * separately (not read off `adapter`) so a caller that only has an event
+ * (no adapter instance in hand) can still call this directly.
+ *
+ * This is a pure extraction: `processPaymentWebhook` below calls it with
+ * exactly the same `payloadSha256`/`now` it always computed, with no logic
+ * changes to the replay-window, dedupe or settlement behavior.
+ */
+export async function processNormalizedPaymentEvent(
+  provider: string,
+  event: PaymentWebhookEvent,
+  payloadSha256: string,
+  now: Date,
 ): Promise<ProcessWebhookResult> {
-  let verified: PaymentWebhookEvent | null
-  try {
-    verified = await adapter.verifyAndParseWebhook(rawBody, headers)
-  } catch (error) {
-    if (error instanceof WebhookVerificationError) {
-      return { ok: false, error: error.reason, message: error.message }
-    }
-    throw error
-  }
-
-  if (!verified) {
-    return { ok: true, body: { ok: true, ignored: true }, afterCommit: Promise.resolve() }
-  }
-  const event = verified
-
-  const provider = adapter.provider
-  const payloadSha256 = sha256(rawBody)
-
   if (event.signedAt && Math.abs(now.getTime() - event.signedAt.getTime()) > WEBHOOK_REPLAY_WINDOW_MS) {
     console.warn(`[payments] rejected stale webhook ${provider}/${event.eventId} signed at ${event.signedAt.toISOString()}`)
     await db.transaction(async (tx) => {
@@ -445,4 +444,27 @@ export async function processPaymentWebhook(
     hooks.push(runPaymentHook(onPaymentFailed, registrationId))
   }
   return { ok: true, body: result.body, afterCommit: Promise.all(hooks).then(() => undefined) }
+}
+
+export async function processPaymentWebhook(
+  adapter: PaymentsAdapter,
+  rawBody: string,
+  headers: Headers,
+  now: Date = new Date(),
+): Promise<ProcessWebhookResult> {
+  let verified: PaymentWebhookEvent | null
+  try {
+    verified = await adapter.verifyAndParseWebhook(rawBody, headers)
+  } catch (error) {
+    if (error instanceof WebhookVerificationError) {
+      return { ok: false, error: error.reason, message: error.message }
+    }
+    throw error
+  }
+
+  if (!verified) {
+    return { ok: true, body: { ok: true, ignored: true }, afterCommit: Promise.resolve() }
+  }
+
+  return processNormalizedPaymentEvent(adapter.provider, verified, sha256(rawBody), now)
 }

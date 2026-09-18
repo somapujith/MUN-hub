@@ -13,6 +13,7 @@ import { RegistrationNotice } from "@/components/registration/registration-notic
 import { StepIndicator } from "@/components/registration/step-indicator";
 import { hasPassed } from "@/components/registration/deadline";
 import { currentPassPrice } from "@/components/registration/pricing";
+import { previewFeeBreakdownAdditive } from "@/components/registration/fees-preview";
 import { formatPrice } from "@/components/shared/currency";
 import { formatDateRange } from "@/components/shared/date-range";
 import {
@@ -26,6 +27,7 @@ import { queryKeys } from "@/api/query-keys";
 import { getMunBySlug, getProductsAvailability } from "@/api/marketplace";
 import { getProfileFormDefaults } from "@/api/student-profile";
 import { getAccountSettings } from "@/api/account";
+import { fetchFeeRates } from "@/api/registration";
 import {
   GROUP_MAX_SIZE,
   GROUP_MIN_SIZE,
@@ -80,6 +82,10 @@ export function GroupRegisterPage() {
     queryFn: () => getProductsAvailability(productIds),
     enabled: mun?.status === "REGISTRATION_OPEN" && productIds.length > 0,
   });
+  // Fee-inclusive total preview (docs/payments/SPEC.md §4.4/§5 — the amount
+  // shown at commit time must match what's actually charged). The server
+  // remains authoritative regardless of what this preview shows.
+  const feeRatesQuery = useQuery({ queryKey: queryKeys.feeRates(), queryFn: fetchFeeRates, staleTime: 5 * 60 * 1000 });
 
   const [step, setStep] = React.useState(0);
   const [pending, setPending] = React.useState(false);
@@ -206,8 +212,17 @@ export function GroupRegisterPage() {
   const selected = selectableProducts.find((e) => e.product.id === productId) ?? selectableProducts[0];
   const maxTeamSize = Math.min(GROUP_MAX_SIZE, selected.available);
   const pricing = currentPassPrice(selected.product);
-  const total = pricing.price * teamSize;
-  const free = total === 0;
+  // The listed price alone — what the organizer is owed, unchanged by the
+  // fee (additive model, docs/payments/SPEC.md §0/§4.4). This is NOT what
+  // the team is actually charged; see `total` below.
+  const passAmount = pricing.price * teamSize;
+  const free = passAmount === 0;
+  const feePreview = free ? null : previewFeeBreakdownAdditive(passAmount, feeRatesQuery.data);
+  // Fee-inclusive total the team will actually be charged. Falls back to the
+  // pre-fee amount only while the fee-rates preview hasn't loaded yet — the
+  // real charge computed server-side in initiateGroupRegistration is what
+  // ultimately matters either way.
+  const total = feePreview?.totalCharge ?? passAmount;
 
   const visibleFields = orderedFields.filter((f) => isFieldVisible(f, answers));
   const detailsComplete =
@@ -290,11 +305,25 @@ export function GroupRegisterPage() {
               {GROUP_MIN_SIZE} to {maxTeamSize} people ({selected.available} seats left on this pass).
             </p>
           </div>
-          <div className="flex items-baseline justify-between rounded-md border border-border bg-surface-soft px-md py-sm">
-            <span className="text-label-md text-ink">
-              {teamSize} × {formatPrice(pricing.price)}
-            </span>
-            <span className="font-mono text-title-md tabular-nums text-ink">{free ? "Free" : formatPrice(total)}</span>
+          <div className="flex flex-col gap-xs rounded-md border border-border bg-surface-soft px-md py-sm">
+            <div className="flex items-baseline justify-between">
+              <span className="text-label-md text-ink">
+                {teamSize} × {formatPrice(pricing.price)}
+              </span>
+              <span className="font-mono tabular-nums text-ink">{free ? "Free" : formatPrice(passAmount)}</span>
+            </div>
+            {feePreview && (
+              <div className="flex items-baseline justify-between text-body-md text-muted-foreground">
+                <span>Platform fee (incl. GST)</span>
+                <span className="font-mono tabular-nums">
+                  {formatPrice(feePreview.platformFee + feePreview.platformFeeTax)}
+                </span>
+              </div>
+            )}
+            <div className="flex items-baseline justify-between border-t border-border pt-xs">
+              <span className="text-label-md text-ink">Total</span>
+              <span className="font-mono text-title-md tabular-nums text-ink">{free ? "Free" : formatPrice(total)}</span>
+            </div>
           </div>
           <div className="flex justify-end">
             <Button type="button" onClick={() => setStep(1)}>
@@ -383,6 +412,10 @@ export function GroupRegisterPage() {
             <Row label="Conference" value={mun.name} />
             <Row label="Pass" value={selected.product.name} />
             <Row label="Team size" value={`${teamSize} people`} />
+            {!free && <Row label="Registration" value={formatPrice(passAmount)} />}
+            {feePreview && (
+              <Row label="Platform fee (incl. GST)" value={formatPrice(feePreview.platformFee + feePreview.platformFeeTax)} />
+            )}
             <Row label="Total" value={free ? "Free" : formatPrice(total)} strong />
             <Row label="Your name" value={core.fullName} />
             <Row label="Your email" value={core.email} />
