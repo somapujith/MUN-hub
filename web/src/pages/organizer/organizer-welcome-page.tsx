@@ -47,7 +47,12 @@ function WelcomeContent() {
 
   return (
     <main className="flex flex-1 items-center justify-center px-lg pt-section pb-28 lg:pb-section">
-      <div className="grid w-full max-w-[1040px] items-center gap-xxl lg:grid-cols-[1fr_1fr] lg:gap-section">
+      {/* minmax(0,1fr), not a bare 1fr: a plain `1fr 1fr` column's automatic
+          minimum size is content-based, so the h1's `lg:whitespace-nowrap`
+          line ("Reach the right delegates,") could force both tracks wider
+          than the viewport at exactly `lg` (1024px), instead of just wrapping
+          or clipping inside its own column. */}
+      <div className="grid w-full max-w-[1040px] items-center gap-xxl lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-section">
         {/* Explicit text colors throughout: the global dark-mode heading
             styles would otherwise wash these out on the light surface. */}
         <h1 className="text-[32px] leading-[1.2] font-normal tracking-[-0.025em] text-[#121212] md:text-[40px]">

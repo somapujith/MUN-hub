@@ -124,7 +124,12 @@ function Stepper({
   const firstOpen = ONBOARDING_STEPS.find((step) => !completed.includes(step));
 
   return (
-    <nav aria-label="Onboarding steps" className="lg:col-start-1 lg:row-start-1 lg:self-center">
+    // min-w-0: this is a grid item below `lg` (the wrapping grid has no
+    // explicit column sizing outside `lg:grid-cols-[...]`), so without it the
+    // step row's own overflow-x-auto below never gets a chance to clip/scroll
+    // — the grid item's automatic min width is content-based and just forces
+    // the whole grid (and page) wider instead.
+    <nav aria-label="Onboarding steps" className="min-w-0 lg:col-start-1 lg:row-start-1 lg:self-center">
       <ol className="flex gap-1 overflow-x-auto lg:flex-col lg:gap-0 lg:overflow-visible">
         {ONBOARDING_STEPS.map((step, index) => {
           const isCurrent = step === current;
