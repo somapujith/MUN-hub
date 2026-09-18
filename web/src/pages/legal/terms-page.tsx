@@ -9,10 +9,11 @@ const SECTIONS: LegalSection[] = [
     body: (
       <>
         <p>
-          These terms are an agreement between you and {SITE_INFO.name} (“MUN
-          Hub”, “we”, “us”) covering your use of {SITE_INFO.domain}, its
-          subdomains, and the services we provide there (together, the
-          “Platform”).
+          These terms are an agreement between you and {SITE_INFO.legalName}, a{" "}
+          {SITE_INFO.entityType.toLowerCase()} registered in India with its
+          registered address at {SITE_INFO.address.oneLine} (“MUN Hub”, “we”,
+          “us”), covering your use of {SITE_INFO.domain}, its subdomains, and
+          the services we provide there (together, the “Platform”).
         </p>
         <p>
           By creating an account, registering for a conference, or listing a

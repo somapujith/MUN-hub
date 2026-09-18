@@ -10,6 +10,7 @@ import {
   TicketIcon,
 } from "lucide-react";
 import { InfoPageShell, InfoSection, PageHero } from "@/components/content/info-page";
+import { RegisteredBusinessDetails } from "@/components/content/registered-business-details";
 import { Button } from "@/components/ui/button";
 import { useListYourMunHref } from "@/hooks/use-list-your-mun-href";
 import { SITE_INFO, mailto } from "@/lib/site-info";
@@ -190,6 +191,10 @@ export function ContactPage() {
               </div>
             ))}
           </dl>
+        </InfoSection>
+
+        <InfoSection eyebrow="Registered business" title="Write to us directly" id="registered-business">
+          <RegisteredBusinessDetails />
         </InfoSection>
 
         <InfoSection

@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { useListYourMunHref } from "@/hooks/use-list-your-mun-href";
+import { SITE_INFO, mailto, tel } from "@/lib/site-info";
 
 /**
  * `footer` — docs/prd/DESIGN-airtable.md § Navigation Variants.
@@ -71,6 +72,19 @@ export function SiteFooter() {
             <p className="mt-sm text-body-md text-muted-foreground">
               A curated marketplace for Model United Nations conferences — every
               listing reviewed before it goes live.
+            </p>
+            <p className="mt-md text-body-md text-muted-foreground">
+              {SITE_INFO.legalName} ({SITE_INFO.entityType})
+              <br />
+              {SITE_INFO.address.oneLine}
+              <br />
+              <a href={tel(SITE_INFO.phone)} className="hover:text-ink">
+                {SITE_INFO.phoneDisplay}
+              </a>{" "}
+              &middot;{" "}
+              <a href={mailto(SITE_INFO.emails.owner)} className="hover:text-ink">
+                {SITE_INFO.emails.owner}
+              </a>
             </p>
           </div>
 

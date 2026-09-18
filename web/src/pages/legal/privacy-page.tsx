@@ -318,7 +318,9 @@ const SECTIONS: LegalSection[] = [
       <p>
         If you have a concern about how we handle your data, contact our
         Grievance Officer at{" "}
-        <a href={mailto(SITE_INFO.emails.privacy)}>{SITE_INFO.emails.privacy}</a>.
+        <a href={mailto(SITE_INFO.emails.privacy)}>{SITE_INFO.emails.privacy}</a>{" "}
+        or {SITE_INFO.phoneDisplay}. You can also write to us at{" "}
+        {SITE_INFO.legalName} ({SITE_INFO.entityType}), {SITE_INFO.address.oneLine}.
         We'll acknowledge your complaint and work to resolve it promptly.
       </p>
     ),

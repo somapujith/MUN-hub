@@ -11,6 +11,7 @@ import {
   UsersRoundIcon,
 } from "lucide-react";
 import { InfoPageShell, InfoSection, PageHero } from "@/components/content/info-page";
+import { RegisteredBusinessDetails } from "@/components/content/registered-business-details";
 import { Button } from "@/components/ui/button";
 import {
   SignatureCard,
@@ -241,6 +242,14 @@ export function AboutPage() {
           title="Starting in Hyderabad, growing city by city"
           intro="We're starting with the Hyderabad conference circuit and adding cities as organizers join. If you run a MUN anywhere, we'd like to hear from you."
         />
+
+        <InfoSection
+          id="registered-business"
+          eyebrow="Registered business"
+          title="Who operates MUN Hub"
+        >
+          <RegisteredBusinessDetails />
+        </InfoSection>
 
         <SignatureCard variant="dark" className="items-center">
           <div className="max-w-2xl text-center">
