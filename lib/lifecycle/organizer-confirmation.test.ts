@@ -158,6 +158,10 @@ describe('submitFinalConfirmation', () => {
     expect(snapshot.scheduleItems).toBeTruthy()
     expect(snapshot.contact).toBeTruthy()
     expect(snapshot.accommodationOptions).toBeTruthy()
+    // The Gate-3 "Payouts" row bug fix: the organizer's current account-level
+    // UPI payout, not the legacy per-mun paymentSettings bank fields above
+    // (makeCompleteMun seeds both — this must read the UPI one).
+    expect(snapshot.organizerPayout).toEqual({ upiId: 'organizer@upi' })
   })
 
   it('does not leak payment ciphertext columns into the snapshot', async () => {

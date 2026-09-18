@@ -17,6 +17,7 @@ import {
   munContacts,
   accommodationOptions,
   accommodationOptionFields,
+  organizerProfiles,
 } from '@/lib/db/schema'
 import type { Mun } from '@/lib/types'
 import type { Session } from '@/lib/auth/adapter'
@@ -50,6 +51,20 @@ function notifyFireAndForget(work: () => Promise<void>): void {
  * with no argument — `panCiphertext`/`accountNumberCiphertext` must never
  * leave this table via any read path, snapshot included. See the security
  * comment on `munPaymentSettings` in lib/db/schema.ts.
+ *
+ * `paymentSettings` above is the legacy per-MUN PAN/bank-account table —
+ * nothing writes to it anymore since the org moved to account-level
+ * UPI-only payouts (`organizer_profiles.upiId`, set once at onboarding).
+ * It's kept here only so an old mun's historical snapshot/version data
+ * stays intact; it is deliberately NOT what the Gate-3 "Payouts" summary
+ * row displays (see `organizerPayout` below fixing that exact bug).
+ *
+ * `organizerPayout` is the organizer's actual, current payout method —
+ * looked up by `mun.organizerId`, same query shape as
+ * `lib/lifecycle/validation.ts#loadValidationContext`'s
+ * `organizerPaymentLinked` check (the thing that actually gates
+ * submit/publish). `null` mun (bad munId) yields `null` here rather than
+ * throwing, matching this function's existing no-guard-on-`mun` behavior.
  *
  * Exported (Task 11, 2026-09-14) — `publishFromQueue` (lib/lifecycle/
  * go-live.ts) reuses this exact snapshot builder for the `mun_versions` row
@@ -109,6 +124,14 @@ export async function buildSnapshot(munId: string) {
     ? await db.select().from(accommodationOptionFields).where(inArray(accommodationOptionFields.optionId, optionIds))
     : []
 
+  const [organizerPayoutRow] = mun
+    ? await db
+        .select({ upiId: organizerProfiles.upiId })
+        .from(organizerProfiles)
+        .where(eq(organizerProfiles.userId, mun.organizerId))
+        .limit(1)
+    : []
+
   return {
     mun,
     committees: munCommittees,
@@ -118,6 +141,7 @@ export async function buildSnapshot(munId: string) {
     executiveBoard,
     formFields,
     paymentSettings: paymentSettings ?? null,
+    organizerPayout: organizerPayoutRow ? { upiId: organizerPayoutRow.upiId } : null,
     documents,
     scheduleItems,
     contact: contact ?? null,
