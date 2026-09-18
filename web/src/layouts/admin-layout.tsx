@@ -60,8 +60,33 @@ export function AdminLayout() {
       event.preventDefault();
     };
     el.addEventListener("wheel", onWheel, { passive: false });
+
+    // The strip's tab labels render in Inter, loaded from Google Fonts with
+    // `display=swap` (index.html) — a cold load first paints the fallback
+    // system font, then swaps to Inter once it arrives, which reflows every
+    // tab's width. `revealActiveTab` above ran against the pre-swap widths,
+    // so at any width where the strip actually needs to scroll (below where
+    // all 13 tabs fit, ~1280px+) the active tab landed only partially
+    // revealed — confirmed: "Audit Log" clipped ~49px into the hidden area
+    // at 320-1024px, with nothing to ever recompute it afterward. Same fix
+    // pattern already used in info-page.tsx's hash-scroll for the same root
+    // cause: re-run once the font has settled, unless the visitor already
+    // started scrolling the strip themselves by then.
+    let settled = false;
+    const stopSettle = () => {
+      settled = true;
+    };
+    const settleEvents = ["wheel", "touchstart", "keydown"] as const;
+    settleEvents.forEach((name) => el.addEventListener(name, stopSettle, { passive: true, once: true }));
+    void document.fonts?.ready.then(() => {
+      requestAnimationFrame(() => {
+        if (!settled) revealActiveTab(el);
+      });
+    });
+
     return () => {
       el.removeEventListener("wheel", onWheel);
+      settleEvents.forEach((name) => el.removeEventListener(name, stopSettle));
       detachFade();
     };
   };

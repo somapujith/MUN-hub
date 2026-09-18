@@ -51,7 +51,20 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-lg rounded-lg border border-border bg-popover p-lg text-body-md text-popover-foreground duration-150 outline-none sm:max-w-md data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // `max-h-[85dvh]` + `overflow-y-auto`: without a height clamp this
+          // popup is `position: fixed` and vertically centered with an
+          // intrinsic height, so on a short viewport (a phone in landscape,
+          // e.g. 667x375; a laptop with devtools open) taller content got
+          // clipped symmetrically off BOTH the top and bottom edges with no
+          // way to reach the clipped part — page scroll can't move a fixed
+          // element, and the popup itself had no internal scroll. Confirmed:
+          // the account-deletion dialog's title and close button clipped at
+          // the top and its submit button pressed flush against the bottom
+          // at 667x375. One call site (Gate2ReviewDialog) already had to
+          // hand-roll this exact fix (`max-h-[90vh] flex flex-col` + an inner
+          // `overflow-y-auto` region) — that redundancy is a sign it belongs
+          // here instead, so every dialog gets a usable fallback for free.
+          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] max-h-[85dvh] -translate-x-1/2 -translate-y-1/2 gap-lg overflow-y-auto rounded-lg border border-border bg-popover p-lg text-body-md text-popover-foreground duration-150 outline-none sm:max-w-md data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
