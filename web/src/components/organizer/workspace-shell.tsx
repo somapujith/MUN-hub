@@ -15,7 +15,7 @@ interface WorkspaceShellProps {
 export function WorkspaceShell({ muns, currentMun, role, children }: WorkspaceShellProps) {
   return (
     <div className="flex min-h-full flex-1 lg:h-dvh lg:overflow-hidden">
-      <aside className="hidden w-[17.5rem] shrink-0 border-r border-sidebar-border lg:block">
+      <aside className="hidden w-[17.5rem] shrink-0 border-r border-sidebar-border lg:block lg:h-dvh">
         <WorkspaceSidebar muns={muns} currentMun={currentMun} />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col lg:h-dvh lg:overflow-y-auto lg:[scrollbar-gutter:stable]">
