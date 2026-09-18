@@ -28,8 +28,13 @@ function formatDateTime(date: Date): string {
 
 /**
  * The delegate's receipt for one registration — owner-only on the server
- * (anyone else gets a 404 and sees "Page not found" here). Deliberately
- * shows no fee split: the platform fee is included in the amount paid.
+ * (anyone else gets a 404, which `fetchRegistrationReceipt` resolves to
+ * `null` rather than throwing, so it lands on "Page not found" here same as
+ * a receipt that genuinely doesn't exist). A real fetch failure (network
+ * drop, 5xx) is a different, thrown-error case — see the `isError` branch
+ * below — and gets its own retry state instead of being lumped in with the
+ * not-found page. Deliberately shows no fee split: the platform fee is
+ * included in the amount paid.
  */
 export function RegistrationReceiptPage() {
   const { registrationId = "" } = useParams();
@@ -53,6 +58,38 @@ export function RegistrationReceiptPage() {
       </div>
     );
   }
+
+  // A genuine fetch failure (network/server error) is not the same thing as
+  // "this receipt doesn't exist or isn't yours" — the API 404s a non-owner
+  // deliberately (privacy: see the module doc comment above), but a 500 or a
+  // dropped connection means we simply don't know yet, and the not-found
+  // page's "go back to your dashboard" framing would wrongly tell someone
+  // their own receipt doesn't exist. Only a query that actually *succeeded*
+  // with no data falls through to the real 404 below.
+  if (receiptQuery.isError) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col">
+        <SiteHeader />
+        <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-start gap-md px-lg py-xxl">
+          <p className="text-body-md text-destructive-text">
+            {receiptQuery.error instanceof Error
+              ? receiptQuery.error.message
+              : "We couldn't load your receipt right now."}
+          </p>
+          <div className="flex flex-wrap gap-sm">
+            <Button variant="outline" onClick={() => void receiptQuery.refetch()}>
+              Try again
+            </Button>
+            <Button variant="ghost" render={<Link to="/dashboard" />}>
+              Your dashboard
+            </Button>
+          </div>
+        </main>
+        <SiteFooter />
+      </div>
+    );
+  }
+
   if (!receipt) return <NotFoundPage />;
 
   const { mun, payment } = receipt;

@@ -114,6 +114,20 @@ export function cancelGroupInvitation(invitationId: string): Promise<void> {
   });
 }
 
+/**
+ * Wraps `POST /registration-groups/:id/registrations/:registrationId/release`
+ * — hands an accepted teammate's seat back to the head so it can be invited
+ * to again. Only legal while the team hasn't paid yet; the API answers 409
+ * once it has, so callers should gate offering this in the UI on the
+ * roster's own paid/unpaid status rather than relying on the error alone.
+ */
+export function releaseGroupSeat(groupId: string, registrationId: string): Promise<void> {
+  return request<void>(
+    `/registration-groups/${encodeURIComponent(groupId)}/registrations/${encodeURIComponent(registrationId)}/release`,
+    { method: "POST" },
+  );
+}
+
 export interface GroupInvitationPreview {
   status: GroupInvitationStatus;
   munName: string;
