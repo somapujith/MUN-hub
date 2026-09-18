@@ -40,8 +40,11 @@ function jsonResponse(body: unknown, init: { status?: number } = {}) {
 /**
  * Stubs fetch: create-order always succeeds; check-status returns whatever
  * `checkStatusData` resolves to for the polled order_id. Response shapes are
- * the CONFIRMED REAL ones (GuruPay dashboard, 2026-09-18) — top-level
- * fields, not nested under `data`.
+ * VERIFIED against the real live API by direct diagnostic calls
+ * (2026-09-18, after production 402s revealed the shape previously assumed
+ * here was wrong): everything is nested under `data`, and the actual payment
+ * outcome is `data.payment_status`, not a top-level `status` (which is
+ * always "success" once the API call itself worked).
  */
 function stubGuruPayFetch(checkStatusData: (orderId: string) => Record<string, unknown> | Promise<Record<string, unknown>>) {
   vi.stubGlobal(
@@ -56,12 +59,16 @@ function stubGuruPayFetch(checkStatusData: (orderId: string) => Record<string, u
         if (body.callback_url.includes('/webhooks/payments')) {
           throw new Error('callback_url must never be the webhook endpoint')
         }
-        return jsonResponse({ status: 'success', payment_url: `https://www.gurupaygateway.com/pay/${body.order_id}` })
+        return jsonResponse({
+          status: 'success',
+          message: 'Order created successfully',
+          data: { payment_url: `https://www.gurupaygateway.com/pay/${body.order_id}`, order_id: body.order_id },
+        })
       }
       if (href.endsWith('/api/check-status')) {
         const body = JSON.parse(String(init.body)) as { order_id: string }
         const data = await checkStatusData(body.order_id)
-        return jsonResponse(data)
+        return jsonResponse({ status: 'success', data })
       }
       throw new Error(`Unexpected GuruPay call: ${href}`)
     }),
@@ -124,7 +131,7 @@ async function createPendingRegistration(passPrice = 1499) {
 describe('POST /registrations under PAYMENTS_ADAPTER=gurupay', () => {
   it('creates the order via stubbed fetch and returns the checkout object with fee split', async () => {
     enableGuruPay()
-    stubGuruPayFetch(() => ({ status: 'pending', amount: '1.00' }))
+    stubGuruPayFetch(() => ({ payment_status: 'pending', amount: '1.00' }))
     process.env.PLATFORM_FEE_BPS = '650'
     process.env.PLATFORM_FEE_TAX_BPS = '1800'
 
@@ -167,7 +174,10 @@ describe('POST /registrations under PAYMENTS_ADAPTER=gurupay', () => {
         if (href.endsWith('/api/create-order')) {
           const body = JSON.parse(String(init.body)) as { order_id: string; callback_url: string }
           calls.push({ callback_url: body.callback_url })
-          return jsonResponse({ status: 'success', payment_url: `https://www.gurupaygateway.com/pay/${body.order_id}` })
+          return jsonResponse({
+            status: 'success',
+            data: { payment_url: `https://www.gurupaygateway.com/pay/${body.order_id}`, order_id: body.order_id },
+          })
         }
         throw new Error(`Unexpected GuruPay call: ${href}`)
       }),
@@ -221,12 +231,12 @@ describe('POST /webhooks/payments under PAYMENTS_ADAPTER=gurupay', () => {
     process.env.PLATFORM_FEE_BPS = '650'
     process.env.PLATFORM_FEE_TAX_BPS = '1800'
     enableGuruPay()
-    stubGuruPayFetch(() => ({ status: 'pending', amount: '1.00' }))
+    stubGuruPayFetch(() => ({ payment_status: 'pending', amount: '1.00' }))
     const { registrationId, payment } = await createPendingRegistration(1499)
 
     // Now flip check-status to report success for this specific order.
     stubGuruPayFetch(() => ({
-      status: 'success',
+      payment_status: 'success',
       amount: String(payment.amount),
       utr: 'UTR_SUCCESS_1',
       paid_at: new Date().toISOString(),
@@ -250,10 +260,10 @@ describe('POST /webhooks/payments under PAYMENTS_ADAPTER=gurupay', () => {
 
   it('cancels the registration on check-status failed', async () => {
     enableGuruPay()
-    stubGuruPayFetch(() => ({ status: 'pending', amount: '1.00' }))
+    stubGuruPayFetch(() => ({ payment_status: 'pending', amount: '1.00' }))
     const { registrationId, payment } = await createPendingRegistration()
 
-    stubGuruPayFetch(() => ({ status: 'failed', amount: String(payment.amount), utr: null }))
+    stubGuruPayFetch(() => ({ payment_status: 'failed', amount: String(payment.amount), utr: null }))
 
     const res = await post(JSON.stringify({ order_id: payment.providerOrderId }))
     expect(res.status).toBe(200)
@@ -266,10 +276,10 @@ describe('POST /webhooks/payments under PAYMENTS_ADAPTER=gurupay', () => {
 
   it('a late success for the SAME order after a reported failure raises PAYMENT_AFTER_HOLD_EXPIRED, never re-confirms the cancelled registration (bug fix — failed is not permanently terminal)', async () => {
     enableGuruPay()
-    stubGuruPayFetch(() => ({ status: 'pending', amount: '1.00' }))
+    stubGuruPayFetch(() => ({ payment_status: 'pending', amount: '1.00' }))
     const { registrationId, payment } = await createPendingRegistration()
 
-    stubGuruPayFetch(() => ({ status: 'failed', amount: String(payment.amount), utr: null }))
+    stubGuruPayFetch(() => ({ payment_status: 'failed', amount: String(payment.amount), utr: null }))
     const failRes = await post(JSON.stringify({ order_id: payment.providerOrderId }))
     expect(await failRes.json()).toEqual({ ok: true })
     expect((await paymentOf(registrationId)).status).toBe('FAILED')
@@ -278,7 +288,7 @@ describe('POST /webhooks/payments under PAYMENTS_ADAPTER=gurupay', () => {
 
     // Student retries on GuruPay's still-open hosted page for the SAME
     // order_id; a later webhook/reconciliation poll now reports success.
-    stubGuruPayFetch(() => ({ status: 'success', amount: String(payment.amount), utr: 'UTR_LATE_RETRY' }))
+    stubGuruPayFetch(() => ({ payment_status: 'success', amount: String(payment.amount), utr: 'UTR_LATE_RETRY' }))
     const retryRes = await post(JSON.stringify({ order_id: payment.providerOrderId }))
     expect(retryRes.status).toBe(200)
     expect(await retryRes.json()).toEqual({ ok: true, exception: true })
@@ -298,13 +308,13 @@ describe('POST /webhooks/payments under PAYMENTS_ADAPTER=gurupay', () => {
 
   it('raises AMOUNT_MISMATCH and leaves the registration untouched when check-status reports a different amount', async () => {
     enableGuruPay()
-    stubGuruPayFetch(() => ({ status: 'pending', amount: '1.00' }))
+    stubGuruPayFetch(() => ({ payment_status: 'pending', amount: '1.00' }))
     const { registrationId, payment } = await createPendingRegistration()
 
     // check-status reports success but with the WRONG amount — a systematic
     // rupee/paise unit bug would trip this on every payment (spec §6).
     stubGuruPayFetch(() => ({
-      status: 'success',
+      payment_status: 'success',
       amount: String(payment.amount * 100), // simulates a paise-vs-rupee mismatch
       utr: 'UTR_MISMATCH',
     }))
@@ -320,10 +330,10 @@ describe('POST /webhooks/payments under PAYMENTS_ADAPTER=gurupay', () => {
 
   it('answers {duplicate: true} for a webhook redelivery of an already-confirmed order, with no state change', async () => {
     enableGuruPay()
-    stubGuruPayFetch(() => ({ status: 'pending', amount: '1.00' }))
+    stubGuruPayFetch(() => ({ payment_status: 'pending', amount: '1.00' }))
     const { registrationId, payment } = await createPendingRegistration()
 
-    stubGuruPayFetch(() => ({ status: 'success', amount: String(payment.amount), utr: 'UTR_DUP' }))
+    stubGuruPayFetch(() => ({ payment_status: 'success', amount: String(payment.amount), utr: 'UTR_DUP' }))
 
     const first = await post(JSON.stringify({ order_id: payment.providerOrderId }))
     expect(await first.json()).toEqual({ ok: true, confirmed: true })
@@ -338,7 +348,7 @@ describe('POST /webhooks/payments under PAYMENTS_ADAPTER=gurupay', () => {
 
   it('acknowledges a pending check-status result as ignored, with no state change', async () => {
     enableGuruPay()
-    stubGuruPayFetch(() => ({ status: 'pending', amount: '1.00' }))
+    stubGuruPayFetch(() => ({ payment_status: 'pending', amount: '1.00' }))
     const { registrationId, payment } = await createPendingRegistration()
 
     const res = await post(JSON.stringify({ order_id: payment.providerOrderId }))
@@ -351,10 +361,10 @@ describe('POST /webhooks/payments under PAYMENTS_ADAPTER=gurupay', () => {
 
   it('leaves the webhook unprocessed (400) when check-status itself fails — never confirms on missing information', async () => {
     enableGuruPay()
-    stubGuruPayFetch(() => ({ status: 'pending', amount: '1.00' }))
+    stubGuruPayFetch(() => ({ payment_status: 'pending', amount: '1.00' }))
     const { registrationId, payment } = await createPendingRegistration()
 
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'failed' }, { status: 500 })))
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'Internal error' }, { status: 500 })))
 
     const res = await post(JSON.stringify({ order_id: payment.providerOrderId }))
     expect(res.status).toBe(400)
@@ -377,7 +387,7 @@ describe('POST /webhooks/payments under PAYMENTS_ADAPTER=gurupay', () => {
 
   it('answers 404 for an unknown order (no matching payment row)', async () => {
     enableGuruPay()
-    stubGuruPayFetch(() => ({ status: 'success', amount: '100.00', utr: 'X' }))
+    stubGuruPayFetch(() => ({ payment_status: 'success', amount: '100.00', utr: 'X' }))
 
     const res = await post(JSON.stringify({ order_id: `mh_${crypto.randomUUID()}_${crypto.randomUUID()}` }))
     expect(res.status).toBe(404)
@@ -385,7 +395,7 @@ describe('POST /webhooks/payments under PAYMENTS_ADAPTER=gurupay', () => {
 
   it('answers 404 when payments are disabled', async () => {
     enableGuruPay()
-    stubGuruPayFetch(() => ({ status: 'pending', amount: '1.00' }))
+    stubGuruPayFetch(() => ({ payment_status: 'pending', amount: '1.00' }))
     const { payment } = await createPendingRegistration()
 
     setRuntimeEnv({})

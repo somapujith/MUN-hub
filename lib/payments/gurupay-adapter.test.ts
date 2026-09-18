@@ -7,11 +7,12 @@ import { checkOrderStatus, createGuruPayAdapter, GURUPAY_PROVIDER } from './guru
  * called. See docs/payments/SPEC.md §6 ("Test suite accidentally hitting
  * real GuruPay") and §9.
  *
- * Response shapes here are the CONFIRMED REAL ones (GuruPay dashboard,
- * 2026-09-18) — top-level fields, not nested under `data`, and `amount` as a
- * STRING in check-status. This replaced an earlier, wrong guess (nested
- * `data.xxx`, numeric amount) that SPEC.md had assumed before the dashboard
- * was reviewed.
+ * Response shapes here are VERIFIED against the real live API by direct
+ * diagnostic calls (2026-09-18, after production 402s revealed the earlier
+ * assumed shape was wrong — see gurupay-adapter.ts's doc comments and git
+ * history): everything is nested under `data`, the envelope's own `status`
+ * only says the API call itself worked, the actual outcome is
+ * `data.payment_status`, and `amount` is a JSON number, not a string.
  */
 
 const CONFIG = { apiKey: 'test-gurupay-key', callbackUrl: 'https://www.munhub.in' }
@@ -22,6 +23,38 @@ function jsonResponse(body: unknown, init: { status?: number } = {}) {
     status: init.status ?? 200,
     headers: { 'content-type': 'application/json' },
   })
+}
+
+function createOrderBody(overrides: Partial<{ status: string; data: Record<string, unknown> }> = {}) {
+  return {
+    status: 'success',
+    message: 'Order created successfully',
+    data: { payment_url: VALID_PAYMENT_URL, order_id: 'echoed_order_id', ...overrides.data },
+    ...overrides,
+  }
+}
+
+function checkStatusBody(
+  paymentStatus: 'success' | 'pending' | 'failed',
+  overrides: Partial<Record<string, unknown>> = {},
+) {
+  return {
+    status: 'success',
+    data: {
+      order_id: 'echoed_order_id',
+      amount: 100,
+      currency: 'INR',
+      payment_status: paymentStatus,
+      customer_name: 'MUN Hub delegate',
+      customer_mobile: null,
+      utr: null,
+      payment_method: 'UPI',
+      provider: 'paytm',
+      gateway_txn_id: null,
+      paid_at: null,
+      ...overrides,
+    },
+  }
 }
 
 afterEach(() => {
@@ -38,13 +71,13 @@ describe('createGuruPayAdapter', () => {
 })
 
 describe('GuruPayAdapter.createOrder', () => {
-  it('POSTs the correct request shape and headers, and returns the generated order id + checkoutUrl', async () => {
+  it('POSTs the correct request shape and headers, and returns the generated order id + checkoutUrl from nested data', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init: RequestInit) => {
         calls.push({ url: String(url), init })
-        return jsonResponse({ status: 'success', payment_url: VALID_PAYMENT_URL })
+        return jsonResponse(createOrderBody())
       }),
     )
 
@@ -63,9 +96,10 @@ describe('GuruPayAdapter.createOrder', () => {
     expect(sentBody.order_id).toMatch(/^mh_reg_abc_/)
     expect(sentBody.callback_url).toBe(CONFIG.callbackUrl)
 
-    // Returned orderId is the generated one — create-order's confirmed real
-    // response doesn't echo one back at all.
+    // Returned orderId is always the generated one, even though the real API
+    // does echo one back under data.order_id — never trusted over our own record.
     expect(order.orderId).toBe(sentBody.order_id)
+    expect(order.orderId).not.toBe('echoed_order_id')
     expect(order.checkoutUrl).toBe(VALID_PAYMENT_URL)
   })
 
@@ -75,7 +109,7 @@ describe('GuruPayAdapter.createOrder', () => {
       'fetch',
       vi.fn(async (_url: string, init: RequestInit) => {
         calls.push({ init })
-        return jsonResponse({ status: 'success', payment_url: VALID_PAYMENT_URL })
+        return jsonResponse(createOrderBody())
       }),
     )
     const adapter = createGuruPayAdapter(CONFIG)
@@ -97,7 +131,7 @@ describe('GuruPayAdapter.createOrder', () => {
       'fetch',
       vi.fn(async (_url: string, init: RequestInit) => {
         calls.push({ init })
-        return jsonResponse({ status: 'success', payment_url: VALID_PAYMENT_URL })
+        return jsonResponse(createOrderBody())
       }),
     )
     const adapter = createGuruPayAdapter(CONFIG)
@@ -115,7 +149,7 @@ describe('GuruPayAdapter.createOrder', () => {
       vi.fn(async (_url: string, init: RequestInit) => {
         const body = JSON.parse(String(init.body)) as { order_id: string }
         generatedIds.add(body.order_id)
-        return jsonResponse({ status: 'success', payment_url: VALID_PAYMENT_URL })
+        return jsonResponse(createOrderBody())
       }),
     )
 
@@ -127,8 +161,13 @@ describe('GuruPayAdapter.createOrder', () => {
     expect(generatedIds.size).toBe(2)
   })
 
-  it('throws on a non-2xx response', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'failed', error: 'bad request' }, { status: 400 })))
+  it('throws on a non-2xx response (e.g. insufficient wallet balance, 402)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({ error: 'Insufficient wallet balance', details: 'Insufficient wallet balance.' }, { status: 402 }),
+      ),
+    )
     const adapter = createGuruPayAdapter(CONFIG)
     await expect(adapter.createOrder({ amount: 100, currency: 'INR', registrationId: 'reg_x' })).rejects.toThrow()
   })
@@ -139,8 +178,19 @@ describe('GuruPayAdapter.createOrder', () => {
     await expect(adapter.createOrder({ amount: 100, currency: 'INR', registrationId: 'reg_x' })).rejects.toThrow()
   })
 
-  it('throws on a response missing payment_url (malformed shape)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'success' })))
+  it('throws on a response missing data.payment_url (malformed shape)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'success', data: {} })))
+    const adapter = createGuruPayAdapter(CONFIG)
+    await expect(adapter.createOrder({ amount: 100, currency: 'INR', registrationId: 'reg_x' })).rejects.toThrow(
+      /unexpected response shape/,
+    )
+  })
+
+  it('throws on a response with the OLD, wrong top-level shape (regression guard for the 2026-09-18 production incident)', async () => {
+    // This is exactly the shape the adapter wrongly assumed before it was
+    // fixed against the real API — asserting it's rejected keeps this
+    // specific regression from silently coming back.
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'success', payment_url: VALID_PAYMENT_URL })))
     const adapter = createGuruPayAdapter(CONFIG)
     await expect(adapter.createOrder({ amount: 100, currency: 'INR', registrationId: 'reg_x' })).rejects.toThrow(
       /unexpected response shape/,
@@ -153,7 +203,7 @@ describe('GuruPayAdapter.createOrder', () => {
       'fetch',
       vi.fn(async (_url: string, init: RequestInit) => {
         sawSignal = init.signal as AbortSignal
-        return jsonResponse({ status: 'success', payment_url: VALID_PAYMENT_URL })
+        return jsonResponse(createOrderBody())
       }),
     )
     const adapter = createGuruPayAdapter(CONFIG)
@@ -168,13 +218,13 @@ describe('GuruPayAdapter.createOrder', () => {
       ['a non-https scheme', 'http://www.gurupaygateway.com/pay/abc'],
       ['a malformed URL', 'not a url at all'],
     ])('rejects %s', async (_label, paymentUrl) => {
-      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'success', payment_url: paymentUrl })))
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(createOrderBody({ data: { payment_url: paymentUrl } }))))
       const adapter = createGuruPayAdapter(CONFIG)
       await expect(adapter.createOrder({ amount: 100, currency: 'INR', registrationId: 'reg_x' })).rejects.toThrow()
     })
 
     it('accepts the confirmed real host/scheme (https://www.gurupaygateway.com)', async () => {
-      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'success', payment_url: VALID_PAYMENT_URL })))
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(createOrderBody())))
       const adapter = createGuruPayAdapter(CONFIG)
       const order = await adapter.createOrder({ amount: 100, currency: 'INR', registrationId: 'reg_x' })
       expect(order.checkoutUrl).toBe(VALID_PAYMENT_URL)
@@ -193,9 +243,9 @@ describe('GuruPayAdapter.verifyAndParseWebhook', () => {
     )
   }
 
-  it('maps a success check-status response to a captured event, built entirely from check-status fields (string amount coerced to whole rupees)', async () => {
+  it('maps a success check-status response to a captured event, built entirely from check-status fields (numeric amount)', async () => {
     stubCheckStatus({
-      body: { status: 'success', amount: '1613.00', utr: 'UTR12345', paid_at: '2026-09-18T10:00:00Z' },
+      body: checkStatusBody('success', { amount: 1613, utr: 'UTR12345', paid_at: '2026-09-18T10:00:00Z' }),
     })
     const adapter = createGuruPayAdapter(CONFIG)
 
@@ -207,8 +257,9 @@ describe('GuruPayAdapter.verifyAndParseWebhook', () => {
     expect(event).toMatchObject({
       type: 'payment.captured',
       providerEventType: 'success',
-      // Always the REQUESTED order id, never anything read off the response
-      // (the confirmed real check-status shape doesn't echo order_id at all).
+      // Always the REQUESTED order id, never data.order_id from the response
+      // (the real check-status response does echo one, but it's not trusted
+      // over our own record).
       providerOrderId: 'mh_reg_1_abc',
       providerPaymentId: 'UTR12345',
       amount: 1613,
@@ -220,7 +271,7 @@ describe('GuruPayAdapter.verifyAndParseWebhook', () => {
   })
 
   it('a forged webhook body with a fake amount/status is ignored — check-status is authoritative', async () => {
-    stubCheckStatus({ body: { status: 'success', amount: '5000.00', utr: 'REAL_UTR' } })
+    stubCheckStatus({ body: checkStatusBody('success', { amount: 5000, utr: 'REAL_UTR' }) })
     const adapter = createGuruPayAdapter(CONFIG)
     const forgedBody = JSON.stringify({ order_id: 'mh_reg_2_xyz', amount: 1, status: 'success', utr: 'FORGED_UTR' })
 
@@ -233,7 +284,7 @@ describe('GuruPayAdapter.verifyAndParseWebhook', () => {
   })
 
   it('maps a failed check-status response to a failed event', async () => {
-    stubCheckStatus({ body: { status: 'failed', amount: '100.00', utr: null } })
+    stubCheckStatus({ body: checkStatusBody('failed', { amount: 100, utr: null }) })
     const adapter = createGuruPayAdapter(CONFIG)
     const event = await adapter.verifyAndParseWebhook(JSON.stringify({ order_id: 'mh_reg_3' }), new Headers())
 
@@ -242,14 +293,14 @@ describe('GuruPayAdapter.verifyAndParseWebhook', () => {
   })
 
   it('returns null for a pending check-status response (authentic, nothing to act on yet)', async () => {
-    stubCheckStatus({ body: { status: 'pending', amount: '100.00' } })
+    stubCheckStatus({ body: checkStatusBody('pending', { amount: 100 }) })
     const adapter = createGuruPayAdapter(CONFIG)
     const event = await adapter.verifyAndParseWebhook(JSON.stringify({ order_id: 'mh_reg_4' }), new Headers())
     expect(event).toBeNull()
   })
 
-  it('throws INVALID_PAYLOAD (not INVALID_SIGNATURE) when check-status returns a non-2xx', async () => {
-    stubCheckStatus({ status: 500, body: { status: 'failed' } })
+  it('throws INVALID_PAYLOAD (not INVALID_SIGNATURE) when check-status returns a non-2xx (e.g. unknown order, 404)', async () => {
+    stubCheckStatus({ status: 404, body: { error: 'Order not found', details: 'No order found with the provided order_id' } })
     const adapter = createGuruPayAdapter(CONFIG)
     const error = await adapter
       .verifyAndParseWebhook(JSON.stringify({ order_id: 'mh_reg_5' }), new Headers())
@@ -269,10 +320,20 @@ describe('GuruPayAdapter.verifyAndParseWebhook', () => {
   })
 
   it('throws INVALID_PAYLOAD when check-status returns malformed JSON/shape', async () => {
-    stubCheckStatus({ body: { status: 'success' /* missing amount */ } })
+    stubCheckStatus({ body: { status: 'success', data: { payment_status: 'success' /* missing amount */ } } })
     const adapter = createGuruPayAdapter(CONFIG)
     const error = await adapter
       .verifyAndParseWebhook(JSON.stringify({ order_id: 'mh_reg_7' }), new Headers())
+      .catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(WebhookVerificationError)
+    expect((error as WebhookVerificationError).reason).toBe('INVALID_PAYLOAD')
+  })
+
+  it('throws INVALID_PAYLOAD for the OLD, wrong top-level shape (regression guard)', async () => {
+    stubCheckStatus({ body: { status: 'pending', amount: '100.00' } })
+    const adapter = createGuruPayAdapter(CONFIG)
+    const error = await adapter
+      .verifyAndParseWebhook(JSON.stringify({ order_id: 'mh_reg_old_shape' }), new Headers())
       .catch((e: unknown) => e)
     expect(error).toBeInstanceOf(WebhookVerificationError)
     expect((error as WebhookVerificationError).reason).toBe('INVALID_PAYLOAD')
@@ -292,7 +353,7 @@ describe('GuruPayAdapter.verifyAndParseWebhook', () => {
   })
 
   it('falls back to now() for occurredAt when check-status has no paid_at', async () => {
-    stubCheckStatus({ body: { status: 'success', amount: '100.00', utr: 'U1' } })
+    stubCheckStatus({ body: checkStatusBody('success', { amount: 100, utr: 'U1' }) })
     const adapter = createGuruPayAdapter(CONFIG)
     const before = Date.now()
     const event = await adapter.verifyAndParseWebhook(JSON.stringify({ order_id: 'mh_reg_8' }), new Headers())
@@ -300,7 +361,7 @@ describe('GuruPayAdapter.verifyAndParseWebhook', () => {
   })
 
   it('throws when check-status returns a non-numeric amount', async () => {
-    stubCheckStatus({ body: { status: 'success', amount: 'not-a-number', utr: 'U1' } })
+    stubCheckStatus({ body: checkStatusBody('success', { amount: 'not-a-number', utr: 'U1' }) })
     const adapter = createGuruPayAdapter(CONFIG)
     const error = await adapter
       .verifyAndParseWebhook(JSON.stringify({ order_id: 'mh_reg_9' }), new Headers())
@@ -316,8 +377,7 @@ describe('checkOrderStatus (exported helper reused by the reconciliation job)', 
       'fetch',
       vi.fn(async (url: string, init: RequestInit) => {
         calls.push({ url: String(url), init })
-        // Confirmed real shape: no order_id echoed back at all.
-        return jsonResponse({ status: 'success', amount: '100.00', utr: 'U1' })
+        return jsonResponse(checkStatusBody('success', { amount: 100, utr: 'U1' }))
       }),
     )
 
@@ -332,7 +392,7 @@ describe('checkOrderStatus (exported helper reused by the reconciliation job)', 
   })
 
   it('returns null for a pending order, without throwing', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'pending', amount: '1.00' })))
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(checkStatusBody('pending', { amount: 1 }))))
     expect(await checkOrderStatus('mh_y', CONFIG)).toBeNull()
   })
 
@@ -342,7 +402,7 @@ describe('checkOrderStatus (exported helper reused by the reconciliation job)', 
   })
 })
 
-describe('amount unit handling (confirmed real shape: whole rupees, string-typed in check-status)', () => {
+describe('amount unit handling (verified real shape: whole rupees, numeric in check-status)', () => {
   it('sends amount as-is (whole rupees, numeric) to create-order, no ×100/÷100 conversion', async () => {
     let sentAmount: number | undefined
     vi.stubGlobal(
@@ -350,7 +410,7 @@ describe('amount unit handling (confirmed real shape: whole rupees, string-typed
       vi.fn(async (_url: string, init: RequestInit) => {
         const body = JSON.parse(String(init.body)) as { amount: number }
         sentAmount = body.amount
-        return jsonResponse({ status: 'success', payment_url: VALID_PAYMENT_URL })
+        return jsonResponse(createOrderBody())
       }),
     )
     const adapter = createGuruPayAdapter(CONFIG)
@@ -359,16 +419,23 @@ describe('amount unit handling (confirmed real shape: whole rupees, string-typed
     expect(sentAmount).toBe(1499)
   })
 
-  it('coerces check-status\'s string amount ("1613.00") to the integer 1613, matching payments.amount units', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'success', amount: '1613.00', utr: 'U' })))
+  it('accepts check-status\'s numeric amount (1613) directly as the integer 1613, matching payments.amount units', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(checkStatusBody('success', { amount: 1613, utr: 'U' }))))
     const adapter = createGuruPayAdapter(CONFIG)
     const event = await adapter.verifyAndParseWebhook(JSON.stringify({ order_id: 'mh_unit' }), new Headers())
     expect(event?.amount).toBe(1613)
     expect(Number.isInteger(event?.amount)).toBe(true)
   })
 
-  it('rounds a fractional-paise string amount to the nearest whole rupee', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'success', amount: '99.5', utr: 'U' })))
+  it('still coerces a string amount defensively, in case a future response ever sends one', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(checkStatusBody('success', { amount: '1613.00', utr: 'U' }))))
+    const adapter = createGuruPayAdapter(CONFIG)
+    const event = await adapter.verifyAndParseWebhook(JSON.stringify({ order_id: 'mh_unit_str' }), new Headers())
+    expect(event?.amount).toBe(1613)
+  })
+
+  it('rounds a fractional-paise amount to the nearest whole rupee', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(checkStatusBody('success', { amount: 99.5, utr: 'U' }))))
     const adapter = createGuruPayAdapter(CONFIG)
     const event = await adapter.verifyAndParseWebhook(JSON.stringify({ order_id: 'mh_round' }), new Headers())
     expect(event?.amount).toBe(100)
