@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, ne } from 'drizzle-orm'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { db } from '@/lib/db/client'
 import {
@@ -25,6 +25,7 @@ import {
   getGroupRoster,
   getInvitationPreview,
   inviteGroupMember,
+  releaseGroupSeat,
   resendGroupInvitation,
 } from './registration-group'
 
@@ -372,6 +373,124 @@ describe('registration-group: roster, invite, resend, cancel, accept', () => {
 
   it('getInvitationPreview throws for an unknown token', async () => {
     await expect(getInvitationPreview('not-a-real-token')).rejects.toThrow(GROUP_ERRORS.invalidInvite)
+  })
+})
+
+describe('releaseGroupSeat', () => {
+  /** Simulates a teammate having claimed `registrationId` while the group is still in a pre-payment hold — not reachable via the real accept flow (acceptGroupInvitation requires CONFIRMED), but the guard must be correct against the row state regardless of how it arose. */
+  async function claimSlotDirectly(registrationId: string, claimedBy: { id: string }) {
+    await db
+      .update(registrations)
+      .set({ userId: claimedBy.id, formResponses: { fullName: claimedBy.id } })
+      .where(eq(registrations.id, registrationId))
+  }
+
+  it('is head-only: a stranger gets Forbidden, staff can act too', async () => {
+    const { mun, product, session } = await setup()
+    const start = await initiateGroupRegistration({ munId: mun.id, registrationProductId: product.id, teamSize: 2 }, session)
+    const [placeholder] = await db
+      .select()
+      .from(registrations)
+      .where(and(eq(registrations.registrationGroupId, start.groupId), ne(registrations.id, start.headRegistrationId)))
+    const teammate = await createUser()
+    await claimSlotDirectly(placeholder.id, teammate)
+
+    const stranger = await createUser()
+    await expect(releaseGroupSeat(start.groupId, placeholder.id, sessionFor(stranger.id))).rejects.toThrow('Forbidden')
+
+    const admin = await createUser({ role: 'ADMIN' })
+    await expect(releaseGroupSeat(start.groupId, placeholder.id, sessionFor(admin.id, 'ADMIN'))).resolves.toBeUndefined()
+  })
+
+  it('refuses to release the head delegate\'s own seat', async () => {
+    const { mun, product, session } = await setup()
+    const start = await initiateGroupRegistration({ munId: mun.id, registrationProductId: product.id, teamSize: 2 }, session)
+    await expect(releaseGroupSeat(start.groupId, start.headRegistrationId, session)).rejects.toThrow(
+      GROUP_ERRORS.cannotReleaseHead,
+    )
+  })
+
+  it('refuses a slot that has not been claimed by anyone', async () => {
+    const { mun, product, session } = await setup()
+    const start = await initiateGroupRegistration({ munId: mun.id, registrationProductId: product.id, teamSize: 2 }, session)
+    const [placeholder] = await db
+      .select()
+      .from(registrations)
+      .where(and(eq(registrations.registrationGroupId, start.groupId), ne(registrations.id, start.headRegistrationId)))
+
+    await expect(releaseGroupSeat(start.groupId, placeholder.id, session)).rejects.toThrow(GROUP_ERRORS.notClaimed)
+  })
+
+  it('refuses a registrationId that does not belong to this group', async () => {
+    const { session } = await setup()
+    const other = await setup()
+    const otherStart = await initiateGroupRegistration(
+      { munId: other.mun.id, registrationProductId: other.product.id, teamSize: 2 },
+      other.session,
+    )
+
+    // The caller's own group exists, but the target registration belongs to
+    // a different group entirely.
+    const { mun, product } = await setup()
+    const mine = await initiateGroupRegistration({ munId: mun.id, registrationProductId: product.id, teamSize: 2 }, session)
+
+    await expect(releaseGroupSeat(mine.groupId, otherStart.headRegistrationId, session)).rejects.toThrow(
+      GROUP_ERRORS.notFound,
+    )
+  })
+
+  it('refuses once the team has actually paid — the seat stays claimed, unchanged', async () => {
+    const { groupId, session } = await startAndPayGroup(2)
+    const adapter = mockAdapter()
+    const friendEmail = `friend-${crypto.randomUUID()}@test.dev`
+    await inviteGroupMember(groupId, friendEmail, 'Friend', APP_URL, session, adapter)
+    const rawToken = new URL(adapter.send.mock.calls[0][0].body.match(/https?:\/\/\S+/)![0]).searchParams.get('token')!
+    const invitee = await createUser({ email: friendEmail })
+    const accepted = await acceptGroupInvitation(rawToken, { fullName: 'Friend' }, sessionFor(invitee.id))
+
+    await expect(releaseGroupSeat(groupId, accepted.registrationId, session)).rejects.toThrow(GROUP_ERRORS.alreadyPaid)
+
+    const [row] = await db.select().from(registrations).where(eq(registrations.id, accepted.registrationId))
+    expect(row.userId).toBe(invitee.id)
+    expect(row.status).toBe('CONFIRMED')
+  })
+
+  it('releases a claimed-but-unpaid seat back to the head, and the reopened slot can be invited to again once paid — capacity stays at teamSize', async () => {
+    // teamSize 2 keeps exactly one non-head slot, so which slot the later
+    // invite lands on is unambiguous.
+    const { mun, product, session, head } = await setup()
+    const start = await initiateGroupRegistration({ munId: mun.id, registrationProductId: product.id, teamSize: 2 }, session)
+    const [placeholder] = await db
+      .select()
+      .from(registrations)
+      .where(and(eq(registrations.registrationGroupId, start.groupId), ne(registrations.id, start.headRegistrationId)))
+
+    const wrongPerson = await createUser()
+    await claimSlotDirectly(placeholder.id, wrongPerson)
+
+    await releaseGroupSeat(start.groupId, placeholder.id, session)
+
+    const [released] = await db.select().from(registrations).where(eq(registrations.id, placeholder.id))
+    expect(released.userId).toBe(head.id)
+    expect(released.formResponses).toBeNull()
+    expect(released.status).toBe('PAYMENT_PENDING') // untouched by the release itself
+
+    // Total rows in the group is still exactly teamSize — release reuses the
+    // existing row rather than creating or destroying a seat.
+    const allRows = await db.select().from(registrations).where(eq(registrations.registrationGroupId, start.groupId))
+    expect(allRows).toHaveLength(2)
+
+    // Now the team pays, and the reopened seat is genuinely invitable again.
+    await db.update(registrations).set({ status: 'CONFIRMED' }).where(eq(registrations.registrationGroupId, start.groupId))
+    const adapter = mockAdapter()
+    const invitation = await inviteGroupMember(start.groupId, 'replacement@test.dev', undefined, APP_URL, session, adapter)
+    expect(invitation.email).toBe('replacement@test.dev')
+
+    const roster = await getGroupRoster(start.groupId, session)
+    expect(roster.slots.find((s) => s.registrationId === placeholder.id)?.invitation).toMatchObject({
+      status: 'PENDING',
+      email: 'replacement@test.dev',
+    })
   })
 })
 

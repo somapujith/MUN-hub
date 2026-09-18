@@ -235,14 +235,16 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
     message === GROUP_ERRORS.cancelled ||
     message === GROUP_ERRORS.alreadyMember ||
     message === GROUP_ERRORS.isHead ||
-    message === GROUP_ERRORS.notPending
+    message === GROUP_ERRORS.notPending ||
+    message === GROUP_ERRORS.notClaimed ||
+    message === GROUP_ERRORS.alreadyPaid
   ) {
     return { status: 409, code: 'CONFLICT_STATE', message }
   }
   if (message === GROUP_ERRORS.full) {
     return { status: 409, code: 'CONFLICT_CAPACITY', message }
   }
-  if (message === GROUP_ERRORS.invalidInvite) {
+  if (message === GROUP_ERRORS.invalidInvite || message === GROUP_ERRORS.cannotReleaseHead) {
     return { status: 400, code: 'VALIDATION_FAILED', message }
   }
   if (message === GROUP_ERRORS.resendCooldown) {
@@ -444,4 +446,7 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: GROUP_ERRORS.full, status: 409, code: 'CONFLICT_CAPACITY' },
   { message: GROUP_ERRORS.invalidInvite, status: 400, code: 'VALIDATION_FAILED' },
   { message: GROUP_ERRORS.resendCooldown, status: 429, code: 'RATE_LIMITED' },
+  { message: GROUP_ERRORS.cannotReleaseHead, status: 400, code: 'VALIDATION_FAILED' },
+  { message: GROUP_ERRORS.notClaimed, status: 409, code: 'CONFLICT_STATE' },
+  { message: GROUP_ERRORS.alreadyPaid, status: 409, code: 'CONFLICT_STATE' },
 ]

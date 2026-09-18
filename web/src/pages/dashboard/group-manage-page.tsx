@@ -18,6 +18,7 @@ import {
   cancelGroupInvitation,
   fetchGroupRoster,
   inviteGroupMember,
+  releaseGroupSeat,
   resendGroupInvitation,
   type GroupRosterSlot,
 } from "@/api/registration-group";
@@ -114,11 +115,31 @@ export function GroupManagePage() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't cancel that invitation"),
   });
 
+  const releaseMutation = useMutation({
+    mutationFn: (registrationId: string) => releaseGroupSeat(groupId, registrationId),
+    onSuccess: async () => {
+      toast.success("Seat released — invite someone else into it below");
+      await invalidateRoster();
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't release that seat"),
+  });
+
   function handleInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setInviteError(null);
     if (!email.trim()) return;
     inviteMutation.mutate();
+  }
+
+  function handleRelease(slot: GroupRosterSlot) {
+    const name = slot.member?.name ?? "this teammate";
+    if (
+      window.confirm(
+        `Release ${name}'s seat? They'll lose access to their registration, and you'll be able to invite someone else into it.`,
+      )
+    ) {
+      releaseMutation.mutate(slot.registrationId);
+    }
   }
 
   if (rosterQuery.isPending) {
@@ -217,6 +238,27 @@ export function GroupManagePage() {
                         Cancel
                       </Button>
                     </div>
+                  )}
+                  {slot.member && !slot.isHead && (
+                    isPaid ? (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled
+                        title="Your team has already paid — contact support to change this seat"
+                      >
+                        Release seat
+                      </Button>
+                    ) : (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={releaseMutation.isPending}
+                        onClick={() => handleRelease(slot)}
+                      >
+                        Release seat
+                      </Button>
+                    )
                   )}
                 </div>
               </li>

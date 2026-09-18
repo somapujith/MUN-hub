@@ -15,6 +15,7 @@ import {
   getGroupRoster,
   getInvitationPreview,
   inviteGroupMember,
+  releaseGroupSeat,
   resendGroupInvitation,
 } from '@/lib/actions/registration-group'
 import { isProfileComplete } from '@/lib/actions/student-profile'
@@ -147,6 +148,17 @@ registrationGroupsRoutes.post('/registration-groups/invitations/:invitationId/re
 /** Cancels a still-pending invitation, freeing its seat for a fresh invite to a different address. */
 registrationGroupsRoutes.post('/registration-groups/invitations/:invitationId/cancel', requireAuth, async (c) => {
   await cancelGroupInvitation(c.req.param('invitationId'), c.get('session'))
+  return c.body(null, 204)
+})
+
+/**
+ * Hands an accepted teammate's seat back to the head — "wrong person
+ * accepted", needs a swap — so it can be invited to again. Only legal while
+ * the team's registration is still in a pre-payment hold; refused with 409
+ * once the team has paid (see `releaseGroupSeat`'s doc comment).
+ */
+registrationGroupsRoutes.post('/registration-groups/:id/registrations/:registrationId/release', requireAuth, async (c) => {
+  await releaseGroupSeat(c.req.param('id'), c.req.param('registrationId'), c.get('session'))
   return c.body(null, 204)
 })
 

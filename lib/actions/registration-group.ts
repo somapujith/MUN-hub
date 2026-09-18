@@ -38,7 +38,13 @@ export const GROUP_ERRORS = {
   isHead: 'You are already the head of this team',
   resendCooldown: 'Please wait a moment before resending this invitation',
   notPending: 'This invitation can no longer be resent or cancelled',
+  cannotReleaseHead: "You can't release your own seat",
+  notClaimed: "This seat hasn't been claimed by anyone yet",
+  alreadyPaid: "Your team has already paid — this seat can no longer be released. Contact support to make a change.",
 } as const
+
+/** Pre-payment hold statuses — mirrors `RELEASABLE_STATUSES` in `lib/actions/registration.ts`. A group's seats all share one status until the team's single payment confirms them together (see `reserveGroupAndStartPayment`); `CONFIRMED`/`ATTENDED`/`NO_SHOW` all mean the team has paid (or, for a free pass, been finalized the same way). */
+const GROUP_PRE_PAYMENT_STATUSES: readonly RegistrationStatus[] = ['PENDING', 'PAYMENT_PENDING']
 
 interface GroupRow {
   id: string
@@ -405,6 +411,61 @@ export async function cancelGroupInvitation(invitationId: string, session: Sessi
     .update(registrationGroupInvitations)
     .set({ status: 'CANCELLED', cancelledAt: new Date() })
     .where(and(eq(registrationGroupInvitations.id, invitationId), eq(registrationGroupInvitations.status, 'PENDING')))
+}
+
+/**
+ * Undoes an accepted teammate's claim on a seat — the "wrong person
+ * accepted", "this teammate dropped out and I need to swap someone in" fix —
+ * by handing the slot back to the head, exactly the shape
+ * `reserveGroupAndStartPayment` created it in (owned by the head, no
+ * answers). That makes it an "open" slot again by every check
+ * `inviteGroupMember` already makes, so the head can invite a replacement
+ * into it with no other change needed.
+ *
+ * Deliberately refused once the team has actually paid (`CONFIRMED` or
+ * later — see `GROUP_PRE_PAYMENT_STATUSES`): undoing a claim on an
+ * already-paid seat is a different, larger problem than this fix covers —
+ * it's tangled up with whether anything is owed back, and MUN Hub has no
+ * refunds — so that path needs its own product decision and isn't built
+ * here. Callers should treat `GROUP_ERRORS.alreadyPaid` as "don't offer this
+ * control once paid" rather than a recoverable error to retry.
+ *
+ * The superseded invitation (already `ACCEPTED`, a terminal status) is left
+ * untouched — same append-only stance `cancelGroupInvitation` takes with
+ * `CANCELLED` ones; a slot's invitation history is never rewritten, only
+ * added to.
+ */
+export async function releaseGroupSeat(
+  groupId: string,
+  registrationId: string,
+  session: Session | null,
+): Promise<void> {
+  const group = await loadGroup(groupId)
+  assertHeadOrAdmin(group, session)
+  if (!group.headRegistrationId) throw new Error(GROUP_ERRORS.notFound)
+  if (registrationId === group.headRegistrationId) throw new Error(GROUP_ERRORS.cannotReleaseHead)
+
+  await db.transaction(async (tx) => {
+    const [slot] = await tx
+      .select({
+        id: registrations.id,
+        userId: registrations.userId,
+        status: registrations.status,
+        registrationGroupId: registrations.registrationGroupId,
+      })
+      .from(registrations)
+      .where(eq(registrations.id, registrationId))
+      .for('update')
+      .limit(1)
+    if (!slot || slot.registrationGroupId !== groupId) throw new Error(GROUP_ERRORS.notFound)
+    if (slot.userId === group.headUserId) throw new Error(GROUP_ERRORS.notClaimed)
+    if (!GROUP_PRE_PAYMENT_STATUSES.includes(slot.status)) throw new Error(GROUP_ERRORS.alreadyPaid)
+
+    await tx
+      .update(registrations)
+      .set({ userId: group.headUserId, formResponses: null, updatedAt: new Date() })
+      .where(eq(registrations.id, registrationId))
+  })
 }
 
 // ---------------------------------------------------------------------------
