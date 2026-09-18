@@ -470,7 +470,8 @@ function ConferenceDetailsForm({
           {locked && (
             <p className="flex items-center gap-xs rounded-sm bg-surface-soft px-sm py-xs text-body-md text-body">
               <LockIcon className="size-4 shrink-0" aria-hidden />
-              These details are locked while MUN Hub reviews your MUN.
+              These details are locked while MUN Hub reviews your MUN. They unlock once the review finishes, or
+              right away if a reviewer asks you to change them.
             </p>
           )}
           <fieldset disabled={locked} className="flex min-w-0 flex-col gap-md">

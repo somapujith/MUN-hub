@@ -1,6 +1,20 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2Icon, ChevronDownIcon, CircleAlertIcon, CircleIcon, InfoIcon, SendIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  ChevronDownIcon,
+  CircleAlertIcon,
+  CircleIcon,
+  HourglassIcon,
+  InfoIcon,
+  LockIcon,
+  PencilIcon,
+  SendIcon,
+  ShieldCheckIcon,
+  TriangleAlertIcon,
+  XCircleIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { confirmModule } from "@/api/module-verification";
@@ -33,6 +47,39 @@ const VERIFICATION_VARIANT: Record<string, "success" | "warning" | "secondary" |
   CHANGES_REQUESTED: "warning",
   REJECTED: "destructive",
 };
+
+/**
+ * Two orthogonal axes, per CLAUDE.md's "completion-vs-verification two-axis
+ * model": `completionStatus` is organizer-facing ("have I filled this in?"),
+ * `verificationState` is reviewer-facing ("has MUN Hub verified it?"). Both
+ * badges already differ in color+label, but COMPLETE and VERIFIED previously
+ * had no icon at all, so a quick glance at two green-ish badges couldn't tell
+ * them apart. Giving each axis its own icon set (never sharing an icon
+ * between "organizer says done" and "MUN Hub says verified") makes the two
+ * badges — and the row's single leading icon below — distinguishable even
+ * for someone skimming color alone. Mirrors the icon+color+label convention
+ * `components/mun/mun-status-badge.tsx` already uses for `MunStatus`.
+ */
+const COMPLETION_ICON: Record<string, LucideIcon> = {
+  NOT_STARTED: CircleIcon,
+  IN_PROGRESS: PencilIcon,
+  ACTION_REQUIRED: CircleAlertIcon,
+  COMPLETE: CheckCircle2Icon,
+  LOCKED: LockIcon,
+};
+
+/** Deliberately never CheckCircle2Icon — that belongs to `COMPLETE`, a different claim. */
+const VERIFICATION_ICON: Record<string, LucideIcon> = {
+  NOT_SUBMITTED: CircleIcon,
+  PENDING_REVIEW: HourglassIcon,
+  VERIFIED: ShieldCheckIcon,
+  CHANGES_REQUESTED: TriangleAlertIcon,
+  REJECTED: XCircleIcon,
+};
+
+function BadgeIcon({ icon: Icon }: { icon?: LucideIcon }) {
+  return Icon ? <Icon className="size-3" aria-hidden /> : null;
+}
 
 /**
  * Every tracked module with its completion, MUN Hub's verification state, the
@@ -102,33 +149,63 @@ function ChecklistRow({
   const [open, setOpen] = useState(false);
   const segment = MODULE_SECTION[module.key as MunModule];
   const section = segment ? getMunNavSection(segment) : undefined;
-  const complete = module.completionStatus === "COMPLETE" || (module.completionStatus === "LOCKED" && toFix.length === 0);
+  const locked = module.completionStatus === "LOCKED";
   const checksId = `checks-${module.key}`;
   const total = module.checks.length;
+
+  // The single leading icon for the row, in priority order. LOCKED and a
+  // reviewer verdict both outrank plain "organizer says complete" — a module
+  // MUN Hub sent back, or one currently frozen for review, must never render
+  // the same reassuring checkmark as one that's simply filled in correctly.
+  // See the two icon maps above for why VERIFIED never reuses COMPLETE's icon.
+  let LeadingIcon: LucideIcon = CircleIcon;
+  let leadingToneClass = "text-muted-foreground";
+  if (locked) {
+    LeadingIcon = LockIcon;
+    leadingToneClass = "text-info-text";
+  } else if (toFix.length > 0) {
+    LeadingIcon = CircleAlertIcon;
+    leadingToneClass = "text-warning-text";
+  } else if (module.verificationState === "REJECTED") {
+    LeadingIcon = XCircleIcon;
+    leadingToneClass = "text-destructive-text";
+  } else if (module.verificationState === "CHANGES_REQUESTED") {
+    LeadingIcon = TriangleAlertIcon;
+    leadingToneClass = "text-warning-text";
+  } else if (module.verificationState === "VERIFIED") {
+    LeadingIcon = ShieldCheckIcon;
+    leadingToneClass = "text-success-text";
+  } else if (module.completionStatus === "COMPLETE") {
+    LeadingIcon = CheckCircle2Icon;
+    leadingToneClass = "text-success-text";
+  }
 
   return (
     <li className="flex flex-col gap-xs py-sm" data-testid={`module-${module.key}`}>
       <div className="flex flex-wrap items-center gap-xs">
-        {complete ? (
-          <CheckCircle2Icon className="size-4 shrink-0 text-success-text" aria-hidden />
-        ) : toFix.length > 0 ? (
-          <CircleAlertIcon className="size-4 shrink-0 text-warning-text" aria-hidden />
-        ) : (
-          <CircleIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        )}
+        <LeadingIcon className={`size-4 shrink-0 ${leadingToneClass}`} aria-hidden />
         <span className="text-body-md font-medium text-ink">{module.label}</span>
         {!module.isRequired && <Badge variant="outline">Optional</Badge>}
         <span className="ml-auto flex flex-wrap items-center gap-xxs">
           <Badge variant={COMPLETION_VARIANT[module.completionStatus] ?? "secondary"}>
+            <BadgeIcon icon={COMPLETION_ICON[module.completionStatus]} />
             {COMPLETION_STATUS_LABEL[module.completionStatus] ?? module.completionStatus}
           </Badge>
           <Badge variant={VERIFICATION_VARIANT[module.verificationState] ?? "secondary"}>
+            <BadgeIcon icon={VERIFICATION_ICON[module.verificationState]} />
             {VERIFICATION_STATE_LABEL[module.verificationState] ?? module.verificationState}
           </Badge>
         </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-sm pl-6">
+        {locked && (
+          <span className="flex items-center gap-xxs text-caption text-muted-foreground">
+            <LockIcon className="size-3.5 shrink-0" aria-hidden />
+            Locked while MUN Hub reviews your MUN — it reopens once the review finishes, or right away if a
+            reviewer asks for changes to this section.
+          </span>
+        )}
         {toFix.length > 0 && (
           <span className="text-caption text-warning-text">
             {toFix.length === 1 ? "1 thing to fix" : `${toFix.length} things to fix`}
