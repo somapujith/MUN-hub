@@ -92,6 +92,11 @@ export const LIMITERS = {
   // request method, so a rule matching only GET would miss it and let it fall
   // through to (and exhaust) the much smaller global budget instead.
   filesIp: { binding: 'RL_FILES_IP', limit: 1200, periodSeconds: 60, perIp: true },
+  // Public "Contact us" form (server/routes/contact.ts) — no session, no
+  // CAPTCHA, so this per-IP cap plus the honeypot field are the only spam
+  // defenses. Each submission writes a support ticket and fires a Telegram
+  // ping, so it's kept much tighter than a read-only endpoint like munsListIp.
+  contactFormIp: { binding: 'RL_CONTACT_FORM_IP', limit: 5, periodSeconds: 60, perIp: true },
   // Payments webhook (server/routes/webhooks.ts, mounted OUTSIDE /api/v1 and
   // this middleware's RULES table — applied directly in that route instead).
   // Every hit triggers a real outbound authenticated call to GuruPay's
@@ -273,6 +278,11 @@ const RULES: LimitRule[] = [
     methods: ['POST'],
     path: /^\/support\/conversations\/[^/]+\/messages$/,
     checks: ({ sessionUserId }) => perUser(LIMITERS.supportMessageUser, sessionUserId),
+  },
+  {
+    methods: ['POST'],
+    path: '/contact',
+    checks: ({ ip }) => [{ limiter: LIMITERS.contactFormIp, key: `ip:${ip}` }],
   },
   {
     methods: ['POST'],

@@ -1,13 +1,21 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "redirects": [
+  "rewrites": [
     {
       "source": "/sitemap.xml",
-      "destination": "https://api.munhub.in/api/v1/sitemap.xml",
-      "permanent": false
-    }
-  ],
-  "rewrites": [
+      "destination": "https://api.munhub.in/api/v1/sitemap.xml"
+    },
+    {
+      "source": "/mun/:slug",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|Twitterbot|LinkedInBot|Slackbot|WhatsApp|TelegramBot|Discordbot|Googlebot|bingbot|DuckDuckBot|Applebot|Pinterest|redditbot|vkShare|Skype|ia_archiver|YandexBot).*"
+        }
+      ],
+      "destination": "/api/social-preview?slug=:slug"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"

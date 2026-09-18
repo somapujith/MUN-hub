@@ -129,6 +129,7 @@ export function AboutPage() {
         eyebrow="About MUN Hub"
         title="One trusted place to find and join Model UN conferences"
         lede="MUN Hub is a curated marketplace for Model United Nations. Delegates discover, compare, and register for conferences in one place. Organizers get a proper registration and management workspace. Our team reviews every conference before it goes live."
+        image="/images/about-hero.jpg"
       >
         <div className="mt-sm flex flex-wrap gap-sm">
           <Button render={<Link to="/muns" />}>Browse conferences</Button>

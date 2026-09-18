@@ -159,7 +159,9 @@ export function SiteFooter() {
 
   return (
     <footer className="border-t border-border bg-background">
-      <div className="content-container py-xxl md:py-section">
+      {/* Deliberately wider than `.content-container` (1280px) — the footer
+          is meant to stretch further than the header/page body above it. */}
+      <div className="mx-auto w-full max-w-[1600px] px-lg py-xxl md:px-xxl md:py-section">
         <div className="grid gap-xl md:grid-cols-[1.3fr_repeat(4,0.85fr)_1.4fr] md:gap-lg">
           <div className="max-w-xs">
             <Link

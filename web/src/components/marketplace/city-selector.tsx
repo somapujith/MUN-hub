@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "cn";
+import { ALL_CITIES_PARAM } from "@/lib/marketplace-filters";
 
 /**
  * City selection control, in two shapes that share one navigation model.
@@ -74,11 +75,10 @@ export function CitySelector({
 
   function select(city: string) {
     const params = new URLSearchParams(searchParams.toString());
-    if (city) {
-      params.set("city", city);
-    } else {
-      params.delete("city");
-    }
+    // "All cities" writes the explicit ALL_CITIES_PARAM marker rather than
+    // deleting the param — the home page defaults a MISSING `city` to
+    // Hyderabad, so deleting it here would just snap the picker right back.
+    params.set("city", city || ALL_CITIES_PARAM);
     // Any city change invalidates the current page cursor.
     params.delete("page");
 

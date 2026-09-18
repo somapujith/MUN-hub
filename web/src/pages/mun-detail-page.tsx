@@ -47,7 +47,7 @@ import { listMunFaqsForOrganizer } from "@/api/mun-faq";
 import { queryKeys } from "@/api/query-keys";
 import { canRegisterForMun, hasPassed } from "@/components/registration/deadline";
 import { munSectionHref } from "@/lib/organizer/nav-config";
-import { absoluteHttpUrl, buildMunEventJsonLd, metaDescription } from "@/lib/seo";
+import { absoluteHttpUrl, buildMunEventJsonLd, canonicalUrl, metaDescription } from "@/lib/seo";
 import { cn } from "cn";
 import { NotFoundPage } from "@/pages/not-found-page";
 import type { MunDetail } from "@/types";
@@ -503,9 +503,22 @@ function PreviewBanner({ munId, munName, status }: { munId: string; munName: str
   );
 }
 
+function buildMunBreadcrumbJsonLd(mun: MunDetail): Record<string, unknown> {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: canonicalUrl("/") },
+      { "@type": "ListItem", position: 2, name: "Explore MUNs", item: canonicalUrl("/muns") },
+      { "@type": "ListItem", position: 3, name: mun.name, item: canonicalUrl(`/mun/${mun.slug}`) },
+    ],
+  };
+}
+
 function MunPageMeta({ mun, soldOutProductIds }: { mun: MunDetail; soldOutProductIds: ReadonlySet<string> }) {
   const where = [mun.city, mun.country].filter(Boolean).join(", ");
   const fallbackDescription = `${mun.name}${where ? ` in ${where}` : ""} — committees, schedule, fees and registration on MUN Hub.`;
+  const eventJsonLd = buildMunEventJsonLd(mun, { soldOutProductIds });
   return (
     <PageMeta
       title={`${mun.name} | MUN Hub`}
@@ -513,7 +526,7 @@ function MunPageMeta({ mun, soldOutProductIds }: { mun: MunDetail; soldOutProduc
       path={`/mun/${mun.slug}`}
       image={absoluteHttpUrl(mun.coverImage)}
       imageAlt={`${mun.name} cover image`}
-      jsonLd={buildMunEventJsonLd(mun, { soldOutProductIds })}
+      jsonLd={eventJsonLd ? [eventJsonLd, buildMunBreadcrumbJsonLd(mun)] : buildMunBreadcrumbJsonLd(mun)}
     />
   );
 }

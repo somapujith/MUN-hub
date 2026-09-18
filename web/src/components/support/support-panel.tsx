@@ -8,6 +8,7 @@ import {
   CheckCircle2Icon,
   LifeBuoyIcon,
   LockIcon,
+  PlusIcon,
   RotateCwIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -58,10 +59,16 @@ export function SupportPanel({ variant = "popover" }: SupportPanelProps) {
   const [localSelected, setLocalSelected] = React.useState<string | null>(null);
   const selectedId = isPage ? searchParams.get("ticket") : localSelected;
   const [limit, setLimit] = React.useState(PAGE_SIZE);
+  // Page variant only: forces the right pane to show the "new message"
+  // composer on a narrow screen even though nothing is selected (below `lg`
+  // the right pane is otherwise hidden whenever `selectedId` is null, so the
+  // list has room). Irrelevant once selecting a ticket sets `selectedId`.
+  const [composing, setComposing] = React.useState(false);
   const { data: session } = useSession();
 
   const select = React.useCallback(
     (ticketId: string | null) => {
+      if (ticketId) setComposing(false);
       if (!isPage) {
         setLocalSelected(ticketId);
         return;
@@ -74,6 +81,11 @@ export function SupportPanel({ variant = "popover" }: SupportPanelProps) {
     },
     [isPage, setSearchParams],
   );
+
+  const startComposing = React.useCallback(() => {
+    select(null);
+    setComposing(true);
+  }, [select]);
 
   // In the widget the list is hidden while a thread is open, so it doesn't poll then.
   const listVisible = isPage || selectedId === null;
@@ -108,14 +120,20 @@ export function SupportPanel({ variant = "popover" }: SupportPanelProps) {
     <section
       aria-label="Your conversations"
       className={`min-h-0 flex-col ${isPage ? "border-border lg:border-r" : ""} ${
-        isPage && selectedId ? "hidden lg:flex" : "flex"
+        isPage && (selectedId || composing) ? "hidden lg:flex" : "flex"
       } ${isPage ? "" : "flex-1"}`}
     >
-      <NewConversation
-        munOptions={munOptions}
-        onStarted={(ticketId) => select(ticketId)}
-        autoFocus={!isPage}
-      />
+      {isPage ? (
+        <div className="flex items-center justify-between gap-sm border-b border-border px-md py-sm">
+          <h2 className="text-body-md font-semibold text-ink">Conversations</h2>
+          <Button variant="outline" size="sm" onClick={startComposing}>
+            <PlusIcon aria-hidden />
+            New
+          </Button>
+        </div>
+      ) : (
+        <NewConversation munOptions={munOptions} onStarted={select} autoFocus />
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {listQuery.isPending ? (
           <div className="flex flex-col gap-xs p-md" aria-busy="true" aria-label="Loading conversations">
@@ -184,12 +202,7 @@ export function SupportPanel({ variant = "popover" }: SupportPanelProps) {
       backVisibility={isPage ? "mobile" : "always"}
     />
   ) : (
-    <div className="hidden flex-1 flex-col items-center justify-center gap-sm p-xl text-center lg:flex">
-      <LifeBuoyIcon className="size-8 text-muted-foreground" strokeWidth={1.25} aria-hidden />
-      <p className="text-body-md text-muted-foreground">
-        Pick a conversation, or send a new message to start one.
-      </p>
-    </div>
+    <NewConversationPane munOptions={munOptions} onStarted={select} onBack={() => setComposing(false)} />
   );
 
   if (!isPage) {
@@ -199,7 +212,7 @@ export function SupportPanel({ variant = "popover" }: SupportPanelProps) {
   return (
     <div className="grid h-[72vh] min-h-[480px] w-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-card lg:grid-cols-[22rem_minmax(0,1fr)]">
       {list}
-      <div className={`min-h-0 min-w-0 flex-col ${selectedId ? "flex" : "hidden lg:flex"}`}>{thread}</div>
+      <div className={`min-h-0 min-w-0 flex-col ${selectedId || composing ? "flex" : "hidden lg:flex"}`}>{thread}</div>
     </div>
   );
 }
@@ -248,10 +261,12 @@ function NewConversation({
   munOptions,
   onStarted,
   autoFocus,
+  wrapperClassName = "border-b border-border p-md",
 }: {
   munOptions: { id: string; name: string }[];
   onStarted: (ticketId: string) => void;
   autoFocus: boolean;
+  wrapperClassName?: string;
 }) {
   const queryClient = useQueryClient();
   const [body, setBody] = React.useState("");
@@ -296,7 +311,7 @@ function NewConversation({
     ) : null;
 
   return (
-    <div className="border-b border-border p-md">
+    <div className={wrapperClassName}>
       <MessageComposer
         id="support-new-message"
         label="Message our support team…"
@@ -308,6 +323,44 @@ function NewConversation({
         submitStyle="text"
         extra={munPicker}
         autoFocus={autoFocus}
+      />
+    </div>
+  );
+}
+
+/**
+ * The page variant's right pane when no conversation is selected: a
+ * chat-shaped "start a new message" panel (header, empty state, composer
+ * pinned at the bottom) so the ticket list on the left stays list-only.
+ */
+function NewConversationPane({
+  munOptions,
+  onStarted,
+  onBack,
+}: {
+  munOptions: { id: string; name: string }[];
+  onStarted: (ticketId: string) => void;
+  onBack: () => void;
+}) {
+  return (
+    <div className="flex min-h-0 w-full flex-1 flex-col">
+      <div className="flex items-center gap-xs border-b border-border px-md py-sm">
+        <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to conversations" className="lg:hidden">
+          <ArrowLeftIcon aria-hidden />
+        </Button>
+        <h2 className="text-body-md font-semibold text-ink">New message</h2>
+      </div>
+      <div className="flex flex-1 flex-col items-center justify-center gap-sm p-xl text-center">
+        <LifeBuoyIcon className="size-8 text-muted-foreground" strokeWidth={1.25} aria-hidden />
+        <p className="max-w-xs text-body-md text-muted-foreground">
+          Send a message below and our team will reply here.
+        </p>
+      </div>
+      <NewConversation
+        munOptions={munOptions}
+        onStarted={onStarted}
+        autoFocus={false}
+        wrapperClassName="border-t border-border p-md"
       />
     </div>
   );

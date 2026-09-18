@@ -481,10 +481,16 @@ describe('marketplace actions', () => {
       expect(rows.some((r) => r.slug === draftMunSlug)).toBe(false)
     })
 
-    it('only returns slug and updatedAt fields', async () => {
+    it('only returns slug, updatedAt and coverImage fields', async () => {
       const rows = await listPublicMunSlugs()
       const match = rows.find((r) => r.slug === publishedMunSlug)
-      expect(match && Object.keys(match).sort()).toEqual(['slug', 'updatedAt'])
+      expect(match && Object.keys(match).sort()).toEqual(['coverImage', 'slug', 'updatedAt'])
+    })
+
+    it('includes the cover image URL when one is set, else null', async () => {
+      const rows = await listPublicMunSlugs()
+      const match = rows.find((r) => r.slug === publishedMunSlug)
+      expect(match?.coverImage).toBeNull()
     })
   })
 

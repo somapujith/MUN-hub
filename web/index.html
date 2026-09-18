@@ -6,10 +6,17 @@
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#181d26" media="(prefers-color-scheme: dark)" />
     <title>MUN Hub</title>
     <!-- Site-wide social card for crawlers that don't run JavaScript. Pages
          that render their own tags (components/seo/page-meta.tsx) remove
          everything marked data-default-seo on mount. -->
+    <meta
+      name="description"
+      content="Browse reviewed Model United Nations conferences, compare committees and fees, and register for your next MUN in minutes."
+      data-default-seo
+    />
     <meta property="og:site_name" content="MUN Hub" data-default-seo />
     <meta property="og:type" content="website" data-default-seo />
     <meta property="og:title" content="MUN Hub — Find and register for Model UN conferences" data-default-seo />
@@ -22,6 +29,17 @@
     <meta name="twitter:title" content="MUN Hub — Find and register for Model UN conferences" data-default-seo />
     <meta name="twitter:description" content="Browse reviewed Model United Nations conferences, compare committees and fees, and register for your next MUN in minutes." data-default-seo />
     <meta name="twitter:image" content="https://www.munhub.in/og-default.png" data-default-seo />
+    <!-- Sitewide, not per-page — stays after data-default-seo tags are stripped. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "MUN Hub",
+        "url": "https://www.munhub.in",
+        "logo": "https://www.munhub.in/apple-touch-icon.png",
+        "sameAs": ["https://instagram.com/munhub.in"]
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

@@ -82,12 +82,45 @@ export function PageHero({
   title,
   lede,
   children,
+  image,
+  imageAlt,
 }: {
   eyebrow: string;
   title: string;
   lede?: React.ReactNode;
   children?: React.ReactNode;
+  /** Optional full-bleed background photo. Switches the hero to light text over a dark scrim instead of the plain text-on-canvas layout. */
+  image?: string;
+  imageAlt?: string;
 }) {
+  if (image) {
+    return (
+      <div className="relative overflow-hidden bg-ink">
+        <img
+          src={image}
+          alt={imageAlt ?? ""}
+          aria-hidden={imageAlt ? undefined : true}
+          className="absolute inset-0 size-full object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/35 to-black/10" />
+        <div className="content-container relative flex min-h-[360px] flex-col justify-end gap-sm pt-xxl pb-xl md:min-h-[440px] md:pb-xxl">
+          <p className="text-caption uppercase tracking-[0.16px] text-white/70">
+            {eyebrow}
+          </p>
+          <h1 className="max-w-[22ch] font-display text-display-md font-normal tracking-[-0.011em] text-balance text-white sm:text-display-lg">
+            {title}
+          </h1>
+          {lede ? (
+            <p className="max-w-[60ch] text-title-md text-pretty text-white/85">
+              {lede}
+            </p>
+          ) : null}
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="border-b border-border">
       <div className="content-container flex flex-col gap-sm pt-xxl pb-xl md:pt-section md:pb-xxl">

@@ -13,6 +13,7 @@ import {
 import { PRICE_OPTIONS, STATUS_OPTIONS } from "@/lib/home-filters";
 import {
   addDays,
+  ALL_CITIES_PARAM,
   DATE_PRESETS,
   matchingDatePreset,
   parseDateParam,
@@ -302,7 +303,11 @@ export function FilterSidebar({ countries, resultCount }: FilterSidebarProps) {
 
   const setParam = useCallback((key: string, value: string) => setParams({ [key]: value }), [setParams]);
 
-  const selectedCity = searchParams.get("city") ?? "";
+  // The nav's city picker writes the explicit ALL_CITIES_PARAM marker (not an
+  // absent param) when cleared — see city-selector.tsx — so it must be
+  // stripped here too, or "All cities" would render as an active "all" chip.
+  const rawCity = searchParams.get("city");
+  const selectedCity = rawCity && rawCity !== ALL_CITIES_PARAM ? rawCity : "";
   const selectedCountry = searchParams.get("country") ?? "";
   const selectedStatus = searchParams.get("status") ?? "";
   const selectedPrice = searchParams.get("price") ?? "";

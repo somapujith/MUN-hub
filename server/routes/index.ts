@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { AppVariables } from '../src/types'
 import { authRoutes } from './auth'
+import { contactRoutes } from './contact'
 import { emailVerificationRoutes } from './email-verification'
 import { goLiveRoutes } from './go-live'
 import { munsRoutes } from './muns'
@@ -16,6 +17,7 @@ publicRoutes.route('/muns', munsRoutes)
 publicRoutes.route('/', passwordResetRoutes)
 publicRoutes.route('/', emailVerificationRoutes)
 publicRoutes.route('/', sitemapRoutes)
+publicRoutes.route('/', contactRoutes)
 
 /**
  * /api/v1 route bundle — sibling agents mount domain modules here.

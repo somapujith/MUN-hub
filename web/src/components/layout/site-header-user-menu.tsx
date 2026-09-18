@@ -32,7 +32,7 @@ import type { Role } from "@/types/enums";
  * the menu labels by role rather than inventing a name lookup.
  */
 
-const ROLE_LABEL: Record<Role, string> = {
+export const ROLE_LABEL: Record<Role, string> = {
   STUDENT: "Delegate",
   ORGANIZER: "Organizer",
   OPERATIONS: "Operations",

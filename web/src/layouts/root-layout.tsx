@@ -27,8 +27,8 @@ export function RootLayout() {
   return (
     <ThemeProvider
       attribute="class"
-      defaultTheme="system"
-      enableSystem
+      defaultTheme="light"
+      forcedTheme="light"
       disableTransitionOnChange
     >
       <Helmet

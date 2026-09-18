@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/signature-card";
 import { useListYourMunHref } from "@/hooks/use-list-your-mun-href";
 import { resolvePriceBand, resolveStatusFilter } from "@/lib/home-filters";
+import { ALL_CITIES_PARAM, DEFAULT_CITY, resolveCityParam } from "@/lib/marketplace-filters";
 import { getMarketplaceFacets, searchMuns, type MunSearchParams } from "@/api/marketplace";
 import { queryKeys } from "@/api/query-keys";
 import { DEFAULT_DESCRIPTION } from "@/lib/seo";
@@ -63,8 +64,7 @@ export function HomePage() {
     queryFn: getMarketplaceFacets,
   });
   const facets = facetsQuery.data ?? { cities: [], countries: [] };
-  const rawCity = searchParams.get("city") ?? undefined;
-  const city = rawCity && facets.cities.includes(rawCity) ? rawCity : "";
+  const city = resolveCityParam(searchParams.get("city"), facets.cities, DEFAULT_CITY);
   const statusFilter = resolveStatusFilter(
     searchParams.get("status") ?? undefined,
   );
@@ -232,7 +232,9 @@ export function HomePage() {
                       <Button
                         variant="on-dark"
                         size="sm"
-                        render={<Link to={hasRailFilter || city ? "/" : "/muns"} />}
+                        render={
+                          <Link to={hasRailFilter || city ? `/?city=${ALL_CITIES_PARAM}` : "/muns"} />
+                        }
                       >
                         {hasRailFilter || city
                           ? "Clear all filters"

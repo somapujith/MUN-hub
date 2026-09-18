@@ -1,12 +1,11 @@
 import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { SiteHeaderMobileNav } from "@/components/layout/site-header-mobile-nav";
+import { SiteHeaderSidebar, accountUrlForRole } from "@/components/layout/site-header-sidebar";
 import { SiteHeaderSearch } from "@/components/layout/site-header-search";
-import { SiteHeaderUserMenu } from "@/components/layout/site-header-user-menu";
 import { CitySelector } from "@/components/marketplace/city-selector";
 import { SupportWidget } from "@/components/support/support-widget";
 import { useSession } from "@/hooks/use-session";
+import { isCrossOrigin } from "@/lib/host-routing";
 
 /**
  * `top-nav` — docs/prd/DESIGN-airtable.md § Components.
@@ -40,22 +39,24 @@ import { useSession } from "@/hooks/use-session";
  * ---------------------------------------------------------------------------
  * RESPONSIVE COLLAPSE (a lot of content for one 64px bar)
  * ---------------------------------------------------------------------------
- *   < 768px   wordmark + search + theme + hamburger. The city picker and the
- *             primary links move into the mobile sheet. Search stays in the bar
- *             rather than the sheet because it's the single most likely action
- *             on a phone and shouldn't cost an extra tap.
- *   768px+    city picker appears; primary nav links appear.
- *   1024px+   search grows to a comfortable 260px and "Sign in" / "List your
- *             MUN" join the right cluster.
+ *   < 768px   wordmark + search + theme + hamburger. The city picker moves
+ *             into the sidebar sheet. Search stays in the bar rather than
+ *             the sheet because it's the single most likely action on a
+ *             phone and shouldn't cost an extra tap.
+ *   768px+    city picker appears in the bar.
+ *   1024px+   search grows to a comfortable 260px and a single "Sign in" /
+ *             "Profile" button joins the right cluster.
+ *
+ * The hamburger (SiteHeaderSidebar) is visible at every width, not just below
+ * 768px — it's the one place both primary navigation (Marketplace) and
+ * account-level utilities (notifications, help, account & settings,
+ * dashboard, sign out) live, so the bar itself carries no "Marketplace" link
+ * of its own — there's only ever one auth button in the bar plus one menu,
+ * never a second "Create account" button competing with it.
  *
  * The bar height never changes and nothing wraps to a second row — the doc
  * specifies a fixed 64px bar, so content drops out of it instead of growing it.
  */
-
-// Organizer entry points (/organizer/apply, /organizer/login) are deliberately
-// not in the bar — they're being given a home elsewhere on the site. Both
-// routes still exist, and /login's footer still links to /organizer/login.
-const NAV_LINKS = [{ href: "/muns", label: "Marketplace" }];
 
 interface SiteHeaderProps {
   /**
@@ -107,58 +108,32 @@ export function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) 
             className="min-w-0 flex-1 sm:max-w-[220px] lg:max-w-[260px]"
           />
   
-          {/* `whitespace-nowrap` keeps a link from wrapping to a second line
-              inside the fixed 64px bar. The link row is the first thing to go
-              when the city picker is present, so it only appears from xl there. */}
-          <nav
-            aria-label="Primary"
-            className={
-              showCityPicker
-                ? "hidden items-center gap-md xl:flex"
-                : "hidden items-center gap-md md:flex lg:gap-lg"
-            }
-          >
-            {NAV_LINKS.map((link) => (
-              <Link
-                key={link.href}
-                to={link.href}
-                className="rounded-sm whitespace-nowrap text-body-md text-body transition-colors duration-150 hover:text-ink focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background focus-visible:outline-none"
-              >
-                {link.label}
-              </Link>
-            ))}
-          </nav>
-  
           <div className="ml-auto flex shrink-0 items-center gap-xs">
-            <ThemeToggle />
-  
             {session ? (
-              <SiteHeaderUserMenu role={session.role} />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="hidden lg:inline-flex"
+                render={
+                  isCrossOrigin(accountUrlForRole(session.role))
+                    ? <a href={accountUrlForRole(session.role)} />
+                    : <Link to={accountUrlForRole(session.role)} />
+                }
+              >
+                Profile
+              </Button>
             ) : (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="hidden lg:inline-flex"
-                  render={<Link to="/login" />}
-                >
-                  Sign in
-                </Button>
-                <Button
-                  size="sm"
-                  className="hidden h-9 lg:inline-flex"
-                  render={<Link to="/signup" />}
-                >
-                  Create account
-                </Button>
-              </>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="hidden lg:inline-flex"
+                render={<Link to="/login" />}
+              >
+                Sign in
+              </Button>
             )}
-  
-  
-            <SiteHeaderMobileNav
-              links={NAV_LINKS}
-              isSignedIn={Boolean(session)}
-              role={session?.role ?? null}
+
+            <SiteHeaderSidebar
               cities={showCityPicker ? cities : undefined}
               selectedCity={selectedCity}
             />

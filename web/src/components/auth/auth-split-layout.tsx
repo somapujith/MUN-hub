@@ -36,10 +36,7 @@ export function AuthSplitLayout({ imageSrc, headline, subtext, footer, children 
         />
 
         <div className="relative flex justify-center px-xl pt-section">
-          <span className="flex items-center gap-sm font-display text-display-md font-medium tracking-[-0.02em] text-white">
-            <span aria-hidden className="size-3 rounded-full bg-signature-coral" />
-            MUN Hub
-          </span>
+          <img src="/images/logo-emblem-white.png" alt="MUN Hub" className="h-40 w-auto" />
         </div>
 
         <div className="relative flex flex-col items-center gap-sm px-xl pb-section text-center">

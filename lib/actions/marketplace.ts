@@ -470,13 +470,14 @@ async function loadPublicMunDetail(where: SQL): Promise<PublicMunDetail | null> 
 }
 
 /**
- * Slug + updatedAt for every publicly-visible MUN, for sitemap generation.
- * Deliberately lightweight (no joins, no committees/products) since sitemap
- * generation can run frequently — don't reuse getMunBySlug/searchMuns here.
+ * Slug + updatedAt + cover image for every publicly-visible MUN, for sitemap
+ * generation. Deliberately lightweight (no joins beyond the cover-image
+ * lookup, no committees/products) since sitemap generation can run
+ * frequently — don't reuse getMunBySlug/searchMuns here.
  */
-export async function listPublicMunSlugs(): Promise<{ slug: string; updatedAt: Date }[]> {
+export async function listPublicMunSlugs(): Promise<{ slug: string; updatedAt: Date; coverImage: string | null }[]> {
   const rows = await db
-    .select({ slug: muns.slug, updatedAt: muns.updatedAt })
+    .select({ slug: muns.slug, updatedAt: muns.updatedAt, coverImage: mediaUrlSql('COVER') })
     .from(muns)
     .where(inArray(muns.status, DEFAULT_PUBLIC_STATUSES))
 

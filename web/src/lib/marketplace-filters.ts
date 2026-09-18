@@ -7,7 +7,8 @@ import { resolvePriceBand, resolveStatusFilter } from "@/lib/home-filters";
  * the two can never disagree about what a param means.
  *
  *   q        free text (name, city, country, theme, organizer)
- *   city     exact city (the nav bar's city picker writes this)
+ *   city     exact city (the nav bar's city picker writes this), or the
+ *            literal "all" — see ALL_CITIES_PARAM
  *   country  exact country
  *   status   REGISTRATION_OPEN | PUBLISHED | REGISTRATION_CLOSED
  *   price    a PRICE_OPTIONS band value from lib/home-filters.ts
@@ -16,6 +17,38 @@ import { resolvePriceBand, resolveStatusFilter } from "@/lib/home-filters";
  *   sortBy   date | deadline | price | newest
  *   page     1-based page number
  */
+
+/**
+ * Explicit "every city" marker `?city=` can carry, distinct from the param
+ * being absent. Needed because the home page defaults a missing `city` to
+ * DEFAULT_CITY (below) — without a dedicated marker, clearing the picker back
+ * to "All cities" would just delete the param and the page would immediately
+ * re-apply the default, making "All cities" unreachable.
+ */
+export const ALL_CITIES_PARAM = "all";
+
+/**
+ * The home page's city when a visitor arrives with no `?city=` at all.
+ * Hyderabad is MUN Hub's primary market (the seeded conference set is
+ * concentrated there) — new visitors land on a populated, relevant shelf
+ * instead of an undifferentiated nationwide list. Only the home page applies
+ * this; `/muns` (the full marketplace search) still defaults to every city,
+ * matching its "browse everything" framing.
+ */
+export const DEFAULT_CITY = "Hyderabad";
+
+/**
+ * Resolves `?city=` against the known facet list.
+ *   - absent              -> `fallback` (caller's own "nothing chosen yet" default)
+ *   - ALL_CITIES_PARAM     -> "" (explicitly every city — never re-defaulted)
+ *   - a known city         -> that city
+ *   - anything else        -> "" (stale/bad link, same as explicit "all")
+ */
+export function resolveCityParam(raw: string | null, cities: string[], fallback = ""): string {
+  if (raw === null) return cities.includes(fallback) ? fallback : "";
+  if (raw === ALL_CITIES_PARAM) return "";
+  return cities.includes(raw) ? raw : "";
+}
 
 export const SORT_OPTIONS: readonly { value: MunSortBy; label: string }[] = [
   { value: "date", label: "Conference date" },
@@ -92,9 +125,11 @@ export function resolveMarketplaceSearch(
     [from, to] = [to, from];
   }
 
+  const rawCity = searchParams.get("city");
+
   return {
     query: searchParams.get("q")?.trim() || undefined,
-    city: searchParams.get("city") || undefined,
+    city: rawCity && rawCity !== ALL_CITIES_PARAM ? rawCity : undefined,
     country: searchParams.get("country") || undefined,
     status: status ? [status] : undefined,
     minPrice: priceBand?.min,

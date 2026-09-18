@@ -32,7 +32,8 @@ interface PageMetaProps {
   noindex?: boolean;
   /** Omit the canonical link (e.g. a 404, which has no canonical address). */
   omitCanonical?: boolean;
-  jsonLd?: Record<string, unknown> | null;
+  /** One structured-data block, or several (e.g. an Event plus a BreadcrumbList) — one <script> each. */
+  jsonLd?: Record<string, unknown> | Record<string, unknown>[] | null;
 }
 
 export function PageMeta({
@@ -77,7 +78,12 @@ export function PageMeta({
       <meta name="twitter:image" content={ogImage} />
       <meta name="twitter:image:alt" content={ogImageAlt} />
 
-      {jsonLd && <script type="application/ld+json">{serializeJsonLd(jsonLd)}</script>}
+      {(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : []).map((entry, index) => (
+        // Index is a fine key here: this list is derived fresh from props on every render, never reordered.
+        <script key={index} type="application/ld+json">
+          {serializeJsonLd(entry)}
+        </script>
+      ))}
     </Helmet>
   );
 }

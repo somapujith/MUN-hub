@@ -1,7 +1,6 @@
 import { WorkspaceMobileNav } from "@/components/organizer/workspace-mobile-nav";
 import { WorkspaceBreadcrumb } from "@/components/organizer/workspace-breadcrumb";
 import { SiteHeaderUserMenu } from "@/components/layout/site-header-user-menu";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { MunStatusBadge } from "@/components/mun/mun-status-badge";
 import type { WorkspaceMun } from "@/types/organizer";
 import type { Role } from "@/types/enums";
@@ -23,7 +22,6 @@ export function WorkspaceTopbar({ muns, currentMun, role }: WorkspaceTopbarProps
         )}
       </div>
       <div className="flex shrink-0 items-center gap-xs">
-        <ThemeToggle />
         <SiteHeaderUserMenu role={role} />
       </div>
     </header>

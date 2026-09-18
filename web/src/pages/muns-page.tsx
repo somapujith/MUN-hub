@@ -10,8 +10,25 @@ import { PageMeta } from "@/components/seo/page-meta";
 import { Button } from "@/components/ui/button";
 import { getMarketplaceFacets, searchMuns } from "@/api/marketplace";
 import { queryKeys } from "@/api/query-keys";
-import { FILTER_PARAM_KEYS, resolveMarketplaceSearch } from "@/lib/marketplace-filters";
+import { FILTER_PARAM_KEYS, resolveCityParam, resolveMarketplaceSearch } from "@/lib/marketplace-filters";
+import { canonicalUrl } from "@/lib/seo";
 import { useScrollToTop } from "@/hooks/use-scroll-to-top";
+import type { MunSummary } from "@/types";
+
+/** ItemList structured data for the currently-loaded page of results — null once there's nothing to list. */
+function buildMunListJsonLd(results: MunSummary[]): Record<string, unknown> | null {
+  if (results.length === 0) return null;
+  return {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    itemListElement: results.map((mun, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: mun.name,
+      url: canonicalUrl(`/mun/${mun.slug}`),
+    })),
+  };
+}
 
 const PAGE_SIZE = 24;
 
@@ -51,7 +68,9 @@ export function MunsPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(page * PAGE_SIZE, total);
-  const city = searchParams.get("city") ?? "";
+  // No default here (unlike the home page) — "/muns" is the full marketplace
+  // search, so a missing `city` genuinely means every city.
+  const city = resolveCityParam(searchParams.get("city"), facets.cities);
   const country = searchParams.get("country") ?? "";
   const query = searchQueryParams.query;
   const locationLabel = [city, country].filter(Boolean).join(", ");
@@ -67,6 +86,7 @@ export function MunsPage() {
         }
         description="Search and filter reviewed Model United Nations conferences by city, country, dates, registration status and delegate fee."
         path="/muns"
+        jsonLd={buildMunListJsonLd(results)}
       />
 
       <SiteHeader cities={facets.cities} selectedCity={city} />

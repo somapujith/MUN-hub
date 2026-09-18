@@ -17,6 +17,8 @@ type SitemapEntry = {
   lastModified?: Date
   changeFrequency?: string
   priority?: number
+  /** Absolute cover-image URL, per the sitemap image extension — helps Google Images indexing. */
+  image?: string
 }
 
 /** Public, indexable SPA pages (web/src/routes.tsx), besides the per-MUN pages. */
@@ -68,6 +70,9 @@ function buildSitemapXml(entries: SitemapEntry[]): string {
       if (entry.priority !== undefined) {
         lines.push(`    <priority>${entry.priority}</priority>`)
       }
+      if (entry.image) {
+        lines.push(`    <image:image><image:loc>${escapeXml(entry.image)}</image:loc></image:image>`)
+      }
       lines.push('  </url>')
       return lines.join('\n')
     })
@@ -75,7 +80,7 @@ function buildSitemapXml(entries: SitemapEntry[]): string {
 
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">',
     body,
     '</urlset>',
   ].join('\n')
@@ -109,6 +114,7 @@ sitemapRoutes.get('/sitemap.xml', async (c) => {
       lastModified: mun.updatedAt,
       changeFrequency: 'weekly',
       priority: 0.7,
+      image: mun.coverImage ?? undefined,
     })),
   ])
 

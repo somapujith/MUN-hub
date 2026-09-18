@@ -1,98 +1,28 @@
 import * as React from "react";
 import { Link } from "react-router";
-import type { LucideIcon } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
+  AlertCircleIcon,
   BuildingIcon,
-  FlagIcon,
-  HandshakeIcon,
-  LockIcon,
-  ReceiptIcon,
-  TicketIcon,
+  CheckIcon,
+  CopyIcon,
+  LinkIcon,
+  Loader2Icon,
+  MapPinIcon,
+  RotateCcwIcon,
+  SendIcon,
 } from "lucide-react";
+import { submitContactForm } from "@/api/contact-form";
 import { InfoPageShell, InfoSection, PageHero } from "@/components/content/info-page";
 import { RegisteredBusinessDetails } from "@/components/content/registered-business-details";
+import { REQUESTER_CATEGORY_OPTIONS } from "@/components/support/support-labels";
 import { Button } from "@/components/ui/button";
-import { useListYourMunHref } from "@/hooks/use-list-your-mun-href";
-import { SITE_INFO, mailto } from "@/lib/site-info";
-
-type ContactChannel = {
-  id: string;
-  icon: LucideIcon;
-  audience: string;
-  title: string;
-  body: React.ReactNode;
-  primary: { label: string; to: string };
-  secondary?: { label: string; to: string };
-  email?: string;
-  /**
-   * An organizer-registration entry point: its primary link comes from
-   * `useListYourMunHref`, and the whole card is hidden when that returns null
-   * (signed-in delegates and staff never see one).
-   */
-  listsYourMun?: true;
-};
-
-const CHANNELS: ContactChannel[] = [
-  {
-    id: "registrations",
-    icon: TicketIcon,
-    audience: "Delegates",
-    title: "Registrations and payments",
-    body: "A missing confirmation, a payment that didn't go through, a seat hold that expired, or a charge that looks wrong. Sign in and open a ticket, and we'll follow up by email.",
-    primary: { label: "Open a support ticket", to: "/support/new" },
-    secondary: { label: "View my registrations", to: "/dashboard" },
-    email: SITE_INFO.emails.support,
-  },
-  {
-    id: "list-your-mun",
-    icon: BuildingIcon,
-    audience: "Organizers",
-    title: "List your conference",
-    body: "Run a MUN and want it on the marketplace? Create an organizer account and apply. We'll review your organization and guide you through setting up your listing.",
-    primary: { label: "List your MUN", to: "/organizer/signup" },
-    secondary: { label: "How review works", to: "/about/curation#review-process" },
-    email: SITE_INFO.emails.organizers,
-    listsYourMun: true,
-  },
-  {
-    id: "organizer-support",
-    icon: ReceiptIcon,
-    audience: "Existing organizers",
-    title: "Help with your workspace",
-    body: "Questions about your listing, a review decision, payouts, or delegate management. Message our team from inside your organizer account.",
-    primary: { label: "Organizer support", to: "/organizer/support" },
-    secondary: { label: "Organizer sign in", to: "/organizer/login" },
-    email: SITE_INFO.emails.organizers,
-  },
-  {
-    id: "report",
-    icon: FlagIcon,
-    audience: "Anyone",
-    title: "Report a listing or a safety concern",
-    body: "Details that don't match, an organizer who doesn't seem official, or anything that puts delegates at risk. Choose “Safety / policy” when you open a ticket.",
-    primary: { label: "Report a concern", to: "/support/new" },
-    secondary: { label: "Our curation standards", to: "/about/curation" },
-    email: SITE_INFO.emails.support,
-  },
-  {
-    id: "privacy",
-    icon: LockIcon,
-    audience: "Anyone",
-    title: "Privacy and data requests",
-    body: "Ask for a copy of your data, a correction, or deletion, or raise a complaint with our Grievance Officer.",
-    primary: { label: "Read the Privacy policy", to: "/legal/privacy" },
-    email: SITE_INFO.emails.privacy,
-  },
-  {
-    id: "partnerships",
-    icon: HandshakeIcon,
-    audience: "Everyone else",
-    title: "Partnerships and press",
-    body: "Schools, universities, MUN circuits, sponsors, and journalists are welcome to write to us.",
-    primary: { label: "About MUN Hub", to: "/about" },
-    email: SITE_INFO.emails.hello,
-  },
-];
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { SITE_INFO } from "@/lib/site-info";
+import type { RequesterCategory } from "@/types/support";
+import { SUPPORT_LIMITS } from "@/types/support";
 
 const QUICK_ANSWERS = [
   {
@@ -131,7 +61,7 @@ const QUICK_ANSWERS = [
     answer: (
       <>
         Start with the conference page, which lists its committees and
-        passes. If it doesn't answer your question, open a ticket under “MUN
+        passes. If it doesn't answer your question, write in under “MUN
         info” and we'll help you get an answer from the organizer.
       </>
     ),
@@ -148,14 +78,6 @@ const QUICK_ANSWERS = [
 ];
 
 export function ContactPage() {
-  const listYourMunHref = useListYourMunHref();
-  const channels = CHANNELS.flatMap((channel) => {
-    if (!channel.listsYourMun) return [channel];
-    return listYourMunHref
-      ? [{ ...channel, primary: { ...channel.primary, to: listYourMunHref } }]
-      : [];
-  });
-
   return (
     <InfoPageShell
       title="Contact"
@@ -164,17 +86,26 @@ export function ContactPage() {
       <PageHero
         eyebrow="Contact"
         title="How can we help?"
-        lede="Choose what you need below, and we'll get your question to the right people. Signed-in tickets are the fastest route, because we can see which account you're asking about."
+        lede="Write to us below and our team will get back to you by email."
+        image="/images/contact-hero.jpg"
       />
 
       <div className="content-container flex flex-col gap-section py-xxl md:py-section">
-        <ul className="grid gap-lg md:grid-cols-2 lg:grid-cols-3">
-          {channels.map((channel) => (
-            <li key={channel.id} id={channel.id} className="scroll-mt-24">
-              <ChannelCard channel={channel} />
-            </li>
-          ))}
-        </ul>
+        <div className="grid gap-xl lg:grid-cols-[1.6fr_1fr] lg:gap-xxl">
+          <div>
+            <SectionHeading>Write to us by filling in the form below</SectionHeading>
+            <div className="mt-lg">
+              <ContactForm />
+            </div>
+          </div>
+
+          <div>
+            <SectionHeading>Contact us</SectionHeading>
+            <div className="mt-lg">
+              <ContactInfoCard />
+            </div>
+          </div>
+        </div>
 
         <InfoSection
           eyebrow="Before you write in"
@@ -193,7 +124,7 @@ export function ContactPage() {
           </dl>
         </InfoSection>
 
-        <InfoSection eyebrow="Registered business" title="Write to us directly" id="registered-business">
+        <InfoSection eyebrow="Registered business" title="Full registered details" id="registered-business">
           <RegisteredBusinessDetails />
         </InfoSection>
 
@@ -218,47 +149,237 @@ export function ContactPage() {
   );
 }
 
-function ChannelCard({ channel }: { channel: ContactChannel }) {
-  const { icon: Icon } = channel;
+function SectionHeading({ children }: { children: string }) {
   return (
-    <article className="flex h-full flex-col gap-sm rounded-lg border border-border p-lg">
-      <div className="flex items-center gap-sm">
-        <span
-          aria-hidden
-          className="flex size-10 items-center justify-center rounded-md bg-surface-soft text-ink"
-        >
-          <Icon className="size-5" />
-        </span>
-        <p className="text-caption uppercase tracking-[0.16px] text-muted-foreground">
-          {channel.audience}
-        </p>
-      </div>
-      <h2 className="font-display text-title-md font-normal text-ink">{channel.title}</h2>
-      <p className="text-body-md leading-relaxed text-body dark:text-muted-foreground">{channel.body}</p>
+    <div>
+      <h2 className="font-display text-title-lg font-normal text-ink">{children}</h2>
+      <span aria-hidden className="mt-xs block h-0.5 w-8 bg-signature-coral" />
+    </div>
+  );
+}
 
-      <div className="mt-auto flex flex-col gap-sm pt-sm">
-        <div className="flex flex-wrap gap-xs">
-          <Button size="sm" render={<Link to={channel.primary.to} />}>
-            {channel.primary.label}
-          </Button>
-          {channel.secondary ? (
-            <Button size="sm" variant="outline" render={<Link to={channel.secondary.to} />}>
-              {channel.secondary.label}
-            </Button>
-          ) : null}
-        </div>
-        {channel.email ? (
-          <p className="text-body-md text-muted-foreground">
-            Or email{" "}
-            <a
-              href={mailto(channel.email)}
-              className="rounded-sm text-link underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            >
-              {channel.email}
-            </a>
-          </p>
-        ) : null}
+const EMPTY_FORM = { category: "GENERAL" as RequesterCategory, name: "", email: "", phone: "", message: "" };
+
+function ContactForm() {
+  const [form, setForm] = React.useState(EMPTY_FORM);
+  // Honeypot — never rendered visibly (see server/routes/contact.ts).
+  const [website, setWebsite] = React.useState("");
+
+  const submitMutation = useMutation({
+    mutationFn: () =>
+      submitContactForm({
+        category: form.category,
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
+        message: form.message.trim() || undefined,
+        website: website || undefined,
+      }),
+    onSuccess: () => {
+      toast.success("Message sent. We'll get back to you by email.");
+      setForm(EMPTY_FORM);
+    },
+  });
+
+  const pending = submitMutation.isPending;
+  const canSubmit = form.name.trim().length > 0 && form.email.trim().length > 0 && form.phone.trim().length > 0;
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!canSubmit || pending) return;
+    submitMutation.mutate();
+  }
+
+  function handleReset() {
+    setForm(EMPTY_FORM);
+    submitMutation.reset();
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-md" noValidate>
+      <div className="flex flex-col gap-xs">
+        <Label htmlFor="contact-category">Category</Label>
+        <select
+          id="contact-category"
+          className="h-11 w-full rounded-sm border border-input bg-background px-md py-sm text-body-md text-ink outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 disabled:bg-surface-soft dark:bg-card"
+          value={form.category}
+          onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value as RequesterCategory }))}
+          disabled={pending}
+        >
+          {REQUESTER_CATEGORY_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </div>
-    </article>
+
+      <div className="flex flex-col gap-xs">
+        <Label htmlFor="contact-name">
+          Name <span className="text-destructive">*</span>
+        </Label>
+        <Input
+          id="contact-name"
+          autoComplete="name"
+          placeholder="Please enter your name"
+          value={form.name}
+          onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+          maxLength={100}
+          required
+          disabled={pending}
+        />
+      </div>
+
+      <div className="grid gap-md sm:grid-cols-2">
+        <div className="flex flex-col gap-xs">
+          <Label htmlFor="contact-email">
+            Email <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            id="contact-email"
+            type="email"
+            autoComplete="email"
+            placeholder="Please enter your email"
+            value={form.email}
+            onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
+            required
+            disabled={pending}
+          />
+        </div>
+        <div className="flex flex-col gap-xs">
+          <Label htmlFor="contact-phone">
+            Mobile number <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            id="contact-phone"
+            type="tel"
+            autoComplete="tel"
+            placeholder="eg: 91XXXXXXXXXX"
+            value={form.phone}
+            onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))}
+            maxLength={20}
+            required
+            disabled={pending}
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-xs">
+        <Label htmlFor="contact-message">Message</Label>
+        <textarea
+          id="contact-message"
+          rows={5}
+          className="w-full resize-y rounded-sm border border-input bg-background px-md py-sm text-body-md text-ink outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 disabled:bg-surface-soft dark:bg-card"
+          placeholder="Type message here"
+          value={form.message}
+          onChange={(event) => setForm((prev) => ({ ...prev, message: event.target.value }))}
+          maxLength={SUPPORT_LIMITS.body}
+          disabled={pending}
+        />
+      </div>
+
+      {/* Honeypot: real visitors never see or fill this in. */}
+      <div aria-hidden="true" className="absolute left-[-9999px] h-0 w-0 overflow-hidden">
+        <label htmlFor="contact-website">Leave this field blank</label>
+        <input
+          id="contact-website"
+          name="website"
+          type="text"
+          tabIndex={-1}
+          autoComplete="off"
+          value={website}
+          onChange={(event) => setWebsite(event.target.value)}
+        />
+      </div>
+
+      {submitMutation.isError && (
+        <p
+          role="alert"
+          className="flex items-start gap-xs rounded-sm border border-destructive/30 bg-destructive/10 px-sm py-xs text-body-md text-destructive-text"
+        >
+          <AlertCircleIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
+          {submitMutation.error.message}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-sm">
+        <Button type="button" variant="outline" onClick={handleReset} disabled={pending}>
+          <RotateCcwIcon aria-hidden />
+          Reset
+        </Button>
+        <Button type="submit" disabled={pending || !canSubmit}>
+          {pending ? <Loader2Icon className="animate-spin" aria-hidden /> : <SendIcon aria-hidden />}
+          {pending ? "Sending…" : "Submit"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function CopyableRow({
+  icon: Icon,
+  children,
+  copyValue,
+}: {
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  children: React.ReactNode;
+  copyValue?: string;
+}) {
+  const [copied, setCopied] = React.useState(false);
+
+  async function handleCopy() {
+    if (!copyValue) return;
+    try {
+      await navigator.clipboard.writeText(copyValue);
+      setCopied(true);
+      toast.success("Copied");
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Couldn't copy — select the text instead.");
+    }
+  }
+
+  return (
+    <div className="flex items-start gap-sm border-b border-border py-md last:border-b-0">
+      <Icon aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1 text-body-md leading-relaxed text-ink">{children}</div>
+      {copyValue && (
+        <button
+          type="button"
+          onClick={handleCopy}
+          aria-label="Copy"
+          className="shrink-0 rounded-sm p-xxs text-muted-foreground transition-colors duration-150 hover:bg-surface-soft hover:text-ink focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          {copied ? <CheckIcon className="size-4" aria-hidden /> : <CopyIcon className="size-4" aria-hidden />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ContactInfoCard() {
+  const website = `https://${SITE_INFO.domain}`;
+  return (
+    <div className="rounded-lg border border-border p-lg">
+      <CopyableRow icon={MapPinIcon}>
+        {SITE_INFO.legalName}
+        <br />
+        {SITE_INFO.address.line1}, {SITE_INFO.address.city}, {SITE_INFO.address.state}{" "}
+        {SITE_INFO.address.postalCode}, {SITE_INFO.address.country}
+      </CopyableRow>
+      <CopyableRow icon={BuildingIcon} copyValue={SITE_INFO.legalName}>
+        {SITE_INFO.legalName}
+      </CopyableRow>
+      <CopyableRow icon={LinkIcon} copyValue={website}>
+        <a
+          href={website}
+          target="_blank"
+          rel="noreferrer"
+          className="rounded-sm text-link underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          {website}
+        </a>
+      </CopyableRow>
+    </div>
   );
 }

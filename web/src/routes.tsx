@@ -61,6 +61,7 @@ import { OrganizerQuickSetupPage } from "@/pages/organizer/dashboard/sections/qu
 import { OrganizerSetupPage } from "@/pages/organizer/dashboard/sections/setup-page";
 import { OrganizerTeamPage } from "@/pages/organizer/dashboard/sections/team-page";
 import { MunsPage } from "@/pages/muns-page";
+import { ErrorPage } from "@/pages/error-page";
 import { ProfilePage } from "@/pages/profile-page";
 import { RequireAuth } from "@/guards/require-auth";
 import { GroupRegisterPage } from "@/pages/register/group-register-page";
@@ -82,177 +83,185 @@ export const router = createBrowserRouter([
   {
     element: <RootLayout />,
     children: [
-      { index: true, element: <HostAwareIndexPage /> },
-      { path: "muns", element: <MunsPage /> },
-      { path: "mun/:slug", element: <MunDetailPage /> },
-      { path: "about", element: <AboutPage /> },
-      { path: "about/curation", element: <CurationStandardsPage /> },
-      { path: "contact", element: <ContactPage /> },
-      { path: "legal", element: <LegalIndexPage /> },
-      { path: "legal/terms", element: <TermsPage /> },
-      { path: "legal/privacy", element: <PrivacyPage /> },
-      { path: "legal/refunds", element: <RefundPolicyPage /> },
-      // Short aliases — the URLs people type, and what payment gateways ask
-      // merchants to link during onboarding.
-      { path: "terms", element: <Navigate to="/legal/terms" replace /> },
-      { path: "privacy", element: <Navigate to="/legal/privacy" replace /> },
-      { path: "refunds", element: <Navigate to="/legal/refunds" replace /> },
-      { path: "login", element: <LoginPage /> },
-      // Labelled per-role doors. Same POST /auth/session underneath — these
-      // differ only in signposting and post-login destination. /admin/login is
-      // intentionally unlinked from the public nav.
-      { path: "organizer/login", element: <OrganizerLoginPage /> },
-      // Organizer accounts are created here (email-code confirmed), never by
-      // converting a delegate account — see lib/actions/organizer-otp.ts.
-      { path: "organizer/signup", element: <OrganizerSignupPage /> },
-      { path: "admin/login", element: <AdminLoginPage /> },
-      { path: "signup", element: <SignupPage /> },
-      { path: "forgot-password", element: <ForgotPasswordPage /> },
-      { path: "reset-password", element: <ResetPasswordPage /> },
-      { path: "verify-email", element: <VerifyEmailPage /> },
       {
-        path: "profile",
-        element: (
-          <RequireAuth>
-            <ProfilePage />
-          </RequireAuth>
-        ),
-      },
-      {
-        path: "dashboard",
-        element: (
-          <RequireAuth>
-            <StudentDashboardPage />
-          </RequireAuth>
-        ),
-      },
-      {
-        path: "dashboard/registrations/:registrationId/pass",
-        element: (
-          <RequireAuth>
-            <RegistrationPassPage />
-          </RequireAuth>
-        ),
-      },
-      {
-        path: "dashboard/support",
-        element: (
-          <RequireAuth>
-            <StudentSupportPage />
-          </RequireAuth>
-        ),
-      },
-      {
-        path: "dashboard/registrations/:registrationId/receipt",
-        element: (
-          <RequireAuth>
-            <RegistrationReceiptPage />
-          </RequireAuth>
-        ),
-      },
-      {
-        path: "support/new",
-        element: (
-          <RequireAuth>
-            <SupportNewPage />
-          </RequireAuth>
-        ),
-      },
-      {
-        path: "register/:slug",
-        element: <RegisterLayout />,
+        // Owns errorElement instead of the RootLayout route above so
+        // ThemeProvider/Toaster/ScrollRestoration stay mounted around a
+        // thrown error — only this subtree (every real page) gets replaced.
+        errorElement: <ErrorPage />,
         children: [
-          { index: true, element: <RegisterPage /> },
-          { path: "group", element: <GroupRegisterPage /> },
-          { path: "pay", element: <RegisterPayPage /> },
-          { path: "confirmation", element: <RegisterConfirmationPage /> },
-        ],
-      },
-      {
-        path: "group-invite",
-        element: <GroupInviteAcceptPage />,
-      },
-      {
-        path: "dashboard/groups/:groupId",
-        element: (
-          <RequireAuth>
-            <GroupManagePage />
-          </RequireAuth>
-        ),
-      },
-      { path: "organizer/welcome", element: <OrganizerWelcomePage /> },
-      { path: "organizer/onboarding", element: <OrganizerOnboardingPage /> },
-      // The first MUN is applied for in the onboarding wizard; this page is for the ones after it.
-      { path: "organizer/apply", element: <OrganizerApplyPage /> },
-      // Gate-1 loop: resubmitting a CHANGES_REQUESTED application.
-      { path: "organizer/apply/:munId/resubmit", element: <OrganizerResubmitPage /> },
-      {
-        path: "organizer/apply/submitted",
-        element: <OrganizerApplySubmittedPage />,
-      },
-      { path: "organizer/support", element: <OrganizerSupportPage /> },
-      { path: "organizer/muns/:munId/preview", element: <OrganizerMunPreviewPage /> },
-      {
-        path: "organizer/dashboard",
-        children: [
+          { index: true, element: <HostAwareIndexPage /> },
+          { path: "muns", element: <MunsPage /> },
+          { path: "mun/:slug", element: <MunDetailPage /> },
+          { path: "about", element: <AboutPage /> },
+          { path: "about/curation", element: <CurationStandardsPage /> },
+          { path: "contact", element: <ContactPage /> },
+          { path: "legal", element: <LegalIndexPage /> },
+          { path: "legal/terms", element: <TermsPage /> },
+          { path: "legal/privacy", element: <PrivacyPage /> },
+          { path: "legal/refunds", element: <RefundPolicyPage /> },
+          // Short aliases — the URLs people type, and what payment gateways ask
+          // merchants to link during onboarding.
+          { path: "terms", element: <Navigate to="/legal/terms" replace /> },
+          { path: "privacy", element: <Navigate to="/legal/privacy" replace /> },
+          { path: "refunds", element: <Navigate to="/legal/refunds" replace /> },
+          { path: "login", element: <LoginPage /> },
+          // Labelled per-role doors. Same POST /auth/session underneath — these
+          // differ only in signposting and post-login destination. /admin/login is
+          // intentionally unlinked from the public nav.
+          { path: "organizer/login", element: <OrganizerLoginPage /> },
+          // Organizer accounts are created here (email-code confirmed), never by
+          // converting a delegate account — see lib/actions/organizer-otp.ts.
+          { path: "organizer/signup", element: <OrganizerSignupPage /> },
+          { path: "admin/login", element: <AdminLoginPage /> },
+          { path: "signup", element: <SignupPage /> },
+          { path: "forgot-password", element: <ForgotPasswordPage /> },
+          { path: "reset-password", element: <ResetPasswordPage /> },
+          { path: "verify-email", element: <VerifyEmailPage /> },
           {
-            element: <WorkspaceLayout />,
+            path: "profile",
+            element: (
+              <RequireAuth>
+                <ProfilePage />
+              </RequireAuth>
+            ),
+          },
+          {
+            path: "dashboard",
+            element: (
+              <RequireAuth>
+                <StudentDashboardPage />
+              </RequireAuth>
+            ),
+          },
+          {
+            path: "dashboard/registrations/:registrationId/pass",
+            element: (
+              <RequireAuth>
+                <RegistrationPassPage />
+              </RequireAuth>
+            ),
+          },
+          {
+            path: "dashboard/support",
+            element: (
+              <RequireAuth>
+                <StudentSupportPage />
+              </RequireAuth>
+            ),
+          },
+          {
+            path: "dashboard/registrations/:registrationId/receipt",
+            element: (
+              <RequireAuth>
+                <RegistrationReceiptPage />
+              </RequireAuth>
+            ),
+          },
+          {
+            path: "support/new",
+            element: (
+              <RequireAuth>
+                <SupportNewPage />
+              </RequireAuth>
+            ),
+          },
+          {
+            path: "register/:slug",
+            element: <RegisterLayout />,
             children: [
-              { index: true, element: <OrganizerOverviewPage /> },
-              { path: "muns", element: <OrganizerMunsPage /> },
+              { index: true, element: <RegisterPage /> },
+              { path: "group", element: <GroupRegisterPage /> },
+              { path: "pay", element: <RegisterPayPage /> },
+              { path: "confirmation", element: <RegisterConfirmationPage /> },
             ],
           },
           {
-            path: ":munId",
-            element: <MunWorkspaceLayout />,
+            path: "group-invite",
+            element: <GroupInviteAcceptPage />,
+          },
+          {
+            path: "dashboard/groups/:groupId",
+            element: (
+              <RequireAuth>
+                <GroupManagePage />
+              </RequireAuth>
+            ),
+          },
+          { path: "organizer/welcome", element: <OrganizerWelcomePage /> },
+          { path: "organizer/onboarding", element: <OrganizerOnboardingPage /> },
+          // The first MUN is applied for in the onboarding wizard; this page is for the ones after it.
+          { path: "organizer/apply", element: <OrganizerApplyPage /> },
+          // Gate-1 loop: resubmitting a CHANGES_REQUESTED application.
+          { path: "organizer/apply/:munId/resubmit", element: <OrganizerResubmitPage /> },
+          {
+            path: "organizer/apply/submitted",
+            element: <OrganizerApplySubmittedPage />,
+          },
+          { path: "organizer/support", element: <OrganizerSupportPage /> },
+          { path: "organizer/muns/:munId/preview", element: <OrganizerMunPreviewPage /> },
+          {
+            path: "organizer/dashboard",
             children: [
-              { index: true, element: <MunIndexRedirect /> },
-              { path: "quick-setup", element: <OrganizerQuickSetupPage /> },
-              { path: "setup", element: <OrganizerSetupPage /> },
-              { path: "committees", element: <OrganizerCommitteesPage /> },
-              { path: "executive-board", element: <OrganizerExecutiveBoardPage /> },
-              { path: "products", element: <OrganizerProductsPage /> },
-              { path: "form", element: <OrganizerFormPage /> },
-              { path: "accommodation", element: <OrganizerAccommodationPage /> },
-              { path: "registrations", element: <OrganizerRegistrationsPage /> },
-              { path: "finance", element: <Navigate to="../settings" replace /> },
-              { path: "communications", element: <OrganizerCommunicationsPage /> },
-              { path: "documents", element: <OrganizerDocumentsPage /> },
-              { path: "conference-day", element: <OrganizerConferenceDayPage /> },
-              { path: "results", element: <OrganizerResultsPage /> },
-              { path: "certificates", element: <OrganizerCertificatesPage /> },
-              { path: "analytics", element: <OrganizerAnalyticsPage /> },
-              { path: "team", element: <OrganizerTeamPage /> },
-              { path: "settings", element: <OrganizerSettingsPage /> },
+              {
+                element: <WorkspaceLayout />,
+                children: [
+                  { index: true, element: <OrganizerOverviewPage /> },
+                  { path: "muns", element: <OrganizerMunsPage /> },
+                ],
+              },
+              {
+                path: ":munId",
+                element: <MunWorkspaceLayout />,
+                children: [
+                  { index: true, element: <MunIndexRedirect /> },
+                  { path: "quick-setup", element: <OrganizerQuickSetupPage /> },
+                  { path: "setup", element: <OrganizerSetupPage /> },
+                  { path: "committees", element: <OrganizerCommitteesPage /> },
+                  { path: "executive-board", element: <OrganizerExecutiveBoardPage /> },
+                  { path: "products", element: <OrganizerProductsPage /> },
+                  { path: "form", element: <OrganizerFormPage /> },
+                  { path: "accommodation", element: <OrganizerAccommodationPage /> },
+                  { path: "registrations", element: <OrganizerRegistrationsPage /> },
+                  { path: "finance", element: <Navigate to="../settings" replace /> },
+                  { path: "communications", element: <OrganizerCommunicationsPage /> },
+                  { path: "documents", element: <OrganizerDocumentsPage /> },
+                  { path: "conference-day", element: <OrganizerConferenceDayPage /> },
+                  { path: "results", element: <OrganizerResultsPage /> },
+                  { path: "certificates", element: <OrganizerCertificatesPage /> },
+                  { path: "analytics", element: <OrganizerAnalyticsPage /> },
+                  { path: "team", element: <OrganizerTeamPage /> },
+                  { path: "settings", element: <OrganizerSettingsPage /> },
+                ],
+              },
             ],
           },
-        ],
-      },
-      {
-        path: "admin",
-        element: <AdminLayout />,
-        children: [
-          { index: true, element: <AdminOverviewPage /> },
-          { path: "reporting", element: <AdminReportingPage /> },
-          { path: "review", element: <AdminReviewPage /> },
-          { path: "verification", element: <AdminVerificationPage /> },
-          { path: "go-live-queue", element: <AdminGoLiveQueuePage /> },
-          { path: "muns", element: <AdminConferencesPage /> },
-          { path: "muns/:munId", element: <AdminConferenceDetailPage /> },
-          { path: "staff", element: <AdminStaffPage /> },
-          { path: "security", element: <AdminSecurityPage /> },
-          { path: "registrations", element: <AdminRegistrationsPage /> },
-          { path: "payments", element: <AdminPaymentsPage /> },
-          { path: "organizers", element: <AdminOrganizersPage /> },
-          { path: "support", element: <AdminSupportPage /> },
-          { path: "audit", element: <AdminAuditPage /> },
           {
-            path: "audit/:targetType/:targetId",
-            element: <AdminAuditDetailPage />,
+            path: "admin",
+            element: <AdminLayout />,
+            children: [
+              { index: true, element: <AdminOverviewPage /> },
+              { path: "reporting", element: <AdminReportingPage /> },
+              { path: "review", element: <AdminReviewPage /> },
+              { path: "verification", element: <AdminVerificationPage /> },
+              { path: "go-live-queue", element: <AdminGoLiveQueuePage /> },
+              { path: "muns", element: <AdminConferencesPage /> },
+              { path: "muns/:munId", element: <AdminConferenceDetailPage /> },
+              { path: "staff", element: <AdminStaffPage /> },
+              { path: "security", element: <AdminSecurityPage /> },
+              { path: "registrations", element: <AdminRegistrationsPage /> },
+              { path: "payments", element: <AdminPaymentsPage /> },
+              { path: "organizers", element: <AdminOrganizersPage /> },
+              { path: "support", element: <AdminSupportPage /> },
+              { path: "audit", element: <AdminAuditPage /> },
+              {
+                path: "audit/:targetType/:targetId",
+                element: <AdminAuditDetailPage />,
+              },
+            ],
           },
+          { path: "*", element: <NotFoundPage /> },
         ],
       },
-      { path: "*", element: <NotFoundPage /> },
     ],
   },
 ]);

@@ -2,9 +2,20 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "munhub-web",
   "compatibility_date": "2025-01-01",
+  // Runs web/src/server/social-preview-worker.ts in front of the static
+  // build for every request (run_worker_first). It only ever rewrites the
+  // response for known link-unfurl/search bots on /mun/:slug or a wildcard
+  // per-MUN host (see that file's header comment); everything else is an
+  // untouched env.ASSETS.fetch(request) passthrough.
+  "main": "src/server/social-preview-worker.ts",
   "assets": {
     "directory": "dist",
-    "not_found_handling": "single-page-application"
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "vars": {
+    "API_BASE_URL": "https://api.munhub.in"
   },
   "routes": [
     { "pattern": "app.munhub.in", "custom_domain": true },
@@ -35,7 +46,12 @@
       // Routes are inherited from the top level unless overridden. The empty
       // list keeps staging off every munhub.in hostname.
       "routes": [],
-      "workers_dev": true
+      "workers_dev": true,
+      // `vars` is never inherited — the social-preview worker must hit the
+      // staging API, not production.
+      "vars": {
+        "API_BASE_URL": "https://munhub-api-staging.somapujith.workers.dev"
+      }
     }
   }
 }
