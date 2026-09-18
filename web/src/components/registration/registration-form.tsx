@@ -241,7 +241,7 @@ export function RegistrationForm({
           {step === 0 && (
             <section className="flex flex-col gap-md">
               <div>
-                <h2 ref={stepHeadingRef} tabIndex={-1} className="text-title-lg text-ink outline-none">
+                <h2 ref={stepHeadingRef} tabIndex={-1} className="scroll-mt-24 text-title-lg text-ink outline-none">
                   Choose your registration
                 </h2>
                 <p className="text-body-md text-muted-foreground">
@@ -356,7 +356,7 @@ export function RegistrationForm({
           {step === 1 && (
             <section className="flex flex-col gap-md">
               <div>
-                <h2 ref={stepHeadingRef} tabIndex={-1} className="text-title-lg text-ink outline-none">
+                <h2 ref={stepHeadingRef} tabIndex={-1} className="scroll-mt-24 text-title-lg text-ink outline-none">
                   Delegate details
                 </h2>
                 <p className="text-body-md text-muted-foreground">
@@ -450,7 +450,7 @@ export function RegistrationForm({
           {step === 2 && (
             <section className="flex flex-col gap-md">
               <div>
-                <h2 ref={stepHeadingRef} tabIndex={-1} className="text-title-lg text-ink outline-none">
+                <h2 ref={stepHeadingRef} tabIndex={-1} className="scroll-mt-24 text-title-lg text-ink outline-none">
                   Review and confirm
                 </h2>
                 <p className="text-body-md text-muted-foreground">
@@ -551,7 +551,12 @@ export function RegistrationForm({
                 </div>
               )}
 
-              <div className="flex justify-between gap-sm">
+              {/* flex-col-reverse below sm: "Confirm and pay" (the longest label in this
+                  footer) doesn't fit beside "Back" in a justify-between row under ~360px —
+                  measured overflowing the 320px viewport by ~29px. Stacked full-width avoids
+                  that regardless of button-label length; side-by-side returns once there's
+                  room. */}
+              <div className="flex flex-col-reverse gap-sm sm:flex-row sm:justify-between">
                 <Button type="button" variant="outline" onClick={() => goToStep(1)} disabled={pending}>
                   <ArrowLeftIcon aria-hidden />
                   Back

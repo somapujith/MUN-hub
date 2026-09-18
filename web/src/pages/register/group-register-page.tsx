@@ -448,7 +448,10 @@ export function GroupRegisterPage() {
             </div>
           )}
 
-          <div className="flex justify-between gap-sm">
+          {/* flex-col-reverse below sm: same overflow registration-form.tsx's identical
+              footer had — "Confirm and pay" doesn't fit beside "Back" in a justify-between
+              row under ~360px. Stacked full-width avoids it; side-by-side returns from sm. */}
+          <div className="flex flex-col-reverse gap-sm sm:flex-row sm:justify-between">
             <Button type="button" variant="outline" onClick={() => setStep(1)} disabled={pending}>
               <ArrowLeftIcon aria-hidden />
               Back
