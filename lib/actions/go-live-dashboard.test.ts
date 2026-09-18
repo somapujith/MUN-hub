@@ -5,6 +5,7 @@ import {
   munSubmissions,
   muns,
   organizerApplications,
+  organizerProfiles,
   users,
   verificationIssues,
   verificationLogs,
@@ -204,5 +205,46 @@ describe('getConfirmationPreview', () => {
     const mun = await makeMun(owner.id)
 
     await expect(getConfirmationPreview(mun.id, sessionFor(stranger))).rejects.toThrow('Forbidden')
+  })
+
+  it("returns the organizer's current account-level UPI payout, not the stale mun_payment_settings bank fields", async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id)
+    await db.insert(organizerProfiles).values({ userId: organizer.id, upiId: 'preview-organizer@freecharge' })
+    // A legacy per-mun bank-account row also exists — the regression this
+    // guards is `organizerPayout` reading these stale fields instead.
+    await db.insert(munPaymentSettings).values({
+      munId: mun.id,
+      legalName: 'Legacy Org',
+      orgType: 'NGO',
+      addressLine1: 'Addr',
+      city: 'Hyderabad',
+      state: 'Telangana',
+      postalCode: '500001',
+      panLast4: '1234',
+      panCiphertext: 'pan-ciphertext-value',
+      authorizedRepName: 'Rep',
+      authorizedRepEmail: 'rep@preview.test',
+      accountHolderName: 'Legacy Account Holder',
+      bankName: 'Legacy Bank',
+      accountNumberLast4: '5678',
+      accountNumberCiphertext: 'account-ciphertext-value',
+      ifsc: 'TEST0001234',
+      accountType: 'current',
+      gateway: 'razorpay',
+    })
+
+    const preview = await getConfirmationPreview(mun.id, sessionFor(organizer))
+
+    expect(preview.snapshot.organizerPayout).toEqual({ upiId: 'preview-organizer@freecharge' })
+  })
+
+  it('reports no payout when the organizer has not linked a UPI id', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id)
+
+    const preview = await getConfirmationPreview(mun.id, sessionFor(organizer))
+
+    expect(preview.snapshot.organizerPayout).toBeNull()
   })
 })

@@ -28,6 +28,19 @@ function plural(count: number, word: string): string {
 }
 
 /**
+ * Partial reveal, same spirit as the legacy `accountNumberLast4`/`panLast4`
+ * masking (show enough to recognize the account, not the whole thing) — there's
+ * no existing UPI-specific masking convention to reuse, since the settings page
+ * (web/src/pages/organizer/dashboard/sections/settings-page.tsx) never
+ * re-displays the value at all once it's on file.
+ */
+function maskUpiId(upiId: string): string {
+  const at = upiId.indexOf("@");
+  if (at <= 0) return upiId;
+  return `${upiId.slice(0, Math.min(2, at))}•••${upiId.slice(at)}`;
+}
+
+/**
  * Gate 3: the organizer reviews a summary of everything they're submitting and
  * attests to it before MUN Hub's verification starts.
  */
@@ -102,7 +115,7 @@ function ConfirmationSummary({ preview }: { preview: ConfirmationPreview }) {
   const mun = snapshot.mun;
   const hasLogo = snapshot.media.some((item) => item.kind === "LOGO");
   const hasCover = snapshot.media.some((item) => item.kind === "COVER");
-  const payment = snapshot.paymentSettings;
+  const payout = snapshot.organizerPayout;
   const place = [mun?.venue, mun?.city, mun?.country].filter(Boolean).join(", ");
 
   const rows: { label: string; value: string }[] = [
@@ -133,11 +146,7 @@ function ConfirmationSummary({ preview }: { preview: ConfirmationPreview }) {
     { label: "Registration form", value: plural(snapshot.formFields.length, "custom question") },
     {
       label: "Payouts",
-      value: payment
-        ? [payment.accountHolderName, payment.bankName, payment.accountNumberLast4 && `•••• ${payment.accountNumberLast4}`]
-            .filter(Boolean)
-            .join(" · ")
-        : "Not set",
+      value: payout?.upiId ? `FreeCharge UPI ${maskUpiId(payout.upiId)}` : "Not set",
     },
     { label: "Branding", value: `${hasLogo ? "Logo" : "No logo"}, ${hasCover ? "cover image" : "no cover image"}` },
     {

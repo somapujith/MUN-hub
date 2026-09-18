@@ -97,7 +97,14 @@ export interface ConfirmationPreview {
     media: { kind: string }[];
     executiveBoard: Row[];
     formFields: Row[];
-    paymentSettings: { accountHolderName: string | null; bankName: string | null; accountNumberLast4: string | null } | null;
+    /**
+     * The organizer's current account-level payout method
+     * (`organizer_profiles.upiId`, set once at onboarding) — NOT the legacy
+     * per-MUN `mun_payment_settings` bank-account fields, which nothing
+     * writes to anymore and which this type deliberately omits (that stale
+     * read was the Gate-3 "Payouts" row bug this type was fixed to close).
+     */
+    organizerPayout: { upiId: string | null } | null;
     documents: { kind: string; title: string }[];
     scheduleItems: Row[];
     contact: { officialEmail: string | null; phone: string | null } | null;
