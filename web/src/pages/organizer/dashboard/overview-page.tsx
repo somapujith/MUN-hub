@@ -43,13 +43,22 @@ function nextStep(mun: WorkspaceMun): NextStep {
     case "REJECTED":
       return { text: "This application wasn't approved.", cta: "View application", href: "/organizer/apply", primary: false };
     case "APPROVED":
-    case "ONBOARDING":
-    case "ACTION_REQUIRED":
-    case "READY_FOR_SUBMISSION":
       return {
         text: "Approved. Set up your MUN, then submit it for review.",
         cta: "Continue setup",
         href: section("setup"),
+        primary: true,
+      };
+    case "ONBOARDING":
+    case "ACTION_REQUIRED":
+    case "READY_FOR_SUBMISSION":
+      // Mirrors mun-index-redirect.tsx's PRE_SUBMISSION_STATUSES — send the
+      // organizer to the minimum-required-fields form, not the full Setup
+      // page, until they've submitted once.
+      return {
+        text: "Approved. Set up your MUN, then submit it for review.",
+        cta: "Continue setup",
+        href: section("quick-setup"),
         primary: true,
       };
     case "CONTENT_SUBMITTED":

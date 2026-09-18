@@ -77,6 +77,13 @@ function formFromMun(mun: MunSetupDetails): QuickSetupForm {
   };
 }
 
+// Mirrors mun-index-redirect.tsx's PRE_SUBMISSION_STATUSES / setup-page.tsx's
+// SUBMITTABLE_STATUSES. Quick Setup is the minimum-fields form for a MUN that
+// hasn't been submitted yet — once it has (or is already live), the "Submit
+// for review" call here would just be rejected server-side as an illegal
+// transition, so this page should point the organizer at MUN Setup instead.
+const SUBMITTABLE_STATUSES = ["ONBOARDING", "ACTION_REQUIRED", "READY_FOR_SUBMISSION", "CONTENT_SUBMITTED"];
+
 function validate(form: QuickSetupForm, hasCommittee: boolean, hasTicket: boolean): string | null {
   if (!form.name.trim()) return "Conference name is required";
   if (!form.startDate || !form.endDate) return "Start and end dates are required";
@@ -150,6 +157,8 @@ export function OrganizerQuickSetupPage() {
   const hasCommittee = moduleComplete("COMMITTEES");
   const hasTicket = moduleComplete("REGISTRATION_TYPES") && moduleComplete("PRICING_CAPACITY");
   const paymentLinked = Boolean(onboardingQuery.data?.profile.upiId);
+  const status = progressQuery.data?.lifecycleStatus ?? detailsQuery.data?.status;
+  const canSubmit = Boolean(status && SUBMITTABLE_STATUSES.includes(status));
 
   const refresh = () =>
     Promise.all([
@@ -225,6 +234,23 @@ export function OrganizerQuickSetupPage() {
           <Skeleton className="h-[520px] w-full max-w-2xl rounded-md" />
         ) : detailsQuery.isError ? (
           <p className="text-body-md text-destructive">{detailsQuery.error.message}</p>
+        ) : !canSubmit ? (
+          <Card className="max-w-2xl">
+            <CardHeader>
+              <CardTitle>Quick setup is already done</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-md">
+              <p className="text-body-md text-muted-foreground">
+                {detailsQuery.data?.name ?? "This conference"} has already been submitted to MUN Hub, so there's
+                nothing left to submit here. Manage its details and go-live status from MUN Setup instead.
+              </p>
+              <div>
+                <Button size="sm" render={<Link to={munSectionHref(munId, "setup")} />}>
+                  Go to MUN Setup
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         ) : (
           <Card className="max-w-2xl">
             <CardHeader>
