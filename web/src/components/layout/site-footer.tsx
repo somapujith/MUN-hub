@@ -74,7 +74,7 @@ export function SiteFooter() {
               listing reviewed before it goes live.
             </p>
             <p className="mt-md text-body-md text-muted-foreground">
-              {SITE_INFO.legalName} ({SITE_INFO.entityType})
+              {SITE_INFO.legalName}
               <br />
               {SITE_INFO.address.oneLine}
               <br />

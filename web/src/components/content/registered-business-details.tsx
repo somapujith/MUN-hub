@@ -13,7 +13,7 @@ export function RegisteredBusinessDetails() {
   return (
     <div className="grid max-w-3xl gap-md rounded-lg border border-border p-lg sm:grid-cols-2">
       <Row icon={BuildingIcon} label="Registered as">
-        {SITE_INFO.legalName} ({SITE_INFO.entityType})
+        {SITE_INFO.legalName}
       </Row>
       <Row icon={MapPinIcon} label="Registered address">
         {SITE_INFO.address.line1}
