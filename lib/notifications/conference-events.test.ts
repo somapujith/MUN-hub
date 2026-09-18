@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, registrationProducts, registrations, users, verificationLogs } from '@/lib/db/schema'
 import { notifyConferenceCancelled } from './conference-events'
@@ -43,18 +44,48 @@ describe('notifyConferenceCancelled', () => {
     await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: admin.id, action: 'CANCELLED', notes: 'Venue fell through' })
 
     const { adapter, send } = mockAdapter()
-    await notifyConferenceCancelled(mun.id, adapter)
+    await notifyConferenceCancelled(mun.id, { adapter })
 
     const recipients = send.mock.calls.map((call) => call[0].to)
     expect(recipients).toContain(confirmedDelegate1.email)
     expect(recipients).toContain(confirmedDelegate2.email)
     expect(recipients).toContain(organizer.email)
+    // Not passed in `justCancelledRegistrationIds`, so this PENDING delegate
+    // isn't treated as "just cancelled by this action" — see the dedicated
+    // test below for that case.
     expect(recipients).not.toContain(pendingDelegate.email)
     expect(send).toHaveBeenCalledTimes(3)
 
     const organizerCall = send.mock.calls.find((call) => call[0].to === organizer.email)
     expect(organizerCall?.[0].subject).toContain(mun.name)
     expect(organizerCall?.[0].body).toContain('The MUN Hub team made this decision.')
+  })
+
+  // docs/review-to-claude.md item #12: before this, a delegate whose
+  // PENDING/PAYMENT_PENDING registration got swept to CANCELLED by the same
+  // cancellation got no email at all — only already-CONFIRMED delegates did.
+  it('also emails a delegate whose in-flight registration this cancellation just swept to CANCELLED, with honest copy', async () => {
+    const { mun, confirmedDelegate1, pendingDelegate } = await makeMunWithRegistrations()
+    const admin = await makeUser('ADMIN', 'Admin')
+    await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: admin.id, action: 'CANCELLED', notes: 'Venue fell through' })
+
+    const [pendingRegistration] = await db
+      .select({ id: registrations.id })
+      .from(registrations)
+      .where(eq(registrations.userId, pendingDelegate.id))
+
+    const { adapter, send } = mockAdapter()
+    await notifyConferenceCancelled(mun.id, { adapter, justCancelledRegistrationIds: [pendingRegistration.id] })
+
+    const pendingCall = send.mock.calls.find((call) => call[0].to === pendingDelegate.email)
+    expect(pendingCall).toBeDefined()
+    expect(pendingCall?.[0].body).toContain("hadn't been confirmed yet")
+    expect(pendingCall?.[0].body.toLowerCase()).not.toContain('payments for this conference are final')
+
+    // A CONFIRMED delegate in the same cancellation still gets the original,
+    // no-refunds copy — the distinction is per-recipient, not per-mun.
+    const confirmedCall = send.mock.calls.find((call) => call[0].to === confirmedDelegate1.email)
+    expect(confirmedCall?.[0].body.toLowerCase()).toContain('payments for this conference are final')
   })
 
   // The admin cancel dialog records the reason as an internal audit note, so
@@ -67,7 +98,7 @@ describe('notifyConferenceCancelled', () => {
     await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: admin.id, action: 'CANCELLED', notes: internalNote })
 
     const { adapter, send } = mockAdapter()
-    await notifyConferenceCancelled(mun.id, adapter)
+    await notifyConferenceCancelled(mun.id, { adapter })
 
     expect(send.mock.calls.map((call) => call[0].to)).toEqual(expect.arrayContaining([confirmedDelegate1.email, organizer.email]))
     for (const [payload] of send.mock.calls) {
@@ -81,7 +112,7 @@ describe('notifyConferenceCancelled', () => {
     await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: organizer.id, action: 'CANCELLED', notes: 'Changed plans' })
 
     const { adapter, send } = mockAdapter()
-    await notifyConferenceCancelled(mun.id, adapter)
+    await notifyConferenceCancelled(mun.id, { adapter })
 
     const recipients = send.mock.calls.map((call) => call[0].to)
     expect(recipients).not.toContain(organizer.email)
@@ -95,7 +126,7 @@ describe('notifyConferenceCancelled', () => {
     await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: admin.id, action: 'CANCELLED', notes: null })
 
     const { adapter, send } = mockAdapter()
-    await notifyConferenceCancelled(mun.id, adapter)
+    await notifyConferenceCancelled(mun.id, { adapter })
 
     const bodies = send.mock.calls.map((call) => call[0].body as string)
     for (const body of bodies) {
@@ -115,7 +146,7 @@ describe('notifyConferenceCancelled', () => {
     await db.insert(verificationLogs).values({ munId: mun.id, reviewerId: organizer.id, action: 'CANCELLED', notes: '   ' })
 
     const { adapter, send } = mockAdapter()
-    await notifyConferenceCancelled(mun.id, adapter)
+    await notifyConferenceCancelled(mun.id, { adapter })
 
     const bodies = send.mock.calls.map((call) => call[0].body as string)
     for (const body of bodies) {
@@ -125,6 +156,8 @@ describe('notifyConferenceCancelled', () => {
 
   it('throws for a mun id that does not resolve', async () => {
     const { adapter } = mockAdapter()
-    await expect(notifyConferenceCancelled('00000000-0000-0000-0000-000000000000', adapter)).rejects.toThrow('Mun not found')
+    await expect(notifyConferenceCancelled('00000000-0000-0000-0000-000000000000', { adapter })).rejects.toThrow(
+      'Mun not found',
+    )
   })
 })

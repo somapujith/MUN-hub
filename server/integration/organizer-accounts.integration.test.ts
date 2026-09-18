@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { studentProfiles, users } from '@/lib/db/schema'
+import { muns, organizerApplications, studentProfiles, users } from '@/lib/db/schema'
 import { SESSION_COOKIE_NAME } from '@/lib/auth/session'
 import { consoleNotificationsAdapter } from '@/lib/notifications/console-adapter'
 import type { NotificationPayload } from '@/lib/notifications/adapter'
@@ -136,5 +136,80 @@ describe('POST /api/v1/organizer/applications', () => {
     const res = await post('/organizer/applications', APPLICATION_BODY, await authHeaders(organizer.id))
 
     expect(res.status).toBe(201)
+  })
+})
+
+describe('POST /api/v1/organizer/applications/:munId/resubmit', () => {
+  // docs/review-to-claude.md item #1 — the Gate-1 CHANGES_REQUESTED loop.
+  async function makeChangesRequestedApplication() {
+    const organizer = await makeUser('ORGANIZER')
+    const [mun] = await db
+      .insert(muns)
+      .values({
+        organizerId: organizer.id,
+        name: 'Route Resubmit MUN',
+        slug: `route-resubmit-${crypto.randomUUID()}`,
+        description: 'Needs more detail before it can be approved.',
+        startDate: new Date('2027-10-01'),
+        city: 'Chennai',
+        status: 'CHANGES_REQUESTED',
+      })
+      .returning()
+    await db.insert(organizerApplications).values({
+      organizerId: organizer.id,
+      munId: mun.id,
+      status: 'CHANGES_REQUESTED',
+      reviewNotes: 'Please clarify your delegate count.',
+      expectedDelegateCount: 50,
+    })
+    return { organizer, mun }
+  }
+
+  it('refuses a caller who does not own the application', async () => {
+    const { mun } = await makeChangesRequestedApplication()
+    const stranger = await makeUser('ORGANIZER')
+
+    const res = await post(`/organizer/applications/${mun.id}/resubmit`, APPLICATION_BODY, await authHeaders(stranger.id))
+
+    expect(res.status).toBe(403)
+    const [unchanged] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
+    expect(unchanged.status).toBe('CHANGES_REQUESTED')
+  })
+
+  it('refuses a delegate account', async () => {
+    const { mun } = await makeChangesRequestedApplication()
+    const student = await makeUser('STUDENT')
+
+    const res = await post(`/organizer/applications/${mun.id}/resubmit`, APPLICATION_BODY, await authHeaders(student.id))
+
+    expect(res.status).toBe(403)
+  })
+
+  it('puts the owning organizer back to SUBMITTED and saves the edited answers', async () => {
+    const { organizer, mun } = await makeChangesRequestedApplication()
+
+    const res = await post(
+      `/organizer/applications/${mun.id}/resubmit`,
+      { ...APPLICATION_BODY, conferenceName: 'Route Resubmit MUN — fixed' },
+      await authHeaders(organizer.id),
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.status).toBe('SUBMITTED')
+    expect(body.reviewNotes).toBeNull()
+
+    const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+    expect(updatedMun.status).toBe('SUBMITTED')
+    expect(updatedMun.name).toBe('Route Resubmit MUN — fixed')
+  })
+
+  it('refuses a mun that is not currently CHANGES_REQUESTED', async () => {
+    const { organizer, mun } = await makeChangesRequestedApplication()
+    await db.update(muns).set({ status: 'ONBOARDING' }).where(eq(muns.id, mun.id))
+
+    const res = await post(`/organizer/applications/${mun.id}/resubmit`, APPLICATION_BODY, await authHeaders(organizer.id))
+
+    expect(res.status).toBe(409)
   })
 })

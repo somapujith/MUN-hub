@@ -626,7 +626,12 @@ describe('cancel', () => {
 
     expect(result).toEqual({ munId: mun.id, status: 'CANCELLED' })
     expect(notifyMock).toHaveBeenCalledTimes(1)
-    expect(notifyMock).toHaveBeenCalledWith(mun.id)
+    const [notifiedMunId, notifyOptions] = notifyMock.mock.calls[0]
+    expect(notifiedMunId).toBe(mun.id)
+    // Exactly the two in-flight registrations this cancellation just swept
+    // to CANCELLED — the already-CONFIRMED one is a separate recipient path
+    // inside notifyConferenceCancelled itself, not something this caller lists.
+    expect(notifyOptions?.justCancelledRegistrationIds?.slice().sort()).toEqual([pending.id, paymentPending.id].sort())
 
     const rows = await db.select().from(registrations).where(eq(registrations.munId, mun.id))
     const byId = new Map(rows.map((row) => [row.id, row.status]))

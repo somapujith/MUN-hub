@@ -38,6 +38,7 @@ import { OrganizerSignupPage } from "@/pages/organizer/organizer-signup-page";
 import { OrganizerWelcomePage } from "@/pages/organizer/organizer-welcome-page";
 import { OrganizerOnboardingPage } from "@/pages/organizer/organizer-onboarding-page";
 import { OrganizerApplyPage } from "@/pages/organizer/organizer-apply-page";
+import { OrganizerResubmitPage } from "@/pages/organizer/organizer-resubmit-page";
 import { OrganizerSupportPage } from "@/pages/organizer/support-page";
 import { OrganizerMunPreviewPage } from "@/pages/organizer/mun-preview-page";
 import { MunIndexRedirect } from "@/pages/organizer/dashboard/mun-index-redirect";
@@ -183,6 +184,8 @@ export const router = createBrowserRouter([
       { path: "organizer/onboarding", element: <OrganizerOnboardingPage /> },
       // The first MUN is applied for in the onboarding wizard; this page is for the ones after it.
       { path: "organizer/apply", element: <OrganizerApplyPage /> },
+      // Gate-1 loop: resubmitting a CHANGES_REQUESTED application.
+      { path: "organizer/apply/:munId/resubmit", element: <OrganizerResubmitPage /> },
       {
         path: "organizer/apply/submitted",
         element: <OrganizerApplySubmittedPage />,

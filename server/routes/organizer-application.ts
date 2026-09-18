@@ -1,23 +1,30 @@
 import { zValidator } from '../lib/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { listMyOrganizerApplications, submitOrganizerApplication } from '@/lib/actions/organizer-application'
+import {
+  listMyOrganizerApplications,
+  resubmitOrganizerApplication,
+  submitOrganizerApplication,
+} from '@/lib/actions/organizer-application'
 import { ONBOARDING_ERRORS, isOrganizerOnboardingComplete } from '@/lib/actions/organizer-onboarding'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
 import type { AppVariables } from '../src/types'
 
-const submitApplicationBodySchema = z
-  .object({
-    conferenceName: z.string().min(1),
-    expectedDate: z.union([z.string().datetime(), z.coerce.date()]),
-    location: z.string().min(1),
-    expectedDelegateCount: z.number().int().positive(),
-    description: z.string().min(1),
-    previousEditions: z.string().optional(),
-    websiteUrl: z.string().url().optional(),
-  })
-  .strict()
+// Shared by both a brand-new application (POST) and a Gate-1 resubmission
+// (POST .../resubmit) — same answers, same shape.
+const applicationFieldsSchema = z.object({
+  conferenceName: z.string().min(1),
+  expectedDate: z.union([z.string().datetime(), z.coerce.date()]),
+  location: z.string().min(1),
+  expectedDelegateCount: z.number().int().positive(),
+  description: z.string().min(1),
+  previousEditions: z.string().optional(),
+  websiteUrl: z.string().url().optional(),
+})
+
+const submitApplicationBodySchema = applicationFieldsSchema.strict()
+const resubmitApplicationBodySchema = applicationFieldsSchema.strict()
 
 export const organizerApplicationRoutes = new Hono<{ Variables: AppVariables }>()
 
@@ -56,5 +63,37 @@ organizerApplicationRoutes.post(
     })
 
     return c.json(application, 201)
+  },
+)
+
+// Gate-1 loop: resubmits an EXISTING mun's application after MUN Hub
+// requested changes (CHANGES_REQUESTED -> SUBMITTED). ORGANIZER only, and
+// only the owning organizer — resubmitOrganizerApplication itself checks
+// ownership and the current state (docs/review-to-claude.md item #1).
+organizerApplicationRoutes.post(
+  '/organizer/applications/:munId/resubmit',
+  requireAuth,
+  requireRole(['ORGANIZER']),
+  zValidator('json', resubmitApplicationBodySchema),
+  async (c) => {
+    const body = c.req.valid('json')
+    const session = c.get('session')
+    const expectedDate = body.expectedDate instanceof Date ? body.expectedDate : new Date(body.expectedDate)
+
+    const application = await resubmitOrganizerApplication(
+      {
+        munId: c.req.param('munId'),
+        conferenceName: body.conferenceName,
+        expectedDate,
+        location: body.location,
+        expectedDelegateCount: body.expectedDelegateCount,
+        description: body.description,
+        previousEditions: body.previousEditions,
+        websiteUrl: body.websiteUrl,
+      },
+      session,
+    )
+
+    return c.json(application)
   },
 )

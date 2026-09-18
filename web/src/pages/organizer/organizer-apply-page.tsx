@@ -282,12 +282,20 @@ function MyApplications({ applications }: { applications: MyOrganizerApplication
                   {application.reviewNotes}
                 </p>
               ) : null}
-              {application.munId && application.status !== "REJECTED" ? (
+              {application.munId && application.status === "CHANGES_REQUESTED" ? (
+                <Link
+                  to={`/organizer/apply/${application.munId}/resubmit`}
+                  className="mt-sm inline-block text-[13px] font-medium text-[#121212] underline underline-offset-2"
+                >
+                  Resubmit application
+                </Link>
+              ) : null}
+              {application.munId && application.status !== "REJECTED" && application.status !== "CHANGES_REQUESTED" ? (
                 <Link
                   to={`/organizer/dashboard/${application.munId}/setup`}
                   className="mt-sm inline-block text-[13px] font-medium text-[#121212] underline underline-offset-2"
                 >
-                  {application.status === "CHANGES_REQUESTED" ? "Update your MUN" : "Open in dashboard"}
+                  Open in dashboard
                 </Link>
               ) : null}
             </li>
