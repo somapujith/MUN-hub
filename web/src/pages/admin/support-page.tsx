@@ -354,7 +354,7 @@ export function AdminSupportPage() {
       <div className="grid h-[75vh] min-h-[520px] grid-rows-[minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-card lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         <section
           aria-label="Ticket queue"
-          className={`min-h-0 flex-col border-border lg:border-r ${state.selectedId ? "hidden lg:flex" : "flex"}`}
+          className={`min-h-0 min-w-0 flex-col border-border lg:border-r ${state.selectedId ? "hidden lg:flex" : "flex"}`}
         >
           <div className="min-h-0 flex-1 overflow-y-auto">
             {queueQuery.isPending ? (
