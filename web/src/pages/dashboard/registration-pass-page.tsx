@@ -83,13 +83,23 @@ export function RegistrationPassPage() {
 
         {pass && (
           <Card className="mx-auto w-full max-w-[36rem] gap-0 py-0 print:border-[#181d26]">
-            <div className="flex flex-col gap-xs bg-[#181d26] px-lg py-lg text-white">
-              <span className="inline-flex items-center gap-xs text-caption text-[#c7c9cf]">
+            {/*
+              Same fixed-vs-theme-aware split SignatureCard's "dark" variant
+              documents: `surface-dark` is #181d26 in light mode, which is
+              also this app's dark-mode canvas background — so a header
+              hardcoded to #181d26 would blend invisibly into the page behind
+              it in dark mode instead of reading as a card. `dark:bg-surface-strong`
+              (a real step up from the dark canvas) keeps the header visible
+              in both themes; `text-on-dark`/`dark:text-foreground` follow the
+              same pattern for the text on top of it.
+            */}
+            <div className="flex flex-col gap-xs bg-surface-dark px-lg py-lg text-on-dark dark:bg-surface-strong dark:text-foreground">
+              <span className="inline-flex items-center gap-xs text-caption text-on-dark/70 dark:text-foreground/70">
                 <TicketIcon className="size-4" aria-hidden /> Delegate pass
               </span>
               {/* Explicit colour: the base layer paints every h1 in --ink. */}
-              <h1 className="font-display text-display-md text-balance text-white">{pass.mun.name}</h1>
-              <p className="flex items-center gap-xs text-body-md text-[#e0e2e6]">
+              <h1 className="font-display text-display-md text-balance text-on-dark dark:text-foreground">{pass.mun.name}</h1>
+              <p className="flex items-center gap-xs text-body-md text-on-dark/85 dark:text-foreground/85">
                 <CalendarIcon className="size-4 shrink-0" aria-hidden />
                 {formatDateRange(
                   pass.mun.startDate ? new Date(pass.mun.startDate) : null,
@@ -97,7 +107,7 @@ export function RegistrationPassPage() {
                 )}
               </p>
               {location && (
-                <p className="flex items-start gap-xs text-body-md text-[#e0e2e6]">
+                <p className="flex items-start gap-xs text-body-md text-on-dark/85 dark:text-foreground/85">
                   <MapPinIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
                   {location}
                 </p>
