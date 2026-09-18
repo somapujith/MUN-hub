@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { adminSelectClassName } from "@/lib/admin/styles";
+import { usePageClamp } from "@/lib/admin/use-page-clamp";
 import type { ApplicationStatus, ReviewDecision, ReviewQueueRow } from "@/types/admin-review";
 
 const PAGE_SIZE = 20;
@@ -132,6 +133,7 @@ export function AdminReviewPage() {
   const results = queueQuery.data?.results ?? [];
   const total = queueQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  usePageClamp(Boolean(queueQuery.data), page, setPage, totalPages);
 
   return (
     <AdminPageFrame

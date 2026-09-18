@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MODULE_LABELS, SEVERITY_OPTIONS } from "@/lib/admin/module-labels";
 import { adminSelectClassName } from "@/lib/admin/styles";
+import { usePageClamp } from "@/lib/admin/use-page-clamp";
 import type { ModuleReviewDecision, ModuleReviewQueueRow, VerificationIssueInput } from "@/types/module-verification";
 import type { ModuleVerificationState } from "@/types/enums";
 
@@ -139,6 +140,7 @@ export function AdminVerificationPage() {
   const results = queueQuery.data?.results ?? [];
   const total = queueQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  usePageClamp(Boolean(queueQuery.data), page, setPage, totalPages);
 
   return (
     <AdminPageFrame

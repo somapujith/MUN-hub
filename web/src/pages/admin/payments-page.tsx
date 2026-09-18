@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getToneClassName, type StatusTone } from "@/components/dashboard/registration-status";
 import { adminSelectClassName } from "@/lib/admin/styles";
+import { usePageClamp } from "@/lib/admin/use-page-clamp";
 import type { PaymentExceptionRow } from "@/types/admin-payments";
 import type { RegistrationStatus } from "@/types/enums";
 
@@ -116,6 +117,8 @@ export function AdminPaymentsPage() {
   const total = exceptionsQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const trimmedNote = note.trim();
+
+  usePageClamp(Boolean(exceptionsQuery.data), page, setPage, totalPages);
 
   const openResolve = (row: PaymentExceptionRow) => {
     setTarget(row);

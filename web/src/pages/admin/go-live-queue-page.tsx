@@ -19,6 +19,7 @@ import {
 } from "@/lib/admin/go-live-labels";
 import { useAdminPermissions } from "@/lib/admin/permissions";
 import { adminQueryKeys } from "@/lib/admin/query-keys";
+import { usePageClamp } from "@/lib/admin/use-page-clamp";
 import type { GoLiveQueueDetailRow } from "@/types/admin-muns";
 import type { PaymentVerificationState } from "@/types/payment-settlement";
 
@@ -100,6 +101,7 @@ export function AdminGoLiveQueuePage() {
   const results = queueQuery.data?.results ?? [];
   const total = queueQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  usePageClamp(Boolean(queueQuery.data), page, setPage, totalPages);
   const awaitingReviewCount = results.filter((row) => row.munStatus === "VERIFICATION").length;
   const readyToPublishCount = results.filter((row) => row.munStatus === "GO_LIVE_QUEUE").length;
   const overdueCount = results.filter((row) => row.slaState === "OVERDUE").length;
