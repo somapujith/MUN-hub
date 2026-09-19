@@ -595,19 +595,15 @@ const REQUEUEABLE_STATUSES = ['UNPUBLISHED', 'VERIFIED'] as const
 
 /**
  * A mun that was published before and has since been unpublished (or sent
- * back through re-verification and verified again) has no active submission:
- * the round that published it is finished. Opens a fresh, already-approved
- * round so it can go through the queue and publish again.
+ * back to VERIFICATION by an admin action and verified again) has no active
+ * submission: the round that published it is finished. Opens a fresh,
+ * already-approved round so it can go through the queue and publish again.
  *
- * Safe without a new content review: a high-impact edit while UNPUBLISHED
- * moves the mun to VERIFICATION (reverification.ts), so a mun still in
- * UNPUBLISHED hasn't changed in a way that needs review, and a mun in VERIFIED
- * has just been re-verified. That guarantee is only as good as the
- * `triggerReverificationIfNeeded` calls at each module's own mutation site —
- * `onModuleDataChanged` does NOT provide it (see its note), so a module whose
- * update action doesn't call it is a hole in this reasoning, not a covered
- * case. As a backstop, this refuses while any required section is still
- * waiting for review, and `publishFromQueue` re-validates live data too.
+ * No new content review: once a mun has been verified, organizer edits never
+ * send it back to review (see the note at the top of reverification.ts), so
+ * a mun sitting in UNPUBLISHED keeps its earlier approval. As a backstop,
+ * this refuses while any required section is still waiting for review, and
+ * `publishFromQueue` re-validates live data too.
  */
 async function openRepublishSubmission(tx: Tx, munId: string, actorId: string) {
   const [mun] = await tx.select({ status: muns.status }).from(muns).where(eq(muns.id, munId)).for('update').limit(1)

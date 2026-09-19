@@ -5,7 +5,6 @@ import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
-import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 import type { Committee, Mun, Portfolio, RegistrationProduct } from '@/lib/types'
 
 // -----------------------------------------------------------------------------
@@ -27,14 +26,8 @@ import type { Committee, Mun, Portfolio, RegistrationProduct } from '@/lib/types
 // as part of) the ownership check, before touching any row. Admin/ops
 // callers are unaffected — `assertModuleNotLocked` itself carves that out.
 //
-// Re-verification key fix (Task 12): the direct `triggerReverificationIfNeeded`
-// calls below now pass the real PRD module key (`COMMITTEES`,
-// `PRICING_CAPACITY`, `BASIC_INFO`) instead of the legacy pre-PRD key
-// (`committees`, `registration_products`, `mun_details`). HIGH_IMPACT_FIELDS
-// now correctly resolves every legacy key to an empty list (Task 12 Step 1),
-// so a before/after diff keyed to a legacy key can never detect a real
-// high-impact change anymore — it must be keyed to the PRD module whose
-// HIGH_IMPACT_FIELDS entry actually lists the changed fields.
+// Once a MUN has been verified, edits here do NOT send it back to review —
+// see the note at the top of reverification.ts.
 
 /** Resolves a committee's owning munId, or throws `Error('Committee not found')`. */
 async function getMunIdForCommittee(committeeId: string): Promise<string> {
@@ -102,8 +95,6 @@ export async function updateCommittee(
   const [updated] = await db.update(committees).set(input).where(eq(committees.id, id)).returning()
   if (!updated) throw new Error('Committee not found')
 
-  // PRD key, not the legacy 'committees' key — see file header comment.
-  await triggerReverificationIfNeeded('COMMITTEES', existing, updated, munId, session!.userId)
   await onModuleDataChanged(munId, 'COMMITTEES', session!.userId)
 
   return updated
@@ -242,7 +233,6 @@ export async function updatePortfolio(
   const [updated] = await db.update(portfolios).set(changes).where(eq(portfolios.id, id)).returning()
   if (!updated) throw new Error('Portfolio not found')
 
-  await triggerReverificationIfNeeded('PORTFOLIOS', existing, updated, munId, session!.userId)
   await onModuleDataChanged(munId, 'PORTFOLIOS', session!.userId)
 
   return updated
@@ -353,12 +343,6 @@ export async function updateRegistrationProduct(
     .returning()
   if (!updated) throw new Error('Registration product not found')
 
-  // PRD keys, not the legacy 'registration_products' key — see file header
-  // comment. Both REGISTRATION_TYPES (name/registrationType/status) and
-  // PRICING_CAPACITY (price/capacity/deadline/...) can be affected by this
-  // same update, so both are checked against the real before/after diff.
-  await triggerReverificationIfNeeded('REGISTRATION_TYPES', existing, updated, existing.munId, session!.userId)
-  await triggerReverificationIfNeeded('PRICING_CAPACITY', existing, updated, existing.munId, session!.userId)
   await onModuleDataChanged(existing.munId, 'REGISTRATION_TYPES', session!.userId)
   await onModuleDataChanged(existing.munId, 'PRICING_CAPACITY', session!.userId)
 
@@ -499,14 +483,6 @@ export async function updateMunDetails(
     .where(eq(muns.id, munId))
     .returning()
   if (!updated) throw new Error('Mun not found')
-
-  // PRD keys, not the legacy 'mun_details' key — see file header comment.
-  // BASIC_INFO (name/edition) and DATES_VENUE (dates, venue, address, map
-  // link, registration window — see HIGH_IMPACT_FIELDS in reverification.ts)
-  // both back onto this same table, so both are checked against the real
-  // before/after diff.
-  await triggerReverificationIfNeeded('BASIC_INFO', existing, updated, munId, session!.userId)
-  await triggerReverificationIfNeeded('DATES_VENUE', existing, updated, munId, session!.userId)
 
   // BASIC_INFO and DATES_VENUE both back onto this same `muns` table (design
   // doc Section 2.1/2.2 — one table, two tracked module rows), so a single

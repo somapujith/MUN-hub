@@ -81,32 +81,16 @@ const SEVERITIES = [
   },
 ];
 
-// Mirrors lib/lifecycle/reverification.ts#HIGH_IMPACT_FIELDS (plus the
-// registration-form exception in lib/actions/registration-form.ts), in plain
-// language. Update both together. PAYMENT_SETTLEMENT's `refundPolicy` field is
-// deliberately not listed: payments on MUN Hub are non-refundable.
-const HIGH_IMPACT_CHANGES = [
-  "Conference name or edition",
-  "Dates, venue, city, or registration deadline",
-  "Passes: their names, availability, prices (including early-bird prices), seat limits, or deadlines",
-  "Committee names, agendas, or capacities, and portfolio names or availability",
-  "Executive board members and their roles",
-  "Schedule timings, rules and documents, and accommodation options",
-  "The official contact email or phone number",
-  "Payout bank details or payment settings",
-  "Removing a registration question, or making an optional question required",
-];
-
 export function CurationStandardsPage() {
   return (
     <InfoPageShell
       title="Curation standards"
-      description="How MUN Hub reviews every Model UN conference before it goes live: organizer verification, content review, organizer confirmation, and re-review after important changes."
+      description="How MUN Hub reviews every Model UN conference before it goes live: organizer verification, content review, and organizer confirmation."
     >
       <PageHero
         eyebrow="Curation standards"
         title="How a conference earns its place on MUN Hub"
-        lede="Nothing goes live on MUN Hub without review. This page explains what we check, who is responsible for what, and what happens when details change after launch."
+        lede="Nothing goes live on MUN Hub without review. This page explains what we check, who is responsible for what, and what happens after launch."
       />
 
       <div className="content-container flex flex-col gap-section py-xxl md:py-section">
@@ -220,39 +204,36 @@ export function CurationStandardsPage() {
         <InfoSection
           id="after-publication"
           eyebrow="After launch"
-          title="When important details change"
-          intro="Verification isn't a one-time stamp. If an organizer changes something delegates rely on, the listing goes back through review before the change is published."
+          title="When details change"
+          intro="We review a conference before it goes live. After that, organizers keep their own listing up to date, and they stay responsible for its accuracy."
         >
           <div className="grid max-w-5xl gap-xl lg:grid-cols-2">
-            <div>
-              <h3 className="font-display text-title-sm font-medium text-ink">
-                Changes that trigger a new review
-              </h3>
-              <ul className="mt-sm flex list-disc flex-col gap-xs pl-lg text-base leading-7 text-body marker:text-muted-foreground dark:text-muted-foreground">
-                {HIGH_IMPACT_CHANGES.map((change) => (
-                  <li key={change} className="pl-xxs">
-                    {change}
-                  </li>
-                ))}
-              </ul>
-            </div>
             <Prose>
               <h3>What delegates should know</h3>
               <p>
-                While a live conference is being re-reviewed, it is temporarily
-                hidden from the marketplace and new registrations are paused.
-                Registrations that are already confirmed are not affected.
+                Once a conference is live, its organizer can update details such
+                as dates, venue, passes and prices without a new review. Check
+                the conference page before you register, and ask the organizer
+                if anything is unclear.
               </p>
               <p>
                 Payments are final, even if a conference later changes or is
                 cancelled (see our <Link to="/legal/refunds">Refund policy</Link>).
-                That's why we review changes before they're published.
+                If a listing looks inaccurate or misleading,{" "}
+                <Link to="/contact">tell us</Link> and we'll look into it.
               </p>
+            </Prose>
+            <Prose>
               <h3>What organizers should know</h3>
               <p>
                 While a submission is under review, sections that affect
                 delegates are locked, so the version we approve is the version
-                that goes live. Minor edits, like branding, stay open.
+                that goes live. After that you can edit your listing, and
+                changes appear on the site straight away.
+              </p>
+              <p>
+                Payout bank details are the exception: when they change, our
+                team re-checks the account.
               </p>
             </Prose>
           </div>
@@ -320,7 +301,6 @@ export function CurationStandardsPage() {
               points={[
                 "A real, approved organization is behind the conference.",
                 "The organizer confirmed the details, and our team reviewed them.",
-                "Important changes after launch were reviewed again.",
                 "Your registration is confirmed only after your payment is verified.",
               ]}
             />
@@ -330,7 +310,7 @@ export function CurationStandardsPage() {
               points={[
                 "That MUN Hub runs the conference. The organizer is responsible for delivering it.",
                 "A rating of the debate quality, the chairing, or the overall experience.",
-                "A guarantee that nothing will change. Conferences can still be rescheduled or cancelled, and payments aren't refunded if that happens.",
+                "A guarantee that nothing will change. Organizers can update their listing after launch, and conferences can still be rescheduled or cancelled. Payments aren't refunded if that happens.",
               ]}
             />
           </div>

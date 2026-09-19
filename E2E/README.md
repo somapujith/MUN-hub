@@ -53,7 +53,7 @@ The seeded demo organizers still have legacy password hashes, which is why the p
 `prepare-db.ts` owns three MUNs belonging to `organizer@munhub.test` and resets them on every run. Specs refer to them by slug, never by id (`fixtures/fixture-muns.ts`):
 
 - **`e2e-open-mun`**: open for registration. Its registrations are wiped at the start of every run. The capacity-2 "E2E Security Council" is reserved for the committee-capacity security test, and the capacity-2 "E2E Limited Pass" exists for the sold-out tests.
-- **`e2e-sandbox-mun`**: in onboarding. This is the **only** MUN organizer specs may edit. Editing a published MUN sends it back to verification, which would close registration for the other specs.
+- **`e2e-sandbox-mun`**: in onboarding. This is the **only** MUN organizer specs may edit, so their edits can't change the MUNs other specs rely on.
 - **`e2e-closed-mun`**: published but not open for registration.
 
 No seeded MUN is open for registration, which is why the fixtures exist.

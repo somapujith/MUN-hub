@@ -215,9 +215,8 @@ export function AboutPage() {
             <SignatureCardEyebrow className="opacity-60">What "curated" means</SignatureCardEyebrow>
             <SignatureCardTitle>Every listing is checked by a person before it goes live.</SignatureCardTitle>
             <SignatureCardDescription className="text-title-md text-[#333840] opacity-100">
-              We verify the organizer, review the conference details section by
-              section, and review listings again when important details change
-              after publication.
+              We verify the organizer and review the conference details section
+              by section before anything goes live.
             </SignatureCardDescription>
           </div>
           <SignatureCardActions className="mt-0 shrink-0">

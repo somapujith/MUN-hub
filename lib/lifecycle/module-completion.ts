@@ -389,9 +389,8 @@ export async function recomputeMunProgress(munId: string, actorId?: string, tx?:
  *      boundary enforced by an exact 3-element membership check, not an
  *      exclusion list.
  *
- * It does NOT trigger re-verification — see the note at the end of `run()`
- * for why the no-op call that used to live there was removed, and where that
- * responsibility actually sits.
+ * It does NOT send a verified mun back to review — organizer edits never do
+ * (see the note at the top of reverification.ts).
  *
  * Runs inside `tx` when the caller already has an open transaction, otherwise
  * opens its own. **All three steps — including step 1's row lazy-create
@@ -491,20 +490,6 @@ export async function onModuleDataChanged(munId: string, moduleKey: MunModule, a
         )
       }
     }
-
-    // NOTE — re-verification is deliberately NOT triggered from here.
-    //
-    // This used to call `triggerReverificationIfNeeded(moduleKey, {}, {}, ...)`,
-    // which reads as a safety net but is a guaranteed no-op: with an empty
-    // `after` snapshot `detectHighImpactChange` returns false for every field,
-    // so nothing ever flipped and nothing ever reset
-    // `mun_payment_settings.verificationState`. Worse, downstream code (e.g.
-    // go-live.ts's `openRepublishSubmission`) assumed it *did* protect every
-    // module. Removed rather than left in place so the real requirement is
-    // unambiguous: a module-mutation action that needs re-verification must
-    // call `triggerReverificationIfNeeded` itself with the real before/after
-    // row snapshots — mun-config.ts, accommodation.ts, executive-board.ts,
-    // mun-schedule.ts, mun-contact.ts and payment-settlement.ts all do.
   }
 
   if (tx) {

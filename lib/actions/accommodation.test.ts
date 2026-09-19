@@ -58,14 +58,14 @@ describe('setAccommodationProvided', () => {
     expect(provided.completionStatus).toBe('COMPLETE')
   })
 
-  it('sends a verified mun back for re-verification when the answer changes', async () => {
+  it('leaves a verified mun verified when the answer changes', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id)
     await db.update(muns).set({ status: 'VERIFIED', accommodationProvided: 'PROVIDED' }).where(eq(muns.id, mun.id))
 
     await setAccommodationProvided(mun.id, 'NOT_PROVIDED', sessionFor(organizer))
     const [row] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
-    expect(row.status).toBe('VERIFICATION')
+    expect(row.status).toBe('VERIFIED')
   })
 
   it("rejects an organizer who doesn't own the mun", async () => {

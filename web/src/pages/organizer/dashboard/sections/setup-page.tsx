@@ -390,8 +390,8 @@ export function OrganizerSetupPage() {
                         </Button>
                       </div>
                       <p className="text-caption text-muted-foreground">
-                        Changing dates, venue, committees, passes or payout details sends that section back to MUN
-                        Hub and takes your MUN off the site until it's re-checked.
+                        You can keep editing your MUN after it's live, and changes appear on the site straight away.
+                        If you change payout details, MUN Hub re-checks the account.
                       </p>
                     </>
                   )}

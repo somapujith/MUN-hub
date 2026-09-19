@@ -207,8 +207,7 @@ const SECTIONS: LegalSection[] = [
           <li>
             <strong>Accuracy and accountability.</strong> You confirm that
             everything you submit is accurate, complete, and authorized for
-            publication, and you remain responsible for it. Important changes
-            after publication go back through review.
+            publication, and you remain responsible for it.
           </li>
           <li>
             <strong>Honoring registrations.</strong> You must deliver the

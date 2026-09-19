@@ -36,7 +36,6 @@ import { requireRole } from '@/lib/auth/authorize'
 import { recordAdminAction } from '@/lib/audit/log'
 import { encryptField } from '@/lib/crypto/field-encryption'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
-import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 import { countedPaymentsFilter } from '@/lib/payments/counted-payments'
 
 const PUBLISH_ROLES = ['ADMIN', 'SUPER_ADMIN'] as const
@@ -230,11 +229,10 @@ export async function upsertPaymentSettings(
       existing != null && SETTLEMENT_VERIFIED_FIELDS.some((field) => before[field] !== after[field])
 
     // Independently of the MUN's status: an account MUNHub already looked at
-    // must not stay VERIFIED once its details change. The MUN-level
-    // re-verification flow below only runs post-VERIFIED, so relying on it
-    // alone would leave an ONBOARDING MUN's swapped-in account reading as
-    // VERIFIED — and `open-registration` (registration-lifecycle.ts) gates
-    // paid passes on exactly that value.
+    // must not stay VERIFIED once its details change — `open-registration`
+    // (registration-lifecycle.ts) gates paid passes on exactly that value.
+    // This is a payout-account check only; it never takes the MUN's listing
+    // offline (a verified MUN's edits don't go back to review).
     const write = accountChanged
       ? { ...values, verificationState: 'PENDING' as const, verifiedAt: null, verifiedBy: null }
       : values
@@ -244,14 +242,6 @@ export async function upsertPaymentSettings(
       .values(write)
       .onConflictDoUpdate({ target: munPaymentSettings.munId, set: write })
       .returning(MASKED_COLUMNS)
-
-    // Real before/after snapshots, in the same transaction as the write, so a
-    // change on an already-verified MUN sends it back through review. (This
-    // used to be left to `onModuleDataChanged`, which passes empty snapshots
-    // and therefore never fired — see that function's note.)
-    if (accountChanged) {
-      await triggerReverificationIfNeeded('PAYMENT_SETTLEMENT', before, after, munId, session!.userId, tx)
-    }
 
     return saved
   })

@@ -426,14 +426,11 @@ describe('registration-form actions', () => {
   })
 
   // -----------------------------------------------------------------------
-  // Task 12 — structural re-verification exception (design doc Section 6).
-  // detectHighImpactChange cannot see a field deletion or an
-  // optional-to-required flip (REGISTRATION_FORM's HIGH_IMPACT_FIELDS list
-  // is deliberately empty), so registration-form.ts calls
-  // forceReverification directly for those two operations when the mun is
-  // already past VERIFIED.
+  // Once a mun is verified, organizer edits never send it back to review —
+  // including the two form changes that used to be a special case (deleting a
+  // field, and making an optional field required).
   // -----------------------------------------------------------------------
-  describe('structural re-verification exception', () => {
+  describe('form edits after verification', () => {
     async function moduleState(munId: string) {
       const [row] = await db
         .select()
@@ -442,7 +439,7 @@ describe('registration-form actions', () => {
       return row
     }
 
-    it('forces re-verification when deleting a field on a post-VERIFIED mun', async () => {
+    it('keeps a VERIFIED mun verified when a field is deleted', async () => {
       const organizer = await makeUser('ORGANIZER')
       const mun = await makeMun(organizer.id)
       const session = sessionFor(organizer)
@@ -460,13 +457,13 @@ describe('registration-form actions', () => {
       await deleteFormField(field.id, session)
 
       const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
-      expect(updatedMun.status).toBe('VERIFICATION')
+      expect(updatedMun.status).toBe('VERIFIED')
 
       const row = await moduleState(mun.id)
-      expect(row?.state).toBe('PENDING_REVIEW')
+      expect(row?.state).toBe('VERIFIED')
     })
 
-    it('forces re-verification when flipping a field from optional to required on a post-VERIFIED mun', async () => {
+    it('keeps a VERIFIED mun verified when a field is flipped from optional to required', async () => {
       const organizer = await makeUser('ORGANIZER')
       const mun = await makeMun(organizer.id)
       const session = sessionFor(organizer)
@@ -484,10 +481,10 @@ describe('registration-form actions', () => {
       await updateFormField(field.id, { required: true }, session)
 
       const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
-      expect(updatedMun.status).toBe('VERIFICATION')
+      expect(updatedMun.status).toBe('VERIFIED')
 
       const row = await moduleState(mun.id)
-      expect(row?.state).toBe('PENDING_REVIEW')
+      expect(row?.state).toBe('VERIFIED')
     })
 
     it('does NOT force re-verification for a field delete on a pre-VERIFIED (ONBOARDING) mun', async () => {

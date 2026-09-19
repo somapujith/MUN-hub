@@ -5,7 +5,6 @@ import type { ScheduleItemKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
-import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 
 // -----------------------------------------------------------------------------
 // mun-schedule — SCHEDULE module (PRD Section 21)
@@ -14,7 +13,7 @@ import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 // Validation rules: endsAt must be strictly after startsAt, and committeeId
 // (if set) must belong to the same mun — same IDOR check as executive-board.
 //
-// SCHEDULE is a high-impact module (Task 12) — every mutation here calls
+// SCHEDULE is a high-impact module — every mutation here calls
 // `assertModuleNotLocked` right after the ownership check.
 
 export interface ScheduleItem {
@@ -123,8 +122,6 @@ export async function updateScheduleItem(
     .returning()
   if (!updated) throw new Error('Schedule item not found')
 
-  // Real before/after snapshots — `onModuleDataChanged` cannot diff for us.
-  await triggerReverificationIfNeeded('SCHEDULE', existing, updated, existing.munId, session!.userId)
   await onModuleDataChanged(existing.munId, 'SCHEDULE', session!.userId)
 
   return updated

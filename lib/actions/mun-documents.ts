@@ -5,7 +5,6 @@ import type { MunDocumentKind } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
-import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 import { assertCanUploadToMun, assertUploadQuota } from '@/lib/actions/upload-limits'
 import { deleteStoredObjectQuietly, selectStorageAdapter } from '@/lib/storage/select-adapter'
 import { validateUpload } from '@/lib/storage/validate'
@@ -21,20 +20,8 @@ import { validateUpload } from '@/lib/storage/validate'
 // selectStorageAdapter() on every call (R2/KV in production, the filesystem
 // in local dev, the mock in tests).
 //
-// RULES_DOCUMENTS is a high-impact module (Task 12) — every mutation here
+// RULES_DOCUMENTS is a high-impact module — every mutation here
 // calls `assertModuleNotLocked` right after the ownership check.
-//
-// Documents are never edited in place, so "replacing a policy doc" is an
-// upload or a delete. Uploading or deleting a POLICY document (the rules and
-// terms delegates agree to) on a verified or live mun sends it back to
-// review (`triggerReverificationIfNeeded`, same transaction as the row
-// write). Informational documents (brochure, handbook, guides, position
-// papers) are routinely added after launch and don't.
-const POLICY_DOCUMENT_KINDS: readonly MunDocumentKind[] = ['RULES', 'CODE_OF_CONDUCT', 'REFUND_POLICY']
-
-function isPolicyDocument(kind: MunDocumentKind): boolean {
-  return POLICY_DOCUMENT_KINDS.includes(kind)
-}
 
 export interface MunDocumentItem {
   id: string
@@ -90,9 +77,6 @@ export async function uploadMunDocument(
           sizeBytes: newBytes,
         })
         .returning()
-      if (isPolicyDocument(row.kind)) {
-        await triggerReverificationIfNeeded('RULES_DOCUMENTS', {}, { url: row.url }, input.munId, session!.userId, tx)
-      }
       return row
     })
   } catch (error) {
@@ -119,7 +103,7 @@ export async function listMunDocuments(munId: string): Promise<MunDocumentItem[]
  */
 export async function deleteMunDocument(id: string, session: Session | null): Promise<void> {
   const [existing] = await db
-    .select({ munId: munDocuments.munId, storageKey: munDocuments.storageKey, kind: munDocuments.kind, url: munDocuments.url })
+    .select({ munId: munDocuments.munId, storageKey: munDocuments.storageKey })
     .from(munDocuments)
     .where(eq(munDocuments.id, id))
     .limit(1)
@@ -127,19 +111,7 @@ export async function deleteMunDocument(id: string, session: Session | null): Pr
   await assertOwnsOrAdmin(existing.munId, session)
   await assertModuleNotLocked(existing.munId, 'RULES_DOCUMENTS', session)
 
-  await db.transaction(async (tx) => {
-    await tx.delete(munDocuments).where(eq(munDocuments.id, id))
-    if (isPolicyDocument(existing.kind)) {
-      await triggerReverificationIfNeeded(
-        'RULES_DOCUMENTS',
-        { url: existing.url },
-        { url: null },
-        existing.munId,
-        session!.userId,
-        tx,
-      )
-    }
-  })
+  await db.delete(munDocuments).where(eq(munDocuments.id, id))
   await deleteStoredObjectQuietly(selectStorageAdapter, existing.storageKey, 'deleteMunDocument')
 
   await onModuleDataChanged(existing.munId, 'RULES_DOCUMENTS', session!.userId)

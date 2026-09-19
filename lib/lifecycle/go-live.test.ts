@@ -29,7 +29,6 @@ import {
   submitMunForReview,
   withdrawSubmission,
 } from './go-live'
-import { reviewModule } from './module-verification'
 import { submitFinalConfirmation } from './organizer-confirmation'
 import { updateMunDetails } from '@/lib/actions/mun-config'
 import { unpublishMun } from '@/lib/actions/admin-review'
@@ -583,7 +582,7 @@ describe('enqueueForGoLive', () => {
     expect(versions.map((version) => version.versionNumber).sort()).toEqual([1, 2])
   })
 
-  it('a change made while unpublished goes through re-verification before the mun can be queued', async () => {
+  it('a change made while unpublished does not need re-verification before the mun can be queued', async () => {
     const organizer = await makeUser()
     const admin = await makeUser('ADMIN')
     const adminSession = { userId: admin.id, role: 'ADMIN' as const }
@@ -592,14 +591,7 @@ describe('enqueueForGoLive', () => {
 
     await updateMunDetails(mun.id, { venue: 'A Different Hall' }, { userId: organizer.id, role: 'ORGANIZER' })
     const [moved] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
-    expect(moved.status).toBe('VERIFICATION')
-    await expect(enqueueForGoLive(mun.id, adminSession)).rejects.toThrow(
-      'Cannot queue a MUN in status VERIFICATION; it must be verified or unpublished',
-    )
-
-    await reviewModule(mun.id, 'DATES_VENUE', 'VERIFIED', [], adminSession)
-    const [verified] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
-    expect(verified.status).toBe('VERIFIED')
+    expect(moved.status).toBe('UNPUBLISHED')
 
     const queued = await enqueueForGoLive(mun.id, adminSession)
     expect(queued.versionNumber).toBe(2)

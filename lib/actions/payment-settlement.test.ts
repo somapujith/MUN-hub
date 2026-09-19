@@ -228,7 +228,7 @@ describe('payment-settlement actions', () => {
       expect(resaved.verifiedAt).not.toBeNull()
     })
 
-    it('sends an already-published mun back to VERIFICATION and its module to PENDING_REVIEW', async () => {
+    it('un-verifies the payout account but leaves an already-published mun live', async () => {
       const organizer = await makeUser('ORGANIZER')
       const admin = await makeUser('ADMIN')
       const mun = await makeMun(organizer.id)
@@ -238,12 +238,22 @@ describe('payment-settlement actions', () => {
       await db
         .insert(munModuleVerifications)
         .values({ munId: mun.id, moduleName: 'PAYMENT_SETTLEMENT', state: 'VERIFIED' })
-        .onConflictDoNothing()
+        .onConflictDoUpdate({
+          target: [munModuleVerifications.munId, munModuleVerifications.moduleName],
+          set: { state: 'VERIFIED' },
+        })
 
-      await upsertPaymentSettings(mun.id, fullInput({ accountNumber: '111222333444555' }), sessionFor(organizer))
+      const changed = await upsertPaymentSettings(
+        mun.id,
+        fullInput({ accountNumber: '111222333444555' }),
+        sessionFor(organizer),
+      )
 
+      // The payout account must be re-checked by an admin ...
+      expect(changed.verificationState).toBe('PENDING')
+      // ... but the MUN itself is not sent back to review or taken offline.
       const [after] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id))
-      expect(after.status).toBe('VERIFICATION')
+      expect(after.status).toBe('PUBLISHED')
       const [module] = await db
         .select({ state: munModuleVerifications.state })
         .from(munModuleVerifications)
@@ -253,7 +263,7 @@ describe('payment-settlement actions', () => {
             eq(munModuleVerifications.moduleName, 'PAYMENT_SETTLEMENT'),
           ),
         )
-      expect(module.state).toBe('PENDING_REVIEW')
+      expect(module.state).toBe('VERIFIED')
     })
   })
 

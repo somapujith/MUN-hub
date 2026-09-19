@@ -485,8 +485,8 @@ describe('mun-config actions', () => {
         ['postalCode', { postalCode: '560001' }],
         ['mapUrl', { mapUrl: 'https://attacker.example/pin' }],
         ['venue', { venue: 'Another Hall' }],
-      ] as const)('sends it back to review when %s changes', async (_label, input) => {
-        expect(await statusAfter(input)).toEqual({ status: 'VERIFICATION', moduleState: 'PENDING_REVIEW' })
+      ] as const)('keeps it live and verified when %s changes', async (_label, input) => {
+        expect(await statusAfter(input)).toEqual({ status: 'PUBLISHED', moduleState: 'VERIFIED' })
       })
 
       it('keeps it live when the setup form re-sends unchanged venue details or edits the theme', async () => {
@@ -551,8 +551,10 @@ describe('mun-config actions', () => {
     })
   })
 
-  describe('re-verification triggers', () => {
-    it('updateRegistrationProduct triggers re-verification when mun is VERIFIED and price changes', async () => {
+  // Product decision: once a MUN is verified, organizer edits never send it
+  // back to review (see the note at the top of lib/lifecycle/reverification.ts).
+  describe('edits after verification do not trigger re-verification', () => {
+    it('updateRegistrationProduct leaves a VERIFIED mun VERIFIED when the price changes', async () => {
       const organizer = await makeUser('ORGANIZER')
       const mun = await makeMun(organizer.id, { status: 'VERIFIED' })
       const session = sessionFor(organizer)
@@ -563,18 +565,22 @@ describe('mun-config actions', () => {
       await updateRegistrationProduct(product.id, { price: 3000 }, session)
 
       const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
-      expect(updatedMun.status).toBe('VERIFICATION')
+      expect(updatedMun.status).toBe('VERIFIED')
+      const [productModule] = await db
+        .select()
+        .from(munModuleVerifications)
+        .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'registration_products')))
+      expect(productModule.state).toBe('VERIFIED')
+      const [saved] = await db.select().from(registrationProducts).where(eq(registrationProducts.id, product.id))
+      expect(saved.price).toBe(3000)
     })
 
-    // The public page shows the street address and links out to mapUrl, so
-    // changing either on a live MUN must go back through review — the same
-    // rule venue/city already had.
     it.each([
       ['addressLine1', { addressLine1: '9 Other Street' }],
       ['addressState', { addressState: 'Karnataka' }],
       ['postalCode', { postalCode: '560001' }],
       ['mapUrl', { mapUrl: 'https://attacker.example/venue' }],
-    ])('updateMunDetails triggers re-verification when a PUBLISHED mun changes %s', async (_field, patch) => {
+    ])('updateMunDetails keeps a PUBLISHED mun live when %s changes', async (_field, patch) => {
       const organizer = await makeUser('ORGANIZER')
       const mun = await makeMun(organizer.id, {
         status: 'PUBLISHED',
@@ -585,18 +591,20 @@ describe('mun-config actions', () => {
       })
       const session = sessionFor(organizer)
 
+      await db.insert(munModuleVerifications).values({ munId: mun.id, moduleName: 'DATES_VENUE', state: 'VERIFIED' })
+
       await updateMunDetails(mun.id, patch, session)
 
       const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
-      expect(updatedMun.status).toBe('VERIFICATION')
+      expect(updatedMun.status).toBe('PUBLISHED')
       const [datesVenue] = await db
         .select()
         .from(munModuleVerifications)
         .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'DATES_VENUE')))
-      expect(datesVenue.state).toBe('PENDING_REVIEW')
+      expect(datesVenue.state).toBe('VERIFIED')
     })
 
-    it('updateMunDetails triggers re-verification when a VERIFIED mun clears its street address', async () => {
+    it('updateMunDetails keeps a VERIFIED mun verified when it clears its street address', async () => {
       const organizer = await makeUser('ORGANIZER')
       const mun = await makeMun(organizer.id, { status: 'VERIFIED', addressLine1: '12 Lake Road' })
       const session = sessionFor(organizer)
@@ -604,7 +612,7 @@ describe('mun-config actions', () => {
       await updateMunDetails(mun.id, { addressLine1: null }, session)
 
       const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
-      expect(updatedMun.status).toBe('VERIFICATION')
+      expect(updatedMun.status).toBe('VERIFIED')
     })
 
     it('updateRegistrationProduct does NOT trigger re-verification when mun is still DRAFT', async () => {

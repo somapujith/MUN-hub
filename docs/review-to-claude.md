@@ -47,7 +47,12 @@ what's actually verified vs. not.
   process holding a Windows file lock — harmless, not tracked by git, safe to ignore or
   clean up later once nothing has them open.)
 
-## Known, disclosed gap — not fixed, deliberately deferred
+## Known, disclosed gap — now moot (2026-09-19)
+
+Superseded: re-verification was removed on the user's decision (verified MUNs can be edited freely,
+see CLAUDE.md "No re-verification after VERIFIED"), so the atomicity gap described in this section
+no longer exists — there is no re-verification trigger to run outside the transaction. The text is
+kept for history.
 
 Several actions call the re-verification trigger **after** their own DB write completes,
 not inside the same transaction: `lib/actions/mun-config.ts` (`updateCommittee`,

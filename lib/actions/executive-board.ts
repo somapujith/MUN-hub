@@ -5,7 +5,6 @@ import type { EbRole } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
-import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 import { FILES_ROUTE_PREFIX, isSafeStorageKey } from '@/lib/storage/keys'
 import { deleteStoredObjectQuietly, selectStorageAdapter } from '@/lib/storage/select-adapter'
 import { validateUpload } from '@/lib/storage/validate'
@@ -21,7 +20,7 @@ import { validateUpload } from '@/lib/storage/validate'
 //     member to a committee belonging to mun B by supplying that committee's
 //     id, since committeeId alone doesn't prove same-mun ownership.
 //
-// EXECUTIVE_BOARD is a high-impact module (Task 12) — every mutation here
+// EXECUTIVE_BOARD is a high-impact module — every mutation here
 // calls `assertModuleNotLocked` right after the ownership check, before any
 // row is touched.
 
@@ -155,11 +154,6 @@ export async function updateEbMember(
     .returning()
   if (!updated) throw new Error('Executive board member not found')
 
-  // Real before/after snapshots, same as mun-config.ts's update actions:
-  // `onModuleDataChanged` does NOT do this for us (it has no snapshots to
-  // diff), so without this call a post-verification EB change would never
-  // trigger re-verification.
-  await triggerReverificationIfNeeded('EXECUTIVE_BOARD', existing, updated, existing.munId, session!.userId)
   await onModuleDataChanged(existing.munId, 'EXECUTIVE_BOARD', session!.userId)
 
   return updated

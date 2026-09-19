@@ -73,15 +73,10 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
  * each registration/conference transition and when.
  *
  * VERIFIED/PUBLISHED/REGISTRATION_OPEN/REGISTRATION_CLOSED/UNPUBLISHED/
- * SUSPENDED can transition back to VERIFICATION — this is the
- * re-verification trigger path (see lib/lifecycle/reverification.ts). The
- * REGISTRATION_CLOSED edge exists because reverification.ts's
- * `POST_VERIFICATION_STATUSES` has always included REGISTRATION_CLOSED:
- * without the edge, a high-impact edit to a closed MUN wrote the change,
- * flipped the module to PENDING_REVIEW and then threw "Invalid transition
- * from REGISTRATION_CLOSED to VERIFICATION" (a 409 to the organizer) while
- * the edit stayed live and unreviewed. Most non-terminal states can transition
- * to CANCELLED. REJECTED, ARCHIVED, and CANCELLED are terminal (no outgoing
+ * SUSPENDED can transition back to VERIFICATION. Organizer edits no longer
+ * trigger this automatically (see lib/lifecycle/reverification.ts) — the
+ * edges remain for deliberate admin actions such as reinstating a suspended
+ * MUN. Most non-terminal states can transition to CANCELLED. REJECTED, ARCHIVED, and CANCELLED are terminal (no outgoing
  * transitions).
  *
  * VERIFIED -> PUBLISHED is retained alongside the recommended

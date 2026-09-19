@@ -55,13 +55,13 @@ Worker logs `[storage] No UPLOADS_BUCKET or UPLOADS_KV binding`. Rows uploaded w
 The existing `RATE_LIMIT_KV` namespace on the account is not referenced by this repo (it may
 belong to another project), so it was deliberately not reused.
 
-## 6. Product decision — a live MUN re-checked after a high-impact edit
+## 6. DECIDED (2026-09-19) — no re-verification after a MUN is verified
 
-Today a high-impact edit (dates, venue, prices, capacity, …) on a live conference moves it back to
-VERIFICATION, which removes it from the marketplace and pauses registration until the review
-passes (the organizer's Setup page now warns about this). Alternative: keep the last verified
-version listed while the change is reviewed (needs the published page to render from
-`mun_versions`). Decide which behaviour you want.
+Decision: once a MUN is verified, organizers can make any change and it stays live — no re-review,
+no removal from the marketplace. Implemented; see CLAUDE.md "No re-verification after VERIFIED".
+Only payout bank-detail changes are still re-checked by an admin (that never takes the MUN offline).
+Still open: the Terms of Service no longer says "important changes go back through review" — include
+that in the pending legal review (item 4).
 
 ## 7. Decision — organizer team access (co-organizers)
 

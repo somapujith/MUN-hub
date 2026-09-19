@@ -5,14 +5,13 @@ import type { AccommodationFieldType } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { assertOwnsOrAdmin } from '@/lib/auth/ownership'
 import { assertModuleNotLocked, onModuleDataChanged } from '@/lib/lifecycle/module-completion'
-import { triggerReverificationIfNeeded } from '@/lib/lifecycle/reverification'
 
 // -----------------------------------------------------------------------------
 // accommodation — ACCOMMODATION module (PRD Section 22)
 // -----------------------------------------------------------------------------
 //
-// ACCOMMODATION is a high-impact module (Task 12, HIGH_IMPACT_FIELDS:
-// ['price', 'capacity', 'name', 'status']) — every mutation that touches an
+// ACCOMMODATION is a high-impact module (HIGH_IMPACT_FIELDS in
+// lib/lifecycle/reverification.ts) — every mutation that touches an
 // accommodation OPTION (which carries those exact fields) calls
 // `assertModuleNotLocked` right after the ownership check, same pattern as
 // mun-config.ts/executive-board.ts/etc. This was missed in this file's
@@ -107,9 +106,7 @@ export type AccommodationProvided = 'PROVIDED' | 'NOT_PROVIDED'
 /**
  * Records whether the conference offers accommodation at all (PRD §22). With
  * NOT_PROVIDED the ACCOMMODATION module passes without any options; with
- * PROVIDED it needs at least one active option. Switching the answer on an
- * already-verified mun sends ACCOMMODATION back for re-verification, since
- * delegates may have registered expecting the other answer.
+ * PROVIDED it needs at least one active option.
  */
 export async function setAccommodationProvided(
   munId: string,
@@ -128,13 +125,6 @@ export async function setAccommodationProvided(
 
   await db.update(muns).set({ accommodationProvided: provided, updatedAt: new Date() }).where(eq(muns.id, munId))
 
-  await triggerReverificationIfNeeded(
-    'ACCOMMODATION',
-    { accommodationProvided: existing.accommodationProvided },
-    { accommodationProvided: provided },
-    munId,
-    session!.userId,
-  )
   await onModuleDataChanged(munId, 'ACCOMMODATION', session!.userId)
 
   return { accommodationProvided: provided }
