@@ -3,13 +3,16 @@ import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  AwardIcon,
   BellIcon,
   BuildingIcon,
   ChevronRightIcon,
   CompassIcon,
   GlobeIcon,
   HomeIcon,
+  IdCardIcon,
   LayoutGridIcon,
+  LockIcon,
   LogOutIcon,
   MenuIcon,
   SettingsIcon,
@@ -154,6 +157,10 @@ export function SiteHeaderSidebar({ cities, selectedCity = "" }: SiteHeaderSideb
   const role = session?.role ?? null;
   const roleLabel = role ? ROLE_LABEL[role] : null;
   const dashboardUrl = role ? homeUrlForRole(role) : null;
+  const isStudent = role === "STUDENT";
+  // MUN Passport is a delegate feature, so organizers and staff don't get a
+  // teaser for it; signed-out visitors and delegates do.
+  const showPassportTeaser = role === null || isStudent;
   const accountUrl = role ? accountUrlForRole(role) : null;
   const helpUrl = role === "STUDENT" || role === "ORGANIZER" ? inboxUrlForRole(role) : "/contact";
   const marketplaceActive =
@@ -266,6 +273,29 @@ export function SiteHeaderSidebar({ cities, selectedCity = "" }: SiteHeaderSideb
           />
           {session && dashboardUrl && (
             <SidebarRow icon={<LayoutGridIcon />} label="Dashboard" url={dashboardUrl} />
+          )}
+          {isStudent && (
+            <SidebarRow
+              icon={<AwardIcon />}
+              label="Certificates & achievements"
+              url={resolveZoneUrl("student", "/dashboard/achievements")}
+              active={pathname === "/dashboard/achievements"}
+            />
+          )}
+          {showPassportTeaser && (
+            // Locked placeholder for the not-yet-built MUN Passport. To ship it,
+            // give this row a `url` and drop `disabled` and `trailing`.
+            <SidebarRow
+              icon={<IdCardIcon />}
+              label="MUN Passport"
+              disabled
+              trailing={
+                <Badge variant="outline" className="shrink-0">
+                  <LockIcon aria-hidden />
+                  Locked
+                </Badge>
+              }
+            />
           )}
         </nav>
 

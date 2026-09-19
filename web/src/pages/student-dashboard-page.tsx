@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { AwardIcon } from "lucide-react";
 import { Helmet } from "react-helmet-async";
 import { useQuery } from "@tanstack/react-query";
 import { SiteHeader } from "@/components/layout/site-header";
@@ -74,9 +75,15 @@ export function StudentDashboardPage() {
                   : "Your registrations and payment status."}
               </p>
             </div>
-            <Button variant="outline" render={<Link to="/muns" />}>
-              Browse MUNs
-            </Button>
+            <div className="flex flex-wrap gap-xs">
+              <Button variant="outline" render={<Link to="/dashboard/achievements" />}>
+                <AwardIcon aria-hidden />
+                Certificates &amp; achievements
+              </Button>
+              <Button variant="outline" render={<Link to="/muns" />}>
+                Browse MUNs
+              </Button>
+            </div>
           </header>
           <Separator />
           {user && !user.emailVerified && (

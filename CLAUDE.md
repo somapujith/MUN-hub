@@ -243,6 +243,16 @@ After signup, an organizer completes a five-step, District-style wizard at publi
   - The welcome page's CTA reads "Start your journey" and opens the wizard, then reads "Go to your dashboard" once onboarding is done.
   - The welcome page and the wizard share `components/organizer/organizer-bright-shell.tsx`, which always renders the bright theme with fixed colors.
 
+## Delegate certificates & achievements page, locked MUN Passport (landed 2026-09-19)
+
+Delegates now have `/dashboard/achievements` (`web/src/pages/credentials-page.tsx`), reached from the student dashboard header and the header sidebar (`site-header-sidebar.tsx`, delegates only). Backend: `lib/actions/student-credentials.ts#listMyCredentials(session)` behind `GET /me/credentials` (`server/routes/student-credentials.ts`, `Cache-Control: no-store`).
+
+- **Awards show only once `verified`.** Organizers type awards in; they stay `unverified` until staff approve the MUN's results (`results.ts#reviewResults`), so a delegate never sees an award that could still change.
+- **Certificates show as soon as a row exists**, with a Verified / Awaiting verification badge. `downloadUrl` is only ever an absolute http(s) URL (the column is free text, so `javascript:`/`data:`/relative values become `null`).
+- **Nothing creates certificates yet.** The organizer-side issuance pipeline (PRD `MUNHub_Organizer_Dashboard_PRD.md` §24-25: generation, unique verification ID, public verify page) doesn't exist, so the certificates section stays empty until it's built. The page and endpoint are ready for it; do not treat the page as proof that certificates are being issued.
+- **MUN Passport is a locked placeholder** row in the same sidebar (lock badge, `aria-disabled`, no route). Shown to signed-out visitors and delegates, hidden for organizers/staff. To ship it, give the row a `url` and drop `disabled`/`trailing`.
+- E2E: `E2E/specs/student/credentials.spec.ts`. Run with `--no-deps` for now — the shared `setup` project (`E2E/setup/auth.setup.ts`) and `expectSignedOutHeader` in `E2E/fixtures/ui.ts` still look for an "Account menu" / "Create account" header button that the 2026-09-19 header redesign removed, so the setup step fails before any spec runs. Not caused by this change; needs fixing separately.
+
 ## Cloudflare Hyperdrive bridge for `lib/db/client.ts` (landed 2026-09-17)
 
 `lib/db/client.ts` is framework-agnostic and has no direct access to Hono's `c.env` binding context (Workers only hands you `env` inside a request handler, not at module-import time — and by the time `server/src/worker.ts`'s module graph finishes evaluating at cold start, `lib/db/client.ts` would already have run). Fixed by making `db`'s underlying Postgres client creation **lazy** — deferred to the first real query (first property access on `db`, via a `Proxy`) instead of eager at module-import time — and adding a small indirection layer for Workers to hand it a connection string before that first access happens:

@@ -28,6 +28,7 @@ import { registrationFormRoutes } from './registration-form'
 import { registrationGroupsRoutes } from './registration-groups'
 import { registrationsRoutes } from './registrations'
 import { resultsRoutes } from './results'
+import { studentCredentialsRoutes } from './student-credentials'
 import { studentDashboardRoutes } from './student-dashboard'
 import { studentProfileRoutes } from './student-profile'
 import { supportRoutes } from './support'
@@ -60,6 +61,7 @@ protectedRoutes.route('/', auditHistoryRoutes)
 protectedRoutes.route('/', adminRoutes)
 protectedRoutes.route('/', supportRoutes)
 protectedRoutes.route('/', studentDashboardRoutes)
+protectedRoutes.route('/', studentCredentialsRoutes)
 protectedRoutes.route('/', studentProfileRoutes)
 protectedRoutes.route('/', organizerDashboardRoutes)
 protectedRoutes.route('/', organizerApplicationRoutes)

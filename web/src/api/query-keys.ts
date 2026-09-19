@@ -9,6 +9,7 @@ export const queryKeys = {
     ["muns", "public", munId, section] as const,
   dashboardUpcoming: () => ["dashboard", "upcoming"] as const,
   dashboardPast: () => ["dashboard", "past"] as const,
+  credentials: () => ["dashboard", "credentials"] as const,
   userProfile: (userId: string) => ["user", "profile", userId] as const,
   registration: (id: string) => ["registration", id] as const,
   registrationReceipt: (id: string) => ["registration", id, "receipt"] as const,
