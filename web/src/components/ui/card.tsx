@@ -20,7 +20,7 @@ function Card({
       data-slot="card"
       data-size={size}
       className={cn(
-        "group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-md border border-border bg-card py-(--card-spacing) text-body-md text-card-foreground transition-colors",
+        "group/card elevated-card flex flex-col gap-(--card-spacing) overflow-hidden rounded-md border border-border/80 bg-card py-(--card-spacing) text-body-md text-card-foreground transition-[border-color,box-shadow] hover:border-border-strong",
         "[--card-spacing:24px] data-[size=sm]:[--card-spacing:16px]",
         "has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0",
         "*:[img:first-child]:rounded-t-md *:[img:last-child]:rounded-b-md",

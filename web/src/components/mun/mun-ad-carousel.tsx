@@ -157,9 +157,10 @@ export function MunAdCarousel({ slides, className }: MunAdCarouselProps) {
             >
               <SignatureCard
                 variant={variant}
-                className="min-h-[320px] justify-center sm:min-h-[360px]"
+                className="brand-grid min-h-[360px] justify-center sm:min-h-[400px]"
               >
-                <div className="max-w-2xl">
+                <div className="relative z-10 grid items-center gap-xl lg:grid-cols-[minmax(0,1fr)_18rem]">
+                  <div className="max-w-2xl">
                   <SignatureCardEyebrow>
                     {mun.status === "REGISTRATION_OPEN"
                       ? "Registration open"
@@ -208,6 +209,20 @@ export function MunAdCarousel({ slides, className }: MunAdCarouselProps) {
                       View conference
                     </Button>
                   </SignatureCardActions>
+                  </div>
+
+                  <div aria-hidden className="hidden lg:block">
+                    <div className="relative ml-auto aspect-square w-64 rounded-full border border-white/20 bg-white/8 p-lg backdrop-blur-sm">
+                      <div className="grid h-full place-items-center rounded-full border border-white/25">
+                        <div className="text-center">
+                          <p className="text-[11px] font-medium tracking-[0.18em] uppercase opacity-65">MUN Hub</p>
+                          <p className="mt-xs font-display text-display-md text-white">Verified</p>
+                          <div className="mx-auto mt-md h-px w-12 bg-white/35" />
+                          <p className="mt-md text-body-md opacity-75">Clear details.<br />Confident decisions.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </SignatureCard>
             </div>

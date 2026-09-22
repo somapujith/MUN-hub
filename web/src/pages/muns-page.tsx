@@ -92,13 +92,15 @@ export function MunsPage() {
       <SiteHeader cities={facets.cities} selectedCity={city} />
 
       <main className="flex-1">
-        <div className="border-b border-border">
-          <div className="content-container flex flex-col gap-lg pt-xxl pb-xl">
+        <div className="border-b border-border bg-surface-soft/70">
+          <div className="content-container relative flex flex-col gap-lg overflow-hidden pt-xxl pb-xl sm:py-section">
+            <div aria-hidden className="absolute top-1/2 right-12 hidden size-56 -translate-y-1/2 rounded-full border border-border bg-signature-cream/60 lg:block" />
+            <div aria-hidden className="absolute top-1/2 right-28 hidden size-32 -translate-y-1/2 rounded-full border border-border/70 bg-signature-mint/50 lg:block" />
             <div className="flex flex-col gap-sm">
               <p className="text-caption uppercase tracking-[0.16px] text-muted-foreground">
                 Marketplace
               </p>
-              <h1 className="max-w-[20ch] font-display text-display-md font-normal tracking-[-0.011em] text-balance text-ink sm:text-display-lg">
+              <h1 className="relative max-w-[18ch] font-display text-display-md font-normal tracking-[-0.011em] text-balance text-ink sm:text-display-xl">
                 Find your next Model UN
               </h1>
               <p className="max-w-[60ch] text-body-md text-body dark:text-muted-foreground">
@@ -107,7 +109,7 @@ export function MunsPage() {
               </p>
             </div>
 
-            <div className="max-w-2xl">
+            <div className="relative max-w-2xl rounded-md bg-background p-xs shadow-[0_10px_30px_rgb(24_29_38/0.08)] ring-1 ring-border/70">
               <SearchBar defaultValue={query} preserve={preserved} />
             </div>
           </div>

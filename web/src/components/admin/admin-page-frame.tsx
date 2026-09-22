@@ -12,13 +12,14 @@ export function AdminPageFrame({ title, description, children }: AdminPageFrameP
     <>
       <Helmet title={title} />
       <main className="flex-1 bg-surface-soft/60">
-        <div className="content-container flex flex-col gap-lg py-xl">
-          <header className="flex flex-col gap-xxs border-b border-border pb-lg">
+        <div className="content-container flex flex-col gap-lg py-xl sm:py-xxl">
+          <header className="relative flex flex-col gap-xxs overflow-hidden rounded-lg bg-surface-dark p-lg text-on-dark sm:p-xl">
+            <div aria-hidden className="absolute -top-16 -right-10 size-48 rounded-full border border-white/10 bg-white/5" />
             <span className="text-[12px] font-medium tracking-[0.16px] text-muted-foreground uppercase">
               Operations
             </span>
-            <h1 className="font-display text-display-md text-ink">{title}</h1>
-            <p className="break-words text-body-md text-muted-foreground">{description}</p>
+            <h1 className="relative font-display text-display-md text-on-dark">{title}</h1>
+            <p className="relative max-w-2xl break-words text-body-md text-on-dark/70">{description}</p>
           </header>
           {children}
         </div>

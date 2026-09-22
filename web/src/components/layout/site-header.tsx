@@ -78,17 +78,26 @@ export function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) 
 
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-border bg-background">
-        <div className="content-container flex h-16 items-center gap-sm lg:gap-md">
+      <header className="sticky top-0 z-40 border-b border-border/80 bg-background/92 shadow-[0_1px_0_rgb(24_29_38/0.02)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/82">
+        <div className="content-container flex h-[4.5rem] items-center gap-sm lg:gap-md">
           <Link
             to="/"
             className="-mx-2 flex shrink-0 items-center gap-2 rounded-sm px-2 py-1 text-label-md font-medium tracking-[-0.01em] text-ink transition-colors duration-150 hover:text-body focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
           >
             <img
               src="/images/logo-mark.png"
-              alt="MUN Hub"
-              className="block h-7 w-auto shrink-0"
+              alt=""
+              className="block h-8 w-auto shrink-0"
             />
+            <span className="hidden font-display text-label-md tracking-[-0.02em] text-ink sm:inline">MUN Hub</span>
+            <span className="sr-only">MUN Hub home</span>
+          </Link>
+
+          <Link
+            to="/muns"
+            className="hidden rounded-sm px-xs py-2 text-body-md font-medium text-muted-foreground transition-colors hover:bg-surface-soft hover:text-ink focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none xl:inline-flex"
+          >
+            Browse MUNs
           </Link>
   
           {showCityPicker && (

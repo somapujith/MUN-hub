@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
+import { BadgeIndianRupeeIcon, LayoutDashboardIcon, ShieldCheckIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { MunAdCarousel } from "@/components/mun/mun-ad-carousel";
@@ -156,23 +157,50 @@ export function HomePage() {
 
       <main className="flex-1">
         {featured.length > 0 && (
-          <section className="pt-xl pb-xxl">
+          <section className="pt-xl pb-lg sm:pt-xxl sm:pb-xl">
             <div className="content-container">
               <MunAdCarousel slides={featured} />
             </div>
           </section>
         )}
 
+        <section aria-label="Why use MUN Hub" className="pb-xxl">
+          <div className="content-container">
+            <div className="grid divide-y divide-border overflow-hidden rounded-md border border-border/80 bg-background elevated-card sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+              {[
+                { icon: ShieldCheckIcon, title: "Reviewed listings", copy: "Every conference is checked before it goes live." },
+                { icon: BadgeIndianRupeeIcon, title: "Transparent fees", copy: "Compare delegate fees before you start registering." },
+                { icon: LayoutDashboardIcon, title: "One clear dashboard", copy: "Track registrations, payments and allotments together." },
+              ].map(({ icon: Icon, title, copy }) => (
+                <div key={title} className="flex items-start gap-sm p-md sm:p-lg">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-signature-cream text-ink">
+                    <Icon aria-hidden className="size-4" strokeWidth={1.8} />
+                  </span>
+                  <div>
+                    <p className="text-body-md font-medium text-ink">{title}</p>
+                    <p className="mt-xxs text-body-md leading-5 text-muted-foreground">{copy}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
         <section className={featured.length > 0 ? "pb-section" : "pt-xxl pb-section"}>
           <div className="content-container">
-            <div className="flex flex-col gap-sm border-b border-border pb-lg">
-              <h1 className="font-display text-display-md font-normal tracking-[-0.011em] text-balance text-ink">
-                Model UN conferences{cityLabel}
-              </h1>
-              <p className="max-w-[60ch] text-body-md text-body dark:text-muted-foreground">
-                Every listing is reviewed before it goes live. Narrow by city,
-                registration status, or delegate fee.
-              </p>
+            <div className="flex flex-col gap-sm border-b border-border pb-lg sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="mb-xs text-caption tracking-[0.14em] text-muted-foreground uppercase">Curated marketplace</p>
+                <h1 className="font-display text-display-md font-normal tracking-[-0.011em] text-balance text-ink sm:text-display-lg">
+                  Model UN conferences{cityLabel}
+                </h1>
+                <p className="mt-xs max-w-[60ch] text-body-md leading-5 text-body dark:text-muted-foreground">
+                  Compare dates, fees and registration status without chasing scattered posts.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" render={<Link to="/muns" />} className="self-start sm:self-auto">
+                Explore all conferences
+              </Button>
             </div>
 
             <div className="flex flex-col gap-lg pt-lg lg:flex-row lg:gap-xxl lg:pt-xl">

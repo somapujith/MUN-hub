@@ -20,8 +20,8 @@ import type { MunSummary } from "@/types";
  * three-row rhythm — title + status, meta, then a footer rule with organizer
  * and fee. The fee sits in tabular figures so prices align down the column.
  *
- * Hover is restrained per the system's no-hover doctrine: a border tone shift
- * and the arrow sliding in, never a lift or a color change.
+ * Hover adds a small lift and stronger border so dense result grids remain
+ * obviously interactive without turning the card into a button-like block.
  */
 
 interface MunCardProps {
@@ -33,6 +33,15 @@ export function MunCard({ mun }: MunCardProps) {
   const hasLocation = location.length > 0;
   const hasDates = Boolean(mun.startDate);
   const cover = safeLinkUrl(mun.coverImage);
+  const artVariant = Array.from(mun.slug).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 3;
+  const artClassName = ["bg-signature-coral", "bg-signature-forest", "bg-surface-dark"][artVariant];
+  const monogram = mun.name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
   // Render-time clock, read once per card mount.
   const [now] = useState(() => Date.now());
   // Only an open MUN's upcoming deadline is worth a line on the card.
@@ -48,21 +57,32 @@ export function MunCard({ mun }: MunCardProps) {
       <Link
         to={`/mun/${mun.slug}`}
         className={cn(
-          "flex h-full flex-col gap-sm overflow-hidden rounded-md border border-border bg-card p-md",
-          "transition-[border-color,background-color] duration-150 ease-out outline-none",
-          "hover:border-border-strong hover:bg-surface-soft",
+          "interactive-card flex h-full flex-col gap-sm overflow-hidden rounded-md border border-border/80 bg-card p-md",
+          "outline-none",
+          "hover:border-border-strong",
           "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25",
           "dark:hover:bg-accent",
         )}
       >
         {/* The organizer's cover photo, bled to the card edge. Decorative —
             the title below names the conference. */}
-        {cover && (
+        {cover ? (
           <RemoteImage
             src={cover}
             alt=""
-            className="-mx-md -mt-md mb-xxs aspect-[16/9] w-[calc(100%_+_2_*_var(--spacing-md))] max-w-none bg-surface-soft object-cover"
+            className="-mx-md -mt-md mb-xxs aspect-[16/7] w-[calc(100%_+_2_*_var(--spacing-md))] max-w-none bg-surface-soft object-cover"
           />
+        ) : (
+          <div
+            aria-hidden
+            className={cn(
+              "mun-card-art -mx-md -mt-md mb-xxs flex aspect-[16/7] w-[calc(100%_+_2_*_var(--spacing-md))] max-w-none items-end justify-between overflow-hidden p-md text-white",
+              artClassName,
+            )}
+          >
+            <span className="text-[11px] font-medium tracking-[0.16em] uppercase opacity-75">Reviewed listing</span>
+            <span className="font-display text-display-md leading-none text-white/90">{monogram || "MUN"}</span>
+          </div>
         )}
 
         <div className="flex items-start justify-between gap-sm">
