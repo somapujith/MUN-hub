@@ -182,6 +182,14 @@ export const adminActionEnum = pgEnum('admin_action', [
   // A delegate deleted (anonymized) their own account; the actor is that
   // account (lib/actions/account-deletion.ts).
   'ACCOUNT_DELETED',
+  // Admin Registrations console (lib/actions/admin-review.ts) — per-
+  // registration actions distinct from the whole-conference CANCELLED
+  // transition (lib/lifecycle/registration-lifecycle.ts, which uses
+  // verification_logs, not admin_actions, for its own audit trail).
+  'REGISTRATION_CANCELLED',
+  'REGISTRATION_FLAGGED_DUPLICATE',
+  'REGISTRATION_DUPLICATE_FLAG_CLEARED',
+  'REGISTRATION_CONFIRMATION_RESENT',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [
