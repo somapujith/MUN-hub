@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from "react";
+import { Link } from "react-router";
 import { cn } from "cn";
 
 // -----------------------------------------------------------------------------
@@ -197,10 +198,18 @@ interface RankedBarListProps {
   formatValue?: (value: number) => string;
   emptyLabel?: string;
   colorToken?: ChartColorToken;
+  /** When given, each row links to this admin URL (e.g. a conference's or organizer's detail page) instead of rendering as plain text. */
+  getHref?: (item: RankedListItem) => string;
 }
 
 /** A ranked, horizontal-bar list — the "table" alternative dataviz recommends for a ranking with a magnitude, without pulling in a chart library. */
-export function RankedBarList({ items, formatValue = String, emptyLabel = "No data for this range", colorToken = "chart-1" }: RankedBarListProps) {
+export function RankedBarList({
+  items,
+  formatValue = String,
+  emptyLabel = "No data for this range",
+  colorToken = "chart-1",
+  getHref,
+}: RankedBarListProps) {
   const maxValue = useMemo(() => Math.max(1, ...items.map((item) => item.value)), [items]);
 
   if (items.length === 0) {
@@ -209,14 +218,9 @@ export function RankedBarList({ items, formatValue = String, emptyLabel = "No da
 
   return (
     <ol className="flex flex-col gap-xs">
-      {items.map((item, index) => (
-        <li key={item.id} className="relative overflow-hidden rounded-sm border border-border">
-          <span
-            aria-hidden
-            className={cn("absolute inset-y-0 left-0", BG_SOFT_CLASS[colorToken])}
-            style={{ width: `${Math.max((item.value / maxValue) * 100, 2)}%` }}
-          />
-          <div className="relative flex items-center justify-between gap-md px-md py-sm">
+      {items.map((item, index) => {
+        const rowContent = (
+          <>
             <div className="flex min-w-0 items-center gap-sm">
               <span className="w-5 shrink-0 text-caption tabular-nums text-muted-foreground">{index + 1}</span>
               <div className="min-w-0">
@@ -225,9 +229,32 @@ export function RankedBarList({ items, formatValue = String, emptyLabel = "No da
               </div>
             </div>
             <span className="shrink-0 tabular-nums text-body-md text-ink">{formatValue(item.value)}</span>
-          </div>
-        </li>
-      ))}
+          </>
+        );
+        // Hover/focus use a translucent ink overlay rather than an opaque
+        // surface color — the decorative proportional bar (the span below)
+        // sits underneath at low opacity and an opaque hover fill would hide
+        // it. focus-visible:ring-inset keeps the ring from being clipped by
+        // this li's overflow-hidden (needed to clip the bar's corners).
+        const rowClassName =
+          "relative flex items-center justify-between gap-md px-md py-sm outline-none transition-colors hover:bg-ink/5 focus-visible:bg-ink/5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+        return (
+          <li key={item.id} className="relative overflow-hidden rounded-sm border border-border">
+            <span
+              aria-hidden
+              className={cn("absolute inset-y-0 left-0", BG_SOFT_CLASS[colorToken])}
+              style={{ width: `${Math.max((item.value / maxValue) * 100, 2)}%` }}
+            />
+            {getHref ? (
+              <Link to={getHref(item)} className={rowClassName}>
+                {rowContent}
+              </Link>
+            ) : (
+              <div className={rowClassName}>{rowContent}</div>
+            )}
+          </li>
+        );
+      })}
     </ol>
   );
 }
