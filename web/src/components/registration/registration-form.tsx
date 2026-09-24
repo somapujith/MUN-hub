@@ -236,7 +236,17 @@ export function RegistrationForm({
     <div className="flex flex-col gap-xl">
       <StepIndicator steps={STEPS} current={step} />
 
-      <div className="grid grid-cols-1 gap-xl lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+      {/* The running summary only exists for steps 0-1 (see the comment below)
+          — reserving its 320px column on step 2 as well left a lopsided block
+          of dead space to the right of the review card, so step 2 goes full
+          width instead of matching the two-column layout it has nothing to
+          put in the second column for. */}
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-xl lg:items-start",
+          step < 2 && "lg:grid-cols-[minmax(0,1fr)_320px]",
+        )}
+      >
         <div className="flex flex-col gap-lg">
           {step === 0 && (
             <section className="flex flex-col gap-md">
@@ -467,64 +477,80 @@ export function RegistrationForm({
                   )}
                 </p>
               </div>
-              <dl className="divide-y divide-border rounded-md border border-border text-body-md">
-                <Row label="Conference" value={munName} />
-                <Row label="Pass" value={selected?.product.name ?? "—"} />
-                {selectedPricing && (
+              <div className="flex flex-col gap-lg rounded-md border border-border bg-surface-soft p-lg">
+                <ReviewGroup heading="Conference">
+                  <Row label="Conference" value={munName} />
+                  <Row label="Pass" value={selected?.product.name ?? "—"} />
+                  {selectedPricing && (
+                    <Row
+                      label="Price"
+                      value={
+                        selectedPricing.earlyBird
+                          ? `${formatPrice(selectedPricing.price)} (early bird)`
+                          : free
+                            ? "Free"
+                            : formatPrice(selectedPricing.price)
+                      }
+                    />
+                  )}
+                  <Row label="Committee" value={selectedCommittee?.name ?? "No preference"} />
                   <Row
-                    label="Price"
+                    label="Portfolio"
                     value={
-                      selectedPricing.earlyBird
-                        ? `${formatPrice(selectedPricing.price)} (early bird)`
-                        : free
-                          ? "Free"
-                          : formatPrice(selectedPricing.price)
+                      selectedCommittee?.portfolios.find((p) => p.id === portfolioId)?.name ??
+                      "No preference"
                     }
                   />
-                )}
-                <Row label="Committee" value={selectedCommittee?.name ?? "No preference"} />
-                <Row
-                  label="Portfolio"
-                  value={
-                    selectedCommittee?.portfolios.find((p) => p.id === portfolioId)?.name ??
-                    "No preference"
-                  }
-                />
-                <Row label="Name" value={core.fullName} />
-                <Row label="Email" value={core.email} />
-                {core.phone && <Row label="Phone" value={core.phone} />}
-                {visibleFields.map((field) => (
-                  <Row
-                    key={field.id}
-                    label={field.label}
-                    value={(answers[field.fieldKey] ?? "").trim() || "—"}
-                  />
-                ))}
+                </ReviewGroup>
+
+                <ReviewGroup heading="Your details">
+                  <Row label="Name" value={core.fullName} />
+                  <Row label="Email" value={core.email} />
+                  {core.phone && <Row label="Phone" value={core.phone} />}
+                  {visibleFields.map((field) => (
+                    <Row
+                      key={field.id}
+                      label={field.label}
+                      value={(answers[field.fieldKey] ?? "").trim() || "—"}
+                    />
+                  ))}
+                </ReviewGroup>
+
                 {accommodationOptions.length > 0 && (
-                  <Row
-                    label="Stay"
-                    value={
-                      selectedStay
-                        ? `${selectedStay.name} · ${formatPrice(selectedStay.price)}`
-                        : "Arranging my own"
-                    }
-                  />
+                  <ReviewGroup heading="Accommodation">
+                    <Row
+                      label="Stay"
+                      value={
+                        selectedStay
+                          ? `${selectedStay.name} · ${formatPrice(selectedStay.price)}`
+                          : "Arranging my own"
+                      }
+                    />
+                    {selectedStay && stayFields.map((field) => (
+                      <Row
+                        key={field.id}
+                        label={field.label}
+                        value={(stayAnswers[field.id] ?? "").trim() || "—"}
+                      />
+                    ))}
+                  </ReviewGroup>
                 )}
-                {selectedStay && stayFields.map((field) => (
-                  <Row
-                    key={field.id}
-                    label={field.label}
-                    value={(stayAnswers[field.id] ?? "").trim() || "—"}
-                  />
-                ))}
-                {feePreview && (
-                  <Row
-                    label="Platform fee (incl. GST)"
-                    value={formatPrice(feePreview.platformFee + feePreview.platformFeeTax)}
-                  />
-                )}
-                <Row label="Total" value={free ? "Free" : formatPrice(total)} strong />
-              </dl>
+
+                <div className="flex flex-col gap-xs border-t border-border pt-lg">
+                  {feePreview && (
+                    <Row
+                      label="Platform fee (incl. GST)"
+                      value={formatPrice(feePreview.platformFee + feePreview.platformFeeTax)}
+                    />
+                  )}
+                  <div className="flex items-baseline justify-between gap-md pt-xs">
+                    <span className="text-label-md text-ink">Total</span>
+                    <span className="font-mono text-title-sm tabular-nums text-ink">
+                      {free ? "Free" : formatPrice(total)}
+                    </span>
+                  </div>
+                </div>
+              </div>
 
               {error && (
                 <div
@@ -720,11 +746,24 @@ function StayField({
   );
 }
 
-function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+/** One labeled section of the review card — an eyebrow caption over a
+ * compact row list, the same grouping language RegistrationSummary already
+ * uses for its own totals block, so a group reads as one unit rather than
+ * more lines in the same undifferentiated table. */
+function ReviewGroup({ heading, children }: { heading: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-md px-md py-sm">
-      <dt className={cn("text-muted-foreground", strong && "font-medium text-ink")}>{label}</dt>
-      <dd className={cn("text-right text-ink", strong && "font-medium")}>{value}</dd>
+    <dl className="flex flex-col gap-xs text-body-md [&:not(:first-child)]:border-t [&:not(:first-child)]:border-border [&:not(:first-child)]:pt-lg">
+      <p className="text-caption uppercase text-muted-foreground">{heading}</p>
+      {children}
+    </dl>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-md">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="text-right text-ink">{value}</dd>
     </div>
   );
 }
