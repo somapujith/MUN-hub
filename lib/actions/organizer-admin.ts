@@ -1,6 +1,6 @@
-import { and, eq, ilike, or, sql } from 'drizzle-orm'
+import { and, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { users } from '@/lib/db/schema'
+import { muns, users } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
@@ -11,7 +11,16 @@ const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
 export type OrganizerRow = Pick<
   User,
   'id' | 'name' | 'email' | 'institution' | 'suspended' | 'suspendedReason' | 'suspendedAt' | 'createdAt'
->
+> & {
+  /**
+   * How many MUNs this organizer runs (any status). A per-row subquery, same
+   * pattern as `seatedRegistrations`/`pendingRegistrations` in
+   * lib/actions/admin-muns.ts — cheap because a page is at most 100 rows.
+   * Lets the Organizers console link through to the Conferences console
+   * pre-filtered by `organizerId` instead of listing every MUN inline here.
+   */
+  munCount: number
+}
 
 export interface ListOrganizersParams {
   limit?: number
@@ -55,7 +64,7 @@ export async function listOrganizers(
       )
     : eq(users.role, 'ORGANIZER')
 
-  const results = await db
+  const rows = await db
     .select({
       id: users.id,
       name: users.name,
@@ -71,6 +80,34 @@ export async function listOrganizers(
     .orderBy(users.name)
     .limit(limit)
     .offset(offset)
+
+  // Deliberately a second query merged in JS, not a per-row correlated
+  // subquery: this query's outer FROM is `users` alone (no join), which
+  // trips Drizzle's `isSingleTable` optimization (pg-core/dialect.js
+  // `buildSelection`) — it strips table qualifiers from EVERY column inside
+  // a raw `sql` field whenever the outer query has no joins, including
+  // columns from an unrelated table referenced in a correlated subquery.
+  // That silently turned `muns.organizer_id = users.id` into
+  // `"organizer_id" = "id"`, which Postgres resolves entirely inside the
+  // subquery's own scope (muns.id) — always false, so munCount was always 0
+  // with no SQL error. `admin-muns.ts`'s equivalent per-row subqueries avoid
+  // this because that query has an `innerJoin`, which disables the
+  // optimization. Same shape as `getGoLiveQueueDetails`'s `bySubmission` map.
+  const munCounts =
+    rows.length === 0
+      ? []
+      : await db
+          .select({ organizerId: muns.organizerId, count: sql<number>`count(*)::int` })
+          .from(muns)
+          .where(
+            inArray(
+              muns.organizerId,
+              rows.map((row) => row.id),
+            ),
+          )
+          .groupBy(muns.organizerId)
+  const countByOrganizer = new Map(munCounts.map((row) => [row.organizerId, row.count]))
+  const results = rows.map((row) => ({ ...row, munCount: countByOrganizer.get(row.id) ?? 0 }))
 
   const [{ count } = { count: 0 }] = await db
     .select({ count: sql<number>`count(*)::int` })

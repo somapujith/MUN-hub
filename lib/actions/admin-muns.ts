@@ -74,6 +74,8 @@ function statusList(statuses: RegistrationStatus[]) {
 export interface AdminMunListParams {
   q?: string
   status?: MunStatus
+  /** Exact match — the drill-down from the Organizers console's per-organizer MUN count/link. */
+  organizerId?: string
   limit?: number
   offset?: number
 }
@@ -103,9 +105,12 @@ export interface AdminMunListResult {
 /**
  * Every MUN on the platform, newest first, paginated (default 20). `q`
  * matches MUN name, slug, organizer name or organizer email (case-insensitive
- * substring); `status` narrows to one lifecycle status. Registration counts
- * are per-row subqueries, which stay cheap because a page is at most 100 rows
- * and registrations are indexed on (mun_id, status).
+ * substring); `status` narrows to one lifecycle status; `organizerId` narrows
+ * to exactly one organizer (the drill-down link from the Organizers console —
+ * exact match rather than another `q` substring, since an organizer's email
+ * could itself be a substring of another one's). Registration counts are
+ * per-row subqueries, which stay cheap because a page is at most 100 rows and
+ * registrations are indexed on (mun_id, status).
  */
 export async function listAdminMuns(
   params: AdminMunListParams = {},
@@ -119,6 +124,7 @@ export async function listAdminMuns(
   const pattern = q ? `%${escapeLike(q)}%` : undefined
   const whereClause = and(
     params.status ? eq(muns.status, params.status) : undefined,
+    params.organizerId ? eq(muns.organizerId, params.organizerId) : undefined,
     pattern
       ? or(ilike(muns.name, pattern), ilike(muns.slug, pattern), ilike(users.name, pattern), ilike(users.email, pattern))
       : undefined,

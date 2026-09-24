@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { adminActions, users } from '@/lib/db/schema'
+import { adminActions, muns, users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 
 import { listOrganizers, ORGANIZER_NOT_FOUND, reinstateOrganizer, suspendOrganizer } from './organizer-admin'
@@ -225,6 +225,34 @@ describe('listOrganizers', () => {
     const noMatch = await listOrganizers({ search: `no-such-organizer-${Date.now()}` }, __actor)
     expect(noMatch.results).toEqual([])
     expect(noMatch.total).toBe(0)
+  })
+
+  it('reports munCount per organizer, so the console can link through to their MUNs', async () => {
+    const admin = await makeUser('ADMIN')
+    const unique = `Ruritania-${Date.now()}`
+    const [organizer] = await db
+      .insert(users)
+      .values({
+        name: `${unique} MUN Society`,
+        email: `ruritania-${Date.now()}-${Math.random()}@test.dev`,
+        role: 'ORGANIZER',
+      })
+      .returning()
+    const [otherOrganizer] = await db
+      .insert(users)
+      .values({ name: `no-muns-${unique}`, email: `no-muns-${Date.now()}@test.dev`, role: 'ORGANIZER' })
+      .returning()
+    await db.insert(muns).values([
+      { organizerId: organizer.id, name: `${unique} A`, slug: `${unique}-a`.toLowerCase(), status: 'DRAFT' },
+      { organizerId: organizer.id, name: `${unique} B`, slug: `${unique}-b`.toLowerCase(), status: 'PUBLISHED' },
+    ])
+    const __actor = sess(admin)
+
+    const { results } = await listOrganizers({ search: unique }, __actor)
+    const row = results.find((r) => r.id === organizer.id)
+    const otherRow = results.find((r) => r.id === otherOrganizer.id)
+    expect(row?.munCount).toBe(2)
+    expect(otherRow?.munCount).toBe(0)
   })
 })
 

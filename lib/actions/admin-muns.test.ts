@@ -133,6 +133,22 @@ describe('listAdminMuns', () => {
     expect(underscoreAsWildcard.total).toBe(0)
   })
 
+  it('filters by organizerId as an exact match, unlike a q substring match on email', async () => {
+    const admin = await makeUser('ADMIN')
+    const organizerA = await makeUser('ORGANIZER', `OrgA-${crypto.randomUUID()}`)
+    const organizerB = await makeUser('ORGANIZER', `OrgB-${crypto.randomUUID()}`)
+    const munA = await makeMun(organizerA.id, 'DRAFT')
+    await makeMun(organizerA.id, 'PUBLISHED')
+    await makeMun(organizerB.id, 'DRAFT')
+
+    const filtered = await listAdminMuns({ organizerId: organizerA.id }, sess(admin))
+    expect(filtered.total).toBe(2)
+    expect(filtered.results.every((r) => r.organizerId === organizerA.id)).toBe(true)
+
+    const combined = await listAdminMuns({ organizerId: organizerA.id, status: 'DRAFT' }, sess(admin))
+    expect(combined.results.map((r) => r.id)).toEqual([munA.id])
+  })
+
   it.each(['STUDENT', 'ORGANIZER'] as const)('refuses a %s session', async (role) => {
     const user = await makeUser(role)
     await expect(listAdminMuns({}, sess(user))).rejects.toThrow('Forbidden')

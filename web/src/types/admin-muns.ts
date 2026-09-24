@@ -26,6 +26,8 @@ import type { MunMediaItem } from "@/types/mun-branding";
 export interface AdminMunListParams {
   q?: string;
   status?: MunStatus;
+  /** Exact match — the drill-down from the Organizers console's per-organizer MUN count/link. */
+  organizerId?: string;
   limit?: number;
   offset?: number;
 }

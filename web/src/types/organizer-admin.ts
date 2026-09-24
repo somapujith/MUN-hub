@@ -7,6 +7,8 @@ export interface OrganizerRow {
   suspendedReason: string | null;
   suspendedAt: string | null;
   createdAt: string;
+  /** How many MUNs this organizer runs (any status). Links through to the Conferences console. */
+  munCount: number;
 }
 
 export interface ListOrganizersResult {
