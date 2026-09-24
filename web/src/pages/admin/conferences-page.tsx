@@ -5,6 +5,7 @@ import { LandmarkIcon, SearchIcon } from "lucide-react";
 import { listAdminMuns } from "@/api/admin-muns";
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
 import { MunStatusBadge } from "@/components/mun/mun-status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -62,6 +63,12 @@ export function AdminConferencesPage() {
   const urlQuery = searchParams.get("q") ?? "";
   const rawStatus = searchParams.get("status");
   const status = isMunStatus(rawStatus) ? rawStatus : undefined;
+  // Drill-down from the Organizers console's per-organizer MUN count/link
+  // (see organizers-page.tsx). `organizerName` is display-only — it's never
+  // sent to the API, just used to label the filter chip below without an
+  // extra round-trip.
+  const organizerId = searchParams.get("organizerId") ?? undefined;
+  const organizerName = searchParams.get("organizerName") ?? undefined;
 
   const [searchInput, setSearchInput] = useState(urlQuery);
   const [page, setPage] = useState(0);
@@ -85,8 +92,8 @@ export function AdminConferencesPage() {
   }, [searchInput, urlQuery, setSearchParams]);
 
   const params = useMemo(
-    () => ({ q: urlQuery || undefined, status, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
-    [urlQuery, status, page],
+    () => ({ q: urlQuery || undefined, status, organizerId, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+    [urlQuery, status, organizerId, page],
   );
 
   const munsQuery = useQuery({
@@ -98,7 +105,20 @@ export function AdminConferencesPage() {
   const results = munsQuery.data?.results ?? [];
   const total = munsQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const filtered = Boolean(urlQuery || status);
+  const filtered = Boolean(urlQuery || status || organizerId);
+
+  const clearOrganizerFilter = () => {
+    setPage(0);
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.delete("organizerId");
+        next.delete("organizerName");
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   return (
     <AdminPageFrame
@@ -154,6 +174,17 @@ export function AdminConferencesPage() {
           {munsQuery.isLoading ? "Loading…" : `${total} ${total === 1 ? "conference" : "conferences"}`}
         </p>
       </div>
+
+      {organizerId && (
+        <div className="flex items-center gap-xs">
+          <Badge variant="secondary">
+            Organizer: {organizerName ?? "filtered"}
+          </Badge>
+          <Button variant="link" size="sm" className="h-auto w-fit p-0" onClick={clearOrganizerFilter}>
+            Clear
+          </Button>
+        </div>
+      )}
 
       {munsQuery.isLoading ? (
         <div className="flex flex-col gap-sm">

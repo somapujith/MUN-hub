@@ -174,12 +174,13 @@ export function AdminOrganizersPage() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-md border border-border bg-card">
-          <table className="w-full min-w-[48rem] text-left text-body-md">
+          <table className="w-full min-w-[54rem] text-left text-body-md">
             <thead className="border-b border-border bg-surface-soft/80 text-muted-foreground">
               <tr>
                 <th className="px-md py-sm font-medium">Organizer</th>
                 <th className="px-md py-sm font-medium">Email</th>
                 <th className="px-md py-sm font-medium">Status</th>
+                <th className="px-md py-sm font-medium">MUNs</th>
                 <th className="px-md py-sm font-medium">Joined</th>
                 <th className="px-md py-sm font-medium text-right">Actions</th>
               </tr>
@@ -204,6 +205,24 @@ export function AdminOrganizersPage() {
                       <p className="mt-xxs max-w-xs text-body-md text-muted-foreground">
                         {organizer.suspendedReason}
                       </p>
+                    )}
+                  </td>
+                  <td className="px-md py-sm">
+                    {organizer.munCount > 0 ? (
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="h-auto w-fit p-0 tabular-nums"
+                        render={
+                          <Link
+                            to={`/admin/muns?organizerId=${organizer.id}&organizerName=${encodeURIComponent(organizer.name)}`}
+                          />
+                        }
+                      >
+                        {organizer.munCount} {organizer.munCount === 1 ? "MUN" : "MUNs"}
+                      </Button>
+                    ) : (
+                      <span className="text-muted-foreground">None yet</span>
                     )}
                   </td>
                   <td className="px-md py-sm tabular-nums text-muted-foreground">
