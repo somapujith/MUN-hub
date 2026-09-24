@@ -1,4 +1,5 @@
 import type {
+  BulkApproveApplicationsResult,
   MunReviewDetail,
   ReviewMunApplicationInput,
   ReviewMunApplicationResult,
@@ -55,5 +56,19 @@ export function reviewMunApplication(munId: string, input: ReviewMunApplicationI
   return request<ReviewMunApplicationResult>(`/admin/muns/${munId}/review-application`, {
     method: "POST",
     body: JSON.stringify(input),
+  });
+}
+
+/**
+ * Bulk approve-only (`POST /admin/muns/bulk-approve`, wrapping
+ * `bulkApproveMunApplications`). Reject/changes-requested need a per-item
+ * reason and stay single-item via `reviewMunApplication` above. Continues
+ * past a per-id failure — check each result's `ok`/`error` rather than
+ * assuming every id in `munIds` succeeded.
+ */
+export function bulkApproveMunApplications(munIds: string[]) {
+  return request<BulkApproveApplicationsResult>(`/admin/muns/bulk-approve`, {
+    method: "POST",
+    body: JSON.stringify({ munIds }),
   });
 }

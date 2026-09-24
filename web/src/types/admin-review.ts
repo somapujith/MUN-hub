@@ -86,3 +86,14 @@ export interface ReviewMunApplicationResult {
   id: string;
   status: MunStatus;
 }
+
+/** One id's outcome from `bulkApproveMunApplications` — the mun/application id and whether it succeeded. */
+export interface BulkApplicationDecisionResult {
+  id: string;
+  ok: boolean;
+  error?: string;
+}
+
+export interface BulkApproveApplicationsResult {
+  results: BulkApplicationDecisionResult[];
+}

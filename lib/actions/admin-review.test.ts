@@ -20,6 +20,7 @@ import { listAdminActions } from './admin-audit'
 import { recordPiiRead } from './admin-pii-read'
 
 import {
+  bulkApproveMunApplications,
   getAdminMunModuleContent,
   getModuleReviewQueue,
   getMunForReview,
@@ -323,6 +324,42 @@ describe('reviewMunApplication', () => {
     const log = logs.find((l) => l.action === 'CHANGES_REQUESTED')
     expect(log?.notes).toBe('fix dates')
     expect(log?.internalNotes).toBe('organizer is slow to respond')
+  })
+})
+
+describe('bulkApproveMunApplications', () => {
+  it("continues past a per-id failure and reports each id's outcome, without letting the failure block the good id", async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    const goodMun = await makeMun(organizer.id, 'SUBMITTED')
+    await makeApplication(organizer.id, goodMun.id)
+
+    // Simulates "someone else already decided this one since the queue was
+    // loaded": approve it up front, so the bulk call's own attempt at the
+    // same id hits the real `reviewMunApplication` invalid-transition guard
+    // (ONBOARDING -> APPROVED), not a synthetic failure.
+    const alreadyDecidedMun = await makeMun(organizer.id, 'SUBMITTED')
+    await makeApplication(organizer.id, alreadyDecidedMun.id)
+    await reviewMunApplication(alreadyDecidedMun.id, 'APPROVED', undefined, undefined, __actor)
+
+    const results = await bulkApproveMunApplications([goodMun.id, alreadyDecidedMun.id], __actor)
+
+    expect(results).toEqual([
+      { id: goodMun.id, ok: true },
+      { id: alreadyDecidedMun.id, ok: false, error: expect.stringContaining('Invalid transition') },
+    ])
+
+    // The good id's own reviewMunApplication call ran to completion (Gate 1
+    // exit into ONBOARDING) despite the other id failing later in the loop.
+    const [after] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, goodMun.id))
+    expect(after.status).toBe('ONBOARDING')
+  })
+
+  it('rejects a non-reviewer session up front, before touching any id', async () => {
+    const student = await makeUser('STUDENT')
+    await expect(bulkApproveMunApplications(['does-not-matter'], sess(student))).rejects.toThrow('Forbidden')
   })
 })
 
