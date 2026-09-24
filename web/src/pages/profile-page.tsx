@@ -312,43 +312,45 @@ export function ProfilePage() {
                       <CardTitle>Personal details</CardTitle>
                     </CardHeader>
                     <CardContent className="flex flex-col gap-md">
-                      <div className="flex flex-col gap-xs">
-                        <Label htmlFor="profile-phone">Phone number</Label>
-                        <Input
-                          id="profile-phone"
-                          type="tel"
-                          value={form.phone}
-                          onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="flex flex-col gap-xs">
-                        <Label htmlFor="profile-institution">School or institution</Label>
-                        <Input
-                          id="profile-institution"
-                          value={form.institution}
-                          onChange={(e) => setForm({ ...form, institution: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="flex flex-col gap-xs">
-                        <Label htmlFor="profile-dob">Date of birth</Label>
-                        <Input
-                          id="profile-dob"
-                          type="date"
-                          value={form.dateOfBirth}
-                          onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="flex flex-col gap-xs">
-                        <Label htmlFor="profile-grade">Grade / year</Label>
-                        <Input
-                          id="profile-grade"
-                          value={form.gradeOrYear}
-                          onChange={(e) => setForm({ ...form, gradeOrYear: e.target.value })}
-                          required
-                        />
+                      <div className="grid gap-md sm:grid-cols-2">
+                        <div className="flex flex-col gap-xs">
+                          <Label htmlFor="profile-phone">Phone number</Label>
+                          <Input
+                            id="profile-phone"
+                            type="tel"
+                            value={form.phone}
+                            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                            required
+                          />
+                        </div>
+                        <div className="flex flex-col gap-xs">
+                          <Label htmlFor="profile-institution">School or institution</Label>
+                          <Input
+                            id="profile-institution"
+                            value={form.institution}
+                            onChange={(e) => setForm({ ...form, institution: e.target.value })}
+                            required
+                          />
+                        </div>
+                        <div className="flex flex-col gap-xs">
+                          <Label htmlFor="profile-dob">Date of birth</Label>
+                          <Input
+                            id="profile-dob"
+                            type="date"
+                            value={form.dateOfBirth}
+                            onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })}
+                            required
+                          />
+                        </div>
+                        <div className="flex flex-col gap-xs">
+                          <Label htmlFor="profile-grade">Grade / year</Label>
+                          <Input
+                            id="profile-grade"
+                            value={form.gradeOrYear}
+                            onChange={(e) => setForm({ ...form, gradeOrYear: e.target.value })}
+                            required
+                          />
+                        </div>
                       </div>
                       <div className="flex flex-col gap-xs">
                         <Label htmlFor="profile-address">Residential address</Label>
@@ -379,34 +381,36 @@ export function ProfilePage() {
                     <CardHeader>
                       <CardTitle>Emergency contact</CardTitle>
                     </CardHeader>
-                    <CardContent className="flex flex-col gap-md">
-                      <div className="flex flex-col gap-xs">
-                        <Label htmlFor="profile-ec-name">Name</Label>
-                        <Input
-                          id="profile-ec-name"
-                          value={form.emergencyContactName}
-                          onChange={(e) => setForm({ ...form, emergencyContactName: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="flex flex-col gap-xs">
-                        <Label htmlFor="profile-ec-phone">Phone</Label>
-                        <Input
-                          id="profile-ec-phone"
-                          type="tel"
-                          value={form.emergencyContactPhone}
-                          onChange={(e) => setForm({ ...form, emergencyContactPhone: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="flex flex-col gap-xs">
-                        <Label htmlFor="profile-ec-relation">Relation</Label>
-                        <Input
-                          id="profile-ec-relation"
-                          value={form.emergencyContactRelation}
-                          onChange={(e) => setForm({ ...form, emergencyContactRelation: e.target.value })}
-                          required
-                        />
+                    <CardContent>
+                      <div className="grid gap-md sm:grid-cols-3">
+                        <div className="flex flex-col gap-xs">
+                          <Label htmlFor="profile-ec-name">Name</Label>
+                          <Input
+                            id="profile-ec-name"
+                            value={form.emergencyContactName}
+                            onChange={(e) => setForm({ ...form, emergencyContactName: e.target.value })}
+                            required
+                          />
+                        </div>
+                        <div className="flex flex-col gap-xs">
+                          <Label htmlFor="profile-ec-phone">Phone</Label>
+                          <Input
+                            id="profile-ec-phone"
+                            type="tel"
+                            value={form.emergencyContactPhone}
+                            onChange={(e) => setForm({ ...form, emergencyContactPhone: e.target.value })}
+                            required
+                          />
+                        </div>
+                        <div className="flex flex-col gap-xs">
+                          <Label htmlFor="profile-ec-relation">Relation</Label>
+                          <Input
+                            id="profile-ec-relation"
+                            value={form.emergencyContactRelation}
+                            onChange={(e) => setForm({ ...form, emergencyContactRelation: e.target.value })}
+                            required
+                          />
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
