@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { zValidator } from '../lib/zod-validator'
 import { z } from 'zod'
 import {
+  claimSubmission,
   enqueueForGoLive,
   getGoLiveQueue,
   publishFromQueue,
@@ -68,6 +69,15 @@ export const goLiveRoutes = new Hono<{ Variables: AppVariables }>()
     const session = c.get('session')
 
     const submission = await enqueueForGoLive(munId, session)
+    return c.json(submission, 200)
+  })
+  // Claims a submission for review — mirrors
+  // POST /admin/support/tickets/:ticketId/assign's shape (server/routes/support.ts).
+  .post('/admin/go-live-queue/:submissionId/claim', async (c) => {
+    const submissionId = c.req.param('submissionId')
+    const session = c.get('session')
+
+    const submission = await claimSubmission(submissionId, session)
     return c.json(submission, 200)
   })
   .get('/admin/go-live-queue', zValidator('query', queueQuerySchema), async (c) => {

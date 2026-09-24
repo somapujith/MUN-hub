@@ -96,6 +96,21 @@ export function getGoLiveQueueDetails(params: GoLiveQueueParams = {}) {
 }
 
 /**
+ * Claims a submission for review — wraps
+ * lib/lifecycle/go-live.ts#claimSubmission (OPERATIONS/ADMIN/SUPER_ADMIN).
+ * The caller always becomes the reviewer, including taking over a submission
+ * someone else already holds (mirrors `assignSupportTicketToSelf` in
+ * `@/api/support` — no separate "force" argument, same as that endpoint).
+ * Refused only once the submission has left the active/claimable set
+ * (PUBLISHED/REJECTED/WITHDRAWN).
+ */
+export function claimSubmission(submissionId: string) {
+  return request<MunSubmissionRow>(`/admin/go-live-queue/${submissionId}/claim`, {
+    method: "POST",
+  });
+}
+
+/**
  * Gate 2 content-review decision on the MUN's active submission — wraps
  * lib/lifecycle/go-live.ts#reviewSubmission (OPERATIONS/ADMIN/SUPER_ADMIN).
  * Legal only while the MUN is in VERIFICATION. APPROVED -> VERIFIED,
