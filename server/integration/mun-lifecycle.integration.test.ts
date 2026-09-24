@@ -1,10 +1,10 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { munPaymentSettings, muns, registrationProducts, verificationLogs } from '@/lib/db/schema'
-import type { MunStatus, PaymentVerificationState } from '@/lib/db/schema-enums'
+import { muns, registrationProducts, verificationLogs } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
+import type { MunStatus } from '@/lib/db/schema-enums'
 import { createApp } from '../src/app'
-import { authHeaders, makeUser } from './helpers'
+import { authHeaders, completeOrganizerOnboarding, makeUser } from './helpers'
 
 const app = createApp()
 const DAY = 24 * 60 * 60 * 1000
@@ -13,12 +13,15 @@ afterAll(async () => {
   await db.$client.end()
 })
 
-/** A mun whose registration window is live right now (real clock — the route has no `now` override). */
-async function makeMun(
-  organizerId: string,
-  status: MunStatus = 'PUBLISHED',
-  payment: PaymentVerificationState = 'VERIFIED',
-) {
+/**
+ * A mun whose registration window is live right now (real clock — the route
+ * has no `now` override). `upiOnboarding` controls whether the owning
+ * organizer has finished the UPI (PAYMENT) step of organizer onboarding —
+ * open-registration's payout gate is account-level (organizer_profiles), not
+ * per-mun, so it's set on the organizer, not on the mun itself.
+ */
+async function makeMun(organizerId: string, status: MunStatus = 'PUBLISHED', upiOnboarding = true) {
+  if (upiOnboarding) await completeOrganizerOnboarding(organizerId)
   const now = Date.now()
   const [mun] = await db
     .insert(muns)
@@ -34,27 +37,6 @@ async function makeMun(
     })
     .returning()
   await db.insert(registrationProducts).values({ munId: mun.id, name: 'Delegate', price: 1200, capacity: 30 })
-  await db.insert(munPaymentSettings).values({
-    munId: mun.id,
-    legalName: 'Test Org',
-    orgType: 'NGO',
-    addressLine1: 'Addr',
-    city: 'Hyderabad',
-    state: 'Telangana',
-    postalCode: '500001',
-    panLast4: '1234',
-    panCiphertext: 'ciphertext-not-real',
-    authorizedRepName: 'Rep',
-    authorizedRepEmail: 'rep@lifecycle-api.test',
-    accountHolderName: 'Test Org',
-    bankName: 'Test Bank',
-    accountNumberLast4: '5678',
-    accountNumberCiphertext: 'ciphertext-not-real',
-    ifsc: 'TEST0001234',
-    accountType: 'current',
-    gateway: 'razorpay',
-    verificationState: payment,
-  })
   return mun
 }
 
@@ -136,12 +118,12 @@ describe('POST /api/v1/muns/:munId/lifecycle/:action', () => {
 
   it('returns 409 CONFLICT_STATE with the failing precondition', async () => {
     const owner = await makeUser()
-    const mun = await makeMun(owner.id, 'PUBLISHED', 'PENDING')
+    const mun = await makeMun(owner.id, 'PUBLISHED', false)
     const res = await post(mun.id, 'open-registration', { headers: await authHeaders(owner.id) })
     expect(res.status).toBe(409)
     const body = await res.json()
     expect(body.error.code).toBe('CONFLICT_STATE')
-    expect(body.error.message).toMatch(/verified your payment account/)
+    expect(body.error.message).toMatch(/payment step of organizer onboarding/)
   })
 
   it('returns 409 for an action that does not fit the current status', async () => {

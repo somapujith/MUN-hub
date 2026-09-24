@@ -229,10 +229,15 @@ export async function upsertPaymentSettings(
       existing != null && SETTLEMENT_VERIFIED_FIELDS.some((field) => before[field] !== after[field])
 
     // Independently of the MUN's status: an account MUNHub already looked at
-    // must not stay VERIFIED once its details change — `open-registration`
-    // (registration-lifecycle.ts) gates paid passes on exactly that value.
-    // This is a payout-account check only; it never takes the MUN's listing
-    // offline (a verified MUN's edits don't go back to review).
+    // must not stay VERIFIED once its details change. This is a payout-account
+    // check only; it never takes the MUN's listing offline (a verified MUN's
+    // edits don't go back to review). NOTE: as of the 2026-09-25 fix,
+    // `open-registration` (registration-lifecycle.ts) no longer reads this
+    // table at all — that gate now checks the organizer's UPI onboarding
+    // completion (organizer_profiles), since the current onboarding flow
+    // never creates a mun_payment_settings row. This table/verification flow
+    // is a legacy per-MUN bank-account design kept for admin display and any
+    // future settlement work, not currently wired to any registration gate.
     const write = accountChanged
       ? { ...values, verificationState: 'PENDING' as const, verifiedAt: null, verifiedBy: null }
       : values

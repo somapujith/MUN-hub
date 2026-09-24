@@ -6,12 +6,13 @@ import {
   munPaymentSettings,
   munSubmissions,
   muns,
+  organizerProfiles,
   registrationProducts,
   registrations,
   users,
   verificationLogs,
 } from '@/lib/db/schema'
-import type { MunStatus, PaymentVerificationState, Role } from '@/lib/db/schema-enums'
+import type { MunStatus, Role } from '@/lib/db/schema-enums'
 import type { Session } from '@/lib/auth/adapter'
 import { notifyConferenceCancelled } from './lifecycle-events'
 import { canTransition } from './mun-state-machine'
@@ -51,11 +52,33 @@ const END = new Date('2026-10-12T00:00:00Z')
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
 
-async function makeUser(role: Role = 'ORGANIZER') {
+interface MakeUserOptions {
+  /**
+   * For an ORGANIZER: whether to finish the UPI (PAYMENT) step of organizer
+   * onboarding on creation — the account-level `organizer_profiles.upiId`/
+   * `upiPhone` pair `open-registration`'s payout gate now checks. Default
+   * true, mirroring the old fixture's `payment: 'VERIFIED'` default.
+   */
+  upiOnboarding?: boolean
+}
+
+async function makeUser(role: Role = 'ORGANIZER', options: MakeUserOptions = {}) {
   const [user] = await db
     .insert(users)
     .values({ name: role, email: `lifecycle-${role}-${crypto.randomUUID()}@test.com`, role })
     .returning()
+  if (role === 'ORGANIZER' && (options.upiOnboarding ?? true)) {
+    await db.insert(organizerProfiles).values({
+      userId: user.id,
+      firstName: 'Test',
+      lastName: 'Organizer',
+      contactPhone: '9876543210',
+      upiId: 'test@freecharge',
+      upiPhone: '9876543210',
+      agreementVersion: 'test',
+      completedAt: new Date(),
+    })
+  }
   return user
 }
 
@@ -71,8 +94,6 @@ interface MunOptions {
   registrationDeadline?: Date | null
   /** Passes to create; default one paid active pass. */
   passes?: Array<{ price: number; status?: string; deadline?: Date | null }>
-  /** Payment settings state; null = no settings row. Default VERIFIED. */
-  payment?: PaymentVerificationState | null
 }
 
 async function makeMun(organizerId: string, options: MunOptions = {}) {
@@ -109,31 +130,6 @@ async function makeMun(organizerId: string, options: MunOptions = {}) {
       })
       .returning()
     createdPasses.push(created)
-  }
-
-  const payment = options.payment === undefined ? 'VERIFIED' : options.payment
-  if (payment) {
-    await db.insert(munPaymentSettings).values({
-      munId: mun.id,
-      legalName: 'Test Org',
-      orgType: 'NGO',
-      addressLine1: 'Addr',
-      city: 'Hyderabad',
-      state: 'Telangana',
-      postalCode: '500001',
-      panLast4: '1234',
-      panCiphertext: 'ciphertext-not-real',
-      authorizedRepName: 'Rep',
-      authorizedRepEmail: 'rep@lifecycle.test',
-      accountHolderName: 'Test Org',
-      bankName: 'Test Bank',
-      accountNumberLast4: '5678',
-      accountNumberCiphertext: 'ciphertext-not-real',
-      ifsc: 'TEST0001234',
-      accountType: 'current',
-      gateway: 'razorpay',
-      verificationState: payment,
-    })
   }
 
   return { mun, passes: createdPasses }
@@ -255,22 +251,47 @@ describe('open-registration', () => {
     expect(await statusOf(mun.id)).toBe('PUBLISHED')
   })
 
-  it('needs a verified payment account when a pass is paid', async () => {
-    const owner = await makeUser()
-    const pending = await makeMun(owner.id, { payment: 'PENDING' })
-    const missing = await makeMun(owner.id, { payment: null })
-    for (const { mun } of [pending, missing]) {
-      await expectLifecycleError(
-        runLifecycleAction(mun.id, 'open-registration', {}, sessionFor(owner), NOW),
-        409,
-        LIFECYCLE_ERRORS.paymentNotVerified,
-      )
-    }
+  it('needs the organizer to have finished UPI onboarding when a pass is paid', async () => {
+    // Never started onboarding — no organizer_profiles row at all.
+    const noProfile = await makeUser('ORGANIZER', { upiOnboarding: false })
+    const { mun: noProfileMun } = await makeMun(noProfile.id)
+    await expectLifecycleError(
+      runLifecycleAction(noProfileMun.id, 'open-registration', {}, sessionFor(noProfile), NOW),
+      409,
+      LIFECYCLE_ERRORS.paymentNotVerified,
+    )
+
+    // Mid-onboarding — a profile row exists (earlier steps done) but the
+    // PAYMENT step (upiId/upiPhone) was never finished.
+    const midOnboarding = await makeUser('ORGANIZER', { upiOnboarding: false })
+    await db.insert(organizerProfiles).values({
+      userId: midOnboarding.id,
+      firstName: 'Test',
+      lastName: 'Organizer',
+      contactPhone: '9876543210',
+    })
+    const { mun: noUpiMun } = await makeMun(midOnboarding.id)
+    await expectLifecycleError(
+      runLifecycleAction(noUpiMun.id, 'open-registration', {}, sessionFor(midOnboarding), NOW),
+      409,
+      LIFECYCLE_ERRORS.paymentNotVerified,
+    )
   })
 
-  it('does not need payment verification when every pass is free', async () => {
-    const owner = await makeUser()
-    const { mun } = await makeMun(owner.id, { passes: [{ price: 0 }], payment: null })
+  it('opens for a paid pass once the organizer has finished UPI onboarding, with no mun_payment_settings row at all', async () => {
+    const owner = await makeUser() // upiOnboarding: true by default
+    const { mun } = await makeMun(owner.id, { passes: [{ price: 1500 }] })
+
+    const [settings] = await db.select().from(munPaymentSettings).where(eq(munPaymentSettings.munId, mun.id))
+    expect(settings).toBeUndefined()
+
+    const result = await runLifecycleAction(mun.id, 'open-registration', {}, sessionFor(owner), NOW)
+    expect(result.status).toBe('REGISTRATION_OPEN')
+  })
+
+  it('does not need UPI onboarding when every pass is free', async () => {
+    const owner = await makeUser('ORGANIZER', { upiOnboarding: false })
+    const { mun } = await makeMun(owner.id, { passes: [{ price: 0 }] })
     const result = await runLifecycleAction(mun.id, 'open-registration', {}, sessionFor(owner), NOW)
     expect(result.status).toBe('REGISTRATION_OPEN')
   })
@@ -708,9 +729,9 @@ describe('cancel', () => {
 
 describe('getLifecycleOverview', () => {
   it('lists the organizer next actions with blocked reasons', async () => {
-    const owner = await makeUser()
+    const owner = await makeUser('ORGANIZER', { upiOnboarding: false })
     const delegate = await makeUser('STUDENT')
-    const { mun, passes } = await makeMun(owner.id, { payment: 'PENDING' })
+    const { mun, passes } = await makeMun(owner.id)
     await db
       .insert(registrations)
       .values({ userId: delegate.id, munId: mun.id, registrationProductId: passes[0].id, status: 'CONFIRMED' })
