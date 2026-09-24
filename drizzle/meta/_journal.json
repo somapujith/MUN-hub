@@ -309,6 +309,13 @@
       "when": 1790283252841,
       "tag": "0043_add_submission_claimed_admin_action",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790284953878,
+      "tag": "0044_public_phalanx",
+      "breakpoints": true
     }
   ]
 }
