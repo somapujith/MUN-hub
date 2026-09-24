@@ -2,12 +2,15 @@ import { zValidator } from '../lib/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import {
+  cancelRegistrationAsAdmin,
   getModuleReviewQueue,
   getMunForReview,
   getReviewQueue,
   publishMun,
   reinstateMun,
+  resendRegistrationConfirmation,
   reviewMunApplication,
+  setRegistrationDuplicateFlag,
   suspendMun,
   unpublishMun,
 } from '@/lib/actions/admin-review'
@@ -51,6 +54,18 @@ const reviewApplicationBodySchema = z
   })
 
 const suspendMunBodySchema = z
+  .object({
+    reason: z.string().min(1),
+  })
+  .strict()
+
+const cancelRegistrationBodySchema = z
+  .object({
+    reason: z.string().min(1),
+  })
+  .strict()
+
+const flagRegistrationDuplicateBodySchema = z
   .object({
     reason: z.string().min(1),
   })
@@ -153,6 +168,60 @@ adminReviewRoutes.get(
       { status: query.status, search: query.q, limit: query.limit, offset: query.offset },
       c.get('session'),
     )
+    return c.json(result)
+  },
+)
+
+// Per-registration admin actions — the admin Registrations page. Distinct
+// from the conference-level `POST /muns/:munId/lifecycle/cancel`
+// (server/routes/mun-lifecycle.ts), which cancels every in-flight hold on an
+// entire mun at once.
+
+adminReviewRoutes.post(
+  '/admin/registrations/:registrationId/cancel',
+  requireAuth,
+  requireRole([...REVIEW_ROLES]),
+  zValidator('json', cancelRegistrationBodySchema),
+  async (c) => {
+    const { reason } = c.req.valid('json')
+    const result = await cancelRegistrationAsAdmin(c.req.param('registrationId'), reason, c.get('session'))
+    return c.json(result)
+  },
+)
+
+adminReviewRoutes.post(
+  '/admin/registrations/:registrationId/flag-duplicate',
+  requireAuth,
+  requireRole([...REVIEW_ROLES]),
+  zValidator('json', flagRegistrationDuplicateBodySchema),
+  async (c) => {
+    const { reason } = c.req.valid('json')
+    const result = await setRegistrationDuplicateFlag(c.req.param('registrationId'), true, reason, c.get('session'))
+    return c.json(result)
+  },
+)
+
+adminReviewRoutes.post(
+  '/admin/registrations/:registrationId/unflag-duplicate',
+  requireAuth,
+  requireRole([...REVIEW_ROLES]),
+  async (c) => {
+    const result = await setRegistrationDuplicateFlag(
+      c.req.param('registrationId'),
+      false,
+      undefined,
+      c.get('session'),
+    )
+    return c.json(result)
+  },
+)
+
+adminReviewRoutes.post(
+  '/admin/registrations/:registrationId/resend-confirmation',
+  requireAuth,
+  requireRole([...REVIEW_ROLES]),
+  async (c) => {
+    const result = await resendRegistrationConfirmation(c.req.param('registrationId'), c.get('session'))
     return c.json(result)
   },
 )

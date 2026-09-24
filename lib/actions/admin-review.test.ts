@@ -19,7 +19,11 @@ import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { listAdminActions } from './admin-audit'
 import { recordPiiRead } from './admin-pii-read'
 
+import type { RegistrationStatus } from '@/lib/db/schema-enums'
+import { initiateRegistration } from './registration'
 import {
+  cancelRegistrationAsAdmin,
+  exportRegistrationsCsv,
   getAdminMunModuleContent,
   getModuleReviewQueue,
   getMunForReview,
@@ -27,7 +31,10 @@ import {
   getReviewQueue,
   publishMun,
   reinstateMun,
+  REGISTRATION_ADMIN_ERRORS,
+  resendRegistrationConfirmation,
   reviewMunApplication,
+  setRegistrationDuplicateFlag,
   suspendMun,
   unpublishMun,
 } from './admin-review'
@@ -616,26 +623,26 @@ describe('getAdminMunModuleContent', () => {
   })
 })
 
-describe('getRegistrationsQueue', () => {
-  async function registeredDelegate() {
-    const organizer = await makeUser('ORGANIZER')
-    const mun = await makeMun(organizer.id, 'PUBLISHED')
-    const tag = `${Date.now()}${Math.random().toString(36).slice(2, 8)}`
-    const [delegate] = await db
-      .insert(users)
-      .values({ name: `Delegate ${tag}`, email: `Search_Me.${tag}@Example.test`, role: 'STUDENT' })
-      .returning()
-    const [product] = await db
-      .insert(registrationProducts)
-      .values({ munId: mun.id, name: 'Delegate pass', price: 100, capacity: 10 })
-      .returning()
-    const [registration] = await db
-      .insert(registrations)
-      .values({ userId: delegate.id, munId: mun.id, registrationProductId: product.id, status: 'PENDING' })
-      .returning()
-    return { delegate, registration }
-  }
+async function registeredDelegate(status: RegistrationStatus = 'PENDING', capacity = 10) {
+  const organizer = await makeUser('ORGANIZER')
+  const mun = await makeMun(organizer.id, 'PUBLISHED')
+  const tag = `${Date.now()}${Math.random().toString(36).slice(2, 8)}`
+  const [delegate] = await db
+    .insert(users)
+    .values({ name: `Delegate ${tag}`, email: `Search_Me.${tag}@Example.test`, role: 'STUDENT' })
+    .returning()
+  const [product] = await db
+    .insert(registrationProducts)
+    .values({ munId: mun.id, name: 'Delegate pass', price: 100, capacity })
+    .returning()
+  const [registration] = await db
+    .insert(registrations)
+    .values({ userId: delegate.id, munId: mun.id, registrationProductId: product.id, status })
+    .returning()
+  return { organizer, delegate, mun, product, registration }
+}
 
+describe('getRegistrationsQueue', () => {
   it('matches the delegate email, case-insensitively and by fragment', async () => {
     const { delegate, registration } = await registeredDelegate()
     const __actor = sess(await makeUser('OPERATIONS'))
@@ -652,6 +659,211 @@ describe('getRegistrationsQueue', () => {
     const __actor = sess(await makeUser('OPERATIONS'))
     const { total } = await getRegistrationsQueue({ q: `Search_Me.%${'_'.repeat(3)}@` }, __actor)
     expect(total).toBe(0)
+  })
+
+  it('returns the owning munId on every row, and filters by an exact status match', async () => {
+    const { registration: pending, mun } = await registeredDelegate('PENDING')
+    const { registration: confirmed } = await registeredDelegate('CONFIRMED')
+    const __actor = sess(await makeUser('OPERATIONS'))
+
+    const { results: pendingResults } = await getRegistrationsQueue({ status: 'PENDING', q: pending.id }, __actor)
+    expect(pendingResults.map((r) => r.id)).toEqual([pending.id])
+    expect(pendingResults[0].munId).toBe(mun.id)
+
+    const { results: confirmedResults } = await getRegistrationsQueue({ status: 'CONFIRMED', q: confirmed.id }, __actor)
+    expect(confirmedResults.map((r) => r.id)).toEqual([confirmed.id])
+
+    // Same registration id, wrong status — the exact-match filter excludes it.
+    const { total: mismatched } = await getRegistrationsQueue({ status: 'CANCELLED', q: pending.id }, __actor)
+    expect(mismatched).toBe(0)
+  })
+
+  it('filters by an exact munId match', async () => {
+    const { registration: a, mun: munA } = await registeredDelegate()
+    const { registration: b } = await registeredDelegate()
+    const __actor = sess(await makeUser('OPERATIONS'))
+
+    const { results, total } = await getRegistrationsQueue({ munId: munA.id }, __actor)
+    expect(total).toBe(1)
+    expect(results.map((r) => r.id)).toEqual([a.id])
+    expect(results.map((r) => r.id)).not.toContain(b.id)
+  })
+})
+
+describe('cancelRegistrationAsAdmin', () => {
+  it('cancels a confirmed registration, releases its seat, and logs REGISTRATION_CANCELLED with the reason', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'REGISTRATION_OPEN')
+    const [product] = await db
+      .insert(registrationProducts)
+      .values({ munId: mun.id, name: 'Free pass', price: 0, capacity: 1 })
+      .returning()
+    const firstStudent = await makeUser('STUDENT')
+    const [registration] = await db
+      .insert(registrations)
+      .values({ userId: firstStudent.id, munId: mun.id, registrationProductId: product.id, status: 'CONFIRMED' })
+      .returning()
+
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    const result = await cancelRegistrationAsAdmin(registration.id, 'duplicate of another entry', __actor)
+    expect(result.status).toBe('CANCELLED')
+
+    const [row] = await db.select().from(registrations).where(eq(registrations.id, registration.id))
+    expect(row.status).toBe('CANCELLED')
+
+    const [log] = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetId, registration.id), eq(adminActions.action, 'REGISTRATION_CANCELLED')))
+    expect(log.actorId).toBe(admin.id)
+    expect(log.reason).toBe('duplicate of another entry')
+
+    // The freed seat is usable again: capacity is 1, and initiateRegistration
+    // would refuse a second caller while the cancelled registration still
+    // held it — this only succeeds because cancelRegistrationAsAdmin
+    // actually released the seat, not just relabeled the row.
+    const secondStudent = await makeUser('STUDENT')
+    const second = await initiateRegistration(
+      { munId: mun.id, registrationProductId: product.id },
+      { userId: secondStudent.id, role: 'STUDENT' },
+    )
+    expect(second.status).toBe('CONFIRMED')
+  })
+
+  it('requires a non-empty reason', async () => {
+    const { registration } = await registeredDelegate('PENDING')
+    const __actor = sess(await makeUser('ADMIN'))
+
+    await expect(cancelRegistrationAsAdmin(registration.id, '   ', __actor)).rejects.toThrow(
+      REGISTRATION_ADMIN_ERRORS.cancelReasonRequired,
+    )
+  })
+
+  it('refuses a registration that is already cancelled', async () => {
+    const { registration } = await registeredDelegate('CANCELLED')
+    const __actor = sess(await makeUser('ADMIN'))
+
+    await expect(cancelRegistrationAsAdmin(registration.id, 'already gone', __actor)).rejects.toThrow(
+      REGISTRATION_ADMIN_ERRORS.alreadyCancelled,
+    )
+  })
+
+  it('404s a registration that does not exist', async () => {
+    const __actor = sess(await makeUser('ADMIN'))
+    await expect(cancelRegistrationAsAdmin('does-not-exist', 'reason', __actor)).rejects.toThrow('not found')
+  })
+
+  // Mirrors suspendMun's own row-lock regression test above: two admins
+  // acting on the same registration at once must serialize on the row lock
+  // (`.for('update')`) rather than both reading the pre-cancel status and
+  // both "succeeding" — matching the discipline `initiateRegistration` and
+  // the payment webhook's cancellation-on-failure path both already use.
+  it('two concurrent cancel calls on the same registration serialize (row lock) — exactly one succeeds', async () => {
+    const { registration } = await registeredDelegate('CONFIRMED')
+    const __actor = sess(await makeUser('ADMIN'))
+
+    const [r1, r2] = await Promise.allSettled([
+      cancelRegistrationAsAdmin(registration.id, 'reason A', __actor),
+      cancelRegistrationAsAdmin(registration.id, 'reason B', __actor),
+    ])
+    const fulfilled = [r1, r2].filter((r) => r.status === 'fulfilled')
+    const rejected = [r1, r2].filter((r) => r.status === 'rejected')
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    expect(String((rejected[0] as PromiseRejectedResult).reason)).toMatch(REGISTRATION_ADMIN_ERRORS.alreadyCancelled)
+
+    const [row] = await db.select().from(registrations).where(eq(registrations.id, registration.id))
+    expect(row.status).toBe('CANCELLED')
+  })
+})
+
+describe('setRegistrationDuplicateFlag', () => {
+  it('flags a registration with a reason and logs REGISTRATION_FLAGGED_DUPLICATE', async () => {
+    const { registration } = await registeredDelegate('PENDING')
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    const result = await setRegistrationDuplicateFlag(registration.id, true, 'same delegate, two accounts', __actor)
+    expect(result.flaggedDuplicateAt).not.toBeNull()
+
+    const [log] = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetId, registration.id), eq(adminActions.action, 'REGISTRATION_FLAGGED_DUPLICATE')))
+    expect(log.actorId).toBe(admin.id)
+    expect(log.reason).toBe('same delegate, two accounts')
+  })
+
+  it('requires a reason to flag, but not to clear', async () => {
+    const { registration } = await registeredDelegate('PENDING')
+    const __actor = sess(await makeUser('ADMIN'))
+
+    await expect(setRegistrationDuplicateFlag(registration.id, true, undefined, __actor)).rejects.toThrow(
+      REGISTRATION_ADMIN_ERRORS.flagReasonRequired,
+    )
+
+    await setRegistrationDuplicateFlag(registration.id, true, 'flagged', __actor)
+    const cleared = await setRegistrationDuplicateFlag(registration.id, false, undefined, __actor)
+    expect(cleared.flaggedDuplicateAt).toBeNull()
+
+    const [log] = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetId, registration.id), eq(adminActions.action, 'REGISTRATION_DUPLICATE_FLAG_CLEARED')))
+    expect(log.actorId).toBeTruthy()
+  })
+})
+
+describe('resendRegistrationConfirmation', () => {
+  it('refuses a registration that was never confirmed', async () => {
+    const { registration } = await registeredDelegate('PENDING')
+    const __actor = sess(await makeUser('ADMIN'))
+
+    await expect(resendRegistrationConfirmation(registration.id, __actor)).rejects.toThrow(
+      REGISTRATION_ADMIN_ERRORS.resendNotConfirmed,
+    )
+  })
+
+  it('resends for a confirmed registration and logs REGISTRATION_CONFIRMATION_RESENT', async () => {
+    const { registration } = await registeredDelegate('CONFIRMED')
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    const result = await resendRegistrationConfirmation(registration.id, __actor)
+    expect(result.sent).toBe(true)
+
+    const [log] = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetId, registration.id), eq(adminActions.action, 'REGISTRATION_CONFIRMATION_RESENT')))
+    expect(log.actorId).toBe(admin.id)
+  })
+
+  it('is a no-op, not an error, when the delegate has opted out of optional email', async () => {
+    const { registration, delegate } = await registeredDelegate('CONFIRMED')
+    await db.update(users).set({ emailNotificationsEnabled: false }).where(eq(users.id, delegate.id))
+    const __actor = sess(await makeUser('ADMIN'))
+
+    const result = await resendRegistrationConfirmation(registration.id, __actor)
+    expect(result.sent).toBe(false)
+  })
+})
+
+describe('exportRegistrationsCsv', () => {
+  it('produces a CSV with the header row plus one row per matching registration, honoring filters', async () => {
+    const { registration: matching, mun } = await registeredDelegate('CONFIRMED')
+    await registeredDelegate('PENDING') // a different mun — must not appear once munId narrows the export
+    const __actor = sess(await makeUser('OPERATIONS'))
+
+    const result = await exportRegistrationsCsv({ munId: mun.id }, __actor)
+    expect(result.rowCount).toBe(1)
+    expect(result.registrationIds).toEqual([matching.id])
+    const lines = result.csv.trim().split('\r\n')
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toContain('Registration ID')
+    expect(lines[1]).toContain(matching.id)
   })
 })
 
