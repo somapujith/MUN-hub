@@ -64,6 +64,7 @@ export function MunHero({ mun, fromPrice }: MunHeroProps) {
             src={cover}
             alt=""
             loading="eager"
+            fetchPriority="high"
             className="aspect-[2/1] w-full rounded-lg bg-surface-soft object-cover sm:aspect-[3/1] lg:aspect-[4/1]"
           />
         </div>

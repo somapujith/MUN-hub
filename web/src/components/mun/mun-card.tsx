@@ -26,9 +26,25 @@ import type { MunSummary } from "@/types";
 
 interface MunCardProps {
   mun: MunSummary;
+  /**
+   * Cover-image loading strategy, set by position in whatever grid/row
+   * renders this card:
+   *   - "lcp": the single most likely Largest Contentful Paint element on
+   *     the page (e.g. the first card in the marketplace results grid) —
+   *     eager-loaded and fetched at browser-priority "high" so it isn't
+   *     queued behind other requests.
+   *   - "eager": one of a handful of other cards visible in the first
+   *     viewport — eager-loaded, but without the priority hint.
+   *   - "lazy" (default): everything else — deferred via `loading="lazy"`
+   *     so off-screen cards (later grid rows, horizontal shelves) don't
+   *     compete for bandwidth with what's actually on screen.
+   */
+  imagePriority?: "lcp" | "eager" | "lazy";
 }
 
-export function MunCard({ mun }: MunCardProps) {
+export function MunCard({ mun, imagePriority = "lazy" }: MunCardProps) {
+  const imageLoading = imagePriority === "lazy" ? "lazy" : "eager";
+  const imageFetchPriority = imagePriority === "lcp" ? "high" : undefined;
   const location = [mun.city, mun.country].filter(Boolean).join(", ");
   const hasLocation = location.length > 0;
   const hasDates = Boolean(mun.startDate);
@@ -70,6 +86,8 @@ export function MunCard({ mun }: MunCardProps) {
           <RemoteImage
             src={cover}
             alt=""
+            loading={imageLoading}
+            fetchPriority={imageFetchPriority}
             className="-mx-md -mt-md mb-xxs aspect-[16/7] w-[calc(100%_+_2_*_var(--spacing-md))] max-w-none bg-surface-soft object-cover"
           />
         ) : (

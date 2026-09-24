@@ -171,6 +171,10 @@ export function SiteFooter() {
               <img
                 src="/images/logo-lockup.png"
                 alt="MUN Hub"
+                width={360}
+                height={232}
+                loading="lazy"
+                decoding="async"
                 className="h-16 w-auto"
               />
             </Link>

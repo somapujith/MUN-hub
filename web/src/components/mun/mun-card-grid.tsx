@@ -57,8 +57,16 @@ export function MunCardGrid({ muns, emptyMessage, className }: MunCardGridProps)
 
   return (
     <div className={cn(GRID_CLASSNAME, className)}>
-      {muns.map((mun) => (
-        <MunCard key={mun.id} mun={mun} />
+      {muns.map((mun, index) => (
+        <MunCard
+          key={mun.id}
+          mun={mun}
+          // The grid is 3-up at desktop, so the first row (indices 0-2) is
+          // the one actually visible without scrolling. Index 0 is this
+          // page's LCP candidate; indices 1-3 cover the rest of that row
+          // (and the 2-up tablet layout) without the priority hint.
+          imagePriority={index === 0 ? "lcp" : index < 4 ? "eager" : "lazy"}
+        />
       ))}
     </div>
   );

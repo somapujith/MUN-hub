@@ -87,6 +87,10 @@ export function SiteHeader({ cities, selectedCity = "" }: SiteHeaderProps = {}) 
             <img
               src="/images/logo-mark.png"
               alt=""
+              width={220}
+              height={133}
+              loading="eager"
+              decoding="async"
               className="block h-8 w-auto shrink-0"
             />
             <span className="hidden font-display text-label-md tracking-[-0.02em] text-ink sm:inline">MUN Hub</span>

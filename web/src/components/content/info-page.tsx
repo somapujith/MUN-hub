@@ -100,6 +100,9 @@ export function PageHero({
           src={image}
           alt={imageAlt ?? ""}
           aria-hidden={imageAlt ? undefined : true}
+          loading="eager"
+          decoding="async"
+          fetchPriority="high"
           className="absolute inset-0 size-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/35 to-black/10" />

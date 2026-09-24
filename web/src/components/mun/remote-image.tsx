@@ -11,12 +11,19 @@ export function RemoteImage({
   className,
   fallback = null,
   loading = "lazy",
+  fetchPriority,
 }: {
   src: string;
   alt: string;
   className?: string;
   fallback?: ReactNode;
   loading?: "lazy" | "eager";
+  /**
+   * Hints the browser to fetch this image before other same-priority
+   * resources — reserve "high" for the single largest above-the-fold image
+   * on a page (an LCP candidate), never for a lazy-loaded one.
+   */
+  fetchPriority?: "high" | "low" | "auto";
 }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   if (failedSrc === src) return <>{fallback}</>;
@@ -26,6 +33,7 @@ export function RemoteImage({
       alt={alt}
       loading={loading}
       decoding="async"
+      fetchPriority={fetchPriority}
       className={className}
       onError={() => setFailedSrc(src)}
     />

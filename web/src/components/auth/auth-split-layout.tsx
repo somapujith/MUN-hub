@@ -36,7 +36,15 @@ export function AuthSplitLayout({ imageSrc, headline, subtext, footer, children 
         />
 
         <div className="relative flex justify-center px-xl pt-section">
-          <img src="/images/logo-emblem-white.png" alt="MUN Hub" className="h-40 w-auto" />
+          <img
+            src="/images/logo-emblem-white.png"
+            alt="MUN Hub"
+            width={500}
+            height={500}
+            loading="eager"
+            decoding="async"
+            className="h-40 w-auto"
+          />
         </div>
 
         <div className="relative flex flex-col items-center gap-sm px-xl pb-section text-center">

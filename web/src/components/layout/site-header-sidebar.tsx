@@ -337,7 +337,15 @@ export function SiteHeaderSidebar({ cities, selectedCity = "" }: SiteHeaderSideb
           )}
 
           <div className={cn("flex items-center justify-between gap-sm pt-sm", session && "border-t border-border")}>
-            <img src="/images/logo-lockup.png" alt="MUN Hub" className="h-8 w-auto" />
+            <img
+              src="/images/logo-lockup.png"
+              alt="MUN Hub"
+              width={360}
+              height={232}
+              loading="lazy"
+              decoding="async"
+              className="h-8 w-auto"
+            />
             <p className="text-right text-legal text-muted-foreground">
               Better delegates.
               <br />
