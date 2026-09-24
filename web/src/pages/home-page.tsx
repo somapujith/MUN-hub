@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { BadgeIndianRupeeIcon, LayoutDashboardIcon, ShieldCheckIcon } from "lucide-react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { MunAdCarousel } from "@/components/mun/mun-ad-carousel";
@@ -172,28 +171,6 @@ export function HomePage() {
             </div>
           </section>
         )}
-
-        <section aria-label="Why use MUN Hub" className="pb-xxl">
-          <div className="content-container">
-            <div className="grid divide-y divide-border overflow-hidden rounded-md border border-border/80 bg-background elevated-card sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-              {[
-                { icon: ShieldCheckIcon, title: "Reviewed listings", copy: "Every conference is checked before it goes live." },
-                { icon: BadgeIndianRupeeIcon, title: "Transparent fees", copy: "Compare delegate fees before you start registering." },
-                { icon: LayoutDashboardIcon, title: "One clear dashboard", copy: "Track registrations, payments and allotments together." },
-              ].map(({ icon: Icon, title, copy }) => (
-                <div key={title} className="flex items-start gap-sm p-md sm:p-lg">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-signature-cream text-ink">
-                    <Icon aria-hidden className="size-4" strokeWidth={1.8} />
-                  </span>
-                  <div>
-                    <p className="text-body-md font-medium text-ink">{title}</p>
-                    <p className="mt-xxs text-body-md leading-5 text-muted-foreground">{copy}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
 
         <section className={featured.length > 0 ? "pb-section" : "pt-xxl pb-section"}>
           <div className="content-container">
