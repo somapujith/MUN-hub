@@ -5,6 +5,7 @@ import { backgroundTasksMiddleware } from '../middleware/background-tasks'
 import { bodyLimitMiddleware } from '../middleware/body-limit'
 import { corsMiddleware } from '../middleware/cors'
 import { csrfMiddleware } from '../middleware/csrf'
+import { edgeCacheMiddleware } from '../middleware/edge-cache'
 import { errorHandler } from '../middleware/error'
 import { hyperdriveMiddleware } from '../middleware/hyperdrive'
 import { rateLimitMiddleware } from '../middleware/rate-limit'
@@ -27,6 +28,7 @@ import type { AppVariables } from './types'
  * runtime-env bridge → hyperdrive-bridge (both Workers-only, see below) →
  * background-task keep-alive → storage bindings → waitUntil bridge →
  * request-id → security headers → logger → CORS →
+ * edge-cache (/api/v1 only, Workers-only, see below) →
  * body limit → session → [webhooks outside CSRF] → CSRF → rate-limit →
  * staff-2FA gate → /api/v1/files + /api/v1 routes → JSON 404 / error handler
  */
@@ -55,6 +57,10 @@ export function createApp() {
   // reads only (server/lib/origins.ts). The origin checks read CORS_ORIGINS /
   // ALLOW_LOCALHOST_ORIGINS per request, never at createApp() time.
   app.use('*', corsMiddleware)
+  // A cache hit skips everything below (body-limit, session, CSRF,
+  // rate-limit, the route itself) — see edge-cache.ts for why it's safe to
+  // sit inside cors/security-headers but outside session/CSRF/rate-limit.
+  app.use('/api/v1/*', edgeCacheMiddleware)
   // Before anything reads a body (rate-limit reads sign-in emails, validators
   // parse JSON).
   app.use('*', bodyLimitMiddleware)
