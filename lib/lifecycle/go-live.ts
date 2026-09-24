@@ -590,6 +590,96 @@ export async function reviewSubmission(
   return updated
 }
 
+/**
+ * Terminal `mun_submissions` statuses — kept side by side with
+ * `ACTIVE_SUBMISSION_PREDICATE` above (same three values, inverted) so a
+ * change to one is trivially comparable against the other; they must stay in
+ * sync. Used by `claimSubmission` below to refuse claiming a submission that
+ * is no longer open for review, mirroring `assignTicket`'s own refusal for a
+ * RESOLVED/CLOSED support ticket (lib/actions/support.ts).
+ */
+const TERMINAL_SUBMISSION_STATUSES = ['PUBLISHED', 'REJECTED', 'WITHDRAWN'] as const
+
+/**
+ * Claims a submission for review: the caller becomes its `reviewerId`. This
+ * is the go-live queue's answer to the exact problem `assignTicket`
+ * (lib/actions/support.ts) already solves for support tickets — two staff
+ * starting to review the same thing with no visible claim — and it mirrors
+ * that function's shape deliberately:
+ *
+ *   - Role check: OPERATIONS/ADMIN/SUPER_ADMIN only (`REVIEW_ROLES`, the same
+ *     bar as `reviewSubmission`/`getGoLiveQueue`).
+ *   - Row lock: `SELECT ... FOR UPDATE` on the `mun_submissions` row *by id*
+ *     (the caller already has `submissionId` from the queue row — see
+ *     `GoLiveQueueRow`/`GoLiveQueueDetailRow`), matching this file's existing
+ *     `.for('update')` transaction convention (CLAUDE.md's "Registration
+ *     integrity" section) and `assignTicket`'s own `lockTicket` helper.
+ *   - Sets the assignee: `reviewerId = session.userId`, never a
+ *     client-supplied id.
+ *   - Writes one audit-log row, but only when the reviewer actually changes —
+ *     reclaiming a submission you already hold is a no-op, exactly matching
+ *     `assignTicket`'s `ticket.assignedTo !== session.userId || ...` guard.
+ *
+ * The one real behavioral question is what happens when someone else already
+ * holds the claim. `assignTicket` does NOT refuse that case: any staff member
+ * can immediately take over an open ticket from another (the queue's button
+ * just relabels itself "Take over"), and the only real refusal is a
+ * ticket that is no longer open (RESOLVED/CLOSED). There is no separate
+ * "explicit reassign" flag or confirmation step on the wire — the UI's
+ * confirmation, if any, lives client-side. This function mirrors that exactly
+ * rather than inventing a stricter first-claim-wins model support tickets
+ * don't actually have: any OPERATIONS/ADMIN/SUPER_ADMIN can take over a
+ * submission's review from another, and the only real refusal is a
+ * submission that has left the active/claimable set
+ * (`TERMINAL_SUBMISSION_STATUSES` above — PUBLISHED/REJECTED/WITHDRAWN,
+ * the exact inverse of `ACTIVE_SUBMISSION_PREDICATE`).
+ *
+ * The row lock still matters even though reassignment is always allowed: it
+ * serializes two concurrent claims so the loser's write can never be lost or
+ * torn — it simply applies after the winner's, "last write wins," with one
+ * audit row per actual change (see the concurrency test in go-live.test.ts).
+ */
+export async function claimSubmission(
+  submissionId: string,
+  session: Session | null,
+): Promise<typeof munSubmissions.$inferSelect> {
+  requireRole(session, [...REVIEW_ROLES])
+
+  return db.transaction(async (tx) => {
+    const [submission] = await tx
+      .select()
+      .from(munSubmissions)
+      .where(eq(munSubmissions.id, submissionId))
+      .for('update')
+      .limit(1)
+    if (!submission) {
+      throw new Error('Submission not found')
+    }
+
+    if ((TERMINAL_SUBMISSION_STATUSES as readonly string[]).includes(submission.status)) {
+      throw new Error(`Cannot claim a submission with status ${submission.status}`)
+    }
+
+    if (submission.reviewerId === session.userId) {
+      // Already yours — a no-op, same as assignTicket's own guard.
+      return submission
+    }
+
+    const [updated] = await tx
+      .update(munSubmissions)
+      .set({ reviewerId: session.userId, updatedAt: new Date() })
+      .where(eq(munSubmissions.id, submissionId))
+      .returning()
+
+    await recordAdminAction(tx, session.userId, 'SUBMISSION_CLAIMED', 'mun_submission', submissionId, undefined, {
+      munId: submission.munId,
+      previousReviewerId: submission.reviewerId,
+    })
+
+    return updated
+  })
+}
+
 /** Statuses a previously published mun can be queued again from. */
 const REQUEUEABLE_STATUSES = ['UNPUBLISHED', 'VERIFIED'] as const
 

@@ -22,6 +22,7 @@ import {
   munModuleVerifications,
 } from '@/lib/db/schema'
 import {
+  claimSubmission,
   enqueueForGoLive,
   getGoLiveQueue,
   publishFromQueue,
@@ -630,6 +631,144 @@ describe('enqueueForGoLive', () => {
     await expect(enqueueForGoLive(mun.id, { userId: admin.id, role: 'ADMIN' })).rejects.toThrow(
       'No active submission found for this mun',
     )
+  })
+})
+
+describe('claimSubmission', () => {
+  it('claims an unassigned submission: sets reviewerId, logs SUBMISSION_CLAIMED', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { submissionId } = await makeMunAtVerification(organizer)
+
+    const claimed = await claimSubmission(submissionId, { userId: admin.id, role: 'ADMIN' })
+    expect(claimed.reviewerId).toBe(admin.id)
+
+    const [log] = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetType, 'mun_submission'), eq(adminActions.targetId, submissionId)))
+    expect(log.action).toBe('SUBMISSION_CLAIMED')
+  })
+
+  it('rejects a non-reviewer (ORGANIZER) with Forbidden', async () => {
+    const organizer = await makeUser()
+    const { submissionId } = await makeMunAtVerification(organizer)
+
+    await expect(claimSubmission(submissionId, { userId: organizer.id, role: 'ORGANIZER' })).rejects.toThrow(
+      'Forbidden',
+    )
+  })
+
+  it('throws for a submission that does not exist', async () => {
+    const admin = await makeUser('ADMIN')
+    await expect(claimSubmission(crypto.randomUUID(), { userId: admin.id, role: 'ADMIN' })).rejects.toThrow(
+      'Submission not found',
+    )
+  })
+
+  // The important case: unlike a naive "first claim wins" design, this
+  // mirrors assignTicket (lib/actions/support.ts) exactly — an already-
+  // claimed submission is NOT refused to a second staff member. Any
+  // OPERATIONS/ADMIN/SUPER_ADMIN can take over the review from another,
+  // same as the support desk's "Assign to me" button relabeling itself
+  // "Take over" with no separate confirmation on the wire.
+  it('a second admin can take over a submission someone else already claimed (not rejected)', async () => {
+    const organizer = await makeUser()
+    const firstReviewer = await makeUser('ADMIN')
+    const secondReviewer = await makeUser('ADMIN')
+    const { submissionId } = await makeMunAtVerification(organizer)
+
+    const firstClaim = await claimSubmission(submissionId, { userId: firstReviewer.id, role: 'ADMIN' })
+    expect(firstClaim.reviewerId).toBe(firstReviewer.id)
+
+    const secondClaim = await claimSubmission(submissionId, { userId: secondReviewer.id, role: 'ADMIN' })
+    expect(secondClaim.reviewerId).toBe(secondReviewer.id)
+
+    const logs = await db
+      .select()
+      .from(adminActions)
+      .where(
+        and(
+          eq(adminActions.targetType, 'mun_submission'),
+          eq(adminActions.targetId, submissionId),
+          eq(adminActions.action, 'SUBMISSION_CLAIMED'),
+        ),
+      )
+    // One audit row per actual reassignment — two real changes here.
+    expect(logs.length).toBe(2)
+  })
+
+  it('re-claiming a submission you already hold is a no-op: no duplicate audit row', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { submissionId } = await makeMunAtVerification(organizer)
+    const session = { userId: admin.id, role: 'ADMIN' as const }
+
+    await claimSubmission(submissionId, session)
+    await claimSubmission(submissionId, session)
+
+    const logs = await db
+      .select()
+      .from(adminActions)
+      .where(
+        and(
+          eq(adminActions.targetType, 'mun_submission'),
+          eq(adminActions.targetId, submissionId),
+          eq(adminActions.action, 'SUBMISSION_CLAIMED'),
+        ),
+      )
+    expect(logs.length).toBe(1)
+  })
+
+  it('refuses to claim a submission that has left review (WITHDRAWN)', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const mun = await makeCompleteMun(organizer.id)
+    const organizerSession = { userId: organizer.id, role: 'ORGANIZER' as const }
+
+    const submitResult = await submitMunForReview(mun.id, organizerSession)
+    if (!submitResult.passed || !submitResult.submissionId) {
+      throw new Error('Fixture setup failed: submitMunForReview did not pass')
+    }
+    await withdrawSubmission(mun.id, organizerSession)
+
+    await expect(
+      claimSubmission(submitResult.submissionId, { userId: admin.id, role: 'ADMIN' }),
+    ).rejects.toThrow(/status WITHDRAWN/i)
+  })
+
+  it('two concurrent claims by different admins both succeed and serialize (row-lock proof, last write wins)', async () => {
+    const organizer = await makeUser()
+    const adminA = await makeUser('ADMIN')
+    const adminB = await makeUser('ADMIN')
+    const { submissionId } = await makeMunAtVerification(organizer)
+
+    const results = await Promise.allSettled([
+      claimSubmission(submissionId, { userId: adminA.id, role: 'ADMIN' }),
+      claimSubmission(submissionId, { userId: adminB.id, role: 'ADMIN' }),
+    ])
+
+    // Unlike reviewSubmission's race (mutually exclusive decisions, where
+    // the loser's transitionMun call fails), claiming is idempotent by
+    // design — the row lock only serializes the two writes, it never
+    // rejects the second claimant. Both calls must succeed.
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true)
+
+    const [submission] = await db.select().from(munSubmissions).where(eq(munSubmissions.id, submissionId))
+    // Whoever's write committed last owns it now — no torn/partial state.
+    expect([adminA.id, adminB.id]).toContain(submission.reviewerId)
+
+    const logs = await db
+      .select()
+      .from(adminActions)
+      .where(
+        and(
+          eq(adminActions.targetType, 'mun_submission'),
+          eq(adminActions.targetId, submissionId),
+          eq(adminActions.action, 'SUBMISSION_CLAIMED'),
+        ),
+      )
+    expect(logs.length).toBe(2)
   })
 })
 

@@ -182,6 +182,12 @@ export const adminActionEnum = pgEnum('admin_action', [
   // A delegate deleted (anonymized) their own account; the actor is that
   // account (lib/actions/account-deletion.ts).
   'ACCOUNT_DELETED',
+  // Gate 2 reviewer self-assignment on a mun_submissions row
+  // (lib/lifecycle/go-live.ts's claimSubmission) — mirrors TICKET_ASSIGNED
+  // above, but for the go-live queue's submissions rather than support
+  // tickets. Written only when the reviewer actually changes (reclaiming a
+  // submission you already hold is a no-op, same as assignTicket).
+  'SUBMISSION_CLAIMED',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [

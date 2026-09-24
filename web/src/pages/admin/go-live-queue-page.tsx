@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RocketIcon } from "lucide-react";
 import { toast } from "sonner";
-import { enqueueForGoLive, getGoLiveQueueDetails, publishFromQueue } from "@/api/go-live";
+import { claimSubmission, enqueueForGoLive, getGoLiveQueueDetails, publishFromQueue } from "@/api/go-live";
 import { setPaymentVerificationState } from "@/api/payment-settlement";
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
 import { Gate2ReviewDialog } from "@/components/admin/gate2-review-dialog";
@@ -27,6 +27,13 @@ const PAGE_SIZE = 20;
 
 const statLabelClassName = "text-[12px] font-medium tracking-[0.16px] text-muted-foreground uppercase";
 
+/** Mirrors support-page.tsx's `assigneeText` for the reviewer column/cell. */
+function reviewerCellText(row: GoLiveQueueDetailRow, userId: string | null): string {
+  if (!row.reviewerId) return "Unassigned";
+  if (row.reviewerId === userId) return "You";
+  return row.reviewerName ?? "A teammate";
+}
+
 /**
  * Gate 2 publish pipeline: every MUN with an active submission. Staff review
  * the submitted content here (approve / request changes / reject); admins
@@ -36,7 +43,7 @@ const statLabelClassName = "text-[12px] font-medium tracking-[0.16px] text-muted
  */
 export function AdminGoLiveQueuePage() {
   const queryClient = useQueryClient();
-  const { canPublish } = useAdminPermissions();
+  const { canPublish, userId } = useAdminPermissions();
   const [page, setPage] = useState(0);
   const [reviewTarget, setReviewTarget] = useState<{ munId: string; munName: string } | null>(null);
   // One idempotency key per in-flight publish attempt, keyed by munId —
@@ -68,6 +75,19 @@ export function AdminGoLiveQueuePage() {
       toast.success("Moved to the go-live queue");
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to queue this MUN"),
+  });
+
+  // The caller always becomes the reviewer, including taking over a
+  // submission someone else already holds — same one-button shape as the
+  // support desk's "Assign to me" / "Take over" (see assigneeText's mirror,
+  // reviewerCellText, below).
+  const claimMutation = useMutation({
+    mutationFn: claimSubmission,
+    onSuccess: async () => {
+      await refresh();
+      toast.success("Submission claimed");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to claim this submission"),
   });
 
   const publishMutation = useMutation({
@@ -258,11 +278,27 @@ export function AdminGoLiveQueuePage() {
                       </div>
                     </td>
                     <td className="px-md py-sm">
-                      {row.reviewerName ? (
-                        <span className="text-ink">{row.reviewerName}</span>
-                      ) : (
-                        <span className="text-muted-foreground">Unassigned</span>
-                      )}
+                      <div className="flex flex-col items-start gap-xs">
+                        {row.reviewerId ? (
+                          <span className="text-ink">{reviewerCellText(row, userId)}</span>
+                        ) : (
+                          <span className="text-muted-foreground">Unassigned</span>
+                        )}
+                        {row.reviewerId !== userId && (
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={claimMutation.isPending && claimMutation.variables === row.submissionId}
+                            onClick={() => claimMutation.mutate(row.submissionId)}
+                          >
+                            {claimMutation.isPending && claimMutation.variables === row.submissionId
+                              ? "Claiming…"
+                              : row.reviewerId
+                                ? "Take over"
+                                : "Claim"}
+                          </Button>
+                        )}
+                      </div>
                     </td>
                     <td className="px-md py-sm">
                       <div className="flex flex-col items-start gap-xs">
