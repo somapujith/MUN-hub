@@ -26,13 +26,19 @@
 #   vite-plugins/api-origin-csp.ts; don't hard-code other APIs here.
 # - Cashfree (docs/payments/CASHFREE.md) is an SDK-driven checkout: the page
 #   loads https://sdk.cashfree.com/js/v3/cashfree.js and calls
-#   cashfree.checkout({ paymentSessionId, redirectTarget: "_self" }), which
-#   performs a top-level browser redirect (not an embedded iframe/widget).
-#   sdk.cashfree.com is allowlisted in script-src to load the SDK;
-#   payments.cashfree.com is allowlisted in connect-src/frame-src
-#   defensively, in case the SDK or the hosted checkout page itself needs it.
+#   cashfree.checkout({ paymentSessionId, redirectTarget: "_self" }).
+#   CORRECTED 2026-09-24 (real browser CSP violations, not an assumption):
+#   even with redirectTarget "_self" the SDK actually frames
+#   https://sdk.cashfree.com/ (frame-src), fetches its own sourcemap from
+#   sdk.cashfree.com (connect-src), and POSTs a form to
+#   https://api.cashfree.com/pg/view/sessions/checkout (form-action) — it is
+#   NOT a pure top-level-navigation flow the way the original comment here
+#   assumed. sdk.cashfree.com is allowlisted in script-src/connect-src/
+#   frame-src; api.cashfree.com in form-action; payments.cashfree.com is kept
+#   in connect-src/frame-src defensively (the hosted checkout page itself may
+#   still use it after the SDK hands off).
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://sdk.cashfree.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.munhub.in https://challenges.cloudflare.com https://payments.cashfree.com; frame-src https://challenges.cloudflare.com https://payments.cashfree.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://sdk.cashfree.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.munhub.in https://challenges.cloudflare.com https://sdk.cashfree.com https://payments.cashfree.com; frame-src https://challenges.cloudflare.com https://sdk.cashfree.com https://payments.cashfree.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://api.cashfree.com; object-src 'none'
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
