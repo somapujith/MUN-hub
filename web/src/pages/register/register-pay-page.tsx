@@ -15,6 +15,7 @@ import { queryKeys } from "@/api/query-keys";
 import { CASHFREE_PROVIDER, MOCK_PAYMENT_PROVIDER, completeMockPayment, fetchRegistrationById } from "@/api/registration";
 import { CashfreeCheckout } from "@/components/registration/cashfree-checkout";
 import { PaymentConfirming } from "@/components/registration/payment-confirming";
+import { PaymentAbandoned } from "@/components/registration/payment-abandoned";
 import { clearCashfreeCheckoutStarted, hasCashfreeCheckoutStarted } from "@/lib/cashfree";
 import { NotFoundPage } from "@/pages/not-found-page";
 
@@ -33,6 +34,19 @@ import { NotFoundPage } from "@/pages/not-found-page";
  * full budget; PaymentConfirming's manual "Check status now" button and
  * TanStack Query's default refetchOnWindowFocus (web/src/api/query-client.ts)
  * both still work past that point.
+ *
+ * Once the budget is exhausted, PaymentConfirming's "we're confirming" copy
+ * would misrepresent the state — auto-polling has genuinely given up — so
+ * the page switches to PaymentAbandoned instead of leaving that copy up
+ * indefinitely. This is deliberately NOT the same as a genuine expiry:
+ * RESERVATION_TTL_MS (lib/actions/registration.ts, 15 minutes) holds the
+ * seat well past this 5-minute poll budget, so there's still time to retry
+ * when the budget runs out. PaymentAbandoned's "Retry payment" just clears
+ * the `cashfree_checkout_started_${id}` flag (web/src/lib/cashfree.ts) and
+ * resets the poll clock, which brings CashfreeCheckout back — that
+ * component already only ever reuses the registration's existing
+ * `checkout.paymentSessionId` rather than creating a new order, so no
+ * backend call is needed to support a retry.
  */
 const PAY_PAGE_POLL_FAST_INTERVAL_MS = 2_000;
 const PAY_PAGE_POLL_FAST_PHASE_MS = 60_000;
@@ -48,6 +62,27 @@ export function RegisterPayPage() {
   const queryClient = useQueryClient();
   const [paying, setPaying] = React.useState(false);
   const pollStartRef = React.useRef<number>(Date.now());
+  // Bumped by handleRetryPayment after it resets pollStartRef, so the effect
+  // below re-arms a fresh exhaustion timer for the new attempt.
+  const [pollEpoch, setPollEpoch] = React.useState(0);
+  const [pollBudgetExhausted, setPollBudgetExhausted] = React.useState(
+    () => Date.now() - pollStartRef.current >= PAY_PAGE_POLL_BUDGET_MS,
+  );
+
+  // Mirrors refetchInterval's own elapsed-vs-budget check below, but as
+  // state: this is what lets the UI switch off PaymentConfirming the moment
+  // the budget actually runs out, rather than only on the next unrelated
+  // re-render (e.g. window focus).
+  React.useEffect(() => {
+    const remaining = PAY_PAGE_POLL_BUDGET_MS - (Date.now() - pollStartRef.current);
+    if (remaining <= 0) {
+      setPollBudgetExhausted(true);
+      return;
+    }
+    setPollBudgetExhausted(false);
+    const timer = setTimeout(() => setPollBudgetExhausted(true), remaining);
+    return () => clearTimeout(timer);
+  }, [pollEpoch]);
 
   const regQuery = useQuery({
     queryKey: queryKeys.registration(registrationId ?? ""),
@@ -130,6 +165,19 @@ export function RegisterPayPage() {
     }
   }
 
+  // Un-does hasReturnedFromCashfree/pollBudgetExhausted back to a fresh
+  // "about to pay" state so CashfreeCheckout renders again — it reuses
+  // registration.checkout.paymentSessionId as-is, so this never calls
+  // initiateRegistration or creates a new order. Only fires once the seat
+  // hold is confirmed still active (the `expired` branch above short-
+  // circuits before this component ever renders otherwise).
+  function handleRetryPayment() {
+    clearCashfreeCheckoutStarted(id);
+    pollStartRef.current = Date.now();
+    setPollEpoch((epoch) => epoch + 1);
+    void regQuery.refetch();
+  }
+
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Helmet><title>Checkout | MUN Hub</title></Helmet>
@@ -147,12 +195,20 @@ export function RegisterPayPage() {
         ) : provider === CASHFREE_PROVIDER ? (
           <>
             {registration.expiresAt && <ReservationCountdown expiresAt={registration.expiresAt} />}
-            {hasReturnedFromCashfree ? (
+            {hasReturnedFromCashfree && !pollBudgetExhausted ? (
               <PaymentConfirming
                 registrationId={registration.id}
                 isTakingLongerThanUsual={isTakingLongerThanUsual}
                 isChecking={regQuery.isFetching}
                 onCheckNow={() => regQuery.refetch()}
+              />
+            ) : hasReturnedFromCashfree ? (
+              <PaymentAbandoned
+                registrationId={registration.id}
+                expiresAt={registration.expiresAt}
+                isChecking={regQuery.isFetching}
+                onCheckNow={() => regQuery.refetch()}
+                onRetry={handleRetryPayment}
               />
             ) : (
               <CashfreeCheckout registration={registration} />
