@@ -1,8 +1,16 @@
+import { Suspense } from "react";
 import { Navigate } from "react-router";
 import { getHostZone, ZONE_DEFAULT_PATH, ZONE_LOGIN_PATH } from "@/lib/host-routing";
 import { useSession } from "@/hooks/use-session";
 import { HomePage } from "@/pages/home-page";
-import { MunDetailPage } from "@/pages/mun-detail-page";
+import { RouteLoadingSkeleton } from "@/components/layout/route-loading-skeleton";
+// Lazy: this file is part of the marketplace host's eager entry graph (it's
+// the "/" route element), but MunDetailPage is only actually rendered here
+// on a wildcard <slug>.munhub.in host (the "mun" zone below) — a plain
+// munhub.in/www visit never needs it. Importing the real component directly
+// pulled its full source (~20KB+, plus transitive deps like the registration
+// card and ad carousel) into every visitor's entry chunk regardless of host.
+import { MunDetailPage } from "@/routes.lazy";
 
 // Root ("/") route element for the role-subdomain architecture: renders the
 // right landing screen based on which host the app is served from, so
@@ -15,7 +23,11 @@ export function HostAwareIndexPage() {
 
   switch (hostZone.zone) {
     case "mun":
-      return <MunDetailPage slugOverride={hostZone.munSlug} />;
+      return (
+        <Suspense fallback={<RouteLoadingSkeleton />}>
+          <MunDetailPage slugOverride={hostZone.munSlug} />
+        </Suspense>
+      );
     case "marketplace":
       return <HomePage />;
     case "organizer":

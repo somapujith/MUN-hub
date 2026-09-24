@@ -8,11 +8,80 @@ import { lazy } from "react";
  * binding, even though none of them were actually exported from routes.tsx.
  *
  * Covers the admin console (admin.munhub.in), the organizer workspace +
- * onboarding (publish.munhub.in), and the registration funnel
- * (register/:slug/**) — see routes.tsx for how these are wired into the
+ * onboarding (publish.munhub.in), the registration funnel
+ * (register/:slug/**), and (added 2026-09-25, perf investigation — see
+ * routes.tsx's `withSuspense` call sites for the route wiring) every public
+ * marketing/legal/account/delegate-dashboard page that isn't needed for the
+ * marketplace homepage's own first paint. Before this, routes.tsx statically
+ * imported ~22 of these page components, so a plain munhub.in/www visit
+ * downloaded the full source of every one of them (signup-page.tsx alone was
+ * the single largest page-level contributor to the eager entry chunk) before
+ * the homepage could render. See routes.tsx for how these are wired into the
  * route tree and route-loading-skeleton.tsx / each layout's own <Suspense>
  * boundary for the loading fallbacks.
  */
+
+// --- Public/legal/account/delegate-dashboard pages, lazy since 2026-09-25 ---
+// (not needed for the marketplace homepage's own first paint; MunDetailPage
+// is also reached eagerly-in-effect from host-aware-index-page.tsx's "mun"
+// zone branch for wildcard <slug>.munhub.in hosts, so it's imported from
+// here there too, wrapped in its own <Suspense>, rather than staying a
+// direct import of the real component.)
+export const AboutPage = lazy(() => import("@/pages/about/about-page").then((m) => ({ default: m.AboutPage })));
+export const CurationStandardsPage = lazy(() =>
+  import("@/pages/about/curation-standards-page").then((m) => ({ default: m.CurationStandardsPage })),
+);
+export const ContactPage = lazy(() => import("@/pages/contact-page").then((m) => ({ default: m.ContactPage })));
+export const LegalIndexPage = lazy(() =>
+  import("@/pages/legal/legal-index-page").then((m) => ({ default: m.LegalIndexPage })),
+);
+export const PrivacyPage = lazy(() =>
+  import("@/pages/legal/privacy-page").then((m) => ({ default: m.PrivacyPage })),
+);
+export const RefundPolicyPage = lazy(() =>
+  import("@/pages/legal/refund-policy-page").then((m) => ({ default: m.RefundPolicyPage })),
+);
+export const TermsPage = lazy(() => import("@/pages/legal/terms-page").then((m) => ({ default: m.TermsPage })));
+export const ForgotPasswordPage = lazy(() =>
+  import("@/pages/forgot-password-page").then((m) => ({ default: m.ForgotPasswordPage })),
+);
+export const LoginPage = lazy(() => import("@/pages/login-page").then((m) => ({ default: m.LoginPage })));
+export const MunDetailPage = lazy(() =>
+  import("@/pages/mun-detail-page").then((m) => ({ default: m.MunDetailPage })),
+);
+export const MunsPage = lazy(() => import("@/pages/muns-page").then((m) => ({ default: m.MunsPage })));
+export const ProfilePage = lazy(() => import("@/pages/profile-page").then((m) => ({ default: m.ProfilePage })));
+export const GroupManagePage = lazy(() =>
+  import("@/pages/dashboard/group-manage-page").then((m) => ({ default: m.GroupManagePage })),
+);
+export const GroupInviteAcceptPage = lazy(() =>
+  import("@/pages/group-invite-accept-page").then((m) => ({ default: m.GroupInviteAcceptPage })),
+);
+export const RegistrationReceiptPage = lazy(() =>
+  import("@/pages/registration-receipt-page").then((m) => ({ default: m.RegistrationReceiptPage })),
+);
+export const ResetPasswordPage = lazy(() =>
+  import("@/pages/reset-password-page").then((m) => ({ default: m.ResetPasswordPage })),
+);
+export const SignupPage = lazy(() => import("@/pages/signup-page").then((m) => ({ default: m.SignupPage })));
+export const StudentDashboardPage = lazy(() =>
+  import("@/pages/student-dashboard-page").then((m) => ({ default: m.StudentDashboardPage })),
+);
+export const CredentialsPage = lazy(() =>
+  import("@/pages/credentials-page").then((m) => ({ default: m.CredentialsPage })),
+);
+export const VerifyEmailPage = lazy(() =>
+  import("@/pages/verify-email-page").then((m) => ({ default: m.VerifyEmailPage })),
+);
+export const RegistrationPassPage = lazy(() =>
+  import("@/pages/dashboard/registration-pass-page").then((m) => ({ default: m.RegistrationPassPage })),
+);
+export const StudentSupportPage = lazy(() =>
+  import("@/pages/student-support-page").then((m) => ({ default: m.StudentSupportPage })),
+);
+export const SupportNewPage = lazy(() =>
+  import("@/pages/support-new-page").then((m) => ({ default: m.SupportNewPage })),
+);
 
 // --- Admin console (admin.munhub.in) ---
 export const AdminLayout = lazy(() => import("@/layouts/admin-layout").then((m) => ({ default: m.AdminLayout })));

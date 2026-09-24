@@ -3,34 +3,34 @@ import { createBrowserRouter, Navigate } from "react-router";
 import { RootLayout } from "@/layouts/root-layout";
 import { RegisterLayout } from "@/layouts/register-layout";
 import { RouteLoadingSkeleton } from "@/components/layout/route-loading-skeleton";
-import { AboutPage } from "@/pages/about/about-page";
-import { CurationStandardsPage } from "@/pages/about/curation-standards-page";
-import { ContactPage } from "@/pages/contact-page";
-import { LegalIndexPage } from "@/pages/legal/legal-index-page";
-import { PrivacyPage } from "@/pages/legal/privacy-page";
-import { RefundPolicyPage } from "@/pages/legal/refund-policy-page";
-import { TermsPage } from "@/pages/legal/terms-page";
-import { ForgotPasswordPage } from "@/pages/forgot-password-page";
 import { HostAwareIndexPage } from "@/pages/host-aware-index-page";
-import { LoginPage } from "@/pages/login-page";
-import { MunDetailPage } from "@/pages/mun-detail-page";
 import { NotFoundPage } from "@/pages/not-found-page";
-import { MunsPage } from "@/pages/muns-page";
 import { ErrorPage } from "@/pages/error-page";
-import { ProfilePage } from "@/pages/profile-page";
 import { RequireAuth } from "@/guards/require-auth";
-import { GroupManagePage } from "@/pages/dashboard/group-manage-page";
-import { GroupInviteAcceptPage } from "@/pages/group-invite-accept-page";
-import { RegistrationReceiptPage } from "@/pages/registration-receipt-page";
-import { ResetPasswordPage } from "@/pages/reset-password-page";
-import { SignupPage } from "@/pages/signup-page";
-import { StudentDashboardPage } from "@/pages/student-dashboard-page";
-import { CredentialsPage } from "@/pages/credentials-page";
-import { VerifyEmailPage } from "@/pages/verify-email-page";
-import { RegistrationPassPage } from "@/pages/dashboard/registration-pass-page";
-import { StudentSupportPage } from "@/pages/student-support-page";
-import { SupportNewPage } from "@/pages/support-new-page";
 import {
+  AboutPage,
+  CurationStandardsPage,
+  ContactPage,
+  LegalIndexPage,
+  PrivacyPage,
+  RefundPolicyPage,
+  TermsPage,
+  ForgotPasswordPage,
+  LoginPage,
+  MunDetailPage,
+  MunsPage,
+  ProfilePage,
+  GroupManagePage,
+  GroupInviteAcceptPage,
+  RegistrationReceiptPage,
+  ResetPasswordPage,
+  SignupPage,
+  StudentDashboardPage,
+  CredentialsPage,
+  VerifyEmailPage,
+  RegistrationPassPage,
+  StudentSupportPage,
+  SupportNewPage,
   AdminLayout,
   AdminLoginPage,
   AdminAuditDetailPage,
@@ -112,21 +112,21 @@ export const router = createBrowserRouter([
         errorElement: <ErrorPage />,
         children: [
           { index: true, element: <HostAwareIndexPage /> },
-          { path: "muns", element: <MunsPage /> },
-          { path: "mun/:slug", element: <MunDetailPage /> },
-          { path: "about", element: <AboutPage /> },
-          { path: "about/curation", element: <CurationStandardsPage /> },
-          { path: "contact", element: <ContactPage /> },
-          { path: "legal", element: <LegalIndexPage /> },
-          { path: "legal/terms", element: <TermsPage /> },
-          { path: "legal/privacy", element: <PrivacyPage /> },
-          { path: "legal/refunds", element: <RefundPolicyPage /> },
+          { path: "muns", element: withSuspense(<MunsPage />) },
+          { path: "mun/:slug", element: withSuspense(<MunDetailPage />) },
+          { path: "about", element: withSuspense(<AboutPage />) },
+          { path: "about/curation", element: withSuspense(<CurationStandardsPage />) },
+          { path: "contact", element: withSuspense(<ContactPage />) },
+          { path: "legal", element: withSuspense(<LegalIndexPage />) },
+          { path: "legal/terms", element: withSuspense(<TermsPage />) },
+          { path: "legal/privacy", element: withSuspense(<PrivacyPage />) },
+          { path: "legal/refunds", element: withSuspense(<RefundPolicyPage />) },
           // Short aliases — the URLs people type, and what payment gateways ask
           // merchants to link during onboarding.
           { path: "terms", element: <Navigate to="/legal/terms" replace /> },
           { path: "privacy", element: <Navigate to="/legal/privacy" replace /> },
           { path: "refunds", element: <Navigate to="/legal/refunds" replace /> },
-          { path: "login", element: <LoginPage /> },
+          { path: "login", element: withSuspense(<LoginPage />) },
           // Labelled per-role doors. Same POST /auth/session underneath — these
           // differ only in signposting and post-login destination. /admin/login is
           // intentionally unlinked from the public nav.
@@ -135,64 +135,64 @@ export const router = createBrowserRouter([
           // converting a delegate account — see lib/actions/organizer-otp.ts.
           { path: "organizer/signup", element: withSuspense(<OrganizerSignupPage />) },
           { path: "admin/login", element: withSuspense(<AdminLoginPage />) },
-          { path: "signup", element: <SignupPage /> },
-          { path: "forgot-password", element: <ForgotPasswordPage /> },
-          { path: "reset-password", element: <ResetPasswordPage /> },
-          { path: "verify-email", element: <VerifyEmailPage /> },
+          { path: "signup", element: withSuspense(<SignupPage />) },
+          { path: "forgot-password", element: withSuspense(<ForgotPasswordPage />) },
+          { path: "reset-password", element: withSuspense(<ResetPasswordPage />) },
+          { path: "verify-email", element: withSuspense(<VerifyEmailPage />) },
           {
             path: "profile",
-            element: (
+            element: withSuspense(
               <RequireAuth>
                 <ProfilePage />
-              </RequireAuth>
+              </RequireAuth>,
             ),
           },
           {
             path: "dashboard",
-            element: (
+            element: withSuspense(
               <RequireAuth>
                 <StudentDashboardPage />
-              </RequireAuth>
+              </RequireAuth>,
             ),
           },
           {
             path: "dashboard/achievements",
-            element: (
+            element: withSuspense(
               <RequireAuth>
                 <CredentialsPage />
-              </RequireAuth>
+              </RequireAuth>,
             ),
           },
           {
             path: "dashboard/registrations/:registrationId/pass",
-            element: (
+            element: withSuspense(
               <RequireAuth>
                 <RegistrationPassPage />
-              </RequireAuth>
+              </RequireAuth>,
             ),
           },
           {
             path: "dashboard/support",
-            element: (
+            element: withSuspense(
               <RequireAuth>
                 <StudentSupportPage />
-              </RequireAuth>
+              </RequireAuth>,
             ),
           },
           {
             path: "dashboard/registrations/:registrationId/receipt",
-            element: (
+            element: withSuspense(
               <RequireAuth>
                 <RegistrationReceiptPage />
-              </RequireAuth>
+              </RequireAuth>,
             ),
           },
           {
             path: "support/new",
-            element: (
+            element: withSuspense(
               <RequireAuth>
                 <SupportNewPage />
-              </RequireAuth>
+              </RequireAuth>,
             ),
           },
           {
@@ -207,14 +207,14 @@ export const router = createBrowserRouter([
           },
           {
             path: "group-invite",
-            element: <GroupInviteAcceptPage />,
+            element: withSuspense(<GroupInviteAcceptPage />),
           },
           {
             path: "dashboard/groups/:groupId",
-            element: (
+            element: withSuspense(
               <RequireAuth>
                 <GroupManagePage />
-              </RequireAuth>
+              </RequireAuth>,
             ),
           },
           { path: "organizer/welcome", element: withSuspense(<OrganizerWelcomePage />) },
