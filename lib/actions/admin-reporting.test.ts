@@ -90,12 +90,30 @@ function sess(user: { id: string; role: AnyRole }): Session {
   return { userId: user.id, role: user.role }
 }
 
-/** A far-future window with a random start, so it never collides with the shared dev DB's real/other-test rows. */
-function farFutureNow(): Date {
-  return new Date(Date.UTC(2160, 0, 1 + Math.floor(Math.random() * 300)))
-}
-
 const DAY = 24 * 60 * 60 * 1000
+
+/**
+ * A far-future "now" for each test, so fixture rows never collide with the
+ * shared dev DB's real/other-test rows. Previously a fresh `Math.random()`
+ * draw from a 300-day pool on every call — with up to 10 call sites in this
+ * file alone, some placing fixture rows as far as 60 days before their own
+ * `now` (deliberately, to prove they're excluded), two draws landing within
+ * ~67 days of each other let one test's rows leak into another's window.
+ * That's exactly what happened in CI (`getConversionFunnel` expected 7,
+ * got 9 — two extra rows from a different test's fixtures): rare per run,
+ * random luck locally, real in CI, genuinely non-deterministic either way.
+ * Each call now gets a unique slot FAR_FUTURE_GAP_DAYS apart — far wider
+ * than any window (or pre/post-window fixture offset) any test here uses —
+ * so no two calls in a single run can ever land within reach of each other,
+ * while the base is still randomized per run to avoid drifting into a
+ * stable set of dates some other, unrelated test file might also pick.
+ */
+const FAR_FUTURE_GAP_DAYS = 1000
+const farFutureBase = Date.UTC(2160, 0, 1) + Math.floor(Math.random() * 300) * DAY
+let farFutureSlot = 0
+function farFutureNow(): Date {
+  return new Date(farFutureBase + farFutureSlot++ * FAR_FUTURE_GAP_DAYS * DAY)
+}
 
 describe('getRegistrationTrend', () => {
   it('zero-fills every day bucket and only counts rows inside the range', async () => {
