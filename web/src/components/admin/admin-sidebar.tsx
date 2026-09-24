@@ -21,7 +21,7 @@ export function AdminSidebar({ onNavigate, className }: AdminSidebarProps) {
           </span>
         </Link>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto py-sm pr-sm pl-xs">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-sm pr-sm pl-xs">
         <AdminNav onNavigate={onNavigate} />
       </div>
       <div className="border-t border-sidebar-border p-sm">

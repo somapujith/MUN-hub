@@ -51,8 +51,12 @@ export function AdminNav({ onNavigate }: AdminNavProps) {
   const stats = statsQuery.data;
 
   return (
-    <nav aria-label="Admin" className="flex flex-col gap-px pl-xs">
-      <ul className="flex list-none flex-col gap-px">
+    <nav aria-label="Admin" className="flex flex-1 flex-col pl-xs">
+      {/* justify-between spreads the items across whatever height the
+          sidebar actually has (any viewport), instead of a fixed gap that
+          only looks filled at one specific screen height. gap-px stays as
+          the floor when content overflows a very short viewport. */}
+      <ul className="flex h-full list-none flex-col justify-between gap-px">
         {ADMIN_NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item.href, item.exact);
           const Icon = item.icon;
