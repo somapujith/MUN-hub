@@ -56,10 +56,17 @@ export function MunsPage() {
     queryKey: queryKeys.muns(searchQueryParams),
     queryFn: () => searchMuns(searchQueryParams),
     placeholderData: (previous) => previous,
+    // Matches GET /muns's `max-age=60` (server/routes/muns.ts,
+    // MARKETPLACE_LIST_CACHE) — no point refetching sooner than the
+    // browser/CDN would have served fresh data anyway.
+    staleTime: 60_000,
   });
   const facetsQuery = useQuery({
     queryKey: queryKeys.marketplaceFacets(),
     queryFn: getMarketplaceFacets,
+    // Matches GET /muns/facets's `max-age=300` (server/routes/muns.ts,
+    // MARKETPLACE_FACETS_CACHE) — facets churn far less than the listing.
+    staleTime: 300_000,
   });
 
   const results = munsQuery.data?.results ?? [];

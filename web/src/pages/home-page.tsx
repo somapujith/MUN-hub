@@ -63,6 +63,9 @@ export function HomePage() {
   const facetsQuery = useQuery({
     queryKey: queryKeys.marketplaceFacets(),
     queryFn: getMarketplaceFacets,
+    // Matches GET /muns/facets's `max-age=300` (server/routes/muns.ts,
+    // MARKETPLACE_FACETS_CACHE) — facets churn far less than the listing.
+    staleTime: 300_000,
   });
   const facets = facetsQuery.data ?? { cities: [], countries: [] };
   const city = resolveCityParam(searchParams.get("city"), facets.cities, DEFAULT_CITY);
@@ -98,20 +101,26 @@ export function HomePage() {
     limit: ROW_LIMIT,
   };
 
+  // All three shelves hit the same public GET /muns endpoint as the
+  // marketplace page — matches its `max-age=60` (server/routes/muns.ts,
+  // MARKETPLACE_LIST_CACHE).
   const openQuery = useQuery({
     queryKey: queryKeys.muns(openParams),
     queryFn: () => searchMuns(openParams),
     enabled: wantsOpen,
+    staleTime: 60_000,
   });
   const publishedQuery = useQuery({
     queryKey: queryKeys.muns(publishedParams),
     queryFn: () => searchMuns(publishedParams),
     enabled: wantsPublished,
+    staleTime: 60_000,
   });
   const closedQuery = useQuery({
     queryKey: queryKeys.muns(closedParams),
     queryFn: () => searchMuns(closedParams),
     enabled: wantsClosed,
+    staleTime: 60_000,
   });
 
   const openNow = openQuery.data ?? EMPTY_RESULT;

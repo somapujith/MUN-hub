@@ -142,6 +142,11 @@ export function MunDetailPage({
     queryKey: previewMunId ? queryKeys.munPreview(previewMunId) : queryKeys.mun(slug ?? ""),
     queryFn: () => (previewMunId ? getMunPreview(previewMunId) : getMunBySlug(slug!)),
     enabled: Boolean(slug),
+    // The public slug lookup matches GET /muns/:slug's `max-age=120`
+    // (server/routes/muns.ts, MUN_DETAIL_CACHE). The organizer preview is
+    // session-dependent and never cached server-side, so it keeps the
+    // global default instead.
+    staleTime: previewMunId ? undefined : 120_000,
   });
 
   const loaded = munQuery.data ?? undefined;
