@@ -27,25 +27,29 @@ Things that surprised people before:
 
 Only deploy a commit on `main` that has passed CI (`.github/workflows/ci.yml`). The order is always migrations → API → web. Migrations therefore have to be **additive**: the API version that's still running must keep working against the migrated schema. Drop or rename things in a later release, after nothing uses them.
 
-### From GitHub Actions (preferred)
+### From GitHub Actions (preferred, and now automatic)
 
-`.github/workflows/ci.yml` (typecheck + lint + `npm run test:ci` against a `postgres:16-alpine` service container, on push to `main` and on PRs) and `.github/workflows/deploy.yml` (the workflow below) both exist in the repo as of 2026-09-24 — this used to be aspirational documentation for a pipeline that hadn't been built yet; it's now real and checked in.
+`.github/workflows/ci.yml` (typecheck + lint + `npm run test:ci` against a `postgres:16-alpine` service container, on push to `main` and on PRs) and `.github/workflows/deploy.yml` both exist in the repo as of 2026-09-24.
 
-1. Actions → **Deploy (production)** → *Run workflow* on `main`. Untick the steps you don't need (`run_migrations`, `deploy_api`, `deploy_web` — the three `workflow_dispatch` boolean inputs).
-2. A reviewer approves the `production` environment.
-3. The workflow typechecks, applies migrations to Neon, runs `wrangler deploy` for `munhub-api` and `munhub-web` (each version tagged with the short commit sha), and checks `https://api.munhub.in/api/v1/health`.
+**As of 2026-09-25, deploy.yml auto-fires on every push to `main`, chained to CI's result — not a raw `push` trigger.** It listens for `workflow_run: workflows: ["CI"], types: [completed]` and only proceeds `if: github.event.workflow_run.conclusion == 'success'`, so a push that fails typecheck/lint/test never reaches the deploy job at all; this is a stronger gate than deploy.yml's own (typecheck-only) step ever was on its own. It checks out `github.event.workflow_run.head_sha` specifically (the exact commit CI validated), not just "whatever is at `main` right now," in case another push landed in the gap. `workflow_dispatch` still exists too, for a manual re-run (e.g. redeploying without a new commit) — its three boolean inputs (`run_migrations`/`deploy_api`/`deploy_web`) still work as before, defaulting to on.
 
-One-time setup (repo **Settings → Environments → `production`**) — **status as of 2026-09-24:**
+**No required-reviewer approval anymore — this is the user's explicit 2026-09-25 decision, not a default.** The `production` environment's `required_reviewers` protection rule was removed at the repo owner's direction (chose "full auto-deploy on every push to main" over keeping either a manual trigger or an approval click). If that ever needs to come back (e.g. after a bad auto-deploy), re-add it: Settings → Environments → `Production` → Required reviewers.
+
+Steps: checkout the validated commit, typecheck, apply migrations to Neon, `wrangler deploy` for `munhub-api` and `munhub-web` (each version tagged with the short commit sha), then check `https://api.munhub.in/api/v1/health`.
+
+One-time setup (repo **Settings → Environments → `production`**) — **status as of 2026-09-25:**
 
 - **There is only one environment, and it's spelled `Production`.** GitHub had already auto-created an environment named `Production` (capital P) for this repo via Vercel's GitHub integration (which deploys `munhub.in`/`www.munhub.in` separately — unrelated to these Worker deploys). GitHub matches a workflow's `environment: production` reference case-insensitively, so `deploy.yml`'s lowercase `production` resolves to that same pre-existing `Production` environment. Don't go looking for, or try to create, a second lowercase one — there isn't one and shouldn't be.
-- Required reviewers: `Production` is configured to require `somapujith` (the repo owner) as a reviewer before any run using it proceeds.
+- Required reviewers: **none** (removed 2026-09-25 — see above).
 - Deployment branches: `main` only.
-- Secrets — **set** on the `Production` environment already:
+- Secrets — all **set** on the `Production` environment:
   - `CLOUDFLARE_ACCOUNT_ID` — set.
-  - `DATABASE_URL` — set, but currently the Neon **pooled** connection string, not the **direct** (non-pooled) one this section otherwise calls for. Known deviation: the direct URL wasn't available in the session that wired this up, and the pooled one was already proven to work (a migration ran successfully through it before it was saved as the secret). Low risk, but swap it for the direct URL when convenient in a future session.
-  - `CLOUDFLARE_API_TOKEN` — **still missing, the one remaining gap before this workflow is runnable end-to-end.** A human has to generate it via the Cloudflare dashboard (My Profile → API Tokens → Create Token) with *Account → Workers Scripts → Edit*, *Zone (munhub.in) → Workers Routes → Edit*, and *Zone → DNS → Edit* (Custom Domains create DNS records) — add *Account → Hyperdrive → Edit* only if the workflow ever needs to manage Hyperdrive. Then: `gh secret set CLOUDFLARE_API_TOKEN --env production`. Don't confuse that `--env production` with the `--env=""` that shows up throughout this doc — `gh secret set --env production` is a GitHub-side flag scoping a secret to the GitHub environment named production/Production; `wrangler ... --env=""` is a completely different, wrangler-side flag meaning "the top-level (no named environment) config." Until `CLOUDFLARE_API_TOKEN` is set, the workflow's `wrangler deploy` steps will fail with an auth error if run — the workflow file itself is complete and correct, this is purely a missing-credential gap.
+  - `CLOUDFLARE_API_TOKEN` — set (confirmed working end-to-end: a real `wrangler deploy` succeeded through this workflow on 2026-09-25). If it's ever missing again, generate it via the Cloudflare dashboard (My Profile → API Tokens → Create Token) with *Account → Workers Scripts → Edit*, *Zone (munhub.in) → Workers Routes → Edit*, and *Zone → DNS → Edit* — then `gh secret set CLOUDFLARE_API_TOKEN --env production`. Don't confuse that `--env production` (a GitHub-side flag scoping a secret to the environment) with the `--env=""` used elsewhere in this doc (a wrangler-side flag meaning "the top-level config").
+  - `DATABASE_URL` — set, but currently the Neon **pooled** connection string, not the **direct** (non-pooled) one this section otherwise calls for. Known deviation, low risk (proven working), swap it for the direct URL when convenient.
 
 Worker secrets (`PAYMENT_FIELD_KEY`, …) are **not** set by the workflow. They live on the Worker and survive deploys (see [Configuration](#configuration-per-worker)).
+
+**The Vercel side (`munhub.in`/`www.munhub.in`) is not covered by this workflow at all** — it's a separate platform with its own deploy mechanism (its GitHub integration did not appear to auto-deploy a push during the 2026-09-25 session that wrote this; confirm how it's actually triggered — dashboard "Redeploy," or check the Vercel project's Git integration settings — before assuming a push to `main` alone updates it).
 
 ### From a clean worktree (fallback)
 

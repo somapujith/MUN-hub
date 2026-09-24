@@ -1,6 +1,18 @@
 name: Deploy (production)
 
 on:
+  # Auto-deploy: fires once the CI workflow finishes on main. Chained to CI's
+  # conclusion (not a raw `push: branches: [main]`) so "automated" doesn't
+  # mean "weaker checks" — this workflow only ever ran its own typecheck
+  # step, never lint or the test suite; CI already runs all three. Gated by
+  # `if: github.event.workflow_run.conclusion == 'success'` on the job below.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  # Kept for a manual re-run (e.g. redeploying without a new commit, or after
+  # fixing an infra issue) — every job step below still runs by default here
+  # too unless a box is explicitly unchecked.
   workflow_dispatch:
     inputs:
       run_migrations:
@@ -19,11 +31,13 @@ on:
 # See docs/operations/RUNBOOK.md ("Deploying" / "From GitHub Actions").
 # Order is always migrations -> API -> web, and migrations must be additive:
 # the API version still running has to keep working against the migrated
-# schema. `environment: production` gates this whole run behind the repo's
-# Settings -> Environments -> production required-reviewer approval, and is
-# the only place these secrets are exposed.
+# schema. `environment: production` is where these secrets are exposed;
+# no required-reviewer rule on it (removed 2026-09-25, user's explicit
+# choice, so a push to main can deploy without a manual approval click) —
+# CI passing is the gate now, not a human clicking "approve" a second time.
 jobs:
   deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: production
     concurrency:
@@ -31,6 +45,11 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Pin to the exact commit CI validated, not just "current main" —
+          # avoids deploying a different commit if another push landed in
+          # the gap between CI finishing and this job starting.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -45,21 +64,21 @@ jobs:
         run: npm run typecheck
 
       - name: Apply migrations to Neon production
-        if: ${{ inputs.run_migrations }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_migrations }}
         run: npx tsx lib/db/migrate.ts
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Deploy munhub-api
-        if: ${{ inputs.deploy_api }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_api }}
         working-directory: server
-        run: npx wrangler deploy --env="" --tag "${{ github.sha }}"
+        run: npx wrangler deploy --env="" --tag "${{ github.event.workflow_run.head_sha || github.sha }}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Build munhub-web
-        if: ${{ inputs.deploy_web }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_web }}
         working-directory: web
         run: npx vite build
         env:
@@ -70,13 +89,13 @@ jobs:
           VITE_CASHFREE_ENV: production
 
       - name: Deploy munhub-web
-        if: ${{ inputs.deploy_web }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_web }}
         working-directory: web
-        run: npx wrangler deploy --env="" --tag "${{ github.sha }}"
+        run: npx wrangler deploy --env="" --tag "${{ github.event.workflow_run.head_sha || github.sha }}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Health check
-        if: ${{ inputs.deploy_api }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_api }}
         run: curl -fsS https://api.munhub.in/api/v1/health
