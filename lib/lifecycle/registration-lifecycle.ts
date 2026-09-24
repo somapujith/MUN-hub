@@ -3,14 +3,14 @@ import type { Session } from '@/lib/auth/adapter'
 import { db } from '@/lib/db/client'
 import {
   achievements,
-  munPaymentSettings,
   munSubmissions,
   muns,
+  organizerProfiles,
   registrationProducts,
   registrations,
   users,
 } from '@/lib/db/schema'
-import type { MunStatus, PaymentVerificationState, Role } from '@/lib/db/schema-enums'
+import type { MunStatus, Role } from '@/lib/db/schema-enums'
 import { notifyConferenceCancelled } from './lifecycle-events'
 import { canTransition, transitionMun } from './mun-state-machine'
 
@@ -105,7 +105,7 @@ export const LIFECYCLE_ERRORS = {
   reasonTooLong: `The reason must be at most ${CANCEL_REASON_MAX_LENGTH} characters`,
   noActivePass: 'Add at least one active registration pass before opening registration',
   paymentNotVerified:
-    'Registration for paid passes can open once MUNHub has verified your payment account',
+    'Finish the payment step of organizer onboarding (add your UPI payout details) before opening registration for a paid pass',
   deadlineMissing: 'Set a registration deadline in Setup before opening registration',
   deadlinePassed: 'The registration deadline has passed — move it in Setup before opening registration',
   conferenceStarted: 'The conference has already started, so registration can no longer be opened',
@@ -210,7 +210,13 @@ interface LifecycleActor {
 interface RegistrationReadiness {
   purchasablePassCount: number
   hasPaidPass: boolean
-  paymentVerificationState: PaymentVerificationState | null
+  /**
+   * Whether the mun's organizer has finished the PAYMENT step of organizer
+   * onboarding (lib/actions/organizer-onboarding.ts) — `organizer_profiles`
+   * has a non-null `upiId`/`upiPhone`, the same pair `acceptOrganizerAgreement`
+   * requires before it locks the wizard. This is account-level, not per-mun.
+   */
+  organizerUpiOnboardingComplete: boolean
 }
 
 interface PlanStep {
@@ -268,7 +274,7 @@ function planAction(
       }
       if (!readiness) throw new Error('Registration readiness was not loaded')
       if (readiness.purchasablePassCount === 0) return { kind: 'blocked', reason: LIFECYCLE_ERRORS.noActivePass }
-      if (readiness.hasPaidPass && readiness.paymentVerificationState !== 'VERIFIED') {
+      if (readiness.hasPaidPass && !readiness.organizerUpiOnboardingComplete) {
         return { kind: 'blocked', reason: LIFECYCLE_ERRORS.paymentNotVerified }
       }
       if (!mun.registrationDeadline) return { kind: 'blocked', reason: LIFECYCLE_ERRORS.deadlineMissing }
@@ -390,7 +396,12 @@ async function lockMun(tx: Tx, munId: string): Promise<LifecycleMun> {
   return mun
 }
 
-async function loadRegistrationReadiness(reader: Reader, munId: string, now: Date): Promise<RegistrationReadiness> {
+async function loadRegistrationReadiness(
+  reader: Reader,
+  munId: string,
+  organizerId: string,
+  now: Date,
+): Promise<RegistrationReadiness> {
   const passes = await reader
     .select({ price: registrationProducts.price, earlyBirdPrice: registrationProducts.earlyBirdPrice })
     .from(registrationProducts)
@@ -404,17 +415,16 @@ async function loadRegistrationReadiness(reader: Reader, munId: string, now: Dat
 
   const hasPaidPass = passes.some((pass) => pass.price > 0 || (pass.earlyBirdPrice ?? 0) > 0)
 
-  // Explicit column list — never select the encrypted payment fields.
-  const [settings] = await reader
-    .select({ verificationState: munPaymentSettings.verificationState })
-    .from(munPaymentSettings)
-    .where(eq(munPaymentSettings.munId, munId))
+  const [profile] = await reader
+    .select({ upiId: organizerProfiles.upiId, upiPhone: organizerProfiles.upiPhone })
+    .from(organizerProfiles)
+    .where(eq(organizerProfiles.userId, organizerId))
     .limit(1)
 
   return {
     purchasablePassCount: passes.length,
     hasPaidPass,
-    paymentVerificationState: settings?.verificationState ?? null,
+    organizerUpiOnboardingComplete: Boolean(profile?.upiId && profile?.upiPhone),
   }
 }
 
@@ -531,7 +541,7 @@ export async function runLifecycleAction(
 
     const readiness =
       action === 'open-registration' && mun.status === 'PUBLISHED'
-        ? await loadRegistrationReadiness(tx, munId, now)
+        ? await loadRegistrationReadiness(tx, munId, mun.organizerId, now)
         : null
     const plan = planAction(action, mun, actor, readiness, now)
     if (plan.kind !== 'ready') throw new LifecycleActionError(plan.reason, 409)
@@ -588,7 +598,7 @@ export async function getLifecycleOverview(
   const actor = describeActor(mun, session)
   if (!actor.isOwner && !isStaff(actor)) throw new Error('Forbidden')
 
-  const readiness = mun.status === 'PUBLISHED' ? await loadRegistrationReadiness(db, munId, now) : null
+  const readiness = mun.status === 'PUBLISHED' ? await loadRegistrationReadiness(db, munId, mun.organizerId, now) : null
 
   const actions: LifecycleActionOption[] = []
   for (const action of LIFECYCLE_ACTIONS) {
@@ -691,7 +701,8 @@ async function runScheduledStep(
       // already have moved this mun since the candidate query.
       if (!isDue(action, mun, now)) return { kind: 'not-due' }
 
-      const readiness = action === 'open-registration' ? await loadRegistrationReadiness(tx, munId, now) : null
+      const readiness =
+        action === 'open-registration' ? await loadRegistrationReadiness(tx, munId, mun.organizerId, now) : null
       const plan = planAction(action, mun, SYSTEM_ACTOR, readiness, now)
       if (plan.kind !== 'ready') return { kind: 'skipped', reason: plan.reason }
 
