@@ -1,4 +1,5 @@
 import type {
+  AdminAuditActor,
   AdminAuditEntry,
   AdminAuditListResult,
   AdminOverviewStats,
@@ -32,6 +33,14 @@ export interface AdminAuditListParams {
   offset?: number;
   /** Include staff reads of delegate data (PII_READ rows); the server leaves them out by default. */
   includeDataAccess?: boolean;
+  /** Exact actor match — a real user id, from `listAuditActors`. */
+  actorId?: string;
+  /** Exact match against the feed's action label (an admin_action value or an APPLICATION_* Gate 1 label). */
+  actionType?: string;
+  /** Inclusive lower bound on when the entry happened. */
+  from?: Date;
+  /** Inclusive upper bound on when the entry happened — pass end-of-day to include the whole day. */
+  to?: Date;
 }
 
 interface RawAdminAuditEntry extends Omit<AdminAuditEntry, "createdAt"> {
@@ -50,6 +59,10 @@ export async function listAdminAuditEntries(
   if (params.limit !== undefined) query.set("limit", String(params.limit));
   if (params.offset !== undefined) query.set("offset", String(params.offset));
   if (params.includeDataAccess) query.set("includeDataAccess", "true");
+  if (params.actorId) query.set("actorId", params.actorId);
+  if (params.actionType) query.set("actionType", params.actionType);
+  if (params.from) query.set("from", params.from.toISOString());
+  if (params.to) query.set("to", params.to.toISOString());
   const qs = query.toString();
 
   const raw = await request<RawAdminAuditListResult>(`/admin/audit${qs ? `?${qs}` : ""}`);
@@ -71,4 +84,9 @@ export async function getAuditHistory(
     `/admin/audit/${encodeURIComponent(targetType)}/${encodeURIComponent(targetId)}`,
   );
   return raw.map((entry) => ({ ...entry, createdAt: new Date(entry.createdAt) }));
+}
+
+/** Options for the audit page's actor filter — every id returned already appears in the feed. */
+export function listAuditActors(): Promise<AdminAuditActor[]> {
+  return request<AdminAuditActor[]>("/admin/audit/actors");
 }

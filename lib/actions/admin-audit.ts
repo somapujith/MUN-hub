@@ -89,6 +89,18 @@ export interface AdminAuditListParams {
    * load). Off by default so they don't bury the changes in the feed.
    */
   includeDataAccess?: boolean
+  /** Exact actor match — a real user id, e.g. from `listAuditActors`. */
+  actorId?: string
+  /**
+   * Exact match against the feed's already-coalesced `action` column — either
+   * an `admin_action` enum value (or its `metadata.event` override) or one of
+   * `GATE1_AUDIT_ACTIONS`' `APPLICATION_*` labels.
+   */
+  actionType?: string
+  /** Inclusive lower bound on `created_at`. */
+  from?: Date
+  /** Inclusive upper bound on `created_at` — callers pass end-of-day to include the whole day. */
+  to?: Date
 }
 
 export interface AdminAuditListResult {
@@ -159,6 +171,19 @@ export async function listAdminActions(
       ) = 'UNDER_REVIEW'
   `
 
+  // Applied identically to the page query and the count query below, against
+  // the already-coalesced `feed` columns (not the raw admin_actions/
+  // verification_logs columns — actor_id and action mean the same thing on
+  // both sides of the UNION by the time they reach `feed`). Raw sql params
+  // skip drizzle's column encoder, so the Date bounds are serialized here
+  // (same reasoning as marketplace.ts's dateFrom handling).
+  const filters = sql`
+    ${params.actorId ? sql`AND feed.actor_id = ${params.actorId}` : sql``}
+    ${params.actionType ? sql`AND feed.action = ${params.actionType}` : sql``}
+    ${params.from ? sql`AND feed.created_at >= ${params.from.toISOString()}::timestamptz` : sql``}
+    ${params.to ? sql`AND feed.created_at <= ${params.to.toISOString()}::timestamptz` : sql``}
+  `
+
   const rows = await db.execute<{
     id: string
     actor_id: string
@@ -172,12 +197,13 @@ export async function listAdminActions(
     SELECT feed.*, u.name AS actor_name
     FROM (${feed}) AS feed
     INNER JOIN ${users} u ON u.id = feed.actor_id
+    WHERE true ${filters}
     ORDER BY feed.created_at DESC, feed.id DESC
     LIMIT ${limit} OFFSET ${offset}
   `)
 
   const countRows = await db.execute<{ count: number }>(
-    sql`SELECT count(*)::int AS count FROM (${feed}) AS feed INNER JOIN ${users} u ON u.id = feed.actor_id`,
+    sql`SELECT count(*)::int AS count FROM (${feed}) AS feed INNER JOIN ${users} u ON u.id = feed.actor_id WHERE true ${filters}`,
   )
 
   const results: AdminAuditListItem[] = Array.from(rows).map((row) => ({
@@ -192,4 +218,35 @@ export async function listAdminActions(
   }))
 
   return { results, total: Number(Array.from(countRows)[0]?.count ?? 0) }
+}
+
+// ---------------------------------------------------------------------------
+// Actor filter options — the audit page's "actor" select
+// ---------------------------------------------------------------------------
+
+export interface AdminAuditActor {
+  id: string
+  name: string
+}
+
+/**
+ * Distinct users who actually appear as an actor in the audit feed (either
+ * `admin_actions.actor_id` or `verification_logs.reviewer_id` — the same two
+ * sources `listAdminActions` reads), for the audit page's actor filter.
+ * Every option this returns is a real id already present in the feed, so the
+ * filter can never be pointed at an arbitrary/unknown id — the client picks
+ * from this list rather than supplying a free-form id itself.
+ */
+export async function listAuditActors(session: Session | null): Promise<AdminAuditActor[]> {
+  requireRole(session, [...ADMIN_ROLES])
+
+  const rows = await db.execute<{ id: string; name: string }>(sql`
+    SELECT DISTINCT u.id, u.name
+    FROM ${users} u
+    WHERE u.id IN (SELECT actor_id FROM admin_actions)
+       OR u.id IN (SELECT reviewer_id FROM verification_logs)
+    ORDER BY u.name
+  `)
+
+  return Array.from(rows)
 }

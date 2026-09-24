@@ -27,6 +27,12 @@ export interface AdminAuditListResult {
 export interface AuditHistoryEntry {
   action: string;
   actorId: string;
+  actorName: string;
   reason: string | null;
   createdAt: Date;
+}
+
+export interface AdminAuditActor {
+  id: string;
+  name: string;
 }

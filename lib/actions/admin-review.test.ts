@@ -16,7 +16,7 @@ import {
 import type { Session } from '@/lib/auth/adapter'
 import { reviewSubmission } from '@/lib/lifecycle/go-live'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
-import { listAdminActions } from './admin-audit'
+import { listAdminActions, listAuditActors } from './admin-audit'
 import { recordPiiRead } from './admin-pii-read'
 
 import {
@@ -774,6 +774,81 @@ describe('listAdminActions (platform audit feed)', () => {
 
   it('rejects a STUDENT session', async () => {
     await expect(listAdminActions({}, sess(await makeUser('STUDENT')))).rejects.toThrow('Forbidden')
+  })
+
+  it('filters by actorId', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const admin1 = await makeUser('ADMIN')
+    const admin2 = await makeUser('ADMIN')
+
+    const mun1 = await makeMun(organizer.id, 'PUBLISHED')
+    const mun2 = await makeMun(organizer.id, 'PUBLISHED')
+    await unpublishMun(mun1.id, sess(admin1))
+    await unpublishMun(mun2.id, sess(admin2))
+
+    const admin1Only = await listAdminActions({ limit: 100, actorId: admin1.id }, sess(admin1))
+    expect(admin1Only.results.every((row) => row.actorId === admin1.id)).toBe(true)
+    expect(admin1Only.results.map((r) => r.targetId)).toContain(mun1.id)
+    expect(admin1Only.results.map((r) => r.targetId)).not.toContain(mun2.id)
+  })
+
+  it('filters by actionType, matching the feed\'s coalesced action label', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    const live = await makeMun(organizer.id, 'PUBLISHED')
+    await unpublishMun(live.id, __actor)
+    const applied = await makeMun(organizer.id, 'SUBMITTED')
+    await reviewMunApplication(applied.id, 'REJECTED', 'no', undefined, __actor)
+
+    const unpublishedOnly = await listAdminActions({ limit: 100, actionType: 'MUN_UNPUBLISHED' }, __actor)
+    expect(unpublishedOnly.results.every((row) => row.action === 'MUN_UNPUBLISHED')).toBe(true)
+    expect(unpublishedOnly.results.map((r) => r.targetId)).toContain(live.id)
+
+    const applicationOnly = await listAdminActions(
+      { limit: 100, actionType: 'APPLICATION_REJECTED' },
+      __actor,
+    )
+    expect(applicationOnly.results.every((row) => row.action === 'APPLICATION_REJECTED')).toBe(true)
+    expect(applicationOnly.results.map((r) => r.targetId)).toContain(applied.id)
+  })
+
+  it('filters by from/to date range', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+    const live = await makeMun(organizer.id, 'PUBLISHED')
+    await unpublishMun(live.id, __actor)
+
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000)
+
+    const inRange = await listAdminActions({ limit: 100, from: yesterday, to: tomorrow }, __actor)
+    expect(inRange.results.map((r) => r.targetId)).toContain(live.id)
+
+    const beforeItHappened = await listAdminActions({ limit: 100, to: yesterday }, __actor)
+    expect(beforeItHappened.results.map((r) => r.targetId)).not.toContain(live.id)
+
+    const afterItHappened = await listAdminActions({ limit: 100, from: tomorrow }, __actor)
+    expect(afterItHappened.results.map((r) => r.targetId)).not.toContain(live.id)
+  })
+})
+
+describe('listAuditActors', () => {
+  it('lists distinct actors who appear in the feed, and rejects a STUDENT session', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+    const live = await makeMun(organizer.id, 'PUBLISHED')
+    await unpublishMun(live.id, __actor)
+
+    const actors = await listAuditActors(__actor)
+    expect(actors).toContainEqual({ id: admin.id, name: admin.name })
+    // Never acted, so never an option in the filter.
+    expect(actors.some((a) => a.id === organizer.id)).toBe(false)
+
+    await expect(listAuditActors(sess(await makeUser('STUDENT')))).rejects.toThrow('Forbidden')
   })
 })
 
