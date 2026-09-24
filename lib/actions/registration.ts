@@ -351,6 +351,13 @@ async function reserveAndStartPayment(
   // stale holds on the mun's other passes must be released too.
   await releaseExpiredReservationsForMun(input.munId)
 
+  // Started alongside the reservation transaction, not after it: this is a
+  // single indexed users.id lookup with no dependency on the transaction's
+  // outcome, so it doesn't need to sit sequentially on the checkout-start
+  // critical path. Awaited only if/where the order actually gets created
+  // (a free registration's result is simply discarded, unused).
+  const customerDetailsPromise = loadCustomerDetails(userId)
+
   const reservation = await db.transaction(async (tx) => {
     // Share-lock the mun so an organizer/admin status change (transitionMun
     // takes FOR UPDATE) cannot close registration between this check and the
@@ -616,7 +623,7 @@ async function reserveAndStartPayment(
       currency,
       registrationId: registration.id,
       returnUrl: buildPaymentReturnUrl(munSlug, registration.id),
-      customer: await loadCustomerDetails(userId),
+      customer: await customerDetailsPromise,
     })
   } catch (error) {
     // Don't make the delegate wait out a 15-minute hold on a seat that can't
@@ -772,6 +779,11 @@ async function reserveGroupAndStartPayment(
   const adapter = getPaymentsAdapter()
 
   await releaseExpiredReservations(input.registrationProductId)
+
+  // See the same comment in reserveAndStartPayment: started alongside the
+  // reservation transaction rather than after it, since it has no
+  // dependency on the transaction's outcome.
+  const customerDetailsPromise = loadCustomerDetails(userId)
 
   const reservation = await db.transaction(async (tx) => {
     const [mun] = await tx
@@ -948,7 +960,7 @@ async function reserveGroupAndStartPayment(
       currency,
       registrationId: headRegistration.id,
       returnUrl: buildPaymentReturnUrl(munSlug, headRegistration.id),
-      customer: await loadCustomerDetails(userId),
+      customer: await customerDetailsPromise,
     })
   } catch (error) {
     console.error(`[payments] createOrder failed for group ${groupId} (head registration ${headRegistration.id})`, error)

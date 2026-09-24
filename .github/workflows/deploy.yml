@@ -64,6 +64,10 @@ jobs:
         run: npx vite build
         env:
           VITE_API_URL: https://api.munhub.in/api/v1
+          # Must agree with munhub-api's CASHFREE_ENV secret/var — both
+          # currently default to "production" if unset, but that's an
+          # implicit match, not an enforced one. Pin it here explicitly.
+          VITE_CASHFREE_ENV: production
 
       - name: Deploy munhub-web
         if: ${{ inputs.deploy_web }}
