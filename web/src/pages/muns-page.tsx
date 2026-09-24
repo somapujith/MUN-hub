@@ -100,9 +100,7 @@ export function MunsPage() {
 
       <main className="flex-1">
         <div className="border-b border-border bg-surface-soft/70">
-          <div className="content-container relative flex flex-col gap-lg overflow-hidden pt-xxl pb-xl sm:py-section">
-            <div aria-hidden className="absolute top-1/2 right-12 hidden size-56 -translate-y-1/2 rounded-full border border-border bg-signature-cream/60 lg:block" />
-            <div aria-hidden className="absolute top-1/2 right-28 hidden size-32 -translate-y-1/2 rounded-full border border-border/70 bg-signature-mint/50 lg:block" />
+          <div className="content-container flex flex-col gap-lg pt-xxl pb-xl sm:py-section">
             <div className="flex flex-col gap-sm">
               <p className="text-caption uppercase tracking-[0.16px] text-muted-foreground">
                 Marketplace
