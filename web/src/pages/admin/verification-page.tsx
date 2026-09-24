@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { SearchIcon, ShieldCheckIcon } from "lucide-react";
 import { toast } from "sonner";
-import { getModuleReviewQueue } from "@/api/module-verification";
+import { bulkVerifyModules, getModuleReviewQueue } from "@/api/module-verification";
 import { queryKeys } from "@/api/query-keys";
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MODULE_LABELS } from "@/lib/admin/module-labels";
 import { adminSelectClassName } from "@/lib/admin/styles";
 import { usePageClamp } from "@/lib/admin/use-page-clamp";
+import type { BulkModuleVerificationResult, BulkModuleVerificationTarget } from "@/types/module-verification";
 import type { ModuleVerificationState } from "@/types/enums";
 
 const PAGE_SIZE = 20;
@@ -51,10 +53,15 @@ function formatDate(value: string | null): string {
  * actually submitted. This page stays a flat, filterable queue.
  */
 export function AdminVerificationPage() {
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
   const [status, setStatus] = useState<ModuleVerificationState>("PENDING_REVIEW");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkSummary, setBulkSummary] = useState<{ ok: number; failed: BulkModuleVerificationResult[] } | null>(
+    null,
+  );
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -71,12 +78,70 @@ export function AdminVerificationPage() {
     placeholderData: (previous) => previous,
   });
 
+  // Selection is page/filter-scoped — a row selected under one status/
+  // search/page combination shouldn't silently carry over once the
+  // underlying result set has changed under it.
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setBulkSummary(null);
+  }, [status, search, page]);
+
+  const bulkVerifyMutation = useMutation({
+    mutationFn: (targets: BulkModuleVerificationTarget[]) => bulkVerifyModules(targets),
+    onSuccess: async (result) => {
+      const failed = result.results.filter((r) => !r.ok);
+      const ok = result.results.length - failed.length;
+      setBulkSummary({ ok, failed });
+      setSelectedIds(new Set());
+      await queryClient.invalidateQueries({ queryKey: ["admin", "module-review-queue"] });
+      if (failed.length === 0) {
+        toast.success(`${ok} module${ok === 1 ? "" : "s"} verified`);
+      } else if (ok === 0) {
+        toast.error(`All ${failed.length} verifications failed`);
+      } else {
+        toast.warning(`${ok} verified, ${failed.length} failed`);
+      }
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to run the bulk verification"),
+  });
+
   const results = queueQuery.data?.results ?? [];
   const total = queueQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   usePageClamp(Boolean(queueQuery.data), page, setPage, totalPages, (newPage) =>
     toast.message(`Moved to page ${newPage + 1} — no more results on the page you were viewing.`),
   );
+
+  const pageIds = results.map((row) => row.id);
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+
+  const toggleRow = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllOnPage = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const runBulkVerify = () => {
+    const targets = results
+      .filter((row) => selectedIds.has(row.id))
+      .map((row) => ({ munId: row.munId, moduleName: row.moduleName }));
+    bulkVerifyMutation.mutate(targets);
+  };
 
   return (
     <AdminPageFrame
@@ -126,6 +191,37 @@ export function AdminVerificationPage() {
         </p>
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-sm rounded-md border border-border bg-surface-soft/80 px-md py-sm">
+          <p className="text-body-md font-medium text-ink">{selectedIds.size} selected</p>
+          <div className="flex items-center gap-sm">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={bulkVerifyMutation.isPending}
+            >
+              Clear selection
+            </Button>
+            <Button size="sm" onClick={runBulkVerify} disabled={bulkVerifyMutation.isPending}>
+              {bulkVerifyMutation.isPending ? "Verifying..." : `Verify ${selectedIds.size}`}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {bulkSummary && (
+        <p role="status" className="text-body-md text-muted-foreground">
+          {bulkSummary.ok} verified
+          {bulkSummary.failed.length > 0
+            ? `, ${bulkSummary.failed.length} failed: ${bulkSummary.failed
+                .slice(0, 3)
+                .map((f) => f.error ?? "Unknown error")
+                .join("; ")}${bulkSummary.failed.length > 3 ? ` (+${bulkSummary.failed.length - 3} more)` : ""}`
+            : ""}
+        </p>
+      )}
+
       {queueQuery.isLoading ? (
         <div className="flex flex-col gap-sm">
           {Array.from({ length: 5 }).map((_, index) => (
@@ -157,6 +253,13 @@ export function AdminVerificationPage() {
           <table className="w-full min-w-[40rem] text-left text-body-md">
             <thead className="border-b border-border bg-surface-soft/80 text-muted-foreground">
               <tr>
+                <th className="w-10 px-md py-sm font-medium">
+                  <Checkbox
+                    aria-label="Select all modules on this page"
+                    checked={allOnPageSelected}
+                    onCheckedChange={toggleSelectAllOnPage}
+                  />
+                </th>
                 <th className="px-md py-sm font-medium">MUN</th>
                 <th className="px-md py-sm font-medium">Module</th>
                 <th className="px-md py-sm font-medium">Confirmed</th>
@@ -166,6 +269,13 @@ export function AdminVerificationPage() {
             <tbody>
               {results.map((row) => (
                 <tr key={row.id} className="border-b border-border last:border-0">
+                  <td className="px-md py-sm">
+                    <Checkbox
+                      aria-label={`Select ${row.munName} — ${MODULE_LABELS[row.moduleName] ?? row.moduleName}`}
+                      checked={selectedIds.has(row.id)}
+                      onCheckedChange={() => toggleRow(row.id)}
+                    />
+                  </td>
                   <td className="px-md py-sm font-medium text-ink">{row.munName}</td>
                   <td className="px-md py-sm text-muted-foreground">{MODULE_LABELS[row.moduleName] ?? row.moduleName}</td>
                   <td className="px-md py-sm tabular-nums text-muted-foreground">

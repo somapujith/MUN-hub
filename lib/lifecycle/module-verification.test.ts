@@ -8,6 +8,7 @@ import {
   reviewModule,
   checkAllModulesVerified,
   setModuleRequirement,
+  bulkVerifyModules,
 } from './module-verification'
 
 async function makeUser(role: 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' | 'STUDENT') {
@@ -290,6 +291,77 @@ describe('reviewModule', () => {
         .where(and(eq(verificationIssues.munId, mun.id), eq(verificationIssues.moduleName, 'FINAL_REVIEW')))
       expect(issueRows.length).toBe(1)
     }
+  })
+})
+
+describe('bulkVerifyModules', () => {
+  it("continues past a per-target failure and reports each target's outcome, without letting the failure block the good target", async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const reviewer = await makeUser('ADMIN')
+    const mun = await makeMun(organizer.id)
+    const organizerSession = { userId: organizer.id, role: 'ORGANIZER' as const }
+    const reviewerSession = { userId: reviewer.id, role: 'ADMIN' as const }
+
+    await confirmModule(mun.id, 'COMMITTEES', organizerSession)
+
+    // Simulates "someone else already reviewed this one since the queue was
+    // loaded": review it up front, so the bulk call's own attempt at the
+    // same (munId, moduleName) hits the real `reviewModule` no-longer-
+    // PENDING_REVIEW guard, not a synthetic failure.
+    await confirmModule(mun.id, 'CONTACT', organizerSession)
+    await reviewModule(mun.id, 'CONTACT', 'VERIFIED', [], reviewerSession)
+
+    const results = await bulkVerifyModules(
+      [
+        { munId: mun.id, moduleName: 'COMMITTEES' },
+        { munId: mun.id, moduleName: 'CONTACT' },
+      ],
+      reviewerSession,
+    )
+
+    expect(results).toEqual([
+      { munId: mun.id, moduleName: 'COMMITTEES', ok: true },
+      { munId: mun.id, moduleName: 'CONTACT', ok: false, error: expect.stringContaining('already reviewed') },
+    ])
+
+    // The good target's own reviewModule call ran to completion despite the
+    // other target failing later in the loop.
+    const [committeesRow] = await db
+      .select()
+      .from(munModuleVerifications)
+      .where(and(eq(munModuleVerifications.munId, mun.id), eq(munModuleVerifications.moduleName, 'COMMITTEES')))
+    expect(committeesRow.state).toBe('VERIFIED')
+    expect(committeesRow.lastReviewedBy).toBe(reviewer.id)
+  })
+
+  it('rejects a non-reviewer session up front, before touching any target', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const student = await makeUser('STUDENT')
+    const mun = await makeMun(organizer.id)
+
+    await expect(
+      bulkVerifyModules([{ munId: mun.id, moduleName: 'COMMITTEES' }], { userId: student.id, role: 'STUDENT' }),
+    ).rejects.toThrow('Forbidden')
+  })
+
+  it('still auto-advances the mun to VERIFIED when the last required module clears via the bulk call', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const reviewer = await makeUser('ADMIN')
+    const mun = await makeMun(organizer.id)
+    const organizerSession = { userId: organizer.id, role: 'ORGANIZER' as const }
+    const reviewerSession = { userId: reviewer.id, role: 'ADMIN' as const }
+
+    for (const moduleName of ALL_15_MODULES.filter((m) => m !== 'FINAL_REVIEW')) {
+      await confirmModule(mun.id, moduleName, organizerSession)
+      await reviewModule(mun.id, moduleName, 'VERIFIED', [], reviewerSession)
+    }
+    await confirmModule(mun.id, 'FINAL_REVIEW', organizerSession)
+
+    const results = await bulkVerifyModules([{ munId: mun.id, moduleName: 'FINAL_REVIEW' }], reviewerSession)
+    expect(results).toEqual([{ munId: mun.id, moduleName: 'FINAL_REVIEW', ok: true }])
+
+    const [updatedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
+    expect(updatedMun.status).toBe('VERIFIED')
   })
 })
 

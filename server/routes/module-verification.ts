@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import {
+  bulkVerifyModules,
   confirmModule,
   getModuleVerificationState,
   reviewModule,
@@ -42,7 +43,37 @@ const setRequirementBodySchema = z
   })
   .strict()
 
+const bulkVerifyModulesBodySchema = z
+  .object({
+    targets: z
+      .array(
+        z
+          .object({
+            munId: z.string().min(1),
+            moduleName: moduleNameSchema,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100),
+  })
+  .strict()
+
 export const moduleVerificationRoutes = new Hono<{ Variables: AppVariables }>()
+
+// Bulk verify-only (Gate 2). Not nested under a single mun's routes below —
+// a batch spans multiple munId/moduleName pairs at once.
+moduleVerificationRoutes.post(
+  '/admin/modules/bulk-verify',
+  requireAuth,
+  requireRole([...REVIEW_ROLES]),
+  zValidator('json', bulkVerifyModulesBodySchema),
+  async (c) => {
+    const { targets } = c.req.valid('json')
+    const results = await bulkVerifyModules(targets, c.get('session'))
+    return c.json({ results })
+  },
+)
 
 // Reviewers can read any mun's module state; an organizer only their own mun's.
 // Was unauthenticated, which let anyone read review state by mun id — and
