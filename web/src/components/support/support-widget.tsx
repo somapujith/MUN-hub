@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { MessageCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { SupportPanel } from "@/components/support/support-panel";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ZoneLink } from "@/components/support/zone-link";
 import { inboxUrlForRole } from "@/components/support/support-labels";
 import { SUPPORT_POLL_MS } from "@/components/support/use-support";
@@ -15,6 +15,17 @@ import { loginPathFor, resolveZoneUrl } from "@/lib/host-routing";
 import { SITE_INFO, mailto } from "@/lib/site-info";
 
 const REQUESTER_ROLES = new Set(["STUDENT", "ORGANIZER"]);
+
+// `SupportPanel` (conversation list + thread + composer, plus its `sonner`
+// toast usage) is only ever needed once a signed-in requester actually opens
+// this floating chat sheet — but `support-widget.tsx` itself is mounted by
+// `site-header.tsx` on every single page, so a static import here shipped
+// the whole chat subtree in the eagerly-loaded site-header chunk for every
+// visitor, including ones who never open the widget. Lazy-loaded so it's
+// fetched only on first open.
+const SupportPanel = lazy(() =>
+  import("@/components/support/support-panel").then((m) => ({ default: m.SupportPanel })),
+);
 
 /** Pages that already are the support inbox (or the staff console) don't need the bubble. */
 function hiddenOn(pathname: string): boolean {
@@ -96,13 +107,25 @@ export function SupportWidget() {
 
         {requester ? (
           <div className="flex min-h-0 flex-1 flex-col">
-            <SupportPanel variant="popover" />
+            <Suspense fallback={<SupportPanelFallback />}>
+              <SupportPanel variant="popover" />
+            </Suspense>
           </div>
         ) : (
           <SignedOutPrompt returnTo={`${location.pathname}${location.search}`} />
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+function SupportPanelFallback() {
+  return (
+    <div className="flex flex-col gap-xs p-md" aria-busy="true" aria-label="Loading conversations">
+      <Skeleton className="h-14 w-full" />
+      <Skeleton className="h-14 w-full" />
+      <Skeleton className="h-14 w-full" />
+    </div>
   );
 }
 

@@ -28,4 +28,23 @@ export default defineConfig(({ mode }) => ({
     mode === "production" && !process.env.VITE_API_URL
       ? { "import.meta.env.VITE_API_URL": JSON.stringify(PRODUCTION_API_URL) }
       : {},
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // React/ReactDOM/scheduler churn far less often than app code (a
+          // version bump, not every deploy), but without this they get
+          // bundled inline with whichever entry first pulls them in — so a
+          // repeat visitor re-downloads React itself after every unrelated
+          // app change. Pulling just these three into their own chunk keeps
+          // them cacheable across deploys without merging other, actually
+          // route-scoped vendor deps (e.g. @base-ui/react, sonner) into one
+          // another the way a blanket "all of node_modules" rule would.
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) {
+            return "vendor-react";
+          }
+        },
+      },
+    },
+  },
 }));
