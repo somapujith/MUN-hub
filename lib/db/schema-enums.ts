@@ -188,6 +188,14 @@ export const adminActionEnum = pgEnum('admin_action', [
   // tickets. Written only when the reviewer actually changes (reclaiming a
   // submission you already hold is a no-op, same as assignTicket).
   'SUBMISSION_CLAIMED',
+  // Admin Registrations console (lib/actions/admin-review.ts) — per-
+  // registration actions distinct from the whole-conference CANCELLED
+  // transition (lib/lifecycle/registration-lifecycle.ts, which uses
+  // verification_logs, not admin_actions, for its own audit trail).
+  'REGISTRATION_CANCELLED',
+  'REGISTRATION_FLAGGED_DUPLICATE',
+  'REGISTRATION_DUPLICATE_FLAG_CLEARED',
+  'REGISTRATION_CONFIRMATION_RESENT',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [

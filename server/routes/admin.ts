@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { getAdminAnalytics } from '@/lib/actions/admin-analytics'
 import { getAdminOverviewStats, listAdminActions, listAuditActors } from '@/lib/actions/admin-audit'
 import { recordPiiRead } from '@/lib/actions/admin-pii-read'
-import { getRegistrationsQueue } from '@/lib/actions/admin-review'
+import { exportRegistrationsCsv, getRegistrationsQueue } from '@/lib/actions/admin-review'
+import { registrationStatusEnum } from '@/lib/db/schema-enums'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
 import type { AppVariables } from '../src/types'
@@ -29,13 +30,21 @@ const auditQuerySchema = z
   })
   .strict()
 
+const registrationsFilterShape = {
+  q: z.string().trim().min(1).optional(),
+  status: z.enum(registrationStatusEnum.enumValues).optional(),
+  munId: z.string().uuid().optional(),
+}
+
 const registrationsQuerySchema = z
   .object({
-    q: z.string().trim().min(1).optional(),
+    ...registrationsFilterShape,
     limit: z.coerce.number().int().min(1).max(100).optional(),
     offset: z.coerce.number().int().min(0).optional(),
   })
   .strict()
+
+const registrationsExportQuerySchema = z.object(registrationsFilterShape).strict()
 
 export const adminRoutes = new Hono<{ Variables: AppVariables }>()
 
@@ -83,11 +92,12 @@ adminRoutes.get(
   },
 )
 
-// Platform-wide, paginated registrations browse with optional `?q=` search —
-// distinct from admin-search.ts's `/admin/search/registrations`, which
-// requires a non-empty `q` and returns an unpaginated 50-row cap for the
-// ops "look up one registration" search box. This is the admin console's
-// Registrations table (browse-first, search narrows it).
+// Platform-wide, paginated registrations browse with optional `?q=`/`?status=`/
+// `?munId=` filters — distinct from admin-search.ts's
+// `/admin/search/registrations`, which requires a non-empty `q` and returns
+// an unpaginated 50-row cap for the ops "look up one registration" search
+// box. This is the admin console's Registrations table (browse-first,
+// filters narrow it).
 adminRoutes.get(
   '/admin/registrations',
   requireAuth,
@@ -102,9 +112,39 @@ adminRoutes.get(
       route: 'GET /admin/registrations',
       targetType: 'registration',
       targetIds: result.results.map((row) => row.id),
-      hasQuery: Boolean(params.q),
+      hasQuery: Boolean(params.q || params.status || params.munId),
     })
     return c.json(result)
+  },
+)
+
+// Same filters as the list above, as a CSV download — registered as its own
+// path (not a `?format=csv` on the list route) so response streaming/headers
+// stay simple and the two are cacheable/rate-limited independently if that's
+// ever needed.
+adminRoutes.get(
+  '/admin/registrations/export',
+  requireAuth,
+  requireRole([...ADMIN_ROLES]),
+  async (c) => {
+    const params = registrationsExportQuerySchema.parse(c.req.query())
+    const session = c.get('session')!
+    const result = await exportRegistrationsCsv(params, session)
+    // Rows carry delegate names and emails, same as the list route above.
+    await recordPiiRead({
+      actorId: session.userId,
+      route: 'GET /admin/registrations/export',
+      targetType: 'registration',
+      targetIds: result.registrationIds,
+      hasQuery: Boolean(params.q || params.status || params.munId),
+    })
+    // BOM so Excel opens the UTF-8 file with names intact (matches
+    // organizer-dashboard.ts's roster export route).
+    return c.body(`﻿${result.csv}`, 200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Cache-Control': 'no-store',
+    })
   },
 )
 

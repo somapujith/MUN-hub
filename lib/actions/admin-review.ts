@@ -1,11 +1,13 @@
 import { and, desc, eq, getTableColumns, ilike, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
+  committees,
   muns,
   munModuleVerifications,
   munSubmissions,
   organizerApplications,
   payments,
+  portfolios,
   registrations,
   users,
   verificationLogs,
@@ -14,12 +16,15 @@ import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
 import { runInBackground } from '@/lib/background-tasks'
+import { toCsv, type CsvCell } from '@/lib/csv'
 import { transitionMun } from '@/lib/lifecycle/mun-state-machine'
 import { openReviewRound, publishFromQueue, type PublishFromQueueResult } from '@/lib/lifecycle/go-live'
 import { loadValidationContext, type MunValidationContext } from '@/lib/lifecycle/validation'
+import { isEmailNotificationsEnabled } from '@/lib/notifications/email-preference'
 import { notifyOrganizerApplicationEvent } from '@/lib/notifications/organizer-application-events'
+import { notifyRegistrationConfirmed } from '@/lib/notifications/registration-events'
 import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
-import type { ApplicationStatus, ModuleVerificationState } from '@/lib/db/schema-enums'
+import type { ApplicationStatus, ModuleVerificationState, RegistrationStatus } from '@/lib/db/schema-enums'
 import type { Mun, MunWithApplication } from '@/lib/types'
 
 const REVIEW_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
@@ -514,17 +519,23 @@ export async function getAdminMunModuleContent(
 
 export interface RegistrationsQueueParams {
   q?: string
+  /** Exact registration status match. */
+  status?: RegistrationStatus
+  /** Exact mun id match — narrows to one conference. */
+  munId?: string
   limit?: number
   offset?: number
 }
 
 export interface RegistrationsQueueRow {
   id: string
+  munId: string
   delegateName: string
   delegateEmail: string
   munName: string
   status: string
   paymentStatus: string | null
+  flaggedDuplicateAt: Date | null
   createdAt: Date
 }
 
@@ -539,6 +550,30 @@ function pattern(q: string): string {
 }
 
 /**
+ * Shared filter predicate for the admin registrations queue and its CSV
+ * export (`exportRegistrationsCsv` below) — kept as one function so the two
+ * can never quietly drift apart (an export that doesn't match what the list
+ * shows would be a confusing, hard-to-notice bug). `status`/`munId` are exact
+ * matches; `q` is the same ILIKE-or-exact-id search `getRegistrationsQueue`
+ * always used, now composable with the other two filters.
+ */
+function buildRegistrationsWhereClause(params: Pick<RegistrationsQueueParams, 'q' | 'status' | 'munId'>) {
+  const q = params.q?.trim()
+  return and(
+    q
+      ? or(
+          ilike(users.name, `%${pattern(q)}%`),
+          ilike(users.email, `%${pattern(q)}%`),
+          ilike(muns.name, `%${pattern(q)}%`),
+          eq(registrations.id, q),
+        )
+      : undefined,
+    params.status ? eq(registrations.status, params.status) : undefined,
+    params.munId ? eq(registrations.munId, params.munId) : undefined,
+  )
+}
+
+/**
  * Platform-wide, paginated registrations list for the admin console's
  * Registrations page — distinct from `admin-search.ts`'s
  * `searchRegistrations`, which requires a non-empty query and returns an
@@ -548,8 +583,10 @@ function pattern(q: string): string {
  * (paginated, default 20/page, newest first — same reasoning as
  * `getReviewQueue`), and an optional `q` narrows across delegate name /
  * delegate email / mun name / registration id using the same
- * ILIKE-or-exact-id predicate shape as
- * `searchRegistrations`. Requires OPERATIONS/ADMIN/SUPER_ADMIN.
+ * ILIKE-or-exact-id predicate shape as `searchRegistrations`. `status` and
+ * `munId` narrow further (exact match) — `munId` is also how a row's MUN
+ * name links out (`getRegistrationsQueue` didn't return it before). Requires
+ * OPERATIONS/ADMIN/SUPER_ADMIN.
  */
 export async function getRegistrationsQueue(
   params: RegistrationsQueueParams = {},
@@ -559,24 +596,18 @@ export async function getRegistrationsQueue(
 
   const limit = params.limit ?? 20
   const offset = params.offset ?? 0
-  const q = params.q?.trim()
-  const whereClause = q
-    ? or(
-        ilike(users.name, `%${pattern(q)}%`),
-        ilike(users.email, `%${pattern(q)}%`),
-        ilike(muns.name, `%${pattern(q)}%`),
-        eq(registrations.id, q),
-      )
-    : undefined
+  const whereClause = buildRegistrationsWhereClause(params)
 
   const results = await db
     .select({
       id: registrations.id,
+      munId: registrations.munId,
       delegateName: users.name,
       delegateEmail: users.email,
       munName: muns.name,
       status: registrations.status,
       paymentStatus: payments.status,
+      flaggedDuplicateAt: registrations.flaggedDuplicateAt,
       createdAt: registrations.createdAt,
     })
     .from(registrations)
@@ -596,4 +627,292 @@ export async function getRegistrationsQueue(
     .where(whereClause)
 
   return { results, total: count }
+}
+
+// ---------------------------------------------------------------------------
+// Per-registration admin actions (2026-09-25) — cancel, flag/unflag as a
+// duplicate, resend the confirmation email. All three act on exactly one
+// registration and are distinct from `runLifecycleAction`'s conference-level
+// `cancel` (lib/lifecycle/registration-lifecycle.ts), which sweeps every
+// in-flight hold on an entire mun at once and audits through
+// verification_logs — these audit through admin_actions instead, mirroring
+// `resolvePaymentException` (lib/payments/exceptions.ts) and `suspendMun`
+// above.
+// ---------------------------------------------------------------------------
+
+export const REGISTRATION_ADMIN_ERRORS = {
+  cancelReasonRequired: 'A reason is required to cancel a registration',
+  alreadyCancelled: 'This registration is already cancelled',
+  flagReasonRequired: 'A reason is required to flag a registration as a duplicate',
+  resendNotConfirmed: 'Only a confirmed registration has a confirmation email to resend',
+} as const
+
+export interface CancelRegistrationResult {
+  id: string
+  status: RegistrationStatus
+}
+
+/**
+ * Admin-initiated cancellation of a single registration — releases its seat
+ * (frees capacity for the product/committee/portfolio, the same way an
+ * expired hold or a failed payment does) without touching any other
+ * registration. For correcting one registration (duplicate, fraud, a
+ * mistaken entry), not for cancelling a whole conference.
+ *
+ * No refunds anywhere in MUN Hub (see lib/payments/exceptions.ts's header) —
+ * cancelling a CONFIRMED (paid) registration does not touch its payment row;
+ * an admin who also needs to account for the money uses the payment
+ * exceptions flow separately (deliberately not touched by this function).
+ *
+ * Row-locks the registration first, mirroring `initiateRegistration`'s own
+ * discipline (lib/actions/registration.ts) and the payment webhook's
+ * cancellation-on-failure path (lib/payments/webhook.ts) — read-under-lock,
+ * then write, all in one transaction, so this can never race a concurrent
+ * webhook/expiry-sweep update on the same row. Requires a non-empty `reason`,
+ * recorded on the `admin_actions` row. OPERATIONS/ADMIN/SUPER_ADMIN.
+ */
+export async function cancelRegistrationAsAdmin(
+  registrationId: string,
+  reason: string,
+  session: Session | null,
+): Promise<CancelRegistrationResult> {
+  requireRole(session, [...REVIEW_ROLES])
+
+  const trimmed = reason.trim()
+  if (!trimmed) throw new Error(REGISTRATION_ADMIN_ERRORS.cancelReasonRequired)
+
+  return db.transaction(async (tx) => {
+    const [registration] = await tx
+      .select({ id: registrations.id, status: registrations.status, munId: registrations.munId })
+      .from(registrations)
+      .where(eq(registrations.id, registrationId))
+      .for('update')
+      .limit(1)
+
+    if (!registration) throw new Error('Registration not found')
+    if (registration.status === 'CANCELLED' || registration.status === 'REFUNDED') {
+      throw new Error(REGISTRATION_ADMIN_ERRORS.alreadyCancelled)
+    }
+
+    const [updated] = await tx
+      .update(registrations)
+      .set({ status: 'CANCELLED', updatedAt: new Date() })
+      .where(eq(registrations.id, registrationId))
+      .returning({ id: registrations.id, status: registrations.status })
+
+    await recordAdminAction(tx, session.userId, 'REGISTRATION_CANCELLED', 'registration', registrationId, trimmed, {
+      munId: registration.munId,
+      previousStatus: registration.status,
+    })
+
+    return updated
+  })
+}
+
+export interface SetDuplicateFlagResult {
+  id: string
+  flaggedDuplicateAt: Date | null
+}
+
+/**
+ * Marks, or clears, a registration as a suspected duplicate — a plain
+ * timestamp marker (`registrations.flaggedDuplicateAt`) for the admin console
+ * to show a "Flagged duplicate" badge, not a state change to the
+ * registration itself (its `status` is untouched either way). Flagging
+ * requires a `reason` (recorded on the `admin_actions` row, mirroring
+ * `suspendMun`); clearing does not (mirroring `reinstateMun`).
+ * OPERATIONS/ADMIN/SUPER_ADMIN.
+ */
+export async function setRegistrationDuplicateFlag(
+  registrationId: string,
+  flagged: boolean,
+  reason: string | undefined,
+  session: Session | null,
+): Promise<SetDuplicateFlagResult> {
+  requireRole(session, [...REVIEW_ROLES])
+
+  const trimmedReason = reason?.trim() || undefined
+  if (flagged && !trimmedReason) {
+    throw new Error(REGISTRATION_ADMIN_ERRORS.flagReasonRequired)
+  }
+
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(registrations)
+      .set({ flaggedDuplicateAt: flagged ? new Date() : null, updatedAt: new Date() })
+      .where(eq(registrations.id, registrationId))
+      .returning({ id: registrations.id, flaggedDuplicateAt: registrations.flaggedDuplicateAt })
+
+    if (!updated) throw new Error('Registration not found')
+
+    await recordAdminAction(
+      tx,
+      session.userId,
+      flagged ? 'REGISTRATION_FLAGGED_DUPLICATE' : 'REGISTRATION_DUPLICATE_FLAG_CLEARED',
+      'registration',
+      registrationId,
+      trimmedReason,
+    )
+
+    return updated
+  })
+}
+
+/** Registration statuses that were actually confirmed at some point — the only ones a "your registration is confirmed" email is honest for. */
+const RESEND_ELIGIBLE_STATUSES: RegistrationStatus[] = ['CONFIRMED', 'ATTENDED', 'NO_SHOW']
+
+export interface ResendConfirmationResult {
+  /** False when the delegate has turned optional email off — never an error, just a no-op. */
+  sent: boolean
+}
+
+/**
+ * Re-sends the registration-confirmed email through the exact same
+ * delegate-facing pipeline the original confirmation used
+ * (`lib/notifications/registration-events.ts#notifyRegistrationConfirmed`) —
+ * no separate email infrastructure. Refuses a registration that was never
+ * actually confirmed (PENDING/PAYMENT_PENDING/CANCELLED/REFUNDED) rather than
+ * sending a "confirmed" email for one that isn't. A no-op (`sent: false`,
+ * not an error) if the delegate has turned optional email off — the same
+ * rule `notifyRegistrationConfirmed` itself already enforces via
+ * `isEmailNotificationsEnabled`, checked here first so the admin can be told
+ * apart from a genuine delivery attempt. OPERATIONS/ADMIN/SUPER_ADMIN.
+ */
+export async function resendRegistrationConfirmation(
+  registrationId: string,
+  session: Session | null,
+): Promise<ResendConfirmationResult> {
+  requireRole(session, [...REVIEW_ROLES])
+
+  const [registration] = await db
+    .select({ id: registrations.id, userId: registrations.userId, status: registrations.status })
+    .from(registrations)
+    .where(eq(registrations.id, registrationId))
+    .limit(1)
+  if (!registration) throw new Error('Registration not found')
+  if (!RESEND_ELIGIBLE_STATUSES.includes(registration.status)) {
+    throw new Error(REGISTRATION_ADMIN_ERRORS.resendNotConfirmed)
+  }
+
+  const enabled = await isEmailNotificationsEnabled(registration.userId)
+  if (!enabled) return { sent: false }
+
+  await notifyRegistrationConfirmed(registrationId)
+  await recordAdminAction(db, session.userId, 'REGISTRATION_CONFIRMATION_RESENT', 'registration', registrationId)
+  return { sent: true }
+}
+
+// ---------------------------------------------------------------------------
+// CSV export (2026-09-25) — same filters, same query shape as
+// getRegistrationsQueue above (via buildRegistrationsWhereClause), batched
+// the same way organizer-dashboard.ts#exportDelegateRoster is: refuse up
+// front past a hard row cap rather than silently truncate, page through in
+// fixed-size batches ordered by a stable (createdAt, id) tie-break so a row
+// added mid-export can't shift already-read pages.
+// ---------------------------------------------------------------------------
+
+const REGISTRATIONS_EXPORT_BATCH = 1_000
+const REGISTRATIONS_EXPORT_MAX_ROWS = 10_000
+
+export const REGISTRATIONS_EXPORT_ERRORS = {
+  tooLarge: 'This export has more than 10,000 rows — narrow it with a filter and export in parts',
+} as const
+
+export interface RegistrationsExportResult {
+  filename: string
+  csv: string
+  rowCount: number
+  /** Every exported registration's id, for the route's PII-read audit entry — not part of the CSV itself. */
+  registrationIds: string[]
+}
+
+const REGISTRATIONS_EXPORT_HEADERS = [
+  'Registration ID',
+  'Status',
+  'Payment status',
+  'Delegate name',
+  'Delegate email',
+  'MUN',
+  'Committee',
+  'Portfolio',
+  'Payment order ID',
+  'Flagged duplicate',
+  'Registered at',
+] as const
+
+/**
+ * The filtered registrations queue (same q/status/munId filters as
+ * `getRegistrationsQueue`, no paging) as a CSV file — platform-wide, for the
+ * admin Registrations page's export button. OPERATIONS/ADMIN/SUPER_ADMIN.
+ */
+export async function exportRegistrationsCsv(
+  params: Pick<RegistrationsQueueParams, 'q' | 'status' | 'munId'>,
+  session: Session | null,
+): Promise<RegistrationsExportResult> {
+  requireRole(session, [...REVIEW_ROLES])
+  const whereClause = buildRegistrationsWhereClause(params)
+
+  const [{ count: total } = { count: 0 }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(registrations)
+    .innerJoin(users, eq(registrations.userId, users.id))
+    .innerJoin(muns, eq(registrations.munId, muns.id))
+    .where(whereClause)
+
+  if (total > REGISTRATIONS_EXPORT_MAX_ROWS) throw new Error(REGISTRATIONS_EXPORT_ERRORS.tooLarge)
+
+  const rows: CsvCell[][] = [[...REGISTRATIONS_EXPORT_HEADERS]]
+  const registrationIds: string[] = []
+  for (let offset = 0; offset < total; offset += REGISTRATIONS_EXPORT_BATCH) {
+    const batch = await db
+      .select({
+        id: registrations.id,
+        status: registrations.status,
+        paymentStatus: payments.status,
+        delegateName: users.name,
+        delegateEmail: users.email,
+        munName: muns.name,
+        committeeName: committees.name,
+        portfolioName: portfolios.name,
+        providerOrderId: payments.providerOrderId,
+        flaggedDuplicateAt: registrations.flaggedDuplicateAt,
+        createdAt: registrations.createdAt,
+      })
+      .from(registrations)
+      .innerJoin(users, eq(registrations.userId, users.id))
+      .innerJoin(muns, eq(registrations.munId, muns.id))
+      .leftJoin(committees, eq(registrations.committeeId, committees.id))
+      .leftJoin(portfolios, eq(registrations.portfolioId, portfolios.id))
+      .leftJoin(payments, eq(payments.registrationId, registrations.id))
+      .where(whereClause)
+      .orderBy(desc(registrations.createdAt), desc(registrations.id))
+      .limit(REGISTRATIONS_EXPORT_BATCH)
+      .offset(offset)
+
+    for (const row of batch) {
+      registrationIds.push(row.id)
+      rows.push([
+        row.id,
+        row.status,
+        row.paymentStatus,
+        row.delegateName,
+        row.delegateEmail,
+        row.munName,
+        row.committeeName,
+        row.portfolioName,
+        row.providerOrderId,
+        row.flaggedDuplicateAt ? 'Yes' : 'No',
+        row.createdAt.toISOString(),
+      ])
+    }
+    if (batch.length < REGISTRATIONS_EXPORT_BATCH) break
+  }
+
+  const date = new Date().toISOString().slice(0, 10)
+  return {
+    filename: `registrations-${date}.csv`,
+    csv: toCsv(rows),
+    rowCount: rows.length - 1,
+    registrationIds,
+  }
 }

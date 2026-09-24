@@ -701,6 +701,13 @@ export const registrations = pgTable(
     // registrationGroups' header comment above for how a row's `userId` can
     // be temporarily the head delegate's own id until a teammate claims it.
     registrationGroupId: text('registration_group_id').references((): AnyPgColumn => registrationGroups.id),
+    // Admin-only duplicate marker (admin Registrations console) — null means
+    // not flagged; a timestamp records when an admin flagged it. Deliberately
+    // not a boolean: the "when" is useful on its own and costs nothing extra.
+    // Not a state change to the registration itself (status is untouched);
+    // the reason for flagging/clearing lives on the admin_actions audit row
+    // (lib/actions/admin-review.ts#setRegistrationDuplicateFlag), not here.
+    flaggedDuplicateAt: timestamp('flagged_duplicate_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

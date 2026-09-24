@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
 import { ZodError } from 'zod'
+import { REGISTRATION_ADMIN_ERRORS, REGISTRATIONS_EXPORT_ERRORS } from '@/lib/actions/admin-review'
 import { APPLICATION_PENDING } from '@/lib/actions/organizer-application'
 import { ONBOARDING_ERRORS } from '@/lib/actions/organizer-onboarding'
 import { ORGANIZER_OPS_ERROR_STATUS } from '@/lib/actions/organizer-ops-errors'
@@ -100,6 +101,24 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   // lib/actions/{organizer-dashboard,check-in,organizer-communications,results}.ts
   if (Object.hasOwn(ORGANIZER_OPS_ERROR_STATUS, message)) {
     return { ...ORGANIZER_OPS_ERROR_STATUS[message], message }
+  }
+
+  // lib/actions/admin-review.ts — admin Registrations console: cancel, flag
+  // duplicate, resend confirmation, CSV export.
+  if (
+    message === REGISTRATION_ADMIN_ERRORS.cancelReasonRequired ||
+    message === REGISTRATION_ADMIN_ERRORS.flagReasonRequired
+  ) {
+    return { status: 400, code: 'VALIDATION_FAILED', message }
+  }
+  if (
+    message === REGISTRATION_ADMIN_ERRORS.alreadyCancelled ||
+    message === REGISTRATION_ADMIN_ERRORS.resendNotConfirmed
+  ) {
+    return { status: 409, code: 'CONFLICT_STATE', message }
+  }
+  if (message === REGISTRATIONS_EXPORT_ERRORS.tooLarge) {
+    return { status: 400, code: 'VALIDATION_FAILED', message }
   }
 
   // lib/actions/staff-mfa.ts — staff TOTP enrollment + sign-in challenge.
@@ -449,4 +468,9 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: GROUP_ERRORS.cannotReleaseHead, status: 400, code: 'VALIDATION_FAILED' },
   { message: GROUP_ERRORS.notClaimed, status: 409, code: 'CONFLICT_STATE' },
   { message: GROUP_ERRORS.alreadyPaid, status: 409, code: 'CONFLICT_STATE' },
+  { message: REGISTRATION_ADMIN_ERRORS.cancelReasonRequired, status: 400, code: 'VALIDATION_FAILED' },
+  { message: REGISTRATION_ADMIN_ERRORS.alreadyCancelled, status: 409, code: 'CONFLICT_STATE' },
+  { message: REGISTRATION_ADMIN_ERRORS.flagReasonRequired, status: 400, code: 'VALIDATION_FAILED' },
+  { message: REGISTRATION_ADMIN_ERRORS.resendNotConfirmed, status: 409, code: 'CONFLICT_STATE' },
+  { message: REGISTRATIONS_EXPORT_ERRORS.tooLarge, status: 400, code: 'VALIDATION_FAILED' },
 ]
