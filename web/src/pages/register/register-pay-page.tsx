@@ -14,16 +14,30 @@ import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
 import { CASHFREE_PROVIDER, MOCK_PAYMENT_PROVIDER, completeMockPayment, fetchRegistrationById } from "@/api/registration";
 import { CashfreeCheckout } from "@/components/registration/cashfree-checkout";
+import { PaymentConfirming } from "@/components/registration/payment-confirming";
+import { clearCashfreeCheckoutStarted, hasCashfreeCheckoutStarted } from "@/lib/cashfree";
 import { NotFoundPage } from "@/pages/not-found-page";
 
 /**
  * Return-poll window: a redirect back from Cashfree's hosted page carries no
  * trust signal on its own — the only way to learn the real outcome is to
- * keep polling `GET /registrations/:id` until it reaches a terminal state or
- * this budget runs out. ~2s cadence for ~30s.
+ * keep polling `GET /registrations/:id` until it reaches a terminal state.
+ * Phased: fast (2s) for the first minute, since most webhooks arrive within
+ * seconds; slower (5s) for the following 4 minutes, since a real production
+ * payment was observed taking ~3-4 minutes end to end (mostly the delegate's
+ * own time on Cashfree's page, but the webhook itself also races the
+ * redirect back). A flat 30s budget (the original value) left the page
+ * frozen on stale "still pending" data with no further checks once it ran
+ * out, even though the registration went on to confirm seconds later — see
+ * the incident this phasing was added to fix. Auto-polling stops after the
+ * full budget; PaymentConfirming's manual "Check status now" button and
+ * TanStack Query's default refetchOnWindowFocus (web/src/api/query-client.ts)
+ * both still work past that point.
  */
-const PAY_PAGE_POLL_INTERVAL_MS = 2_000;
-const PAY_PAGE_POLL_BUDGET_MS = 30_000;
+const PAY_PAGE_POLL_FAST_INTERVAL_MS = 2_000;
+const PAY_PAGE_POLL_FAST_PHASE_MS = 60_000;
+const PAY_PAGE_POLL_SLOW_INTERVAL_MS = 5_000;
+const PAY_PAGE_POLL_BUDGET_MS = 5 * 60_000;
 
 export function RegisterPayPage() {
   const { slug = "" } = useParams();
@@ -33,7 +47,7 @@ export function RegisterPayPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [paying, setPaying] = React.useState(false);
-  const pollDeadlineRef = React.useRef<number>(Date.now() + PAY_PAGE_POLL_BUDGET_MS);
+  const pollStartRef = React.useRef<number>(Date.now());
 
   const regQuery = useQuery({
     queryKey: queryKeys.registration(registrationId ?? ""),
@@ -41,25 +55,30 @@ export function RegisterPayPage() {
     enabled: Boolean(registrationId),
     // Whether online payments are available can change between visits.
     refetchOnMount: "always",
-    // Bounded auto-poll for a student landing back on this page after
-    // Cashfree's hosted checkout: stops as soon as the registration reaches a
-    // terminal state (the query itself flips `enabled` off via `settled`
-    // below and this component navigates away) or once the time budget
-    // expires, whichever comes first — never polls forever.
+    // Bounded, phased auto-poll for a student landing back on this page
+    // after Cashfree's hosted checkout: stops as soon as the registration
+    // reaches a terminal state (the query itself flips `enabled` off via
+    // `settled` below and this component navigates away) or once the time
+    // budget expires, whichever comes first — never polls forever.
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       const isTerminal = status !== undefined && status !== "PAYMENT_PENDING" && status !== "PENDING";
       if (isTerminal) return false;
-      return Date.now() < pollDeadlineRef.current ? PAY_PAGE_POLL_INTERVAL_MS : false;
+      const elapsed = Date.now() - pollStartRef.current;
+      if (elapsed >= PAY_PAGE_POLL_BUDGET_MS) return false;
+      return elapsed < PAY_PAGE_POLL_FAST_PHASE_MS ? PAY_PAGE_POLL_FAST_INTERVAL_MS : PAY_PAGE_POLL_SLOW_INTERVAL_MS;
     },
   });
   const registration = regQuery.data;
   const settled = registration && registration.status !== "PAYMENT_PENDING" && registration.status !== "PENDING";
+  const hasReturnedFromCashfree = registrationId ? hasCashfreeCheckoutStarted(registrationId) : false;
+  const isTakingLongerThanUsual = Date.now() - pollStartRef.current >= PAY_PAGE_POLL_FAST_PHASE_MS;
 
   React.useEffect(() => {
     if (!registrationId) {
       navigate(`/register/${slug}`, { replace: true });
     } else if (settled) {
+      clearCashfreeCheckoutStarted(registrationId);
       navigate(`/register/${slug}/confirmation?registrationId=${encodeURIComponent(registrationId)}`, { replace: true });
     }
   }, [registrationId, settled, slug, navigate]);
@@ -128,7 +147,16 @@ export function RegisterPayPage() {
         ) : provider === CASHFREE_PROVIDER ? (
           <>
             {registration.expiresAt && <ReservationCountdown expiresAt={registration.expiresAt} />}
-            <CashfreeCheckout registration={registration} />
+            {hasReturnedFromCashfree ? (
+              <PaymentConfirming
+                registrationId={registration.id}
+                isTakingLongerThanUsual={isTakingLongerThanUsual}
+                isChecking={regQuery.isFetching}
+                onCheckNow={() => regQuery.refetch()}
+              />
+            ) : (
+              <CashfreeCheckout registration={registration} />
+            )}
             <p className="text-body-md text-muted-foreground">
               <Link to="/legal/refunds" className="text-link underline-offset-4 hover:underline">
                 All payments are final

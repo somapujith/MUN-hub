@@ -2,7 +2,7 @@ import * as React from "react";
 import { ExternalLinkIcon, LockIcon, ShieldCheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatPrice } from "@/components/shared/currency";
-import { CASHFREE_MODE, loadCashfreeSdk } from "@/lib/cashfree";
+import { CASHFREE_MODE, loadCashfreeSdk, markCashfreeCheckoutStarted } from "@/lib/cashfree";
 import type { MockRegistrationDetail } from "@/types";
 
 interface CashfreeCheckoutProps {
@@ -43,6 +43,10 @@ export function CashfreeCheckout({ registration }: CashfreeCheckoutProps) {
     try {
       const Cashfree = await loadCashfreeSdk();
       const cashfree = Cashfree({ mode: CASHFREE_MODE });
+      // Set BEFORE the redirect, not after: redirectTarget "_self" is a full
+      // top-level navigation away from the app, so nothing after this call
+      // that depends on the redirect actually happening is guaranteed to run.
+      markCashfreeCheckoutStarted(registration.id);
       await cashfree.checkout({ paymentSessionId: checkout.paymentSessionId, redirectTarget: "_self" });
       // redirectTarget "_self" navigates the browser away on success; if we
       // get here the SDK itself failed to initiate the redirect.
