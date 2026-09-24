@@ -147,6 +147,9 @@ export const OrganizerExecutiveBoardPage = lazy(() =>
 export const OrganizerFormPage = lazy(() =>
   import("@/pages/organizer/dashboard/sections/form-page").then((m) => ({ default: m.OrganizerFormPage })),
 );
+export const OrganizerPaymentsPage = lazy(() =>
+  import("@/pages/organizer/dashboard/sections/payments-page").then((m) => ({ default: m.OrganizerPaymentsPage })),
+);
 export const OrganizerProductsPage = lazy(() =>
   import("@/pages/organizer/dashboard/sections/products-page").then((m) => ({ default: m.OrganizerProductsPage })),
 );

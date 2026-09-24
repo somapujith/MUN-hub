@@ -7,6 +7,7 @@ import {
   ChartNoAxesColumnIcon,
   FileTextIcon,
   FolderOpenIcon,
+  IndianRupeeIcon,
   LayersIcon,
   LayoutDashboardIcon,
   ListChecksIcon,
@@ -52,6 +53,7 @@ export const MUN_NAV_SECTIONS: readonly MunNavSection[] = [
   { segment: "results", label: "Results & Awards", icon: AwardIcon, group: "Operations" },
   { segment: "certificates", label: "Certificates", icon: BadgeCheckIcon, group: "Operations" },
   { segment: "analytics", label: "Analytics", icon: ChartNoAxesColumnIcon, group: "Admin" },
+  { segment: "payments", label: "Payments", icon: IndianRupeeIcon, group: "Admin" },
   { segment: "team", label: "Team & Permissions", icon: UserCogIcon, group: "Admin" },
   { segment: "settings", label: "Settings", icon: SettingsIcon, group: "Admin" },
 ];
