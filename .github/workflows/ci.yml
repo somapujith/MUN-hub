@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  typecheck-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm --prefix server ci
+      - run: npm --prefix web ci
+      - run: npm run typecheck
+      - run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mun_hub
+          POSTGRES_PASSWORD: mun_hub_dev
+          POSTGRES_DB: mun_hub_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mun_hub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm --prefix server ci
+      - run: npm --prefix web ci
+      # .env.test (committed) already points at this exact user/db/port — see
+      # docs/operations/ENVIRONMENTS.md and CLAUDE.md's "Test/dev DB
+      # isolation" section for why tests never touch any other database.
+      - name: Apply migrations to the test database
+        run: npx tsx lib/db/migrate.ts
+        env:
+          DATABASE_URL: postgresql://mun_hub:mun_hub_dev@localhost:5432/mun_hub_test
+      - run: npm run test:ci

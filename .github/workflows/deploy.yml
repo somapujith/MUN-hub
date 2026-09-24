@@ -1,0 +1,78 @@
+name: Deploy (production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: Apply pending Drizzle migrations to Neon production
+        type: boolean
+        default: true
+      deploy_api:
+        description: Deploy munhub-api (Hono API Worker)
+        type: boolean
+        default: true
+      deploy_web:
+        description: Deploy munhub-web (Vite SPA Worker)
+        type: boolean
+        default: true
+
+# See docs/operations/RUNBOOK.md ("Deploying" / "From GitHub Actions").
+# Order is always migrations -> API -> web, and migrations must be additive:
+# the API version still running has to keep working against the migrated
+# schema. `environment: production` gates this whole run behind the repo's
+# Settings -> Environments -> production required-reviewer approval, and is
+# the only place these secrets are exposed.
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+      - run: npm --prefix server ci
+      - run: npm --prefix web ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Apply migrations to Neon production
+        if: ${{ inputs.run_migrations }}
+        run: npx tsx lib/db/migrate.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Deploy munhub-api
+        if: ${{ inputs.deploy_api }}
+        working-directory: server
+        run: npx wrangler deploy --env="" --tag "${{ github.sha }}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Build munhub-web
+        if: ${{ inputs.deploy_web }}
+        working-directory: web
+        run: npx vite build
+        env:
+          VITE_API_URL: https://api.munhub.in/api/v1
+
+      - name: Deploy munhub-web
+        if: ${{ inputs.deploy_web }}
+        working-directory: web
+        run: npx wrangler deploy --env="" --tag "${{ github.sha }}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Health check
+        if: ${{ inputs.deploy_api }}
+        run: curl -fsS https://api.munhub.in/api/v1/health
