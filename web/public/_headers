@@ -24,18 +24,15 @@
 # - connect-src lists the production API. A build against another API (e.g.
 #   staging's VITE_API_URL) gets that origin appended in dist/_headers by
 #   vite-plugins/api-origin-csp.ts; don't hard-code other APIs here.
-# - GuruPay (docs/payments/SPEC.md) is a redirect-based checkout
-#   (window.location.assign to its hosted payment_url), not an embedded
-#   widget/frame, so CSP's connect-src/frame-src don't govern the top-level
-#   navigation itself. www.gurupaygateway.com is allowlisted in
-#   connect-src/frame-src defensively anyway, in case the hosted page or a
-#   future non-redirect integration step needs it.
-#   Confirmed real domain (GuruPay dashboard, 2026-09-18): the API and the
-#   hosted checkout page are both under www.gurupaygateway.com (payment_url
-#   looks like https://www.gurupaygateway.com/pay/...) — api.gurupaygateway.com
-#   does not resolve at all. See lib/payments/gurupay-adapter.ts.
+# - Cashfree (docs/payments/CASHFREE.md) is an SDK-driven checkout: the page
+#   loads https://sdk.cashfree.com/js/v3/cashfree.js and calls
+#   cashfree.checkout({ paymentSessionId, redirectTarget: "_self" }), which
+#   performs a top-level browser redirect (not an embedded iframe/widget).
+#   sdk.cashfree.com is allowlisted in script-src to load the SDK;
+#   payments.cashfree.com is allowlisted in connect-src/frame-src
+#   defensively, in case the SDK or the hosted checkout page itself needs it.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.munhub.in https://challenges.cloudflare.com https://www.gurupaygateway.com; frame-src https://challenges.cloudflare.com https://www.gurupaygateway.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://sdk.cashfree.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.munhub.in https://challenges.cloudflare.com https://payments.cashfree.com; frame-src https://challenges.cloudflare.com https://payments.cashfree.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

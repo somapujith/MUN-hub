@@ -166,13 +166,14 @@ export interface RegistrationWithMun {
 }
 
 /**
- * GuruPay's redirect-based checkout for one registration (server/routes/
+ * Cashfree's SDK-driven checkout for one registration (server/routes/
  * registrations.ts's `GET /registrations/:id` `checkout` field). Present
- * only while `paymentProvider === 'gurupay'` and the registration is still
+ * only while `paymentProvider === 'cashfree'` and the registration is still
  * `PAYMENT_PENDING` — otherwise null.
  */
 export interface RegistrationCheckout {
-  paymentUrl: string;
+  /** Handed to Cashfree's JS SDK: `cashfree.checkout({ paymentSessionId, redirectTarget: "_self" })`. */
+  paymentSessionId: string;
   orderId: string;
   /** Whole rupees, includes the platform fee (`totalCharge`). */
   amount: number;
@@ -185,9 +186,8 @@ export interface RegistrationCheckout {
   platformFeeTaxAmount: number | null;
   /**
    * MUN Hub's OWN reservation hold deadline (registrations.expiresAt) — NOT
-   * anything GuruPay returns. GuruPay's real API has no order-expiry field;
-   * this is mirrored from the registration's own `expiresAt`, which is the
-   * sole authoritative deadline (docs/payments/SPEC.md §4.5).
+   * anything Cashfree returns; this is mirrored from the registration's own
+   * `expiresAt`, which is the sole authoritative deadline.
    */
   expiresAt: Date | null;
 }
@@ -197,18 +197,18 @@ export interface MockRegistrationDetail extends Omit<RegistrationWithMun, "payme
   productPrice: number;
   /**
    * Which checkout to offer: the provider key (`mock_razorpay` for the dev
-   * mock, `gurupay` for the live gateway) or null when online payments are
+   * mock, `cashfree` for the live gateway) or null when online payments are
    * unavailable.
    */
   paymentProvider?: string | null;
-  /** GuruPay's hosted-page redirect target, or null (see RegistrationCheckout). */
+  /** Cashfree's checkout session, or null (see RegistrationCheckout). */
   checkout?: RegistrationCheckout | null;
   /**
-   * Extends RegistrationWithMun.payment with the fee-breakdown fields
-   * (docs/payments/SPEC.md §11 Q7) so the checkout/pay pages can itemize
-   * "Registration · Platform fee (incl. GST) · Total" for every provider,
-   * not only gurupay's `checkout` object. Null on rows with no stored
-   * breakdown (pre-fee-model rows, or a free pass with no payment at all).
+   * Extends RegistrationWithMun.payment with the fee-breakdown fields so the
+   * checkout/pay pages can itemize "Registration · Platform fee (incl. GST)
+   * · Total" for every provider, not only cashfree's `checkout` object. Null
+   * on rows with no stored breakdown (pre-fee-model rows, or a free pass
+   * with no payment at all).
    */
   payment: Array<{
     amount: number;

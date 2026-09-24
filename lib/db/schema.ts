@@ -810,14 +810,19 @@ export const payments = pgTable(
     provider: text('provider').notNull().default('mock_razorpay'),
     providerOrderId: text('provider_order_id').notNull().unique(),
     providerPaymentId: text('provider_payment_id'),
-    // GuruPay's hosted checkout page for this order (PaymentOrder.checkoutUrl,
-    // lib/payments/adapter.ts). Null for a provider with no redirect checkout
-    // (mock, and any future embedded-widget adapter). Stored at createOrder
-    // time and served back unchanged by GET /registrations/:id's `checkout`
-    // object (docs/payments/SPEC.md §4.4.3) — never re-fetched or
-    // regenerated, so a re-render/re-poll of the pay page never triggers a
-    // second GuruPay order (§6 "Double-submit").
+    // A URL-based provider's hosted checkout page (PaymentOrder.checkoutUrl,
+    // lib/payments/adapter.ts). Historical: populated by GuruPay (retired
+    // 2026-09-24, see docs/payments/CASHFREE.md); no currently-shipped
+    // adapter sets this. Kept, not dropped, so old rows keep their real
+    // value. Stored at createOrder time and served back unchanged — never
+    // re-fetched or regenerated, so a re-render/re-poll of the pay page never
+    // triggers a second provider order ("Double-submit" safety).
     checkoutUrl: text('checkout_url'),
+    // Cashfree's payment_session_id (PaymentOrder.checkoutSessionId,
+    // lib/payments/adapter.ts) — handed to Cashfree's JS SDK client-side to
+    // drive checkout (Cashfree has no plain checkout URL). Null for any other
+    // provider. Same "stored once, never regenerated" rule as checkoutUrl.
+    checkoutSessionId: text('checkout_session_id'),
     amount: integer('amount').notNull(),
     currency: text('currency').notNull().default('INR'),
     // Fee breakdown, computed server-side when the order is created (same

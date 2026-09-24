@@ -1,5 +1,16 @@
 # SPEC: GuruPay Payment Gateway Integration + Additive Platform Fee
 
+> **Status (2026-09-24): superseded and retired.** GuruPay was fully removed
+> from the codebase and replaced with **Cashfree** as the live payment
+> gateway — `docs/payments/CASHFREE.md` is the authoritative doc for the
+> real, currently-shipped implementation (`lib/payments/cashfree-adapter.ts`,
+> `lib/jobs/reconcile-cashfree-orders.ts`). No GuruPay code remains in the
+> repository; this document is kept only as historical reference for the
+> design decisions of the integration it once described (the additive
+> platform fee model it introduced is unchanged and still shipped — see
+> `lib/payments/fees-additive.ts`). Do not follow anything below as a recipe
+> for new work.
+
 **Status:** Draft
 **Created:** 2026-09-18
 **Author:** spec-interviewer agent

@@ -2,45 +2,54 @@ import * as React from "react";
 import { ExternalLinkIcon, LockIcon, ShieldCheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatPrice } from "@/components/shared/currency";
+import { CASHFREE_MODE, loadCashfreeSdk } from "@/lib/cashfree";
 import type { MockRegistrationDetail } from "@/types";
 
-interface GuruPayCheckoutRedirectProps {
+interface CashfreeCheckoutProps {
   registration: MockRegistrationDetail;
 }
 
 /**
  * Replaces the mock buttons branch of register-pay-page.tsx when
- * `paymentProvider === "gurupay"` (docs/payments/SPEC.md §4.1 step 5,
- * §7). Redirect-based checkout: shows the itemized fee breakdown, then sends
- * the browser to GuruPay's hosted `checkout.paymentUrl` — never an embedded
- * widget.
+ * `paymentProvider === "cashfree"`. SDK-driven checkout: shows the itemized
+ * fee breakdown, then loads Cashfree's JS SDK and calls
+ * `cashfree.checkout({ paymentSessionId, redirectTarget: "_self" })`, which
+ * performs the actual browser redirect — Cashfree has no plain hosted-
+ * checkout URL to redirect to directly.
  *
- * On return from GuruPay (`callback_url`), the pay page's own poll of
- * `GET /registrations/:id` is what decides the outcome (§4.1 step 6/§5) —
- * this component never parses a redirect query param as a trust signal.
+ * On return from Cashfree (`order_meta.return_url`), the pay page's own poll
+ * of `GET /registrations/:id` is what decides the outcome — this component
+ * never parses a redirect query param as a trust signal.
  *
- * Double-submit safety (§6 "Double-submit"): this component NEVER calls
- * `initiateRegistration`/creates a new order — it only ever redirects to the
- * already-stored `registration.checkout.paymentUrl`. A re-render (e.g. the
- * user navigating back to this page) redirects to the exact same URL, not a
- * new one.
+ * Double-submit safety: this component NEVER calls `initiateRegistration`/
+ * creates a new order — it only ever reuses the already-stored
+ * `registration.checkout.paymentSessionId`. A re-render (e.g. the user
+ * navigating back to this page) reuses the exact same session id, not a new
+ * one.
  */
-export function GuruPayCheckoutRedirect({ registration }: GuruPayCheckoutRedirectProps) {
+export function CashfreeCheckout({ registration }: CashfreeCheckoutProps) {
   const checkout = registration.checkout;
   const [redirecting, setRedirecting] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   const amountDue = checkout?.amount ?? registration.payment.at(0)?.amount ?? registration.productPrice;
-  // Itemized breakdown from the actual fee fields stored on the payment row
-  // (checkout.passAmount/platformFeeAmount/platformFeeTaxAmount — see
-  // server/routes/registrations.ts) — only when the fields are actually
-  // present (older/mock rows have no fee breakdown stored).
   const hasBreakdown =
     checkout?.passAmount != null && checkout?.platformFeeAmount != null && checkout?.platformFeeTaxAmount != null;
 
-  function handleContinue() {
+  async function handleContinue() {
     if (!checkout) return;
     setRedirecting(true);
-    window.location.assign(checkout.paymentUrl);
+    setError(null);
+    try {
+      const Cashfree = await loadCashfreeSdk();
+      const cashfree = Cashfree({ mode: CASHFREE_MODE });
+      await cashfree.checkout({ paymentSessionId: checkout.paymentSessionId, redirectTarget: "_self" });
+      // redirectTarget "_self" navigates the browser away on success; if we
+      // get here the SDK itself failed to initiate the redirect.
+    } catch {
+      setRedirecting(false);
+      setError("Couldn't open the payment page. Please try again.");
+    }
   }
 
   if (!checkout) {
@@ -75,10 +84,11 @@ export function GuruPayCheckoutRedirect({ registration }: GuruPayCheckoutRedirec
       <div className="flex items-start gap-xs rounded-sm bg-surface-soft px-md py-sm text-body-md text-muted-foreground">
         <ShieldCheckIcon className="mt-px size-4 shrink-0" aria-hidden />
         <p>
-          <span className="font-medium text-ink">Secure checkout via GuruPay.</span> You&apos;ll be redirected to
+          <span className="font-medium text-ink">Secure checkout via Cashfree.</span> You&apos;ll be redirected to
           complete your payment.
         </p>
       </div>
+      {error && <p className="text-body-md text-destructive">{error}</p>}
       <Button size="lg" disabled={redirecting} onClick={handleContinue}>
         <ExternalLinkIcon aria-hidden />
         {redirecting ? "Redirecting…" : `Pay ${formatPrice(amountDue)}`}

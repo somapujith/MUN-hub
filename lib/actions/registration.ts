@@ -10,6 +10,7 @@ import {
   registrationGroups,
   registrationProducts,
   registrations,
+  users,
 } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { isRecentlyExpired, notifyExpiredCheckouts } from '@/lib/jobs/release-expired-holds'
@@ -27,16 +28,34 @@ const RESERVATION_TTL_MS = 15 * 60 * 1000
 
 /**
  * The real, browser-facing MUN Hub page a redirect-based provider's
- * `callback_url` should send the student's browser to after paying
- * (docs/payments/SPEC.md §4.1 step 6, bug fix — this must never be the
- * webhook endpoint, which is a completely separate, server-to-server
- * concept configured once in the provider's own dashboard). The pay page
- * itself never trusts this redirect to mean anything: it polls
- * `GET /registrations/:id` to learn the real outcome (register-pay-page.tsx).
+ * `return_url` should send the student's browser to after paying (Cashfree's
+ * `order_meta.return_url` — this must never be the webhook endpoint, which is
+ * a completely separate, server-to-server concept). The pay page itself never
+ * trusts this redirect to mean anything: it polls `GET /registrations/:id` to
+ * learn the real outcome (register-pay-page.tsx).
  */
 function buildPaymentReturnUrl(munSlug: string, registrationId: string): string {
   const webOrigin = (getRuntimeEnv('APP_URL') || 'http://localhost:5173').replace(/\/+$/, '')
   return `${webOrigin}/register/${encodeURIComponent(munSlug)}/pay?registrationId=${encodeURIComponent(registrationId)}`
+}
+
+/**
+ * The paying user's details for a provider whose order-creation API requires
+ * `customer_details` (Cashfree; see CreateOrderInput.customer's doc comment
+ * in lib/payments/adapter.ts). `phone` is non-null in real traffic — the
+ * route layer (server/routes/registrations.ts) already gates on
+ * `isProfileComplete` before this is ever reached — but this function stays
+ * defensive since initiateRegistration itself is deliberately untested-for-
+ * profile-completeness and callable directly (e.g. in unit tests, always
+ * against the mock adapter, which ignores this field entirely).
+ */
+async function loadCustomerDetails(userId: string): Promise<{ id: string; name: string; email: string; phone: string } | undefined> {
+  const [user] = await db
+    .select({ id: users.id, name: users.name, email: users.email, phone: users.phone })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+  return user ? { id: user.id, name: user.name, email: user.email, phone: user.phone ?? '' } : undefined
 }
 
 /**
@@ -597,6 +616,7 @@ async function reserveAndStartPayment(
       currency,
       registrationId: registration.id,
       returnUrl: buildPaymentReturnUrl(munSlug, registration.id),
+      customer: await loadCustomerDetails(userId),
     })
   } catch (error) {
     // Don't make the delegate wait out a 15-minute hold on a seat that can't
@@ -620,8 +640,10 @@ async function reserveAndStartPayment(
       provider: adapter.provider,
       providerOrderId: order.orderId,
       // Stored once, at order creation, never regenerated on a later read —
-      // see the checkoutUrl column's own doc comment in lib/db/schema.ts.
+      // see the checkoutUrl/checkoutSessionId columns' own doc comments in
+      // lib/db/schema.ts.
       checkoutUrl: order.checkoutUrl ?? null,
+      checkoutSessionId: order.checkoutSessionId ?? null,
       amount: fees.totalCharge,
       currency,
       platformFeeAmount: fees.platformFee,
@@ -926,6 +948,7 @@ async function reserveGroupAndStartPayment(
       currency,
       registrationId: headRegistration.id,
       returnUrl: buildPaymentReturnUrl(munSlug, headRegistration.id),
+      customer: await loadCustomerDetails(userId),
     })
   } catch (error) {
     console.error(`[payments] createOrder failed for group ${groupId} (head registration ${headRegistration.id})`, error)
@@ -952,6 +975,7 @@ async function reserveGroupAndStartPayment(
         provider: adapter.provider,
         providerOrderId: order.orderId,
         checkoutUrl: order.checkoutUrl ?? null,
+        checkoutSessionId: order.checkoutSessionId ?? null,
         amount: fees.totalCharge,
         currency,
         platformFeeAmount: fees.platformFee,

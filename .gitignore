@@ -37,6 +37,9 @@ yarn-error.log*
 .dev.vars*
 !.dev.vars.example
 
+# local secret handoff files — never committed
+APIKey.csv
+
 # vercel
 .vercel
 

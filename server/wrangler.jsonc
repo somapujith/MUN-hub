@@ -13,12 +13,13 @@
   ],
   "vars": {
     // Non-secret config only. Secrets (DATABASE_URL, PAYMENT_FIELD_KEY,
-    // TOTP_FIELD_KEY, MOCK_PAYMENT_WEBHOOK_SECRET, GURUPAY_API_KEY, etc. —
-    // see .dev.vars.example) must be set via `wrangler secret put <NAME>`,
-    // never committed here. REQUIRE_STAFF_2FA (lib/actions/staff-mfa.ts) is a
-    // plain var, not a secret, but is deliberately left out of this file —
-    // staff sign-in stays 2FA-optional until every staff account has
-    // enrolled and it's turned on here explicitly.
+    // TOTP_FIELD_KEY, MOCK_PAYMENT_WEBHOOK_SECRET, CASHFREE_CLIENT_ID,
+    // CASHFREE_CLIENT_SECRET, etc. — see .dev.vars.example) must be set via
+    // `wrangler secret put <NAME>`, never committed here. REQUIRE_STAFF_2FA
+    // (lib/actions/staff-mfa.ts) is a plain var, not a secret, but is
+    // deliberately left out of this file — staff sign-in stays 2FA-optional
+    // until every staff account has enrolled and it's turned on here
+    // explicitly.
     "COOKIE_DOMAIN": ".munhub.in",
     // Extra exact origins only. The production web hosts are built in
     // (server/lib/origins.ts); localhost is trusted only with
@@ -32,17 +33,16 @@
     // the web app loads them cross-origin from here.
     "PUBLIC_API_URL": "https://api.munhub.in",
     "COOKIE_SECURE": "true",
-    // GuruPay is the live payment gateway (docs/payments/SPEC.md);
-    // GURUPAY_API_KEY is a secret — `wrangler secret put GURUPAY_API_KEY`,
-    // never a var, never committed here.
-    "PAYMENTS_ADAPTER": "gurupay",
+    // Cashfree is the live payment gateway (docs/payments/CASHFREE.md);
+    // CASHFREE_CLIENT_ID/CASHFREE_CLIENT_SECRET are secrets — set via
+    // `wrangler secret put`, never a var, never committed here.
+    "PAYMENTS_ADAPTER": "cashfree",
+    // "sandbox" or "production" — picks Cashfree's API base URL.
+    "CASHFREE_ENV": "production",
     // Platform fee (lib/payments/fees-additive.ts#computeFeeBreakdownAdditive):
-    // 6.5% of the registration price, plus 18% GST on that fee — ADDITIVE as
-    // of the GuruPay rollout (charged to the student on top of the listed
-    // price; the organizer receives the full listed price, unchanged). 650bps
-    // (6.5%) is the confirmed platform fee rate for this additive GuruPay
-    // model (confirmed 2026-09-18, distinct from the old subtractive-model
-    // rate this replaced).
+    // 6.5% of the registration price, plus 18% GST on that fee — ADDITIVE
+    // (charged to the student on top of the listed price; the organizer
+    // receives the full listed price, unchanged).
     "PLATFORM_FEE_BPS": "650",
     "PLATFORM_FEE_TAX_BPS": "1800",
     // Telegram support notifications (lib/actions/telegram.ts) — the bot's
@@ -147,7 +147,7 @@
         "PUBLIC_API_URL": "https://munhub-api-staging.somapujith.workers.dev",
         // workers.dev is served over HTTPS, same as production.
         "COOKIE_SECURE": "true",
-        // 650bps (6.5%) — same confirmed additive GuruPay platform fee rate as
+        // 650bps (6.5%) — same confirmed additive platform fee rate as
         // production (see the top-level PLATFORM_FEE_BPS comment).
         "PLATFORM_FEE_BPS": "650",
         "PLATFORM_FEE_TAX_BPS": "1800"

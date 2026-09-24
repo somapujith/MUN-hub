@@ -66,11 +66,10 @@ export function apiEnv(name: string): string | undefined {
 
 /**
  * lib/payments/fees-additive.ts#computeFeeBreakdownAdditive with the API's
- * configured rates (docs/payments/SPEC.md §4.4 — additive model, shipped
- * with GuruPay: `passAmount` is the listed price the caller passes in;
- * `totalCharge` is what's actually stored as payments.amount and what the
- * delegate is charged; `organizerNet` is `passAmount` unchanged, never a
- * subtractive remainder).
+ * configured rates (additive model: `passAmount` is the listed price the
+ * caller passes in; `totalCharge` is what's actually stored as
+ * payments.amount and what the delegate is charged; `organizerNet` is
+ * `passAmount` unchanged, never a subtractive remainder).
  */
 export function expectedFeeSplit(passAmount: number) {
   const feeBps = Number(apiEnv('PLATFORM_FEE_BPS') ?? '0')

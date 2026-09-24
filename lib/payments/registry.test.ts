@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setRuntimeEnv } from '@/lib/runtime-env'
-import { GURUPAY_PROVIDER } from './gurupay-adapter'
+import { CASHFREE_PROVIDER } from './cashfree-adapter'
 import { mockPaymentsAdapter } from './mock-adapter'
 import { getPaymentsAdapter } from './registry'
 
@@ -8,8 +8,11 @@ const KEYS = [
   'PAYMENTS_ADAPTER',
   'MOCK_PAYMENTS_ENABLED',
   'MOCK_PAYMENT_WEBHOOK_SECRET',
-  'GURUPAY_API_KEY',
+  'CASHFREE_CLIENT_ID',
+  'CASHFREE_CLIENT_SECRET',
+  'CASHFREE_ENV',
   'APP_URL',
+  'PUBLIC_API_URL',
 ] as const
 const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]))
 
@@ -63,23 +66,37 @@ describe('getPaymentsAdapter', () => {
     expect(getPaymentsAdapter()).toBe(mockPaymentsAdapter)
   })
 
-  it('returns a GuruPay adapter when GURUPAY_API_KEY is present via getRuntimeEnv', () => {
-    process.env.PAYMENTS_ADAPTER = 'gurupay'
-    setRuntimeEnv({ GURUPAY_API_KEY: 'test-key', APP_URL: 'https://www.munhub.in' })
+  it('returns a Cashfree adapter when both credentials are present via getRuntimeEnv', () => {
+    process.env.PAYMENTS_ADAPTER = 'cashfree'
+    setRuntimeEnv({
+      CASHFREE_CLIENT_ID: 'test-id',
+      CASHFREE_CLIENT_SECRET: 'test-secret',
+      APP_URL: 'https://www.munhub.in',
+      PUBLIC_API_URL: 'https://api.munhub.in',
+    })
     const adapter = getPaymentsAdapter()
-    expect(adapter?.provider).toBe(GURUPAY_PROVIDER)
+    expect(adapter?.provider).toBe(CASHFREE_PROVIDER)
   })
 
-  it('returns null for gurupay when GURUPAY_API_KEY is missing (never falls back to the mock)', () => {
-    process.env.PAYMENTS_ADAPTER = 'gurupay'
-    delete process.env.GURUPAY_API_KEY
-    setRuntimeEnv({})
+  it('returns null for cashfree when either credential is missing (never falls back to the mock)', () => {
+    process.env.PAYMENTS_ADAPTER = 'cashfree'
+    setRuntimeEnv({ CASHFREE_CLIENT_ID: 'test-id' })
+    expect(getPaymentsAdapter()).toBeNull()
+    setRuntimeEnv({ CASHFREE_CLIENT_SECRET: 'test-secret' })
     expect(getPaymentsAdapter()).toBeNull()
   })
 
-  it('builds a fresh gurupay adapter instance per call (never cached at module scope)', () => {
-    process.env.PAYMENTS_ADAPTER = 'gurupay'
-    setRuntimeEnv({ GURUPAY_API_KEY: 'test-key' })
+  it('defaults to production when CASHFREE_ENV is unset, and honors "sandbox" explicitly', () => {
+    process.env.PAYMENTS_ADAPTER = 'cashfree'
+    setRuntimeEnv({ CASHFREE_CLIENT_ID: 'id', CASHFREE_CLIENT_SECRET: 'secret' })
+    expect(getPaymentsAdapter()?.provider).toBe(CASHFREE_PROVIDER)
+    setRuntimeEnv({ CASHFREE_CLIENT_ID: 'id', CASHFREE_CLIENT_SECRET: 'secret', CASHFREE_ENV: 'sandbox' })
+    expect(getPaymentsAdapter()?.provider).toBe(CASHFREE_PROVIDER)
+  })
+
+  it('builds a fresh cashfree adapter instance per call (never cached at module scope)', () => {
+    process.env.PAYMENTS_ADAPTER = 'cashfree'
+    setRuntimeEnv({ CASHFREE_CLIENT_ID: 'test-id', CASHFREE_CLIENT_SECRET: 'test-secret' })
     const first = getPaymentsAdapter()
     const second = getPaymentsAdapter()
     expect(first).not.toBe(second)

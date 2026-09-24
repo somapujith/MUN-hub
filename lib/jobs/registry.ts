@@ -5,7 +5,7 @@ import { runSlaNotifications } from '@/lib/notifications/sla-job'
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import { purgeExpiredAuthArtifacts } from './purge-auth-artifacts'
 import { purgeDeletedUserAnswers } from './purge-deleted-user-answers'
-import { reconcileGuruPayOrdersJob } from './reconcile-gurupay-orders'
+import { reconcileCashfreeOrdersJob } from './reconcile-cashfree-orders'
 import { releaseExpiredHoldsJob } from './release-expired-holds'
 import type { JobResult, ScheduledJob } from './types'
 
@@ -131,7 +131,7 @@ export const organizerDigestJob: ScheduledJob = {
 export const SCHEDULED_JOBS: readonly ScheduledJob[] = [
   releaseExpiredHoldsJob,
   scheduledLifecycleTransitionsJob,
-  reconcileGuruPayOrdersJob,
+  reconcileCashfreeOrdersJob,
   slaNotificationsJob,
   conferenceRemindersJob,
   organizerDigestJob,

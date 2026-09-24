@@ -99,11 +99,10 @@ export const LIMITERS = {
   contactFormIp: { binding: 'RL_CONTACT_FORM_IP', limit: 5, periodSeconds: 60, perIp: true },
   // Payments webhook (server/routes/webhooks.ts, mounted OUTSIDE /api/v1 and
   // this middleware's RULES table — applied directly in that route instead).
-  // Every hit triggers a real outbound authenticated call to GuruPay's
-  // check-status, so this endpoint needs its own throttle: generous enough
-  // for real webhook/retry volume, but bounded so it can't be used to
-  // amplify calls against GuruPay's API with MUNHub's key, or exhaust
-  // Workers resources.
+  // Cashfree's webhook is signature-verified, but the endpoint still needs
+  // its own throttle: generous enough for real webhook/retry volume, but
+  // bounded so a flood of forged deliveries can't exhaust Workers resources
+  // on signature verification alone.
   webhooksPaymentsIp: { binding: 'RL_WEBHOOKS_PAYMENTS_IP', limit: 60, periodSeconds: 60, perIp: true },
 } satisfies Record<string, LimiterSpec>
 

@@ -37,8 +37,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 /** Provider key of the dev/test mock checkout (lib/payments/mock-adapter.ts). */
 export const MOCK_PAYMENT_PROVIDER = "mock_razorpay";
-/** Provider key of the live GuruPay gateway (lib/payments/gurupay-adapter.ts). */
-export const GURUPAY_PROVIDER = "gurupay";
+/** Provider key of the live Cashfree gateway (lib/payments/cashfree-adapter.ts). */
+export const CASHFREE_PROVIDER = "cashfree";
 
 /**
  * Wraps `GET /registrations/fee-rates` — public, non-sensitive additive
@@ -128,7 +128,7 @@ interface RawRegistrationDetail {
   }>;
   paymentProvider: string | null;
   checkout: {
-    paymentUrl: string;
+    paymentSessionId: string;
     orderId: string;
     amount: number;
     currency: string;
@@ -179,7 +179,7 @@ function toRegistrationDetail(raw: RawRegistrationDetail): MockRegistrationDetai
 function toCheckout(raw: RawRegistrationDetail["checkout"]): RegistrationCheckout | null {
   if (!raw) return null;
   return {
-    paymentUrl: raw.paymentUrl,
+    paymentSessionId: raw.paymentSessionId,
     orderId: raw.orderId,
     amount: raw.amount,
     currency: raw.currency,

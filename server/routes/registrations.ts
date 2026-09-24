@@ -15,8 +15,8 @@ import {
 import { isProfileComplete } from '@/lib/actions/student-profile'
 import { db } from '@/lib/db/client'
 import { payments, registrations } from '@/lib/db/schema'
+import { CASHFREE_PROVIDER } from '@/lib/payments/cashfree-adapter'
 import { getPlatformFeeRates } from '@/lib/payments/fees'
-import { GURUPAY_PROVIDER } from '@/lib/payments/gurupay-adapter'
 import { MOCK_PROVIDER, simulatePaymentOutcome } from '@/lib/payments/mock-adapter'
 import { getPaymentsAdapter } from '@/lib/payments/registry'
 import { processPaymentWebhook } from '@/lib/payments/webhook'
@@ -224,32 +224,29 @@ registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
 
   const paymentProvider = getPaymentsAdapter()?.provider ?? null
   const payment = detail.payment.at(0)
-  // GuruPay's redirect-based checkout (docs/payments/SPEC.md §4.4.3): the
-  // browser needs the already-stored payment_url to redirect to. Only
-  // offered while the registration is still PAYMENT_PENDING and the active
-  // provider is gurupay — a settled registration or a provider switch never
-  // hands back a stale checkout target.
+  // Cashfree's SDK-driven checkout (docs/payments/CASHFREE.md): the browser
+  // needs the already-stored payment_session_id to hand to Cashfree's JS SDK.
+  // Only offered while the registration is still PAYMENT_PENDING and the
+  // active provider is cashfree — a settled registration or a provider switch
+  // never hands back a stale checkout target.
   const checkout =
-    paymentProvider === GURUPAY_PROVIDER && detail.status === 'PAYMENT_PENDING' && payment?.checkoutUrl
+    paymentProvider === CASHFREE_PROVIDER && detail.status === 'PAYMENT_PENDING' && payment?.checkoutSessionId
       ? {
-          paymentUrl: payment.checkoutUrl,
+          paymentSessionId: payment.checkoutSessionId,
           orderId: payment.providerOrderId,
           amount: payment.amount,
           currency: payment.currency,
-          // Itemized breakdown (docs/payments/SPEC.md §5 "Checkout total
-          // display") so the client can show "Registration: ₹X · Platform
-          // fee (incl. GST): ₹Y · Total: ₹Z" instead of only the total.
-          // Additive model (lib/payments/fees-additive.ts): passAmount +
-          // platformFee + platformFeeTax === amount, always, by construction.
+          // Itemized breakdown so the client can show "Registration: ₹X ·
+          // Platform fee (incl. GST): ₹Y · Total: ₹Z" instead of only the
+          // total. Additive model (lib/payments/fees-additive.ts): passAmount
+          // + platformFee + platformFeeTax === amount, always, by construction.
           passAmount: payment.organizerNetAmount,
           platformFeeAmount: payment.platformFeeAmount,
           platformFeeTaxAmount: payment.platformFeeTaxAmount,
           // MUN Hub's OWN reservation hold deadline (registrations.expiresAt,
-          // already elsewhere in this response) — NOT anything GuruPay
-          // returns. GuruPay's confirmed real create-order/check-status
-          // responses (docs/payments/SPEC.md) don't even include an
-          // order-expiry field; MUN Hub's 15-minute hold is the sole
-          // authoritative deadline (see §4.5).
+          // already elsewhere in this response) — NOT anything Cashfree
+          // returns; MUN Hub's 15-minute hold is the sole authoritative
+          // deadline.
           expiresAt: detail.expiresAt,
         }
       : null
@@ -281,10 +278,10 @@ registrationsRoutes.get('/registrations/:id', requireAuth, async (c) => {
     },
     committee: detail.committee ? { name: detail.committee.name } : null,
     portfolio: detail.portfolio ? { name: detail.portfolio.name } : null,
-    // Fee-breakdown fields included for every provider (not just gurupay's
+    // Fee-breakdown fields included for every provider (not just cashfree's
     // `checkout` object) so the pay page's mock branch can itemize the same
-    // way (docs/payments/SPEC.md §11 Q7 — consistent copy across providers).
-    // Null on rows created before the fee model existed.
+    // way (consistent copy across providers). Null on rows created before
+    // the fee model existed.
     payment: detail.payment.map((p) => ({
       amount: p.amount,
       currency: p.currency,

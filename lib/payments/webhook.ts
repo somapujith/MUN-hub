@@ -392,13 +392,13 @@ async function applyEvent(
  * replay-window check, dedupe/claim, settlement transaction and post-commit
  * hooks that used to be the back half of `processPaymentWebhook` itself.
  *
- * Extracted (docs/payments/SPEC.md §4.4.2/§12) so the GuruPay reconciliation
- * job (`lib/jobs/reconcile-gurupay-orders.ts`) can feed it an event obtained
- * directly from `checkOrderStatus` — a real normalized event, not raw
- * bytes — without fabricating a fake `rawBody`/`Headers` pair just to
- * round-trip through `verifyAndParseWebhook` again. `provider` is passed
- * separately (not read off `adapter`) so a caller that only has an event
- * (no adapter instance in hand) can still call this directly.
+ * Extracted so a reconciliation job (`lib/jobs/reconcile-cashfree-orders.ts`)
+ * can feed it an event obtained directly from a status poll — a real
+ * normalized event, not raw bytes — without fabricating a fake
+ * `rawBody`/`Headers` pair just to round-trip through `verifyAndParseWebhook`
+ * again. `provider` is passed separately (not read off `adapter`) so a
+ * caller that only has an event (no adapter instance in hand) can still call
+ * this directly.
  *
  * This is a pure extraction: `processPaymentWebhook` below calls it with
  * exactly the same `payloadSha256`/`now` it always computed, with no logic

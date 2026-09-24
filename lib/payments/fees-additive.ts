@@ -1,9 +1,8 @@
 import { applyBps, assertBps, type FeeRates } from './fees'
 
 /**
- * Additive platform fee model, introduced for GuruPay
- * (docs/payments/SPEC.md §4.4/§6/§12) — the OPPOSITE direction from
- * `computeFeeBreakdown` in ./fees.ts.
+ * Additive platform fee model, introduced with the live payment gateway
+ * rollout — the OPPOSITE direction from `computeFeeBreakdown` in ./fees.ts.
  *
  * `computeFeeBreakdown` is SUBTRACTIVE: the fee is included in the listed
  * price, the delegate pays exactly the listed amount, and the organizer's net

@@ -12,17 +12,15 @@ import { ReservationCountdown } from "@/components/registration/reservation-coun
 import { hasPassed } from "@/components/registration/deadline";
 import { formatPrice } from "@/components/shared/currency";
 import { queryKeys } from "@/api/query-keys";
-import { GURUPAY_PROVIDER, MOCK_PAYMENT_PROVIDER, completeMockPayment, fetchRegistrationById } from "@/api/registration";
-import { GuruPayCheckoutRedirect } from "@/components/registration/gurupay-checkout-redirect";
+import { CASHFREE_PROVIDER, MOCK_PAYMENT_PROVIDER, completeMockPayment, fetchRegistrationById } from "@/api/registration";
+import { CashfreeCheckout } from "@/components/registration/cashfree-checkout";
 import { NotFoundPage } from "@/pages/not-found-page";
 
 /**
- * Return-poll window (docs/payments/SPEC.md §5 "On return from GuruPay"): a
- * redirect back from GuruPay's hosted page carries no trust signal on its
- * own (§6 "GuruPay redirect returns... with no clear success signal") — the
- * only way to learn the real outcome is to keep polling
- * `GET /registrations/:id` until it reaches a terminal state or this budget
- * runs out. ~2s cadence for ~30s, matching the spec's own numbers.
+ * Return-poll window: a redirect back from Cashfree's hosted page carries no
+ * trust signal on its own — the only way to learn the real outcome is to
+ * keep polling `GET /registrations/:id` until it reaches a terminal state or
+ * this budget runs out. ~2s cadence for ~30s.
  */
 const PAY_PAGE_POLL_INTERVAL_MS = 2_000;
 const PAY_PAGE_POLL_BUDGET_MS = 30_000;
@@ -44,7 +42,7 @@ export function RegisterPayPage() {
     // Whether online payments are available can change between visits.
     refetchOnMount: "always",
     // Bounded auto-poll for a student landing back on this page after
-    // GuruPay's hosted checkout: stops as soon as the registration reaches a
+    // Cashfree's hosted checkout: stops as soon as the registration reaches a
     // terminal state (the query itself flips `enabled` off via `settled`
     // below and this component navigates away) or once the time budget
     // expires, whichever comes first — never polls forever.
@@ -127,10 +125,10 @@ export function RegisterPayPage() {
           <RegistrationNotice tone="warning" title="Your seat hold expired" message="Start again to reserve a fresh seat.">
             <Button render={<Link to={`/register/${slug}`} />}>Start over</Button>
           </RegistrationNotice>
-        ) : provider === GURUPAY_PROVIDER ? (
+        ) : provider === CASHFREE_PROVIDER ? (
           <>
             {registration.expiresAt && <ReservationCountdown expiresAt={registration.expiresAt} />}
-            <GuruPayCheckoutRedirect registration={registration} />
+            <CashfreeCheckout registration={registration} />
             <p className="text-body-md text-muted-foreground">
               <Link to="/legal/refunds" className="text-link underline-offset-4 hover:underline">
                 All payments are final

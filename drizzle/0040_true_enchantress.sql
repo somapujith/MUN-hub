@@ -1,0 +1,1 @@
+ALTER TABLE "payments" ADD COLUMN "checkout_session_id" text;

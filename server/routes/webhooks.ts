@@ -42,14 +42,14 @@ export function webhookResponse(c: Context<{ Variables: AppVariables }>, result:
  * lib/payments/webhook.ts. Mounted outside /api/v1 and outside CSRF
  * middleware — and outside rateLimitMiddleware's RULES table too, so its own
  * per-IP limit (LIMITERS.webhooksPaymentsIp) is applied directly here rather
- * than relying on the /api/v1-scoped middleware. Every hit that reaches
- * `processPaymentWebhook` for GuruPay triggers a real outbound authenticated
- * `check-status` call, so this endpoint must never be unthrottled — it could
- * otherwise be used to amplify calls against GuruPay's API using MUNHub's
- * key, or to exhaust Workers resources. The limit (60/min per IP) is
- * generous enough for real webhook/retry volume from GuruPay itself. With no
- * usable payments adapter there is nothing that could have sent a genuine
- * event, so the endpoint answers 404 (checked after the rate limit, so an
+ * than relying on the /api/v1-scoped middleware. Cashfree's webhook carries a
+ * real HMAC signature (lib/payments/cashfree-adapter.ts), verified before
+ * anything is read or written, but the endpoint still isn't left unthrottled
+ * — a flood of forged deliveries would otherwise cost Workers resources on
+ * signature verification alone. The limit (60/min per IP) is generous enough
+ * for real webhook/retry volume from Cashfree itself. With no usable
+ * payments adapter there is nothing that could have sent a genuine event, so
+ * the endpoint answers 404 (checked after the rate limit, so an
  * unauthenticated flood still costs the caller their budget either way).
  */
 export const webhooks = new Hono<{ Variables: AppVariables }>().post('/payments', async (c) => {

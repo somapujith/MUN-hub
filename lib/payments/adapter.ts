@@ -2,7 +2,7 @@
  * Payments provider seam. Everything outside `lib/payments/` talks to a
  * provider only through this interface, obtained from `getPaymentsAdapter()`
  * (./registry.ts) — never by importing a concrete adapter. A real gateway
- * (Razorpay — see docs/payments/INTEGRATION.md) is one new file implementing
+ * (Cashfree — see docs/payments/CASHFREE.md) is one new file implementing
  * this interface plus one registry entry; call sites stay unchanged.
  *
  * Amount units: every `amount` in this interface is in the same units as
@@ -19,27 +19,48 @@ export interface CreateOrderInput {
   registrationId: string
   /**
    * Where the student's BROWSER should land after paying, for a
-   * redirect-based provider (GuruPay's `callback_url`) — a real MUN Hub page
-   * (e.g. `${APP_URL}/register/:slug/pay?registrationId=...`), never the
-   * webhook endpoint. This redirect is never trusted to confirm anything
-   * (see GuruPayAdapter.verifyAndParseWebhook) — it only returns the student
+   * redirect-based provider (Cashfree's `order_meta.return_url`) — a real MUN
+   * Hub page (e.g. `${APP_URL}/register/:slug/pay?registrationId=...`), never
+   * the webhook endpoint. This redirect is never trusted to confirm anything
+   * (see CashfreeAdapter.verifyAndParseWebhook) — it only returns the student
    * to a page that polls `GET /registrations/:id`. Optional: the mock
    * adapter and any non-redirect-based provider ignore it.
    */
   returnUrl?: string
+  /**
+   * The paying user, for providers whose order-creation API requires
+   * customer details (Cashfree: `customer_details.customer_id/name/email/
+   * phone`, all required). Optional — the mock adapter ignores it. Callers
+   * (lib/actions/registration.ts) supply this from `users` right before
+   * calling createOrder; `phone` is non-null there because a paid
+   * registration already requires a complete student profile.
+   */
+  customer?: {
+    id: string
+    name: string
+    email: string
+    phone: string
+  }
 }
 
 export interface PaymentOrder {
   /** Provider's order id — stored as `payments.provider_order_id`. */
   orderId: string
   /**
-   * Hosted checkout page to redirect the browser to, for a redirect-based
-   * provider (GuruPay: `payment_url`). Optional and additive — the mock
-   * adapter and any future embedded-widget adapter (Razorpay's Checkout.js)
-   * are not forced to supply it; `PaymentOrder` without this field stays a
-   * valid return value for either of those.
+   * Hosted checkout page to redirect the browser to, for a provider whose
+   * order-creation response is a plain URL. Optional and additive — no
+   * currently-shipped adapter sets this (kept for the historical
+   * `payments.checkout_url` column and any future URL-based provider); the
+   * mock adapter and Cashfree both leave it unset.
    */
   checkoutUrl?: string
+  /**
+   * Cashfree's `payment_session_id` — handed to Cashfree's own JS SDK
+   * client-side (`cashfree.checkout({ paymentSessionId, redirectTarget:
+   * "_self" })`), which performs the actual browser redirect. Optional and
+   * additive, same reasoning as `checkoutUrl`.
+   */
+  checkoutSessionId?: string
 }
 
 export type PaymentWebhookEventType = 'payment.captured' | 'payment.failed'

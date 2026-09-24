@@ -281,6 +281,13 @@
       "when": 1789701880541,
       "tag": "0039_calm_jamie_braddock",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790238486017,
+      "tag": "0040_true_enchantress",
+      "breakpoints": true
     }
   ]
 }

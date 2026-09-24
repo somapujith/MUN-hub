@@ -1,6 +1,6 @@
 import { getRuntimeEnv } from '@/lib/runtime-env'
 import type { PaymentsAdapter } from './adapter'
-import { createGuruPayAdapter } from './gurupay-adapter'
+import { createCashfreeAdapter } from './cashfree-adapter'
 import { getMockWebhookSecret, mockPaymentsAdapter } from './mock-adapter'
 
 /**
@@ -19,7 +19,7 @@ import { getMockWebhookSecret, mockPaymentsAdapter } from './mock-adapter'
  *
  * Adding a provider: implement `PaymentsAdapter` in its own file and add a
  * case below that returns it only when its credentials are present. See
- * docs/payments/INTEGRATION.md.
+ * docs/payments/CASHFREE.md.
  */
 export function getPaymentsAdapter(): PaymentsAdapter | null {
   const name = (getRuntimeEnv('PAYMENTS_ADAPTER') || 'mock').trim().toLowerCase()
@@ -29,20 +29,31 @@ export function getPaymentsAdapter(): PaymentsAdapter | null {
       return getRuntimeEnv('MOCK_PAYMENTS_ENABLED') === 'true' && getMockWebhookSecret()
         ? mockPaymentsAdapter
         : null
-    case 'gurupay': {
-      const apiKey = getRuntimeEnv('GURUPAY_API_KEY')
-      if (!apiKey) return null
-      // `callback_url` is GuruPay's post-payment BROWSER redirect target —
-      // never the webhook endpoint (GuruPay's webhook delivery is configured
-      // once in GuruPay's own dashboard, entirely separately from any API
-      // request; confirmed 2026-09-18). Every real call from
-      // lib/actions/registration.ts supplies its own per-registration
-      // `CreateOrderInput.returnUrl` (a real `/register/:slug/pay` page); this
-      // is only the adapter-level fallback if one is ever missing. APP_URL is
-      // the web app's own origin (production: https://www.munhub.in) — the
-      // same var lib/notifications/* already uses for web-facing links.
+    case 'cashfree': {
+      const clientId = getRuntimeEnv('CASHFREE_CLIENT_ID')
+      const clientSecret = getRuntimeEnv('CASHFREE_CLIENT_SECRET')
+      if (!clientId || !clientSecret) return null
+      const env = getRuntimeEnv('CASHFREE_ENV') === 'sandbox' ? 'sandbox' : 'production'
+      // notifyUrl is Cashfree's per-order webhook target (order_meta.notify_url
+      // on every createOrder call) — there is no dashboard-level webhook
+      // setting to configure separately, unlike some other gateways.
+      // PUBLIC_API_URL is this API's own public origin (production:
+      // https://api.munhub.in) — the same var lib/storage/* already uses for
+      // API-facing URLs.
+      const apiOrigin = (getRuntimeEnv('PUBLIC_API_URL') || 'http://localhost:3001').replace(/\/$/, '')
+      // APP_URL is the web app's own origin (production: https://www.munhub.in)
+      // — the same var lib/notifications/* already uses for web-facing links.
+      // Every real call from lib/actions/registration.ts supplies its own
+      // per-registration `CreateOrderInput.returnUrl`; this is only the
+      // adapter-level fallback if one is ever missing.
       const webOrigin = (getRuntimeEnv('APP_URL') || 'http://localhost:5173').replace(/\/$/, '')
-      return createGuruPayAdapter({ apiKey, callbackUrl: webOrigin })
+      return createCashfreeAdapter({
+        clientId,
+        clientSecret,
+        env,
+        notifyUrl: `${apiOrigin}/webhooks/payments`,
+        appUrl: webOrigin,
+      })
     }
     default:
       console.error(`[payments] unknown PAYMENTS_ADAPTER "${name}" — online payments are unavailable`)
