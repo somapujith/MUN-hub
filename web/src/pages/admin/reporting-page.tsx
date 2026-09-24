@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
+import { DownloadIcon } from "lucide-react";
 import {
   getConversionFunnel,
   getGeographyBreakdown,
@@ -20,7 +21,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { adminQueryKeys } from "@/lib/admin/query-keys";
-import { REPORTING_RANGE_DAYS, type ReportingRangeDays, type TrendGranularity } from "@/types/admin-reporting";
+import { downloadCsv, rowsToCsv } from "@/lib/csv";
+import {
+  REPORTING_RANGE_DAYS,
+  type ConversionFunnel,
+  type GeographyRow,
+  type OrganizerLeaderboard,
+  type PlatformFeeSummaryRow,
+  type ReportingRangeDays,
+  type ReportingTrends,
+  type TopConferences,
+  type TrendGranularity,
+} from "@/types/admin-reporting";
 
 const compactNumber = new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 });
 const percentFormat = new Intl.NumberFormat("en-IN", { style: "percent", maximumFractionDigits: 1 });
@@ -42,6 +54,88 @@ function formatBucketLabel(bucket: string): string {
   const date = new Date(`${bucket}T00:00:00.000Z`);
   if (Number.isNaN(date.getTime())) return bucket;
   return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }).format(date);
+}
+
+// --- CSV export -------------------------------------------------------------
+// Every reporting endpoint returns complete, already-aggregated data for the
+// current range (not paginated), so exports run entirely off the query data
+// already loaded for the page — no dedicated export endpoint.
+
+function exportTrendsCsv(data: ReportingTrends, days: ReportingRangeDays) {
+  const headers = ["Bucket", "Registrations", "Revenue gross (INR)", "Revenue net (INR)", "Organizer signups", "Delegate signups"];
+  const rows = data.registrations.map((point, index) => [
+    point.bucket,
+    point.value,
+    data.revenue.gross[index]?.value ?? 0,
+    data.revenue.net[index]?.value ?? 0,
+    data.signups.organizers[index]?.value ?? 0,
+    data.signups.delegates[index]?.value ?? 0,
+  ]);
+  downloadCsv(`mun-hub-trends-${days}d.csv`, rowsToCsv(headers, rows));
+}
+
+function exportRegistrationFunnelCsv(data: ConversionFunnel, days: ReportingRangeDays) {
+  const { registrations } = data;
+  const headers = ["Metric", "Value"];
+  const rows: (string | number)[][] = [
+    ["Started", registrations.started],
+    ["Confirmed", registrations.confirmed],
+    ["Cancelled", registrations.cancelled],
+    ["Conversion rate (%)", Math.round(registrations.conversionRate * 100)],
+  ];
+  downloadCsv(`mun-hub-registration-funnel-${days}d.csv`, rowsToCsv(headers, rows));
+}
+
+function exportPaymentFunnelCsv(data: ConversionFunnel, days: ReportingRangeDays) {
+  const { payments } = data;
+  const headers = ["Metric", "Value"];
+  const rows: (string | number)[][] = [
+    ["Total payments", payments.totalPayments],
+    ["Paid", payments.paid],
+    ["Failed", payments.failed],
+    ["Success rate (%)", Math.round(payments.successRate * 100)],
+    ["Exception rate (%)", Math.round(payments.exceptionRate * 100)],
+    ["Exceptions opened", payments.exceptionsOpened],
+  ];
+  downloadCsv(`mun-hub-payment-funnel-${days}d.csv`, rowsToCsv(headers, rows));
+}
+
+function exportTopConferencesCsv(data: TopConferences, days: ReportingRangeDays) {
+  const headers = ["Ranked by", "Rank", "Conference", "Slug", "Value"];
+  const rows: (string | number)[][] = [
+    ...data.byRegistrations.map((row, index): (string | number)[] => ["Registrations", index + 1, row.name, row.slug, row.value]),
+    ...data.byRevenue.map((row, index): (string | number)[] => ["Revenue (INR)", index + 1, row.name, row.slug, row.value]),
+  ];
+  downloadCsv(`mun-hub-top-conferences-${days}d.csv`, rowsToCsv(headers, rows));
+}
+
+function exportOrganizerLeaderboardCsv(data: OrganizerLeaderboard, days: ReportingRangeDays) {
+  const headers = ["Ranked by", "Rank", "Organizer", "Email", "Value"];
+  const rows: (string | number)[][] = [
+    ...data.byConferencesPublished.map((row, index): (string | number)[] => ["Conferences published", index + 1, row.name, row.email, row.value]),
+    ...data.byRevenue.map((row, index): (string | number)[] => ["Revenue (INR)", index + 1, row.name, row.email, row.value]),
+  ];
+  downloadCsv(`mun-hub-organizer-leaderboard-${days}d.csv`, rowsToCsv(headers, rows));
+}
+
+function exportGeographyCsv(data: GeographyRow[], days: ReportingRangeDays) {
+  const headers = ["City", "Country", "Registrations", "Revenue (INR)"];
+  const rows = data.map((row) => [row.city ?? "Unknown", row.country ?? "", row.registrationCount, row.revenue]);
+  downloadCsv(`mun-hub-geography-${days}d.csv`, rowsToCsv(headers, rows));
+}
+
+function exportPlatformFeeCsv(data: PlatformFeeSummaryRow[], days: ReportingRangeDays) {
+  const headers = ["Currency", "Platform fee total", "GST on fee", "Paid payments"];
+  const rows = data.map((row) => [row.currency, row.platformFeeTotal, row.platformFeeTaxTotal, row.paidPayments]);
+  downloadCsv(`mun-hub-platform-fee-${days}d.csv`, rowsToCsv(headers, rows));
+}
+
+function ExportCsvButton({ onExport, label = "Export CSV" }: { onExport: () => void; label?: string }) {
+  return (
+    <Button type="button" variant="outline" size="sm" onClick={onExport}>
+      <DownloadIcon aria-hidden /> {label}
+    </Button>
+  );
 }
 
 function SegmentedControl<T extends string | number>({
@@ -78,17 +172,22 @@ function SegmentedControl<T extends string | number>({
 function SectionFrame({
   title,
   description,
+  actions,
   children,
 }: {
   title: string;
   description?: string;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="flex flex-col gap-md rounded-md border border-border bg-card p-lg" aria-label={title}>
-      <div className="flex flex-col gap-xxs">
-        <h2 className="font-display text-title-md text-ink">{title}</h2>
-        {description && <p className="text-body-md text-muted-foreground">{description}</p>}
+      <div className="flex flex-wrap items-start justify-between gap-md">
+        <div className="flex flex-col gap-xxs">
+          <h2 className="font-display text-title-md text-ink">{title}</h2>
+          {description && <p className="text-body-md text-muted-foreground">{description}</p>}
+        </div>
+        {actions}
       </div>
       {children}
     </section>
@@ -172,6 +271,12 @@ export function AdminReportingPage() {
     value: row.value,
   }));
 
+  // The Organizers console has no per-organizer detail route (see
+  // web/src/routes.tsx) — it's a searchable list instead. `?q=` deep-links
+  // into that search (organizers-page.tsx reads it on mount) so a leaderboard
+  // row still lands on the right organizer, not just an unfiltered list.
+  const organizerHref = (item: RankedListItem) => `/admin/organizers?q=${encodeURIComponent(item.sublabel ?? item.label)}`;
+
   return (
     <>
       <Helmet title="Analytics" />
@@ -190,7 +295,15 @@ export function AdminReportingPage() {
           />
         </div>
 
-        <SectionFrame title="Trends" description="Registrations, revenue and signups, bucketed by day or week.">
+        <SectionFrame
+          title="Trends"
+          description="Registrations, revenue and signups, bucketed by day or week."
+          actions={
+            trendsQuery.data && (
+              <ExportCsvButton onExport={() => exportTrendsCsv(trendsQuery.data, days)} />
+            )
+          }
+        >
           <div className="flex justify-end">
             <SegmentedControl
               aria-label="Trend granularity"
@@ -242,7 +355,15 @@ export function AdminReportingPage() {
         </SectionFrame>
 
         <div className="grid grid-cols-1 gap-lg lg:grid-cols-2">
-          <SectionFrame title="Registration funnel" description="Of registrations started in this range.">
+          <SectionFrame
+            title="Registration funnel"
+            description="Of registrations started in this range."
+            actions={
+              funnelQuery.data && (
+                <ExportCsvButton onExport={() => exportRegistrationFunnelCsv(funnelQuery.data, days)} />
+              )
+            }
+          >
             <QueryState isLoading={funnelQuery.isLoading} isError={funnelQuery.isError} error={funnelQuery.error} skeletonHeight="h-40" />
             {funnelQuery.data && (
               <>
@@ -273,7 +394,15 @@ export function AdminReportingPage() {
             )}
           </SectionFrame>
 
-          <SectionFrame title="Payment funnel" description="PAID vs FAILED attempts, and exceptions opened.">
+          <SectionFrame
+            title="Payment funnel"
+            description="PAID vs FAILED attempts, and exceptions opened."
+            actions={
+              funnelQuery.data && (
+                <ExportCsvButton onExport={() => exportPaymentFunnelCsv(funnelQuery.data, days)} />
+              )
+            }
+          >
             <QueryState isLoading={funnelQuery.isLoading} isError={funnelQuery.isError} error={funnelQuery.error} skeletonHeight="h-40" />
             {funnelQuery.data && (
               <>
@@ -309,7 +438,15 @@ export function AdminReportingPage() {
           </SectionFrame>
         </div>
 
-        <SectionFrame title="Top conferences" description="Top 10 by registration count and by revenue, for this range.">
+        <SectionFrame
+          title="Top conferences"
+          description="Top 10 by registration count and by revenue, for this range."
+          actions={
+            topConferencesQuery.data && (
+              <ExportCsvButton onExport={() => exportTopConferencesCsv(topConferencesQuery.data, days)} />
+            )
+          }
+        >
           <QueryState
             isLoading={topConferencesQuery.isLoading}
             isError={topConferencesQuery.isError}
@@ -320,7 +457,11 @@ export function AdminReportingPage() {
             <div className="grid grid-cols-1 gap-lg lg:grid-cols-2">
               <div className="flex flex-col gap-sm">
                 <h3 className="text-body-md font-medium text-ink">By registrations</h3>
-                <RankedBarList items={topConferencesByRegistrations} colorToken="chart-1" />
+                <RankedBarList
+                  items={topConferencesByRegistrations}
+                  colorToken="chart-1"
+                  getHref={(item) => `/admin/muns/${item.id}`}
+                />
               </div>
               <div className="flex flex-col gap-sm">
                 <h3 className="text-body-md font-medium text-ink">By revenue</h3>
@@ -328,19 +469,28 @@ export function AdminReportingPage() {
                   items={topConferencesByRevenue}
                   colorToken="chart-3"
                   formatValue={(value) => formatMoney(value, "INR", true)}
+                  getHref={(item) => `/admin/muns/${item.id}`}
                 />
               </div>
             </div>
           )}
         </SectionFrame>
 
-        <SectionFrame title="Organizer leaderboard" description="Top 10 organizers by conferences ever published, and by revenue generated in this range.">
+        <SectionFrame
+          title="Organizer leaderboard"
+          description="Top 10 organizers by conferences ever published, and by revenue generated in this range."
+          actions={
+            organizersQuery.data && (
+              <ExportCsvButton onExport={() => exportOrganizerLeaderboardCsv(organizersQuery.data, days)} />
+            )
+          }
+        >
           <QueryState isLoading={organizersQuery.isLoading} isError={organizersQuery.isError} error={organizersQuery.error} skeletonHeight="h-48" />
           {organizersQuery.data && (
             <div className="grid grid-cols-1 gap-lg lg:grid-cols-2">
               <div className="flex flex-col gap-sm">
                 <h3 className="text-body-md font-medium text-ink">By conferences published</h3>
-                <RankedBarList items={organizersByPublished} colorToken="chart-4" />
+                <RankedBarList items={organizersByPublished} colorToken="chart-4" getHref={organizerHref} />
               </div>
               <div className="flex flex-col gap-sm">
                 <h3 className="text-body-md font-medium text-ink">By revenue</h3>
@@ -348,6 +498,7 @@ export function AdminReportingPage() {
                   items={organizersByRevenue}
                   colorToken="chart-3"
                   formatValue={(value) => formatMoney(value, "INR", true)}
+                  getHref={organizerHref}
                 />
               </div>
             </div>
@@ -355,7 +506,16 @@ export function AdminReportingPage() {
         </SectionFrame>
 
         <div className="grid grid-cols-1 gap-lg lg:grid-cols-2">
-          <SectionFrame title="Geography" description="Registrations and revenue by conference city, for this range.">
+          <SectionFrame
+            title="Geography"
+            description="Registrations and revenue by conference city, for this range."
+            actions={
+              geographyQuery.data &&
+              geographyQuery.data.length > 0 && (
+                <ExportCsvButton onExport={() => exportGeographyCsv(geographyQuery.data, days)} />
+              )
+            }
+          >
             <QueryState isLoading={geographyQuery.isLoading} isError={geographyQuery.isError} error={geographyQuery.error} skeletonHeight="h-40" />
             {geographyQuery.data &&
               (geographyQuery.data.length === 0 ? (
@@ -386,7 +546,16 @@ export function AdminReportingPage() {
               ))}
           </SectionFrame>
 
-          <SectionFrame title="Platform fee" description="Fee and GST on it, collected from PAID payments in this range.">
+          <SectionFrame
+            title="Platform fee"
+            description="Fee and GST on it, collected from PAID payments in this range."
+            actions={
+              feesQuery.data &&
+              feesQuery.data.length > 0 && (
+                <ExportCsvButton onExport={() => exportPlatformFeeCsv(feesQuery.data, days)} />
+              )
+            }
+          >
             <QueryState isLoading={feesQuery.isLoading} isError={feesQuery.isError} error={feesQuery.error} skeletonHeight="h-40" />
             {feesQuery.data &&
               (feesQuery.data.length === 0 ? (

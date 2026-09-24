@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { SearchIcon, UsersIcon } from "lucide-react";
 import { toast } from "sonner";
 import { listOrganizers, reinstateOrganizer, suspendOrganizer } from "@/api/organizer-admin";
@@ -32,21 +32,38 @@ function formatDate(value: string): string {
 
 export function AdminOrganizersPage() {
   const queryClient = useQueryClient();
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlQuery = searchParams.get("q") ?? "";
+
+  // Seeded from `?q=` so a deep link (e.g. an Analytics leaderboard row) lands
+  // pre-searched — mirrors the same `?q=` pattern registrations-page.tsx uses.
+  const [searchInput, setSearchInput] = useState(urlQuery);
   const [page, setPage] = useState(0);
   const [suspendTarget, setSuspendTarget] = useState<OrganizerRow | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
 
-  // Debounce the raw input into the value that actually drives the query, and
-  // reset back to the first page whenever the search term changes.
+  // Debounce typing into both the query that drives the fetch and the `?q=`
+  // URL param, and reset back to the first page whenever the search term
+  // changes.
   useEffect(() => {
     const handle = setTimeout(() => {
-      setSearch(searchInput.trim());
       setPage(0);
+      setSearchParams(
+        (previous) => {
+          const next = new URLSearchParams(previous);
+          const trimmed = searchInput.trim();
+          if (trimmed) next.set("q", trimmed);
+          else next.delete("q");
+          return next;
+        },
+        { replace: true },
+      );
     }, 300);
     return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
+
+  const search = urlQuery.trim();
 
   const params = { limit: PAGE_SIZE, offset: page * PAGE_SIZE, search: search || undefined };
   const organizersQuery = useQuery({
