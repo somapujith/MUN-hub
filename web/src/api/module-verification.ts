@@ -1,5 +1,7 @@
 import type { MunModule } from "@/types/enums";
 import type {
+  BulkModuleVerificationTarget,
+  BulkVerifyModulesResult,
   ModuleReviewQueueParams,
   ModuleReviewQueueResult,
   ModuleVerificationRow,
@@ -74,5 +76,19 @@ export function reviewModule(munId: string, moduleName: MunModule, input: Review
   return request<ModuleVerificationRow>(`/muns/${munId}/modules/${moduleName}/actions/review`, {
     method: "POST",
     body: JSON.stringify(input),
+  });
+}
+
+/**
+ * Bulk verify-only (`POST /admin/modules/bulk-verify`, wrapping
+ * `bulkVerifyModules`). Changes-requested/rejected need per-item issues and
+ * stay single-item via `reviewModule` above. Continues past a per-target
+ * failure — check each result's `ok`/`error` rather than assuming every
+ * target succeeded.
+ */
+export function bulkVerifyModules(targets: BulkModuleVerificationTarget[]) {
+  return request<BulkVerifyModulesResult>(`/admin/modules/bulk-verify`, {
+    method: "POST",
+    body: JSON.stringify({ targets }),
   });
 }

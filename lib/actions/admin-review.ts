@@ -214,6 +214,46 @@ export async function reviewMunApplication(
   return updated
 }
 
+export interface BulkApplicationDecisionResult {
+  id: string
+  ok: boolean
+  error?: string
+}
+
+/**
+ * Bulk-approve wrapper around `reviewMunApplication` — approve-only. Reject
+ * and changes-requested both require a per-item reason (Admin PRD §8), which
+ * doesn't fit a single bulk action, so those stay single-item on purpose.
+ *
+ * Thin on purpose: no new transaction, no duplicated transition/audit/
+ * notification logic — every id in `munIds` just calls the existing
+ * `reviewMunApplication(munId, 'APPROVED', ...)` one at a time, inside its
+ * own try/catch, so one item that can no longer be approved (already
+ * decided by someone else since the queue was loaded, an invalid state
+ * transition, etc.) doesn't abort the rest of the batch. Returns a per-id
+ * result so the caller can show exactly which ones succeeded and why any
+ * failed. Requires the same role bar as `reviewMunApplication`, checked once
+ * up front so an unauthorized caller fails fast instead of failing once per
+ * id in the loop.
+ */
+export async function bulkApproveMunApplications(
+  munIds: string[],
+  session: Session | null,
+): Promise<BulkApplicationDecisionResult[]> {
+  requireRole(session, [...REVIEW_ROLES])
+
+  const results: BulkApplicationDecisionResult[] = []
+  for (const munId of munIds) {
+    try {
+      await reviewMunApplication(munId, 'APPROVED', undefined, undefined, session)
+      results.push({ id: munId, ok: true })
+    } catch (error) {
+      results.push({ id: munId, ok: false, error: error instanceof Error ? error.message : 'Unknown error' })
+    }
+  }
+  return results
+}
+
 function notifyReviewDecisionAfterCommit(
   munId: string,
   decision: 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED',

@@ -3,11 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardListIcon, SearchIcon } from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
-import { getMunForReview, getReviewQueue, reviewMunApplication } from "@/api/admin-review";
+import { bulkApproveMunApplications, getMunForReview, getReviewQueue, reviewMunApplication } from "@/api/admin-review";
 import { queryKeys } from "@/api/query-keys";
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
 import { MunStatusBadge } from "@/components/mun/mun-status-badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { adminSelectClassName } from "@/lib/admin/styles";
 import { usePageClamp } from "@/lib/admin/use-page-clamp";
-import type { ApplicationStatus, ReviewDecision, ReviewQueueRow } from "@/types/admin-review";
+import type { ApplicationStatus, BulkApplicationDecisionResult, ReviewDecision, ReviewQueueRow } from "@/types/admin-review";
 
 const PAGE_SIZE = 20;
 
@@ -63,6 +64,10 @@ export function AdminReviewPage() {
   const [notes, setNotes] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
   const [showReasonError, setShowReasonError] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkSummary, setBulkSummary] = useState<{ ok: number; failed: BulkApplicationDecisionResult[] } | null>(
+    null,
+  );
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -86,6 +91,14 @@ export function AdminReviewPage() {
   });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["admin", "review-queue"] });
+
+  // Selection is page/filter-scoped: a row selected on one status/search/page
+  // combination shouldn't silently carry over once the underlying result set
+  // has changed under it.
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setBulkSummary(null);
+  }, [status, search, page]);
 
   const closeDialog = () => {
     setReviewTarget(null);
@@ -116,6 +129,25 @@ export function AdminReviewPage() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to record decision"),
   });
 
+  const bulkApproveMutation = useMutation({
+    mutationFn: (ids: string[]) => bulkApproveMunApplications(ids),
+    onSuccess: async (result) => {
+      const failed = result.results.filter((r) => !r.ok);
+      const ok = result.results.length - failed.length;
+      setBulkSummary({ ok, failed });
+      setSelectedIds(new Set());
+      await refresh();
+      if (failed.length === 0) {
+        toast.success(`${ok} application${ok === 1 ? "" : "s"} approved`);
+      } else if (ok === 0) {
+        toast.error(`All ${failed.length} approvals failed`);
+      } else {
+        toast.warning(`${ok} approved, ${failed.length} failed`);
+      }
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to run the bulk approval"),
+  });
+
   // Admin PRD §8: rejecting or requesting changes must tell the organizer why.
   const reasonRequired = decision !== "APPROVED";
   const reasonMissing = reasonRequired && notes.trim().length === 0;
@@ -136,6 +168,30 @@ export function AdminReviewPage() {
   usePageClamp(Boolean(queueQuery.data), page, setPage, totalPages, (newPage) =>
     toast.message(`Moved to page ${newPage + 1} — no more results on the page you were viewing.`),
   );
+
+  const pageIds = results.map((row) => row.id);
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+
+  const toggleRow = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllOnPage = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
 
   return (
     <AdminPageFrame
@@ -185,6 +241,43 @@ export function AdminReviewPage() {
         </p>
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-sm rounded-md border border-border bg-surface-soft/80 px-md py-sm">
+          <p className="text-body-md font-medium text-ink">
+            {selectedIds.size} selected
+          </p>
+          <div className="flex items-center gap-sm">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={bulkApproveMutation.isPending}
+            >
+              Clear selection
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => bulkApproveMutation.mutate(Array.from(selectedIds))}
+              disabled={bulkApproveMutation.isPending}
+            >
+              {bulkApproveMutation.isPending ? "Approving..." : `Approve ${selectedIds.size}`}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {bulkSummary && (
+        <p role="status" className="text-body-md text-muted-foreground">
+          {bulkSummary.ok} approved
+          {bulkSummary.failed.length > 0
+            ? `, ${bulkSummary.failed.length} failed: ${bulkSummary.failed
+                .slice(0, 3)
+                .map((f) => f.error ?? "Unknown error")
+                .join("; ")}${bulkSummary.failed.length > 3 ? ` (+${bulkSummary.failed.length - 3} more)` : ""}`
+            : ""}
+        </p>
+      )}
+
       {queueQuery.isLoading ? (
         <div className="flex flex-col gap-sm">
           {Array.from({ length: 5 }).map((_, index) => (
@@ -214,6 +307,13 @@ export function AdminReviewPage() {
           <table className="w-full min-w-[40rem] text-left text-body-md">
             <thead className="border-b border-border bg-surface-soft/80 text-muted-foreground">
               <tr>
+                <th className="w-10 px-md py-sm font-medium">
+                  <Checkbox
+                    aria-label="Select all applications on this page"
+                    checked={allOnPageSelected}
+                    onCheckedChange={toggleSelectAllOnPage}
+                  />
+                </th>
                 <th className="px-md py-sm font-medium">MUN</th>
                 <th className="px-md py-sm font-medium">Location</th>
                 <th className="px-md py-sm font-medium">Status</th>
@@ -224,6 +324,13 @@ export function AdminReviewPage() {
             <tbody>
               {results.map((row) => (
                 <tr key={row.id} className="border-b border-border last:border-0">
+                  <td className="px-md py-sm">
+                    <Checkbox
+                      aria-label={`Select ${row.name}`}
+                      checked={selectedIds.has(row.id)}
+                      onCheckedChange={() => toggleRow(row.id)}
+                    />
+                  </td>
                   <td className="px-md py-sm font-medium">
                     <Link to={`/admin/muns/${row.id}`} className="text-link hover:text-link-active">
                       {row.name}

@@ -2,6 +2,7 @@ import { zValidator } from '../lib/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import {
+  bulkApproveMunApplications,
   getModuleReviewQueue,
   getMunForReview,
   getReviewQueue,
@@ -56,6 +57,12 @@ const suspendMunBodySchema = z
   })
   .strict()
 
+const bulkApproveApplicationsBodySchema = z
+  .object({
+    munIds: z.array(z.string().min(1)).min(1).max(100),
+  })
+  .strict()
+
 export const adminReviewRoutes = new Hono<{ Variables: AppVariables }>()
 
 adminReviewRoutes.get(
@@ -98,6 +105,20 @@ adminReviewRoutes.post(
       session,
     )
     return c.json(result)
+  },
+)
+
+// Bulk approve-only (Gate 1). A literal 3-segment path — never collides with
+// the `/admin/muns/:munId/...` 4-segment param routes above/below it.
+adminReviewRoutes.post(
+  '/admin/muns/bulk-approve',
+  requireAuth,
+  requireRole([...REVIEW_ROLES]),
+  zValidator('json', bulkApproveApplicationsBodySchema),
+  async (c) => {
+    const { munIds } = c.req.valid('json')
+    const results = await bulkApproveMunApplications(munIds, c.get('session'))
+    return c.json({ results })
   },
 )
 

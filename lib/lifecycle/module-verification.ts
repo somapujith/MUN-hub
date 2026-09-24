@@ -277,6 +277,59 @@ export async function reviewModule(
   return updated
 }
 
+export interface BulkModuleVerificationTarget {
+  munId: string
+  moduleName: MunModule
+}
+
+export interface BulkModuleVerificationResult {
+  munId: string
+  moduleName: MunModule
+  ok: boolean
+  error?: string
+}
+
+/**
+ * Bulk-verify wrapper around `reviewModule` — VERIFIED-only bulk action.
+ * CHANGES_REQUESTED/REJECTED both require a per-item reason (issues[]), which
+ * doesn't fit a single bulk action, so those decisions stay single-item.
+ *
+ * Thin on purpose: no new transaction, no duplicated row-lock/precondition/
+ * audit/notification logic — every `(munId, moduleName)` pair just calls the
+ * existing `reviewModule(munId, moduleName, 'VERIFIED', [], session)` one at
+ * a time, inside its own try/catch, so one module that's no longer
+ * PENDING_REVIEW (already reviewed by someone else since the queue was
+ * loaded) doesn't abort the rest of the batch. Each call still runs
+ * `checkAllModulesVerified` exactly as a single-item VERIFIED decision would
+ * — the mun-level auto-advance to VERIFIED fires normally once a mun's last
+ * required module clears. Returns a per-target result so the caller can show
+ * exactly which ones succeeded and why any failed. Requires the same role
+ * bar as `reviewModule`, checked once up front so an unauthorized caller
+ * fails fast instead of failing once per target in the loop.
+ */
+export async function bulkVerifyModules(
+  targets: BulkModuleVerificationTarget[],
+  session: Session | null,
+): Promise<BulkModuleVerificationResult[]> {
+  requireRole(session, [...REVIEW_ROLES])
+
+  const results: BulkModuleVerificationResult[] = []
+  for (const { munId, moduleName } of targets) {
+    try {
+      await reviewModule(munId, moduleName, 'VERIFIED', [], session)
+      results.push({ munId, moduleName, ok: true })
+    } catch (error) {
+      results.push({
+        munId,
+        moduleName,
+        ok: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      })
+    }
+  }
+  return results
+}
+
 /**
  * If every required tracked module is VERIFIED and the mun is currently in
  * VERIFICATION, transitions it to VERIFIED via the shared state machine

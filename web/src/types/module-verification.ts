@@ -57,3 +57,21 @@ export interface ModuleVerificationRow {
   lastReviewedBy: string | null;
   isRequired: boolean;
 }
+
+/** One `(munId, moduleName)` pair to bulk-verify. */
+export interface BulkModuleVerificationTarget {
+  munId: string;
+  moduleName: MunModule;
+}
+
+/** One target's outcome from `bulkVerifyModules` — its pair and whether it succeeded. */
+export interface BulkModuleVerificationResult {
+  munId: string;
+  moduleName: MunModule;
+  ok: boolean;
+  error?: string;
+}
+
+export interface BulkVerifyModulesResult {
+  results: BulkModuleVerificationResult[];
+}
