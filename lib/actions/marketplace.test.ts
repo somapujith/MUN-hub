@@ -1,7 +1,7 @@
 import { eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '@/lib/db/client'
-import { munContacts, munFormFields, munMedia, muns, registrationProducts, users } from '@/lib/db/schema'
+import { committees, munContacts, munFormFields, munMedia, muns, portfolios, registrationProducts, users } from '@/lib/db/schema'
 import {
   assertMunPubliclyVisible,
   clipToPublicStatuses,
@@ -182,6 +182,20 @@ describe('marketplace actions', () => {
       contactPersonEmail: 'private.person@example.com',
       contactPersonPhone: '+44 7700 900000',
     })
+
+    // One committee with two portfolios, one with none — exercises the
+    // committees<->portfolios LEFT JOIN grouping in loadPublicMunDetail.
+    const [unsc, unhrc] = await db
+      .insert(committees)
+      .values([
+        { munId: publishedMunId, name: `UNSC ${suffix}`, agenda: 'Peace and security', capacity: 20 },
+        { munId: publishedMunId, name: `UNHRC ${suffix}`, agenda: 'Human rights', capacity: 15 },
+      ])
+      .returning()
+    await db.insert(portfolios).values([
+      { committeeId: unsc.id, name: 'United States', type: 'COUNTRY', availability: 2 },
+      { committeeId: unsc.id, name: 'United Kingdom', type: 'COUNTRY', availability: 1 },
+    ])
   })
 
   afterAll(async () => {
@@ -367,11 +381,30 @@ describe('marketplace actions', () => {
       expect(Array.isArray(detail?.committees)).toBe(true)
       expect(Array.isArray(detail?.registrationProducts)).toBe(true)
       expect(detail?.registrationProducts.every((p) => p.status === 'active')).toBe(true)
-      // committees carry nested portfolios array (even if empty for this fixture)
       expect(detail?.committees.every((c) => Array.isArray(c.portfolios))).toBe(true)
       expect(detail?.mapUrl).toBe('https://maps.example.com/oxford')
       expect(detail?.coverImage).toBe(`https://cdn.example.com/${suffix}/cover.png`)
       expect(detail?.logo).toBe(`https://cdn.example.com/${suffix}/logo.png`)
+    })
+
+    it('groups portfolios under their own committee from the single joined query, including a committee with none', async () => {
+      const detail = await getMunBySlug(publishedMunSlug)
+      expect(detail).not.toBeNull()
+
+      const unsc = detail!.committees.find((c) => c.name === `UNSC ${suffix}`)
+      const unhrc = detail!.committees.find((c) => c.name === `UNHRC ${suffix}`)
+      expect(unsc).toBeDefined()
+      expect(unhrc).toBeDefined()
+
+      // The LEFT JOIN must not leak a phantom portfolio row for the
+      // committee with none, and must not cross-contaminate UNSC's rows onto it.
+      expect(unhrc!.portfolios).toEqual([])
+
+      expect(unsc!.portfolios.map((p) => p.name).sort()).toEqual(['United Kingdom', 'United States'])
+      const us = unsc!.portfolios.find((p) => p.name === 'United States')!
+      expect(us.committeeId).toBe(unsc!.id)
+      expect(us.type).toBe('COUNTRY')
+      expect(us.availability).toBe(2)
     })
 
     it('never exposes the organizer id or internal columns', async () => {

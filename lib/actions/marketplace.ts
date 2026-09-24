@@ -397,10 +397,17 @@ async function loadPublicMunDetail(where: SQL): Promise<PublicMunDetail | null> 
     return null
   }
 
-  const [committeeRows, activeProducts, contactRows, formFields] = await Promise.all([
+  // Committees and their portfolios are fetched as one LEFT JOIN (instead of
+  // a committees query followed by a separate portfolios-by-committeeIds
+  // query) to save a full sequential DB round trip on every mun detail
+  // fetch — each round trip carries real network latency from the Worker to
+  // Neon, and this endpoint is otherwise the platform's most-requested read.
+  // Grouped back into PublicCommittee[] below the same way the two-query
+  // version did.
+  const [committeePortfolioRows, activeProducts, contactRows, formFields] = await Promise.all([
     db
       .select({
-        id: committees.id,
+        committeeId: committees.id,
         munId: committees.munId,
         name: committees.name,
         agenda: committees.agenda,
@@ -408,10 +415,17 @@ async function loadPublicMunDetail(where: SQL): Promise<PublicMunDetail | null> 
         capacity: committees.capacity,
         committeeType: committees.committeeType,
         portfoliosEnabled: committees.portfoliosEnabled,
+        portfolioId: portfolios.id,
+        portfolioName: portfolios.name,
+        portfolioType: portfolios.type,
+        portfolioAvailability: portfolios.availability,
+        portfolioDescription: portfolios.description,
+        portfolioRestrictions: portfolios.restrictions,
       })
       .from(committees)
+      .leftJoin(portfolios, eq(portfolios.committeeId, committees.id))
       .where(eq(committees.munId, row.id))
-      .orderBy(asc(committees.createdAt), asc(committees.id)),
+      .orderBy(asc(committees.createdAt), asc(committees.id), asc(portfolios.createdAt), asc(portfolios.id)),
     db
       .select(PUBLIC_PRODUCT_COLUMNS)
       .from(registrationProducts)
@@ -429,33 +443,40 @@ async function loadPublicMunDetail(where: SQL): Promise<PublicMunDetail | null> 
     listFormFields(row.id),
   ])
 
-  const committeeIds = committeeRows.map((c) => c.id)
-  const portfolioRows: PublicPortfolio[] = committeeIds.length
-    ? await db
-        .select({
-          id: portfolios.id,
-          committeeId: portfolios.committeeId,
-          name: portfolios.name,
-          type: portfolios.type,
-          availability: portfolios.availability,
-          description: portfolios.description,
-          restrictions: portfolios.restrictions,
-        })
-        .from(portfolios)
-        .where(inArray(portfolios.committeeId, committeeIds))
-        .orderBy(asc(portfolios.createdAt), asc(portfolios.id))
-    : []
-
-  const portfoliosByCommittee = new Map<string, PublicPortfolio[]>()
-  for (const portfolio of portfolioRows) {
-    const existing = portfoliosByCommittee.get(portfolio.committeeId) ?? []
-    portfoliosByCommittee.set(portfolio.committeeId, [...existing, portfolio])
+  const committeeOrder: string[] = []
+  const committeeById = new Map<string, PublicCommittee>()
+  for (const r of committeePortfolioRows) {
+    let committee = committeeById.get(r.committeeId)
+    if (!committee) {
+      committee = {
+        id: r.committeeId,
+        munId: r.munId,
+        name: r.name,
+        agenda: r.agenda,
+        description: r.description,
+        capacity: r.capacity,
+        committeeType: r.committeeType,
+        portfoliosEnabled: r.portfoliosEnabled,
+        portfolios: [],
+      }
+      committeeById.set(r.committeeId, committee)
+      committeeOrder.push(r.committeeId)
+    }
+    if (r.portfolioId) {
+      const portfolio: PublicPortfolio = {
+        id: r.portfolioId,
+        committeeId: r.committeeId,
+        name: r.portfolioName!,
+        type: r.portfolioType,
+        availability: r.portfolioAvailability!,
+        description: r.portfolioDescription,
+        restrictions: r.portfolioRestrictions,
+      }
+      committee.portfolios.push(portfolio)
+    }
   }
 
-  const publicCommittees: PublicCommittee[] = committeeRows.map((committee) => ({
-    ...committee,
-    portfolios: portfoliosByCommittee.get(committee.id) ?? [],
-  }))
+  const publicCommittees: PublicCommittee[] = committeeOrder.map((id) => committeeById.get(id)!)
 
   return {
     ...row,
