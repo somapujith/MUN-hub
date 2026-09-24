@@ -44,3 +44,19 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(self), microphone=(), geolocation=()
   X-Frame-Options: DENY
+
+# Vite emits every JS/CSS/font/image it processes under /assets/ with a
+# content hash in the filename (e.g. assets/index-B6TKhp4t.js) — a content
+# change always produces a new filename, so the old URL can be cached
+# forever. Cloudflare Workers Static Assets' default for everything is
+# "Cache-Control: public, max-age=0, must-revalidate" (always revalidate
+# with the origin before using the cached copy), which is correct for
+# index.html — the one file whose content legitimately changes without a
+# URL change — but wastes a round-trip on every repeat visit for hashed
+# assets. This rule does NOT duplicate the security headers on the /* rule
+# above: Cloudflare merges headers from every rule that matches a request,
+# so requests under /assets/* still get the /* rule's CSP/HSTS/etc, plus
+# this Cache-Control (https://developers.cloudflare.com/workers/static-assets/headers/).
+# Keep in sync with web/vercel.json.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

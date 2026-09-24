@@ -1,0 +1,2 @@
+CREATE INDEX "mun_media_mun_id_kind_display_order_idx" ON "mun_media" USING btree ("mun_id","kind","display_order","created_at");--> statement-breakpoint
+CREATE INDEX "registration_products_status_mun_id_idx" ON "registration_products" USING btree ("status","mun_id");

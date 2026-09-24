@@ -1,7 +1,9 @@
+import { Suspense } from "react";
 import { Outlet } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { RequireOrganizer } from "@/guards/require-organizer";
 import { WorkspaceShell } from "@/components/organizer/workspace-shell";
+import { RouteLoadingSkeleton } from "@/components/layout/route-loading-skeleton";
 import { useSession } from "@/hooks/use-session";
 import { queryKeys } from "@/api/query-keys";
 import { getOrganizerWorkspaceOverview } from "@/api/organizer-dashboard";
@@ -40,7 +42,9 @@ function OrgWorkspace() {
       currentMun={null}
       role={session?.role ?? "ORGANIZER"}
     >
-      <Outlet />
+      <Suspense fallback={<RouteLoadingSkeleton />}>
+        <Outlet />
+      </Suspense>
     </WorkspaceShell>
   );
 }

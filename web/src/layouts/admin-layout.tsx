@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { Link, Outlet, useLocation } from "react-router";
 import { RequireAuth } from "@/guards/require-auth";
 import { RequireRole } from "@/guards/require-role";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
+import { RouteLoadingSkeleton } from "@/components/layout/route-loading-skeleton";
 import { ADMIN_NAV_ITEMS, ADMIN_REVIEW_ROLES } from "@/lib/admin/nav-config";
 import { attachScrollFade } from "@/lib/scroll-fade";
 
@@ -125,7 +126,9 @@ export function AdminLayout() {
               ))}
             </div>
           </nav>
-          <Outlet />
+          <Suspense fallback={<RouteLoadingSkeleton />}>
+            <Outlet />
+          </Suspense>
           <SiteFooter />
         </div>
       </RequireRole>

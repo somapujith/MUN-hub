@@ -567,7 +567,18 @@ export const registrationProducts = pgTable(
     eligibility: jsonb('eligibility'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('registration_products_mun_id_idx').on(table.munId)],
+  (table) => [
+    index('registration_products_mun_id_idx').on(table.munId),
+    // Supports lib/actions/marketplace.ts's minPriceSubquery: `WHERE status =
+    // 'active' GROUP BY mun_id` across the WHOLE table (not scoped to one
+    // mun), run on every marketplace list request. Without this, that
+    // aggregate is a sequential scan of the entire table — the mun_id-only
+    // index above doesn't help a query with no mun_id predicate at all.
+    // Leading with status (the only WHERE column) then mun_id (the GROUP BY
+    // column) lets Postgres do a single ordered index scan instead of a scan
+    // + sort for the grouping.
+    index('registration_products_status_mun_id_idx').on(table.status, table.munId),
+  ],
 )
 
 export const registrationProductsRelations = relations(registrationProducts, ({ one, many }) => ({
@@ -1437,7 +1448,22 @@ export const munMedia = pgTable(
     displayOrder: integer('display_order').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('mun_media_mun_id_idx').on(table.munId)],
+  (table) => [
+    index('mun_media_mun_id_idx').on(table.munId),
+    // Supports lib/actions/marketplace.ts's mediaUrlSql correlated subquery
+    // (`WHERE mun_id = ? AND kind = ? ORDER BY display_order, created_at
+    // LIMIT 1`), run once per row on every marketplace list page (up to the
+    // page size) and twice per mun detail page (cover + logo). Leading with
+    // mun_id then kind (both equality predicates) and trailing with the two
+    // ORDER BY columns lets Postgres satisfy the whole subquery — filter,
+    // order, and limit — from one index scan instead of a filter + sort.
+    index('mun_media_mun_id_kind_display_order_idx').on(
+      table.munId,
+      table.kind,
+      table.displayOrder,
+      table.createdAt,
+    ),
+  ],
 )
 
 export const munMediaRelations = relations(munMedia, ({ one }) => ({

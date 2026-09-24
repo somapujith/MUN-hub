@@ -84,14 +84,28 @@ async function resolveIncludeInactive(
 
 export const munsRoutes = new Hono<{ Variables: AppVariables }>()
 
+// Public, anonymous, non-personalized: searchMuns always clips to the
+// publicly-visible statuses regardless of caller, and this handler never
+// reads `c.get('session')`, so the response is identical for every caller of
+// the same query string — safe for Cloudflare's edge cache and browsers to
+// share. Short-ish TTL since price/capacity/newly-published listings can
+// change; `stale-while-revalidate` means a cache hit is never blocked behind
+// a fresh Neon round trip.
+const MARKETPLACE_LIST_CACHE = 'public, max-age=60, s-maxage=300, stale-while-revalidate=600'
+// Facets (distinct city/country values) change only when a MUN in a new
+// city/country is published — much lower churn than the listing itself.
+const MARKETPLACE_FACETS_CACHE = 'public, max-age=300, s-maxage=3600, stale-while-revalidate=7200'
+
 munsRoutes.get('/', async (c) => {
   const params = searchQuerySchema.parse(pickSearchQuery(c.req.query()))
   const result = await searchMuns(params)
+  c.header('Cache-Control', MARKETPLACE_LIST_CACHE)
   return c.json(result)
 })
 
 munsRoutes.get('/facets', async (c) => {
   const facets = await getMarketplaceFacets()
+  c.header('Cache-Control', MARKETPLACE_FACETS_CACHE)
   return c.json(facets)
 })
 
@@ -109,19 +123,37 @@ munsRoutes.get('/:slug/products', async (c, next) => {
     return
   }
 
-  const includeInactive = await resolveIncludeInactive(
-    mun.id,
-    c.req.query('includeInactive'),
-    c.get('session'),
-  )
+  const rawIncludeInactive = c.req.query('includeInactive')
+  const includeInactive = await resolveIncludeInactive(mun.id, rawIncludeInactive, c.get('session'))
 
   if (!includeInactive) {
+    // Only cache when the URL itself is unambiguous. With no `includeInactive`
+    // param, resolveIncludeInactive never even looks at the session, so this
+    // exact URL always serves the same public list to every caller — same
+    // shape as GET /:slug, safe to cache. A URL that DOES carry
+    // `?includeInactive=true` can serve two different bodies for the exact
+    // same URL depending on who's asking (owner/staff vs. everyone else, who
+    // gets silently downgraded to this branch) — a shared edge/browser cache
+    // can't key on session, so caching a downgraded response here risks the
+    // owner later being served a stale public-only list from the cache.
+    c.header('Cache-Control', rawIncludeInactive === 'true' ? 'no-store' : MARKETPLACE_LIST_CACHE)
     return c.json(mun.registrationProducts)
   }
 
+  // Owner/staff branch: archived/inactive products, session-dependent. Never
+  // cache — would leak inactive products to the public if ever served back
+  // from a shared cache.
+  c.header('Cache-Control', 'no-store')
   const products = await listRegistrationProducts(mun.id, { includeInactive: true })
   return c.json(products)
 })
+
+// Public, anonymous, non-personalized: getMunBySlug only ever returns
+// publicly-visible-status muns (never reads session), so this response is
+// identical for every caller. Detail content (dates, venue, description,
+// committees) changes far less often than the listing, so it gets a longer
+// TTL.
+const MUN_DETAIL_CACHE = 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800'
 
 munsRoutes.get('/:slug', async (c) => {
   const { slug } = slugParamSchema.parse({ slug: c.req.param('slug') })
@@ -131,5 +163,6 @@ munsRoutes.get('/:slug', async (c) => {
     throw new Error('Mun not found')
   }
 
+  c.header('Cache-Control', MUN_DETAIL_CACHE)
   return c.json(mun)
 })

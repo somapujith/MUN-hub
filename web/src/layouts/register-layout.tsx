@@ -1,6 +1,7 @@
-import { useLayoutEffect } from "react";
+import { Suspense, useLayoutEffect } from "react";
 import { Outlet, useLocation } from "react-router";
 import { RequireAuth } from "@/guards/require-auth";
+import { RegistrationPageSkeleton } from "@/components/registration/registration-page-skeleton";
 
 /**
  * Registration funnel — UX auth gate; server is authoritative.
@@ -20,7 +21,9 @@ export function RegisterLayout() {
   useScrollToTopOnStepChange();
   return (
     <RequireAuth>
-      <Outlet />
+      <Suspense fallback={<RegistrationPageSkeleton />}>
+        <Outlet />
+      </Suspense>
     </RequireAuth>
   );
 }

@@ -39,8 +39,13 @@ const updateFaqBodySchema = z
 export const munFaqRoutes = new Hono<{ Variables: AppVariables }>()
 
 // Public: published (and later) muns only — any other mun answers 404.
+// listPublicMunFaqs gates on assertMunPubliclyVisible alone (never the
+// caller's session — even the owner uses /faqs/manage to see a draft's FAQs),
+// so this response is identical for every caller of the same munId. FAQs
+// change rarely, so a longer TTL than the marketplace listing is safe.
 munFaqRoutes.get('/muns/:munId/faqs', async (c) => {
   const faqs = await listPublicMunFaqs(c.req.param('munId'))
+  c.header('Cache-Control', 'public, max-age=300, s-maxage=1800, stale-while-revalidate=3600')
   return c.json(faqs)
 })
 

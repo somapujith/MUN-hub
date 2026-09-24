@@ -288,6 +288,13 @@
       "when": 1790238486017,
       "tag": "0040_true_enchantress",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790253906481,
+      "tag": "0041_add_marketplace_read_indexes",
+      "breakpoints": true
     }
   ]
 }

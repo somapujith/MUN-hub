@@ -102,6 +102,21 @@ describe('public marketplace routes', () => {
       expect((await app.request('/api/v1/muns?sortBy=popularity')).status).toBe(400)
       expect((await app.request('/api/v1/muns?dateFrom=not-a-date')).status).toBe(400)
     })
+
+    it('is publicly cacheable — same response for every caller, so it carries a shared Cache-Control', async () => {
+      const res = await app.request(`/api/v1/muns?query=${tag}`)
+      expect(res.headers.get('Cache-Control')).toBe('public, max-age=60, s-maxage=300, stale-while-revalidate=600')
+    })
+  })
+
+  describe('GET /api/v1/muns/facets', () => {
+    it('is publicly cacheable with a longer TTL than the listing', async () => {
+      const res = await app.request('/api/v1/muns/facets')
+      expect(res.status).toBe(200)
+      expect(res.headers.get('Cache-Control')).toBe(
+        'public, max-age=300, s-maxage=3600, stale-while-revalidate=7200',
+      )
+    })
   })
 
   describe('GET /api/v1/muns/:slug', () => {
@@ -123,12 +138,43 @@ describe('public marketplace routes', () => {
       const res = await app.request(`/api/v1/muns/${draftMun.slug}`)
       expect(res.status).toBe(404)
     })
+
+    it('is publicly cacheable, with a longer TTL than the listing since detail content changes less often', async () => {
+      const res = await app.request(`/api/v1/muns/${publishedMun.slug}`)
+      expect(res.headers.get('Cache-Control')).toBe(
+        'public, max-age=120, s-maxage=600, stale-while-revalidate=1800',
+      )
+    })
+  })
+
+  describe('GET /api/v1/muns/:slug/products', () => {
+    it('is publicly cacheable when no includeInactive param is present', async () => {
+      const res = await app.request(`/api/v1/muns/${publishedMun.slug}/products`)
+      expect(res.status).toBe(200)
+      expect(res.headers.get('Cache-Control')).toBe('public, max-age=60, s-maxage=300, stale-while-revalidate=600')
+    })
+
+    it('never caches the ?includeInactive=true URL — it can serve two different bodies for the same URL', async () => {
+      const anonymous = await app.request(`/api/v1/muns/${publishedMun.slug}/products?includeInactive=true`)
+      expect(anonymous.status).toBe(200)
+      expect(anonymous.headers.get('Cache-Control')).toBe('no-store')
+
+      const headers = await authHeaders(ownerId)
+      const asOwner = await app.request(`/api/v1/muns/${publishedMun.slug}/products?includeInactive=true`, {
+        headers,
+      })
+      expect(asOwner.status).toBe(200)
+      expect(asOwner.headers.get('Cache-Control')).toBe('no-store')
+    })
   })
 
   describe('FAQ routes', () => {
-    it('serves a published mun’s FAQs publicly', async () => {
+    it('serves a published mun’s FAQs publicly, cacheably', async () => {
       const res = await app.request(`/api/v1/muns/${publishedMun.id}/faqs`)
       expect(res.status).toBe(200)
+      expect(res.headers.get('Cache-Control')).toBe(
+        'public, max-age=300, s-maxage=1800, stale-while-revalidate=3600',
+      )
       const faqs = (await res.json()) as { question: string }[]
       expect(faqs.map((f) => f.question)).toEqual(['Public question?'])
     })
