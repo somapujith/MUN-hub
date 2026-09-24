@@ -50,6 +50,7 @@ export const queryKeys = {
   munConfirmationPreview: (munId: string) => ["organizer", "confirmation-preview", munId] as const,
   adminOverview: () => ["admin", "overview"] as const,
   adminAudit: (params: Record<string, unknown>) => ["admin", "audit", params] as const,
+  adminAuditActors: () => ["admin", "audit", "actors"] as const,
   adminAuditHistory: (targetType: string, targetId: string) =>
     ["admin", "audit", "history", targetType, targetId] as const,
   // Gate 1 — organizer-application review (never the Gate 2 module queue below).

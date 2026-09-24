@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { getAdminAnalytics } from '@/lib/actions/admin-analytics'
-import { getAdminOverviewStats, listAdminActions } from '@/lib/actions/admin-audit'
+import { getAdminOverviewStats, listAdminActions, listAuditActors } from '@/lib/actions/admin-audit'
 import { recordPiiRead } from '@/lib/actions/admin-pii-read'
 import { getRegistrationsQueue } from '@/lib/actions/admin-review'
 import { requireAuth } from '../middleware/require-auth'
@@ -22,6 +22,10 @@ const auditQuerySchema = z
       .enum(['true', 'false'])
       .optional()
       .transform((value) => value === 'true'),
+    actorId: z.string().uuid().optional(),
+    actionType: z.string().trim().min(1).max(200).optional(),
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
   })
   .strict()
 
@@ -64,6 +68,18 @@ adminRoutes.get(
     const params = auditQuerySchema.parse(c.req.query())
     const result = await listAdminActions(params, c.get('session'))
     return c.json(result)
+  },
+)
+
+// Options for the audit page's actor filter — see listAuditActors' own doc
+// comment for why this is a fixed list of real ids, not a free-text search.
+adminRoutes.get(
+  '/admin/audit/actors',
+  requireAuth,
+  requireRole([...ADMIN_ROLES]),
+  async (c) => {
+    const actors = await listAuditActors(c.get('session'))
+    return c.json(actors)
   },
 )
 

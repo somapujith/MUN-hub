@@ -39,7 +39,7 @@ export function AdminAuditDetailPage() {
             <li key={`${entry.action}-${entry.createdAt.toISOString()}-${index}`} className="rounded-md border border-border bg-card p-md">
               <p className="break-words font-medium text-ink">{entry.action}</p>
               <p className="break-words text-body-md text-muted-foreground">
-                {entry.createdAt.toLocaleString()} · actor {entry.actorId}
+                {entry.createdAt.toLocaleString()} · {entry.actorName}
               </p>
               {entry.reason && <p className="mt-xxs break-words text-body-md text-body">{entry.reason}</p>}
             </li>

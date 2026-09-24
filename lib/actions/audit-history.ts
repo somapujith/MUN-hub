@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { adminActions, verificationLogs } from '@/lib/db/schema'
+import { adminActions, users, verificationLogs } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
 import { requireRole } from '@/lib/auth/authorize'
 
@@ -9,6 +9,8 @@ const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
 export interface AuditEntry {
   action: string
   actorId: string
+  /** Resolved from `users.name` — same join pattern `listAdminActions` (admin-audit.ts) uses for its list feed. */
+  actorName: string
   reason: string | null
   createdAt: Date
 }
@@ -33,10 +35,12 @@ export async function getAuditHistory(
       // stored enum value (see lib/actions/admin-staff.ts).
       action: sql<string>`coalesce(${adminActions.metadata}->>'event', ${adminActions.action}::text)`,
       actorId: adminActions.actorId,
+      actorName: users.name,
       reason: adminActions.reason,
       createdAt: adminActions.createdAt,
     })
     .from(adminActions)
+    .innerJoin(users, eq(users.id, adminActions.actorId))
     .where(and(eq(adminActions.targetType, targetType), eq(adminActions.targetId, targetId)))
 
   const lifecycleActions =
@@ -45,10 +49,12 @@ export async function getAuditHistory(
           .select({
             action: verificationLogs.action,
             actorId: verificationLogs.reviewerId,
+            actorName: users.name,
             reason: verificationLogs.notes,
             createdAt: verificationLogs.createdAt,
           })
           .from(verificationLogs)
+          .innerJoin(users, eq(users.id, verificationLogs.reviewerId))
           .where(eq(verificationLogs.munId, targetId))
       : []
 
