@@ -35,6 +35,9 @@ const STAFF_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const satisfies re
 
 const LINK_TOKEN_TTL_MS = 1000 * 60 * 15 // 15 minutes — plenty for "open Telegram, tap Start"
 
+/** Thrown by startTelegramLink when TELEGRAM_BOT_USERNAME isn't set (e.g. local dev). */
+export const TELEGRAM_NOT_CONFIGURED = 'Telegram notifications are not configured'
+
 function telegramApiUrl(method: string): string | null {
   const token = getRuntimeEnv('TELEGRAM_BOT_TOKEN')
   return token ? `https://api.telegram.org/bot${token}/${method}` : null
@@ -71,7 +74,7 @@ export async function startTelegramLink(session: Session | null): Promise<{ deep
   requireRole(session, [...STAFF_ROLES])
 
   const botUsername = getRuntimeEnv('TELEGRAM_BOT_USERNAME')
-  if (!botUsername) throw new Error('Telegram notifications are not configured')
+  if (!botUsername) throw new Error(TELEGRAM_NOT_CONFIGURED)
 
   const token = generateOpaqueToken()
   const now = new Date()

@@ -10,6 +10,7 @@ import { UPLOAD_LIMIT_ERROR_PATTERN, UPLOAD_LIMIT_ERRORS } from '@/lib/actions/u
 import { MFA_ERRORS } from '@/lib/actions/staff-mfa'
 import { MODULE_LOCKED_PATTERN } from '@/lib/lifecycle/module-completion'
 import { STORAGE_NOT_CONFIGURED } from '@/lib/storage/adapter'
+import { TELEGRAM_NOT_CONFIGURED } from '@/lib/actions/telegram'
 import { reportRequestError } from '../lib/report-error'
 import type { AppVariables } from '../src/types'
 
@@ -153,6 +154,12 @@ export function mapThrownError(error: unknown): { status: number; code: ErrorCod
   // The upload is refused rather than silently discarded, so the caller can
   // retry once storage is configured instead of getting a 201 for nothing.
   if (message === STORAGE_NOT_CONFIGURED) {
+    return { status: 503, code: 'UNAVAILABLE', message }
+  }
+
+  // lib/actions/telegram.ts#startTelegramLink — no TELEGRAM_BOT_USERNAME
+  // configured (e.g. local dev without a bot set up).
+  if (message === TELEGRAM_NOT_CONFIGURED) {
     return { status: 503, code: 'UNAVAILABLE', message }
   }
 
@@ -397,6 +404,7 @@ export const KNOWN_ERROR_MAPPINGS: Array<{ message: string; status: number; code
   { message: 'MUN title is required', status: 400, code: 'VALIDATION_FAILED' },
   { message: APPLICATION_PENDING, status: 409, code: 'CONFLICT_DUPLICATE' },
   { message: STORAGE_NOT_CONFIGURED, status: 503, code: 'UNAVAILABLE' },
+  { message: TELEGRAM_NOT_CONFIGURED, status: 503, code: 'UNAVAILABLE' },
   {
     message: 'Portfolios is locked while MUN Hub reviews this MUN. You can edit it again if a reviewer sends it back.',
     status: 409,

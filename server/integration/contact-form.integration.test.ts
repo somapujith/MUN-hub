@@ -8,6 +8,7 @@ import { makeUser } from './helpers'
 vi.mock('@/lib/actions/telegram', () => ({
   notifyStaffNewTicket: vi.fn().mockResolvedValue(undefined),
   notifyStaffTicketReply: vi.fn().mockResolvedValue(undefined),
+  TELEGRAM_NOT_CONFIGURED: 'Telegram notifications are not configured',
 }))
 
 const app = createApp()
