@@ -29,18 +29,21 @@ Only deploy a commit on `main` that has passed CI (`.github/workflows/ci.yml`). 
 
 ### From GitHub Actions (preferred)
 
-1. Actions → **Deploy (production)** → *Run workflow* on `main`. Untick the steps you don't need (migrations, API, web).
+`.github/workflows/ci.yml` (typecheck + lint + `npm run test:ci` against a `postgres:16-alpine` service container, on push to `main` and on PRs) and `.github/workflows/deploy.yml` (the workflow below) both exist in the repo as of 2026-09-24 — this used to be aspirational documentation for a pipeline that hadn't been built yet; it's now real and checked in.
+
+1. Actions → **Deploy (production)** → *Run workflow* on `main`. Untick the steps you don't need (`run_migrations`, `deploy_api`, `deploy_web` — the three `workflow_dispatch` boolean inputs).
 2. A reviewer approves the `production` environment.
 3. The workflow typechecks, applies migrations to Neon, runs `wrangler deploy` for `munhub-api` and `munhub-web` (each version tagged with the short commit sha), and checks `https://api.munhub.in/api/v1/health`.
 
-One-time setup (repo **Settings → Environments → `production`**):
+One-time setup (repo **Settings → Environments → `production`**) — **status as of 2026-09-24:**
 
-- Required reviewers: at least one person other than the one who triggers the deploy, where possible.
+- **There is only one environment, and it's spelled `Production`.** GitHub had already auto-created an environment named `Production` (capital P) for this repo via Vercel's GitHub integration (which deploys `munhub.in`/`www.munhub.in` separately — unrelated to these Worker deploys). GitHub matches a workflow's `environment: production` reference case-insensitively, so `deploy.yml`'s lowercase `production` resolves to that same pre-existing `Production` environment. Don't go looking for, or try to create, a second lowercase one — there isn't one and shouldn't be.
+- Required reviewers: `Production` is configured to require `somapujith` (the repo owner) as a reviewer before any run using it proceeds.
 - Deployment branches: `main` only.
-- Secrets:
-  - `DATABASE_URL`: the Neon production branch's **direct** (non-pooled) connection string, `?sslmode=require`
-  - `CLOUDFLARE_API_TOKEN`: an API token with *Account → Workers Scripts → Edit*, *Zone (munhub.in) → Workers Routes → Edit*, and *Zone → DNS → Edit* (Custom Domains create DNS records). Add *Account → Hyperdrive → Edit* only if the workflow ever needs to manage Hyperdrive.
-  - `CLOUDFLARE_ACCOUNT_ID`
+- Secrets — **set** on the `Production` environment already:
+  - `CLOUDFLARE_ACCOUNT_ID` — set.
+  - `DATABASE_URL` — set, but currently the Neon **pooled** connection string, not the **direct** (non-pooled) one this section otherwise calls for. Known deviation: the direct URL wasn't available in the session that wired this up, and the pooled one was already proven to work (a migration ran successfully through it before it was saved as the secret). Low risk, but swap it for the direct URL when convenient in a future session.
+  - `CLOUDFLARE_API_TOKEN` — **still missing, the one remaining gap before this workflow is runnable end-to-end.** A human has to generate it via the Cloudflare dashboard (My Profile → API Tokens → Create Token) with *Account → Workers Scripts → Edit*, *Zone (munhub.in) → Workers Routes → Edit*, and *Zone → DNS → Edit* (Custom Domains create DNS records) — add *Account → Hyperdrive → Edit* only if the workflow ever needs to manage Hyperdrive. Then: `gh secret set CLOUDFLARE_API_TOKEN --env production`. Don't confuse that `--env production` with the `--env=""` that shows up throughout this doc — `gh secret set --env production` is a GitHub-side flag scoping a secret to the GitHub environment named production/Production; `wrangler ... --env=""` is a completely different, wrangler-side flag meaning "the top-level (no named environment) config." Until `CLOUDFLARE_API_TOKEN` is set, the workflow's `wrangler deploy` steps will fail with an auth error if run — the workflow file itself is complete and correct, this is purely a missing-credential gap.
 
 Worker secrets (`PAYMENT_FIELD_KEY`, …) are **not** set by the workflow. They live on the Worker and survive deploys (see [Configuration](#configuration-per-worker)).
 
