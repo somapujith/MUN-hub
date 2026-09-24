@@ -70,6 +70,28 @@ const PROFILE_SECTIONS: ReadonlyArray<{ key: string; label: string; description:
 ];
 const DEFAULT_SECTION = PROFILE_SECTIONS[0].key;
 
+function sectionMeta(key: string) {
+  return PROFILE_SECTIONS.find((section) => section.key === key)!;
+}
+
+/**
+ * Every tab panel opens with the same {h2 + one-line description} shape —
+ * the pattern `PrivacyDataSection` already established for its own panel.
+ * Reusing it here (instead of jumping straight into the first card) is what
+ * gives the three panels equal visual rhythm; the copy itself is just the
+ * matching `PROFILE_SECTIONS` entry, not new copy.
+ */
+function SectionIntro({ id, title, description }: { id: string; title: string; description: string }) {
+  return (
+    <header className="flex flex-col gap-xxs">
+      <h2 id={id} className="font-display text-title-lg text-ink">
+        {title}
+      </h2>
+      <p className="text-body-md text-muted-foreground">{description}.</p>
+    </header>
+  );
+}
+
 const NAV_ITEM_BASE =
   "group/nav flex items-start gap-sm rounded-sm px-sm py-sm text-left outline-none transition-colors duration-150 ease-out focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 const NAV_ITEM_IDLE = "text-muted-foreground hover:bg-surface-soft hover:text-ink";
@@ -307,6 +329,11 @@ export function ProfilePage() {
                   }}
                   className="flex flex-col gap-lg"
                 >
+                  <SectionIntro
+                    id="profile-details-heading"
+                    title={sectionMeta("profile").label}
+                    description={sectionMeta("profile").description}
+                  />
                   <Card>
                     <CardHeader>
                       <CardTitle>Personal details</CardTitle>
@@ -363,7 +390,7 @@ export function ProfilePage() {
                           required
                         />
                       </div>
-                      <label className="flex items-center gap-sm text-body-md text-body" htmlFor="profile-transportation">
+                      <div className="flex items-center gap-sm">
                         <Checkbox
                           id="profile-transportation"
                           checked={form.requiresTransportation}
@@ -374,14 +401,14 @@ export function ProfilePage() {
                         <Label htmlFor="profile-transportation" className="cursor-pointer">
                           I&apos;ll need transportation assistance
                         </Label>
-                      </label>
+                      </div>
                     </CardContent>
                   </Card>
                   <Card>
                     <CardHeader>
                       <CardTitle>Emergency contact</CardTitle>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="flex flex-col gap-md">
                       <div className="grid gap-md sm:grid-cols-3">
                         <div className="flex flex-col gap-xs">
                           <Label htmlFor="profile-ec-name">Name</Label>
@@ -447,6 +474,11 @@ export function ProfilePage() {
 
             {activeSection === "security" && (
               <div className="flex flex-col gap-lg">
+                <SectionIntro
+                  id="account-security-heading"
+                  title={sectionMeta("security").label}
+                  description={sectionMeta("security").description}
+                />
                 <Card>
                   <CardHeader>
                     <CardTitle>Change password</CardTitle>
@@ -511,10 +543,7 @@ export function ProfilePage() {
                       <p className="text-body-md text-destructive">{accountQuery.error.message}</p>
                     ) : (
                       <>
-                        <label
-                          className="flex items-center gap-sm text-body-md text-body"
-                          htmlFor="email-notifications"
-                        >
+                        <div className="flex items-center gap-sm">
                           <Checkbox
                             id="email-notifications"
                             checked={notificationsEnabled}
@@ -523,7 +552,7 @@ export function ProfilePage() {
                           <Label htmlFor="email-notifications" className="cursor-pointer">
                             Send me email notifications
                           </Label>
-                        </label>
+                        </div>
                         <Button
                           size="sm"
                           className="self-start"
