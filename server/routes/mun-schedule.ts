@@ -39,11 +39,19 @@ const updateScheduleBodySchema = z
 
 export const munScheduleRoutes = new Hono<{ Variables: AppVariables }>()
 
-// Published MUNs for anyone; unpublished ones for the owner and staff only (404 otherwise).
+// Published MUNs for anyone; unpublished ones for the owner and staff only
+// (404 otherwise) — same session-dependent-URL hazard as the other by-id
+// module reads, so only the resolved-'public' case may carry a shared
+// Cache-Control; owner/staff gets no-store. TTL matches the mun detail page
+// (muns.ts's MUN_DETAIL_CACHE) — session times/rooms can shift as the
+// conference date nears, about as often as the rest of the detail content.
+const MUN_SCHEDULE_CACHE = 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800'
+
 munScheduleRoutes.get('/muns/:munId/schedule', async (c) => {
   const munId = c.req.param('munId')
-  await assertMunReadable(munId, c.get('session'))
+  const access = await assertMunReadable(munId, c.get('session'))
   const items = await listScheduleItems(munId)
+  c.header('Cache-Control', access === 'public' ? MUN_SCHEDULE_CACHE : 'no-store')
   return c.json(items)
 })
 

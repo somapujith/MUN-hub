@@ -54,12 +54,22 @@ const updateEbBodySchema = z
 
 export const executiveBoardRoutes = new Hono<{ Variables: AppVariables }>()
 
-// Public members of a published MUN for anyone; unpublished MUNs for the
-// owner and staff only (404 otherwise). Hidden members: /manage below.
+// listEbMembers only ever returns isPublic=true rows (hidden members: see
+// /manage below), so the body is the same for a published MUN regardless of
+// caller. But assertMunReadable itself is session-dependent for an
+// unpublished MUN (owner/staff get 200, everyone else 404 on the exact same
+// URL) — so only the resolved-'public' case (published mun) may carry a
+// shared Cache-Control; the owner/staff case must say no-store, or a shared
+// cache could later serve an anonymous visitor the owner's preview of an
+// unpublished MUN. TTL matches muns.ts's MUN_DETAIL_CACHE — board membership
+// changes about as often as the rest of the mun detail page.
+const EXECUTIVE_BOARD_CACHE = 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800'
+
 executiveBoardRoutes.get('/muns/:munId/executive-board', async (c) => {
   const munId = c.req.param('munId')
-  await assertMunReadable(munId, c.get('session'))
+  const access = await assertMunReadable(munId, c.get('session'))
   const members = await listEbMembers(munId)
+  c.header('Cache-Control', access === 'public' ? EXECUTIVE_BOARD_CACHE : 'no-store')
   return c.json(members)
 })
 

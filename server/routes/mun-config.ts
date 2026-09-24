@@ -172,11 +172,19 @@ munConfigRoutes.get('/organizer/muns/:munId/preview', requireAuth, async (c) => 
   return c.json(await getMunPreview(c.req.param('munId'), c.get('session')))
 })
 
-// Published MUNs for anyone; unpublished ones for the owner and staff only (404 otherwise).
+// Published MUNs for anyone; unpublished ones for the owner and staff only
+// (404 otherwise) — same session-dependent-URL hazard as the other by-id
+// module reads (mun-documents.ts etc.), so only the resolved-'public' case
+// may carry a shared Cache-Control; owner/staff gets no-store. TTL matches
+// the mun detail page (muns.ts's MUN_DETAIL_CACHE) — committee names/
+// capacities change about as often as the rest of the detail content.
+const COMMITTEES_CACHE = 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800'
+
 munConfigRoutes.get('/muns/:munId/committees', async (c) => {
   const munId = c.req.param('munId')
-  await assertMunReadable(munId, c.get('session'))
+  const access = await assertMunReadable(munId, c.get('session'))
   const committees = await listCommittees(munId)
+  c.header('Cache-Control', access === 'public' ? COMMITTEES_CACHE : 'no-store')
   return c.json(committees)
 })
 
@@ -214,14 +222,21 @@ munConfigRoutes.delete('/committees/:committeeId', requireAuth, async (c) => {
 })
 
 // Same visibility as the committee's MUN; an unknown committee and an
-// unreadable one both answer 404.
+// unreadable one both answer 404. listPortfolios is a plain select (no live
+// "seats taken" aggregate — that's computed at registration time, not stored
+// here), so it changes only when the organizer edits the roster, same churn
+// as the committee list itself — reuses COMMITTEES_CACHE. Only the
+// resolved-'public' case may carry a shared Cache-Control, for the same
+// reason as the committees route above.
 munConfigRoutes.get('/committees/:committeeId/portfolios', async (c) => {
   const committeeId = c.req.param('committeeId')
   const munId = await findMunIdForCommittee(committeeId)
-  if (!munId || (await resolveMunReadAccess(munId, c.get('session'))) === 'none') {
+  const access = munId ? await resolveMunReadAccess(munId, c.get('session')) : 'none'
+  if (access === 'none') {
     throw new Error('Committee not found')
   }
   const items = await listPortfolios(committeeId)
+  c.header('Cache-Control', access === 'public' ? COMMITTEES_CACHE : 'no-store')
   return c.json(items)
 })
 
@@ -275,11 +290,27 @@ munConfigRoutes.delete('/portfolios/:portfolioId', requireAuth, async (c) => {
 // Reached for ids only (munsRoutes answers public slugs first). Published
 // MUNs for anyone; unpublished ones for the owner and staff only (404
 // otherwise). Archived products only for the owner/admin.
+//
+// Same shape and same cache reasoning as muns.ts's `/:slug/products`,
+// including the same URL-poisoning guard: a non-owner's `?includeInactive=true`
+// is silently downgraded to the active-only list, but the URL string is still
+// ambiguous (owner vs. everyone else), so it stays no-store based on the raw
+// query param — never on the resolved `includeInactive` flag — even though
+// the resolved flag is false for that caller too. Only a published mun's
+// plain URL (no includeInactive param at all) is byte-identical for every
+// caller and safe to cache.
+const PRODUCTS_BY_ID_CACHE = 'public, max-age=60, s-maxage=300, stale-while-revalidate=600'
+
 munConfigRoutes.get('/muns/:munId/products', async (c) => {
   const munId = c.req.param('munId')
   const access = await assertMunReadable(munId, c.get('session'))
-  const includeInactive = access === 'owner' && c.req.query('includeInactive') === 'true'
+  const rawIncludeInactive = c.req.query('includeInactive')
+  const includeInactive = access === 'owner' && rawIncludeInactive === 'true'
   const products = await listRegistrationProducts(munId, { includeInactive })
+  c.header(
+    'Cache-Control',
+    access === 'public' ? (rawIncludeInactive === 'true' ? 'no-store' : PRODUCTS_BY_ID_CACHE) : 'no-store',
+  )
   return c.json(products)
 })
 

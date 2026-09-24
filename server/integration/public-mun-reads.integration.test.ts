@@ -251,3 +251,57 @@ describe('archived rows stay owner-only', () => {
     expect(members.map((m) => m.name)).not.toContain('Hidden Member')
   })
 })
+
+// Each by-id public read now carries its own shared Cache-Control, but only
+// on the exact URL that is byte-identical for every caller (a published mun,
+// read with no owner-only query param). The same URL against an unpublished
+// mun, or with a query param that unlocks owner-only data, must stay
+// no-store — the response for THAT url varies by session/role even though
+// the path looks the same, and a shared cache can't key on either one.
+const EXPECTED_PUBLIC_CACHE: Record<string, string> = {
+  contact: 'public, max-age=300, s-maxage=1800, stale-while-revalidate=3600',
+  documents: 'public, max-age=300, s-maxage=1800, stale-while-revalidate=3600',
+  committees: 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800',
+  portfolios: 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800',
+  schedule: 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800',
+  media: 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800',
+  accommodation: 'public, max-age=60, s-maxage=300, stale-while-revalidate=600',
+  'accommodation fields': 'public, max-age=300, s-maxage=1800, stale-while-revalidate=3600',
+  'executive board': 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800',
+  'form fields': 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800',
+  products: 'public, max-age=60, s-maxage=300, stale-while-revalidate=600',
+}
+
+describe('Cache-Control on the by-id public reads', () => {
+  it('gives each public read of a published MUN its own shared Cache-Control', async () => {
+    for (const [label, path] of readPaths(published)) {
+      const res = await app.request(path)
+      expect(res.status, label).toBe(200)
+      expect(res.headers.get('Cache-Control'), label).toBe(EXPECTED_PUBLIC_CACHE[label])
+    }
+  })
+
+  it('never shares a cache for the owner/staff 200 of an unpublished MUN on the same URL', async () => {
+    for (const [label, path] of readPaths(unpublished)) {
+      for (const who of ['owner', 'admin', 'operations'] as const) {
+        const res = await app.request(path, { headers: headers[who] })
+        expect(res.status, `${label} as ${who}`).toBe(200)
+        expect(res.headers.get('Cache-Control'), `${label} as ${who}`).toBe('no-store')
+      }
+    }
+  })
+
+  it('never caches an includeInactive=true URL, for anyone', async () => {
+    for (const resource of ['accommodation', 'products'] as const) {
+      const path = `/api/v1/muns/${published.munId}/${resource}?includeInactive=true`
+      for (const [who, init] of [
+        ['anonymous', {}],
+        ['owner', { headers: headers.owner }],
+      ] as const) {
+        const res = await app.request(path, init)
+        expect(res.status, `${resource} as ${who}`).toBe(200)
+        expect(res.headers.get('Cache-Control'), `${resource} as ${who}`).toBe('no-store')
+      }
+    }
+  })
+})

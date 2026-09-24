@@ -29,11 +29,21 @@ const uploadDocumentBodySchema = z
 
 export const munDocumentsRoutes = new Hono<{ Variables: AppVariables }>()
 
-// Published MUNs for anyone; unpublished ones for the owner and staff only (404 otherwise).
+// Published MUNs for anyone; unpublished ones for the owner and staff only
+// (404 otherwise) — assertMunReadable's result varies by session for the same
+// URL when the mun isn't public yet, so only the resolved-'public' case may
+// carry a shared Cache-Control (same reasoning as muns.ts's
+// includeInactive=true guard); the owner/staff case is no-store. Rules/
+// background-guide PDFs change rarely once uploaded — a document is added,
+// not edited in place — so this gets a longer TTL than the mun detail page,
+// matching the FAQ list's reasoning (mun-faq.ts).
+const MUN_DOCUMENTS_CACHE = 'public, max-age=300, s-maxage=1800, stale-while-revalidate=3600'
+
 munDocumentsRoutes.get('/muns/:munId/documents', async (c) => {
   const munId = c.req.param('munId')
-  await assertMunReadable(munId, c.get('session'))
+  const access = await assertMunReadable(munId, c.get('session'))
   const documents = await listMunDocuments(munId)
+  c.header('Cache-Control', access === 'public' ? MUN_DOCUMENTS_CACHE : 'no-store')
   return c.json(documents)
 })
 

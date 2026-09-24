@@ -62,11 +62,26 @@ export const registrationFormRoutes = new Hono<{ Variables: AppVariables }>()
 // The owner (or an admin) gets the form builder's view, which materializes
 // the default fields. Everyone else gets a read-only view that never writes —
 // of a published MUN only (404 otherwise), except OPERATIONS reviewers.
+//
+// Only the resolved-'public' case (a published mun, read-only view, no
+// materialization) may carry a shared Cache-Control: it's the only branch
+// that is both response-shape-identical for every caller AND side-effect-
+// free. 'owner' calls listFormFieldsForOrganizer, which writes rows on first
+// call — never cacheable. 'staff' reaches the same listFormFields(munId) call
+// as 'public', but only because assertMunReadable let it read an unpublished
+// mun on this exact URL — caching that would risk a shared cache later
+// serving a stranger the staff reviewer's view of an unpublished mun's form.
+// TTL matches the mun detail page (muns.ts's MUN_DETAIL_CACHE) — organizers
+// tend to settle the form early, about the same churn as the rest of the
+// detail content.
+const FORM_FIELDS_CACHE = 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800'
+
 registrationFormRoutes.get('/muns/:munId/form-fields', async (c) => {
   const munId = c.req.param('munId')
   const session = c.get('session')
   const access = await assertMunReadable(munId, session)
   const fields = access === 'owner' ? await listFormFieldsForOrganizer(munId, session) : await listFormFields(munId)
+  c.header('Cache-Control', access === 'public' ? FORM_FIELDS_CACHE : 'no-store')
   return c.json(fields)
 })
 

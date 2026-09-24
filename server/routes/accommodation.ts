@@ -81,11 +81,31 @@ accommodationRoutes.put(
 
 // Published MUNs for anyone; unpublished ones for the owner and staff only
 // (404 otherwise). Archived options only for the owner/admin.
+//
+// Cacheable only for the plain public read of a published mun, and only when
+// the URL itself carries no `includeInactive` param — same guard as muns.ts's
+// `/:slug/products`. A non-owner's `?includeInactive=true` is silently
+// downgraded to the active-only list (same body as the plain URL), but the
+// URL string itself is still ambiguous: a shared cache keys on the URL, not
+// on who's asking, so caching THIS response under THIS URL risks a later
+// owner request being served back this stale downgraded list instead of ever
+// reaching the origin. Checking the raw query param (not the resolved
+// `includeInactive` flag) is what keeps that URL out of the cache regardless
+// of whose request first populated it. Price/capacity here behaves like
+// registration products, so it reuses that same TTL (muns.ts's
+// MARKETPLACE_LIST_CACHE) rather than the longer mun-detail one.
+const ACCOMMODATION_OPTIONS_CACHE = 'public, max-age=60, s-maxage=300, stale-while-revalidate=600'
+
 accommodationRoutes.get('/muns/:munId/accommodation', async (c) => {
   const munId = c.req.param('munId')
   const access = await assertMunReadable(munId, c.get('session'))
-  const includeInactive = access === 'owner' && c.req.query('includeInactive') === 'true'
+  const rawIncludeInactive = c.req.query('includeInactive')
+  const includeInactive = access === 'owner' && rawIncludeInactive === 'true'
   const options = await listAccommodationOptions(munId, { includeInactive })
+  c.header(
+    'Cache-Control',
+    access === 'public' ? (rawIncludeInactive === 'true' ? 'no-store' : ACCOMMODATION_OPTIONS_CACHE) : 'no-store',
+  )
   return c.json(options)
 })
 
@@ -118,14 +138,22 @@ accommodationRoutes.delete('/accommodation/:optionId', requireAuth, async (c) =>
 })
 
 // Same visibility as the option's MUN; an unknown option and an unreadable
-// one both answer 404.
+// one both answer 404. Custom fields (e.g. "roommate preference") change
+// about as rarely as the documents list, so this reuses that TTL; only the
+// resolved-'public' case may carry a shared Cache-Control, for the same
+// reason as every other by-id module read on this mun (owner/staff sees an
+// unpublished option's fields on the same URL a stranger 404s on).
+const ACCOMMODATION_FIELDS_CACHE = 'public, max-age=300, s-maxage=1800, stale-while-revalidate=3600'
+
 accommodationRoutes.get('/accommodation/:optionId/fields', async (c) => {
   const optionId = c.req.param('optionId')
   const munId = await findMunIdForAccommodationOption(optionId)
-  if (!munId || (await resolveMunReadAccess(munId, c.get('session'))) === 'none') {
+  const access = munId ? await resolveMunReadAccess(munId, c.get('session')) : 'none'
+  if (access === 'none') {
     throw new Error('Accommodation option not found')
   }
   const fields = await listAccommodationOptionFields(optionId)
+  c.header('Cache-Control', access === 'public' ? ACCOMMODATION_FIELDS_CACHE : 'no-store')
   return c.json(fields)
 })
 

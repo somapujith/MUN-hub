@@ -42,11 +42,19 @@ const reorderGalleryBodySchema = z
 
 export const munBrandingRoutes = new Hono<{ Variables: AppVariables }>()
 
-// Published MUNs for anyone; unpublished ones for the owner and staff only (404 otherwise).
+// Published MUNs for anyone; unpublished ones for the owner and staff only
+// (404 otherwise) — same session-dependent-URL hazard as the other by-id
+// module reads, so only the resolved-'public' case may carry a shared
+// Cache-Control; owner/staff gets no-store. TTL matches the mun detail page
+// (muns.ts's MUN_DETAIL_CACHE) — logo/cover/gallery images change about as
+// often as the rest of the detail content.
+const MUN_MEDIA_CACHE = 'public, max-age=120, s-maxage=600, stale-while-revalidate=1800'
+
 munBrandingRoutes.get('/muns/:munId/media', async (c) => {
   const munId = c.req.param('munId')
-  await assertMunReadable(munId, c.get('session'))
+  const access = await assertMunReadable(munId, c.get('session'))
   const media = await listMunMedia(munId)
+  c.header('Cache-Control', access === 'public' ? MUN_MEDIA_CACHE : 'no-store')
   return c.json(media)
 })
 

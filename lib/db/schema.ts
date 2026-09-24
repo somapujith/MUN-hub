@@ -905,21 +905,38 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
 // certificates (scaffolded per PRD — no logic/UI in MVP)
 // ---------------------------------------------------------------------------
 
-export const certificates = pgTable('certificates', {
-  id: id(),
-  userId: text('user_id')
-    .notNull()
-    .references(() => users.id),
-  munId: text('mun_id')
-    .notNull()
-    .references(() => muns.id),
-  registrationId: text('registration_id')
-    .notNull()
-    .references(() => registrations.id),
-  certificateUrl: text('certificate_url'),
-  verificationStatus: text('verification_status').notNull().default('unverified'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const certificates = pgTable(
+  'certificates',
+  {
+    id: id(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id),
+    registrationId: text('registration_id')
+      .notNull()
+      .references(() => registrations.id),
+    certificateUrl: text('certificate_url'),
+    verificationStatus: text('verification_status').notNull().default('unverified'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Supports listMyCredentials (lib/actions/student-credentials.ts) —
+    // `WHERE user_id = ? ORDER BY created_at DESC` for the signed-in
+    // delegate's own certificates on their live /dashboard/achievements page
+    // (GET /me/credentials). user_id leads because it's the equality filter
+    // (one delegate's rows out of the whole table); created_at as the second
+    // column lets the same index satisfy the ORDER BY without a separate sort.
+    index('certificates_user_id_created_at_idx').on(table.userId, table.createdAt),
+    // Supports listCertificates (lib/actions/certificates.ts) — the
+    // organizer dashboard's `WHERE mun_id = ? ORDER BY created_at DESC`.
+    // mun_id leads for the same reason: it's the equality filter, and
+    // created_at lets the index also cover the sort.
+    index('certificates_mun_id_created_at_idx').on(table.munId, table.createdAt),
+  ],
+)
 
 export const certificatesRelations = relations(certificates, ({ one }) => ({
   user: one(users, { fields: [certificates.userId], references: [users.id] }),
@@ -934,23 +951,41 @@ export const certificatesRelations = relations(certificates, ({ one }) => ({
 // achievements (scaffolded per PRD — no logic/UI in MVP)
 // ---------------------------------------------------------------------------
 
-export const achievements = pgTable('achievements', {
-  id: id(),
-  userId: text('user_id')
-    .notNull()
-    .references(() => users.id),
-  munId: text('mun_id')
-    .notNull()
-    .references(() => muns.id),
-  registrationId: text('registration_id')
-    .notNull()
-    .references(() => registrations.id),
-  committee: text('committee'),
-  portfolio: text('portfolio'),
-  award: text('award'),
-  verificationStatus: text('verification_status').notNull().default('unverified'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const achievements = pgTable(
+  'achievements',
+  {
+    id: id(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    munId: text('mun_id')
+      .notNull()
+      .references(() => muns.id),
+    registrationId: text('registration_id')
+      .notNull()
+      .references(() => registrations.id),
+    committee: text('committee'),
+    portfolio: text('portfolio'),
+    award: text('award'),
+    verificationStatus: text('verification_status').notNull().default('unverified'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Supports listMyCredentials (lib/actions/student-credentials.ts) —
+    // `WHERE user_id = ? AND verification_status = 'verified'` for the
+    // signed-in delegate's own awards on their live /dashboard/achievements
+    // page (GET /me/credentials). user_id leads: it's the far more selective
+    // predicate (one delegate's rows), with verification_status narrowing
+    // further within it.
+    index('achievements_user_id_verification_status_idx').on(table.userId, table.verificationStatus),
+    // Supports listMunAchievements/getResultsForReview (lib/actions/results.ts)
+    // — the organizer/staff `WHERE mun_id = ? ORDER BY created_at DESC` award
+    // roster — and loadResultsState's `COUNT(*) WHERE mun_id = ?`. mun_id
+    // leads for the same reason as certificates_mun_id_created_at_idx above;
+    // created_at lets the index also cover the ORDER BY.
+    index('achievements_mun_id_created_at_idx').on(table.munId, table.createdAt),
+  ],
+)
 
 export const achievementsRelations = relations(achievements, ({ one }) => ({
   user: one(users, { fields: [achievements.userId], references: [users.id] }),
