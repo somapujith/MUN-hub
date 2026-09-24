@@ -196,6 +196,12 @@ export const adminActionEnum = pgEnum('admin_action', [
   'REGISTRATION_FLAGGED_DUPLICATE',
   'REGISTRATION_DUPLICATE_FLAG_CLEARED',
   'REGISTRATION_CONFIRMATION_RESENT',
+  // Admin manually triggered a single-payment Cashfree reconcile check
+  // (lib/payments/admin-reconcile.ts#reconcilePaymentAsAdmin) — the on-demand
+  // counterpart to the 5-minute reconcileCashfreeOrders cron job. Written
+  // once per trigger regardless of outcome (still pending, confirmed, failed,
+  // exception, ...); the outcome itself lives in `metadata`.
+  'PAYMENT_RECONCILE_TRIGGERED',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [

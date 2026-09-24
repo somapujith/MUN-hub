@@ -34,6 +34,7 @@ export const queryKeys = {
   paymentsSummary: (munId: string) => ["organizer", "payments-summary", munId] as const,
   adminPaymentExceptions: (params: Record<string, unknown> = {}) => ["admin", "payment-exceptions", params] as const,
   adminPaymentExceptionsAll: () => ["admin", "payment-exceptions"] as const,
+  adminPaymentTimeline: (paymentId: string) => ["admin", "payments", paymentId, "timeline"] as const,
   adminRegistrations: (params: Record<string, unknown> = {}) => ["admin", "registrations", params] as const,
   adminRegistrationsAll: () => ["admin", "registrations"] as const,
   schedule: (munId: string) => ["organizer", "schedule", munId] as const,

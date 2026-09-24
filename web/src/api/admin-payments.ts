@@ -1,4 +1,11 @@
-import type { ListPaymentExceptionsParams, ListPaymentExceptionsResult, ResolvedPaymentException } from "@/types/admin-payments";
+import type {
+  ListPaymentExceptionsParams,
+  ListPaymentExceptionsResult,
+  PaymentTimeline,
+  PaymentTimelineEvent,
+  ReconcilePaymentResult,
+  ResolvedPaymentException,
+} from "@/types/admin-payments";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -40,3 +47,27 @@ export function resolvePaymentException(paymentId: string, note: string) {
     { method: "POST", body: JSON.stringify({ note }) },
   );
 }
+
+/**
+ * On-demand counterpart to the 5-minute reconcileCashfreeOrders cron job —
+ * runs the same Cashfree order check for one payment right now, and applies
+ * whatever it finds through the real settlement path. `POST
+ * /admin/payments/:paymentId/reconcile` (server/routes/admin-search.ts →
+ * lib/payments/admin-reconcile.ts).
+ */
+export function reconcilePayment(paymentId: string) {
+  return request<ReconcilePaymentResult>(
+    `/admin/payments/${encodeURIComponent(paymentId)}/reconcile`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * Read-only payment lifecycle timeline (order created, webhook received,
+ * outcome), oldest first — `GET /admin/payments/:paymentId/timeline`.
+ */
+export function getPaymentTimeline(paymentId: string) {
+  return request<PaymentTimeline>(`/admin/payments/${encodeURIComponent(paymentId)}/timeline`);
+}
+
+export type { PaymentTimeline, PaymentTimelineEvent };

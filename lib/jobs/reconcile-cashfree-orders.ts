@@ -58,8 +58,13 @@ export const RECONCILE_RUN_DEADLINE_MS = 4 * 60 * 1000
  * then a deliberate no-op (there is nothing to poll with, and no cashfree
  * payment could exist without the adapter having been usable when it was
  * created).
+ *
+ * Exported so `lib/payments/admin-reconcile.ts#reconcilePaymentAsAdmin` (the
+ * admin-triggered single-payment reconcile) can build the exact same minimal
+ * `checkOrderPayments` config this job uses, rather than re-deriving its own
+ * copy of this env-reading logic.
  */
-function cashfreeConfig(): { clientId: string; clientSecret: string; env: 'sandbox' | 'production' } | null {
+export function cashfreeConfig(): { clientId: string; clientSecret: string; env: 'sandbox' | 'production' } | null {
   const clientId = getRuntimeEnv('CASHFREE_CLIENT_ID')
   const clientSecret = getRuntimeEnv('CASHFREE_CLIENT_SECRET')
   if (!clientId || !clientSecret) return null
