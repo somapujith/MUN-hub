@@ -8,6 +8,7 @@ export interface AdminRegistrationRow {
   delegateEmail: string;
   munName: string;
   status: RegistrationStatus;
+  paymentId: string | null;
   paymentStatus: PaymentStatus | null;
   flaggedDuplicateAt: Date | null;
   createdAt: Date;

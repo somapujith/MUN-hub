@@ -534,6 +534,7 @@ export interface RegistrationsQueueRow {
   delegateEmail: string
   munName: string
   status: string
+  paymentId: string | null
   paymentStatus: string | null
   flaggedDuplicateAt: Date | null
   createdAt: Date
@@ -606,6 +607,7 @@ export async function getRegistrationsQueue(
       delegateEmail: users.email,
       munName: muns.name,
       status: registrations.status,
+      paymentId: payments.id,
       paymentStatus: payments.status,
       flaggedDuplicateAt: registrations.flaggedDuplicateAt,
       createdAt: registrations.createdAt,

@@ -8,8 +8,10 @@ import {
   CopyIcon,
   DownloadIcon,
   FlagOffIcon,
+  HistoryIcon,
   MailIcon,
   MoreHorizontalIcon,
+  RefreshCwIcon,
   SearchIcon,
   UsersRoundIcon,
   XIcon,
@@ -24,8 +26,10 @@ import {
   resendRegistrationConfirmation,
   unflagRegistrationDuplicate,
 } from "@/api/admin-registrations";
+import { reconcilePayment } from "@/api/admin-payments";
 import { queryKeys } from "@/api/query-keys";
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
+import { PaymentTimelineDialog } from "@/components/admin/payment-timeline-dialog";
 import { ReasonDialog } from "@/components/admin/reason-dialog";
 import { RegistrationStatusChip } from "@/components/dashboard/registration-status-chip";
 import { getPaymentStatusMeta, getRegistrationStatusMeta, getToneClassName } from "@/components/dashboard/registration-status";
@@ -41,7 +45,7 @@ import { Input } from "@/components/ui/input";
 import { adminSelectClassName } from "@/lib/admin/styles";
 import { usePageClamp } from "@/lib/admin/use-page-clamp";
 import type { AdminRegistrationRow } from "@/types/admin-registrations";
-import type { RegistrationStatus } from "@/types/enums";
+import type { PaymentStatus, RegistrationStatus } from "@/types/enums";
 
 const PAGE_SIZE = 20;
 
@@ -63,6 +67,11 @@ const STATUS_OPTIONS: RegistrationStatus[] = [
 const RESEND_ELIGIBLE_STATUSES = new Set<RegistrationStatus>(["CONFIRMED", "ATTENDED", "NO_SHOW"]);
 const ALREADY_CANCELLED_STATUSES = new Set<RegistrationStatus>(["CANCELLED", "REFUNDED"]);
 
+// Mirrors lib/payments/admin-reconcile.ts's RECONCILABLE_STATUSES — PAID and
+// REFUNDED are terminal for Cashfree (no refunds; see lib/payments/exceptions.ts),
+// so there's nothing left for a manual reconcile check to change.
+const RECONCILABLE_PAYMENT_STATUSES = new Set<PaymentStatus>(["CREATED", "PENDING", "FAILED"]);
+
 function formatDate(value: Date): string {
   return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(
     value,
@@ -81,6 +90,7 @@ export function AdminRegistrationsPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<AdminRegistrationRow | null>(null);
   const [flagTarget, setFlagTarget] = useState<AdminRegistrationRow | null>(null);
+  const [timelinePaymentId, setTimelinePaymentId] = useState<string | null>(null);
 
   // Debounce typing into both the query that drives the fetch and the `?q=`
   // URL param — the admin console mock's page comment flagged real `?q=`
@@ -177,6 +187,18 @@ export function AdminRegistrationsPage() {
       else toast.message("Not sent — this delegate has turned off optional email");
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to resend the confirmation"),
+  });
+
+  // On-demand counterpart to the 5-minute reconcileCashfreeOrders cron job —
+  // runs the same Cashfree order check for one payment right now.
+  const reconcileMutation = useMutation({
+    mutationFn: (paymentId: string) => reconcilePayment(paymentId),
+    onSuccess: async (result) => {
+      await invalidateAfterMutation();
+      if (result.statusAfter !== result.statusBefore) toast.success(result.message);
+      else toast.message(result.message);
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to reconcile this payment"),
   });
 
   const exportCsv = async () => {
@@ -309,11 +331,14 @@ export function AdminRegistrationsPage() {
                   const canCancel = !ALREADY_CANCELLED_STATUSES.has(row.status);
                   const canResend = RESEND_ELIGIBLE_STATUSES.has(row.status);
                   const isFlagged = row.flaggedDuplicateAt !== null;
+                  const canReconcile =
+                    row.paymentId !== null && row.paymentStatus !== null && RECONCILABLE_PAYMENT_STATUSES.has(row.paymentStatus);
                   const rowBusy =
                     (cancelMutation.isPending && cancelMutation.variables?.registrationId === row.id) ||
                     (flagMutation.isPending && flagMutation.variables?.registrationId === row.id) ||
                     (unflagMutation.isPending && unflagMutation.variables === row.id) ||
-                    (resendMutation.isPending && resendMutation.variables === row.id);
+                    (resendMutation.isPending && resendMutation.variables === row.id) ||
+                    (reconcileMutation.isPending && reconcileMutation.variables === row.paymentId);
                   return (
                     <tr key={row.id} className="border-b border-border last:border-0">
                       <td className="px-md py-sm">
@@ -398,6 +423,24 @@ export function AdminRegistrationsPage() {
                                 <MailIcon /> Resend confirmation
                               </DropdownMenuItem>
                             )}
+                            {canReconcile && (
+                              <DropdownMenuItem
+                                onClick={() => reconcileMutation.mutate(row.paymentId!)}
+                                nativeButton
+                                render={<button type="button" />}
+                              >
+                                <RefreshCwIcon /> Reconcile payment
+                              </DropdownMenuItem>
+                            )}
+                            {row.paymentId && (
+                              <DropdownMenuItem
+                                onClick={() => setTimelinePaymentId(row.paymentId)}
+                                nativeButton
+                                render={<button type="button" />}
+                              >
+                                <HistoryIcon /> View payment timeline
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>
@@ -469,6 +512,8 @@ export function AdminRegistrationsPage() {
         }}
         onClose={() => setFlagTarget(null)}
       />
+
+      <PaymentTimelineDialog paymentId={timelinePaymentId} onClose={() => setTimelinePaymentId(null)} />
     </>
   );
 }
