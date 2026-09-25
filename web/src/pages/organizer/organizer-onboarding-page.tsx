@@ -130,7 +130,13 @@ function Stepper({
     // step row's own overflow-x-auto below never gets a chance to clip/scroll
     // — the grid item's automatic min width is content-based and just forces
     // the whole grid (and page) wider instead.
-    <nav aria-label="Onboarding steps" className="min-w-0 lg:col-start-1 lg:row-start-1 lg:self-center">
+    //
+    // lg:self-start (not self-center): the step content column varies a lot
+    // in height across steps (Payment now has 7+ fields), and centering the
+    // much-shorter nav against a tall step left a large empty gap above it
+    // and pushed the whole page taller than it needed to be. Top-aligning it
+    // with the step heading is correct for every step, not just this one.
+    <nav aria-label="Onboarding steps" className="min-w-0 lg:col-start-1 lg:row-start-1 lg:self-start">
       <ol className="flex gap-1 overflow-x-auto lg:flex-col lg:gap-0 lg:overflow-visible">
         {ONBOARDING_STEPS.map((step, index) => {
           const isCurrent = step === current;

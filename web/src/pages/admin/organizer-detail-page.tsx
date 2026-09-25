@@ -267,10 +267,10 @@ export function AdminOrganizerDetailPage() {
         )}
       </Section>
 
-      <OrganizerBankDetailsCard key={organizer.id} organizerId={organizer.id} />
+      <OrganizerBankDetailsCard key={`bank-${organizer.id}`} organizerId={organizer.id} />
 
       <PayoutVerificationModule
-        key={organizer.id}
+        key={`payout-${organizer.id}`}
         organizerId={organizer.id}
         initialStatus={{
           payoutVerified: profile?.payoutVerified ?? false,
