@@ -53,8 +53,10 @@ next-env.d.ts
 
 .playwright-mcp/
 
-# claude code / superpowers scratch state
+# claude code / codex / freebuff / superpowers scratch state
 .claude/
+.codex/
+.freebuff/
 .superpowers/
 /superpowers/
 
