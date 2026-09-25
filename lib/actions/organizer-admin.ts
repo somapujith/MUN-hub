@@ -189,6 +189,125 @@ export async function reinstateOrganizer(userId: string, session: Session | null
   })
 }
 
+export interface OrganizerProfileDetail {
+  firstName: string | null
+  lastName: string | null
+  contactPhone: string | null
+  /** The organizer's first MUN, answered in the onboarding wizard. */
+  munName: string | null
+  munCity: string | null
+  /** ISO date (YYYY-MM-DD). */
+  munStartDate: string | null
+  expectedDelegateCount: number | null
+  munDescription: string | null
+  previousEditions: string | null
+  websiteUrl: string | null
+  agreementVersion: string | null
+  completedAt: Date | null
+  /** Account-level payout status — see `verifyOrganizerPayout` below. Never the bank account number itself (see `OrganizerBankDetails`, revealed separately). */
+  payoutVerified: boolean
+  paymentGateway: string | null
+  payoutVerifiedAt: Date | null
+}
+
+export interface OrganizerDetail {
+  id: string
+  name: string
+  email: string
+  institution: string | null
+  suspended: boolean
+  suspendedReason: string | null
+  suspendedAt: Date | null
+  createdAt: Date
+  /** Onboarding-wizard answers, or null if the organizer hasn't started onboarding. */
+  profile: OrganizerProfileDetail | null
+}
+
+/**
+ * Full "everything this organizer entered" admin view for the organizer
+ * detail page: account fields plus their onboarding-wizard answers
+ * (name/phone, first MUN's answers) and their payout-verification status.
+ * Deliberately excludes the bank account number itself — that stays behind
+ * `getOrganizerBankDetails`'s separate reveal-on-click endpoint below, and is
+ * never bundled into a plain GET. Requires OPERATIONS/ADMIN/SUPER_ADMIN, and
+ * only ever acts on an ORGANIZER account (see `lockOrganizer`'s reasoning) —
+ * a non-organizer id reads as "not found", not "forbidden". Read-only and
+ * not audit-logged (unlike `getOrganizerBankDetails` — nothing sensitive is
+ * returned here).
+ */
+export async function getOrganizerDetail(userId: string, session: Session | null): Promise<OrganizerDetail> {
+  requireRole(session, [...ADMIN_ROLES])
+
+  const [target] = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      institution: users.institution,
+      suspended: users.suspended,
+      suspendedReason: users.suspendedReason,
+      suspendedAt: users.suspendedAt,
+      createdAt: users.createdAt,
+      role: users.role,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+  if (!target || target.role !== 'ORGANIZER') throw new Error(ORGANIZER_NOT_FOUND)
+
+  const [row] = await db
+    .select({
+      firstName: organizerProfiles.firstName,
+      lastName: organizerProfiles.lastName,
+      contactPhone: organizerProfiles.contactPhone,
+      munName: organizerProfiles.munName,
+      munCity: organizerProfiles.munCity,
+      munStartDate: organizerProfiles.munStartDate,
+      expectedDelegateCount: organizerProfiles.expectedDelegateCount,
+      munDescription: organizerProfiles.munDescription,
+      previousEditions: organizerProfiles.previousEditions,
+      websiteUrl: organizerProfiles.websiteUrl,
+      agreementVersion: organizerProfiles.agreementVersion,
+      completedAt: organizerProfiles.completedAt,
+      payoutVerified: organizerProfiles.payoutVerified,
+      paymentGateway: organizerProfiles.paymentGateway,
+      payoutVerifiedAt: organizerProfiles.payoutVerifiedAt,
+    })
+    .from(organizerProfiles)
+    .where(eq(organizerProfiles.userId, userId))
+    .limit(1)
+
+  return {
+    id: target.id,
+    name: target.name,
+    email: target.email,
+    institution: target.institution,
+    suspended: target.suspended,
+    suspendedReason: target.suspendedReason,
+    suspendedAt: target.suspendedAt,
+    createdAt: target.createdAt,
+    profile: row
+      ? {
+          firstName: row.firstName,
+          lastName: row.lastName,
+          contactPhone: row.contactPhone,
+          munName: row.munName,
+          munCity: row.munCity,
+          munStartDate: row.munStartDate ? row.munStartDate.toISOString().slice(0, 10) : null,
+          expectedDelegateCount: row.expectedDelegateCount,
+          munDescription: row.munDescription,
+          previousEditions: row.previousEditions,
+          websiteUrl: row.websiteUrl,
+          agreementVersion: row.agreementVersion,
+          completedAt: row.completedAt,
+          payoutVerified: row.payoutVerified,
+          paymentGateway: row.paymentGateway,
+          payoutVerifiedAt: row.payoutVerifiedAt,
+        }
+      : null,
+  }
+}
+
 export interface OrganizerBankDetails {
   accountHolderName: string | null
   bankName: string | null
@@ -247,4 +366,84 @@ export async function getOrganizerBankDetails(userId: string, session: Session |
     upiId: row?.upiId ?? null,
     upiPhone: row?.upiPhone ?? null,
   }
+}
+
+// -----------------------------------------------------------------------------
+// Payout verification (2026-09-26, explicit user instruction) — the
+// account-level gate that lets an organizer self-publish without a further
+// admin Gate-2 step. See lib/lifecycle/go-live.ts#organizerSelfPublish for
+// the consuming side.
+// -----------------------------------------------------------------------------
+
+/**
+ * Which real payment gateway account staff manually set the organizer up as
+ * a beneficiary in — there is no automated settlement integration (CLAUDE.md
+ * deferred list), so this is a record of a real, out-of-band action, not a
+ * live provider selection. `MANUAL` covers a plain bank transfer with no
+ * gateway involved. Kept as a fixed list (not free text) so the web
+ * dropdown and the server validation can never drift.
+ */
+export const PAYMENT_GATEWAY_OPTIONS = ['CASHFREE', 'MANUAL'] as const
+export type PaymentGateway = (typeof PAYMENT_GATEWAY_OPTIONS)[number]
+
+export const PAYOUT_VERIFICATION_ERRORS = {
+  bankDetailsMissing: "This organizer hasn't submitted bank payout details yet",
+} as const
+
+export interface OrganizerPayoutStatus {
+  payoutVerified: boolean
+  paymentGateway: string | null
+  payoutVerifiedAt: Date | null
+}
+
+/**
+ * Marks an organizer's payout verified and records which gateway they were
+ * tied to — the one deliberate admin action that then lets
+ * `lib/lifecycle/go-live.ts#organizerSelfPublish` skip every further Gate-2
+ * admin step for that organizer's MUNs. Requires the organizer to have
+ * already filled in bank details (accountHolderName/bankName/
+ * bankAccountLast4/ifscCode) — verifying an empty profile would be a lie.
+ * Requires OPERATIONS/ADMIN/SUPER_ADMIN, and only ever acts on an ORGANIZER
+ * account (see `lockOrganizer`'s reasoning — a non-organizer id reads as
+ * "not found", not "forbidden"). Idempotent: verifying an already-verified
+ * organizer again just updates `paymentGateway`/`payoutVerifiedAt`/
+ * `payoutVerifiedBy` and logs another audit row — there's no "already
+ * verified" error, since staff may legitimately re-confirm or switch gateways.
+ */
+export async function verifyOrganizerPayout(
+  userId: string,
+  gateway: PaymentGateway,
+  session: Session | null,
+): Promise<OrganizerPayoutStatus> {
+  requireRole(session, [...ADMIN_ROLES])
+
+  const [target] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1)
+  if (!target || target.role !== 'ORGANIZER') throw new Error(ORGANIZER_NOT_FOUND)
+
+  return db.transaction(async (tx) => {
+    const [profile] = await tx
+      .select({
+        accountHolderName: organizerProfiles.accountHolderName,
+        bankName: organizerProfiles.bankName,
+        bankAccountLast4: organizerProfiles.bankAccountLast4,
+        ifscCode: organizerProfiles.ifscCode,
+      })
+      .from(organizerProfiles)
+      .where(eq(organizerProfiles.userId, userId))
+      .limit(1)
+    if (!profile?.accountHolderName || !profile.bankName || !profile.bankAccountLast4 || !profile.ifscCode) {
+      throw new Error(PAYOUT_VERIFICATION_ERRORS.bankDetailsMissing)
+    }
+
+    const now = new Date()
+    const [updated] = await tx
+      .update(organizerProfiles)
+      .set({ payoutVerified: true, paymentGateway: gateway, payoutVerifiedAt: now, payoutVerifiedBy: session.userId })
+      .where(eq(organizerProfiles.userId, userId))
+      .returning({ payoutVerified: organizerProfiles.payoutVerified, paymentGateway: organizerProfiles.paymentGateway })
+
+    await recordAdminAction(tx, session.userId, 'ORGANIZER_PAYOUT_VERIFIED', 'user', userId, undefined, { gateway })
+
+    return { payoutVerified: updated.payoutVerified, paymentGateway: updated.paymentGateway, payoutVerifiedAt: now }
+  })
 }

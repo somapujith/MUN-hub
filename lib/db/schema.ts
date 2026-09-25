@@ -299,6 +299,21 @@ export const organizerProfiles = pgTable('organizer_profiles', {
   ifscCode: text('ifsc_code'),
   upiId: text('upi_id'),
   upiPhone: text('upi_phone'),
+  // Account-level payout verification (2026-09-26, explicit user
+  // instruction) — a staff member ties the organizer to a real payment
+  // gateway (lib/actions/organizer-admin.ts#verifyOrganizerPayout) after
+  // manually setting them up as a beneficiary there (no automated
+  // settlement integration exists — see CLAUDE.md's deferred list). Once
+  // true, lib/lifecycle/go-live.ts lets the owning organizer take their own
+  // MUN live with no further admin Gate-2 step (organizerSelfPublish).
+  // Nullable/false by default — this is a one-time admin action, not
+  // something the organizer sets themselves.
+  payoutVerified: boolean('payout_verified').notNull().default(false),
+  payoutVerifiedAt: timestamp('payout_verified_at', { withTimezone: true }),
+  payoutVerifiedBy: text('payout_verified_by').references(() => users.id),
+  // Free text, same convention as mun_payment_settings.gateway — which real
+  // gateway account the organizer was manually set up as a beneficiary in.
+  paymentGateway: text('payment_gateway'),
   agreementVersion: text('agreement_version'),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

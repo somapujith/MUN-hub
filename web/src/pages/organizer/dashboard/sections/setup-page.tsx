@@ -1,11 +1,18 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
-import { AlertTriangle, CheckCircle2, Eye, Globe, LockIcon, Save, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, Globe, LockIcon, Rocket, Save, ShieldCheck } from "lucide-react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
-import { getMunProgress, getMunReviewFeedback, submitMunForReview, withdrawSubmission } from "@/api/go-live";
+import {
+  getMunProgress,
+  getMunReviewFeedback,
+  organizerSelfPublish,
+  submitMunForReview,
+  withdrawSubmission,
+} from "@/api/go-live";
 import { getMunDetails, updateMunDetails } from "@/api/mun-config";
+import { getOrganizerOnboarding } from "@/api/organizer-onboarding";
 import { submitFinalConfirmation } from "@/api/organizer-confirmation";
 import { queryKeys } from "@/api/query-keys";
 import { Button } from "@/components/ui/button";
@@ -137,6 +144,12 @@ export function OrganizerSetupPage() {
     queryFn: () => getMunReviewFeedback(munId),
     enabled: Boolean(munId),
   });
+  // Same query key the workspace-wide payout banner and Quick Setup use —
+  // shares one cache entry rather than firing a second request.
+  const onboardingQuery = useQuery({
+    queryKey: queryKeys.organizerOnboarding(),
+    queryFn: getOrganizerOnboarding,
+  });
 
   const refresh = () =>
     Promise.all([
@@ -182,9 +195,19 @@ export function OrganizerSetupPage() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to unlock your sections"),
   });
 
+  const selfPublishMutation = useMutation({
+    mutationFn: () => organizerSelfPublish(munId),
+    onSuccess: async (result) => {
+      await refresh();
+      toast.success(`${result.mun.name} is now live on MUN Hub.`);
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to publish your MUN"),
+  });
+
   const mun = detailsQuery.data;
   const progress = progressQuery.data;
   const status: MunStatus | undefined = progress?.lifecycleStatus ?? mun?.status;
+  const payoutVerified = onboardingQuery.data?.profile.payoutVerified ?? false;
   const canSubmitForReview = Boolean(status && SUBMITTABLE_STATUSES.includes(status));
   const canConfirm = Boolean(status && CONFIRMABLE_STATUSES.includes(status));
   const approved = Boolean(status && POST_APPROVAL_STATUSES.includes(status));
@@ -363,10 +386,27 @@ export function OrganizerSetupPage() {
                       Checks passed. Confirm your submission to continue.
                     </p>
                   )}
-                  {status === "VERIFICATION" && (
+                  {status === "VERIFICATION" && payoutVerified && (
+                    <>
+                      <p className="flex items-center gap-xs text-body-md text-success-text">
+                        <CheckCircle2 className="size-4 shrink-0" aria-hidden />
+                        Your payout is verified — you can publish this MUN yourself, no admin review needed.
+                      </p>
+                      <Button
+                        size="sm"
+                        disabled={selfPublishMutation.isPending}
+                        onClick={() => selfPublishMutation.mutate()}
+                      >
+                        <Rocket aria-hidden />
+                        {selfPublishMutation.isPending ? "Publishing..." : "Go live"}
+                      </Button>
+                    </>
+                  )}
+                  {status === "VERIFICATION" && !payoutVerified && (
                     <p className="text-body-md text-body">
                       MUN Hub is verifying your MUN and will email you the result. Sections they send back show up
-                      in the checklist below, unlocked for you to fix.
+                      in the checklist below, unlocked for you to fix. Waiting on payment verification before this
+                      can go live — once that's done, you can publish it yourself.
                     </p>
                   )}
                   {approved && !live && (

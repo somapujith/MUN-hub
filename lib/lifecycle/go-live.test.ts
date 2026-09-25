@@ -25,6 +25,7 @@ import {
   claimSubmission,
   enqueueForGoLive,
   getGoLiveQueue,
+  organizerSelfPublish,
   publishFromQueue,
   reviewSubmission,
   submitMunForReview,
@@ -1071,6 +1072,97 @@ describe('publishFromQueue', () => {
     const { mun } = await makeQueuedSubmission(organizer, admin)
 
     await expect(publishFromQueue(mun.id, { userId: organizer.id, role: 'ORGANIZER' })).rejects.toThrow('Forbidden')
+  })
+})
+
+/** Flips organizer_profiles.payoutVerified for `organizerId` — the one thing `verifyOrganizerPayout` (lib/actions/organizer-admin.ts) sets that this file cares about. Upserts: makeBareMun's organizer has no organizer_profiles row at all yet. */
+async function verifyPayout(organizerId: string) {
+  await db
+    .insert(organizerProfiles)
+    .values({ userId: organizerId, payoutVerified: true })
+    .onConflictDoUpdate({ target: organizerProfiles.userId, set: { payoutVerified: true } })
+}
+
+describe('organizerSelfPublish', () => {
+  it('walks VERIFICATION straight through to PUBLISHED for a payout-verified organizer, reusing reviewSubmission/enqueueForGoLive/publishFromQueue', async () => {
+    const organizer = await makeUser()
+    const { mun, submissionId } = await makeMunAtVerification(organizer)
+    await verifyPayout(organizer.id)
+
+    const result = await organizerSelfPublish(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
+
+    expect(result.replay).toBe(false)
+    expect(result.mun.status).toBe('PUBLISHED')
+    expect(result.submission.status).toBe('PUBLISHED')
+    expect(result.munVersionId).toBeTruthy()
+
+    // Same audit trail an admin-driven approve + publish would leave, but
+    // with the organizer as the actor — that IS the record of who did it.
+    const approvedLog = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetType, 'mun_submission'), eq(adminActions.targetId, submissionId), eq(adminActions.action, 'MUN_APPROVED')))
+    expect(approvedLog[0]?.actorId).toBe(organizer.id)
+
+    const publishedLog = await db
+      .select()
+      .from(adminActions)
+      .where(and(eq(adminActions.targetType, 'mun'), eq(adminActions.targetId, mun.id), eq(adminActions.action, 'MUN_PUBLISHED')))
+    expect(publishedLog[0]?.actorId).toBe(organizer.id)
+  })
+
+  it('refuses an organizer whose payout is not verified', async () => {
+    const organizer = await makeUser()
+    const { mun } = await makeMunAtVerification(organizer)
+
+    await expect(organizerSelfPublish(mun.id, { userId: organizer.id, role: 'ORGANIZER' })).rejects.toThrow(
+      'Your payout must be verified before your MUN can go live',
+    )
+
+    const [munRow] = await db.select({ status: muns.status }).from(muns).where(eq(muns.id, mun.id)).limit(1)
+    expect(munRow.status).toBe('VERIFICATION')
+  })
+
+  it('refuses a payout-verified organizer who does not own this mun', async () => {
+    const organizer = await makeUser()
+    const stranger = await makeUser()
+    const { mun } = await makeMunAtVerification(organizer)
+    await verifyPayout(stranger.id)
+
+    await expect(organizerSelfPublish(mun.id, { userId: stranger.id, role: 'ORGANIZER' })).rejects.toThrow('Forbidden')
+  })
+
+  it('refuses staff and signed-out callers the same way — this is organizer-only', async () => {
+    const organizer = await makeUser()
+    const admin = await makeUser('ADMIN')
+    const { mun } = await makeMunAtVerification(organizer)
+    await verifyPayout(organizer.id)
+
+    await expect(organizerSelfPublish(mun.id, { userId: admin.id, role: 'ADMIN' })).rejects.toThrow('Forbidden')
+    await expect(organizerSelfPublish(mun.id, null)).rejects.toThrow('Forbidden')
+  })
+
+  it('refuses a mun with no active submission (wrong status), even payout-verified', async () => {
+    const organizer = await makeUser()
+    const mun = await makeBareMun(organizer.id)
+    await verifyPayout(organizer.id)
+
+    await expect(organizerSelfPublish(mun.id, { userId: organizer.id, role: 'ORGANIZER' })).rejects.toThrow(
+      'No active submission found for this mun',
+    )
+  })
+
+  it("does not open a self-request-changes or self-reject path — reviewSubmission still refuses those decisions from the organizer even once payout is verified", async () => {
+    const organizer = await makeUser()
+    const { mun } = await makeMunAtVerification(organizer)
+    await verifyPayout(organizer.id)
+
+    await expect(
+      reviewSubmission(mun.id, 'CHANGES_REQUESTED', { notes: 'nope' }, { userId: organizer.id, role: 'ORGANIZER' }),
+    ).rejects.toThrow('Forbidden')
+    await expect(
+      reviewSubmission(mun.id, 'REJECTED', { reason: 'nope' }, { userId: organizer.id, role: 'ORGANIZER' }),
+    ).rejects.toThrow('Forbidden')
   })
 })
 

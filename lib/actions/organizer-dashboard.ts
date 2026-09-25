@@ -88,7 +88,12 @@ export async function getMunOverview(munId: string, session: Session | null): Pr
         ),
       ),
     ),
-    db.select({ capacity: registrationProducts.capacity }).from(registrationProducts).where(eq(registrationProducts.munId, munId)),
+    db
+      .select({ capacity: registrationProducts.capacity })
+      .from(registrationProducts)
+      // An inactive product isn't selling, so its seats aren't available —
+      // same rule getOrganizerWorkspaceOverview's capacityByMun applies.
+      .where(and(eq(registrationProducts.munId, munId), eq(registrationProducts.status, 'active'))),
   ])
 
   const totalCapacity = products.reduce((sumCapacity, product) => sumCapacity + product.capacity, 0)

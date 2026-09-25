@@ -83,6 +83,25 @@ describe('organizer dashboard queries', () => {
     }
   })
 
+  it("excludes an inactive (disabled) product's capacity from availableSeats — a deactivated pass isn't selling", async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const [organizer] = await db
+      .insert(users)
+      .values({ name: 'Org', email: `org-inactive-${suffix}@test.com`, role: 'ORGANIZER' })
+      .returning()
+    const [mun] = await db
+      .insert(muns)
+      .values({ organizerId: organizer.id, name: 'Inactive Product Mun', slug: `inactive-product-mun-${suffix}` })
+      .returning()
+    await db.insert(registrationProducts).values({ munId: mun.id, name: 'Active Pass', price: 1000, capacity: 5 })
+    await db
+      .insert(registrationProducts)
+      .values({ munId: mun.id, name: 'Disabled Pass', price: 1000, capacity: 5, status: 'inactive' })
+
+    const overview = await getMunOverview(mun.id, sess(organizer))
+    expect(overview.availableSeats).toBe(5) // only the active pass's 5 seats — the disabled pass's 5 don't count
+  })
+
   it('rejects a non-owning organizer', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const [owner] = await db

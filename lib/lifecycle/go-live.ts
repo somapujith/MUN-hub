@@ -5,6 +5,7 @@ import {
   muns,
   munSubmissions,
   munVersions,
+  organizerProfiles,
   verificationIssues,
 } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
@@ -362,6 +363,41 @@ async function lockLatestSubmission(tx: Tx, munId: string) {
   return submission
 }
 
+/**
+ * Gate 2's decision/enqueue/publish steps are staff-only by default
+ * (REVIEW_ROLES/PUBLISH_ROLES) — with one deliberate exception (2026-09-26,
+ * explicit user instruction): the owning organizer, once their account-level
+ * payout is verified (`organizer_profiles.payoutVerified`, set by
+ * `lib/actions/organizer-admin.ts#verifyOrganizerPayout`), can move their OWN
+ * mun forward. `allowOrganizer` is false at `reviewSubmission`'s
+ * CHANGES_REQUESTED/REJECTED call sites — those wouldn't make sense
+ * self-directed. This is what lets `organizerSelfPublish` below reuse
+ * `reviewSubmission`/`enqueueForGoLive`/`publishFromQueue` verbatim instead
+ * of duplicating their transactions: same idempotency, same audit trail,
+ * same PUBLISH-stage re-validation against live data, regardless of who
+ * triggers it.
+ */
+async function assertReviewAuthority(
+  munId: string,
+  session: Session | null,
+  staffRoles: readonly string[],
+  allowOrganizer: boolean,
+): Promise<void> {
+  if (session && staffRoles.includes(session.role)) return
+  if (allowOrganizer && session?.role === 'ORGANIZER') {
+    const [mun] = await db.select({ organizerId: muns.organizerId }).from(muns).where(eq(muns.id, munId)).limit(1)
+    if (mun?.organizerId === session.userId) {
+      const [profile] = await db
+        .select({ payoutVerified: organizerProfiles.payoutVerified })
+        .from(organizerProfiles)
+        .where(eq(organizerProfiles.userId, session.userId))
+        .limit(1)
+      if (profile?.payoutVerified) return
+    }
+  }
+  throw new Error('Forbidden')
+}
+
 export type ReviewSubmissionDecision = 'APPROVED' | 'CHANGES_REQUESTED' | 'REJECTED'
 
 export interface ReviewSubmissionOptions {
@@ -433,7 +469,11 @@ export async function reviewSubmission(
   opts: ReviewSubmissionOptions,
   session: Session | null,
 ): Promise<typeof munSubmissions.$inferSelect> {
-  requireRole(session, [...REVIEW_ROLES])
+  await assertReviewAuthority(munId, session, REVIEW_ROLES, decision === 'APPROVED')
+  // assertReviewAuthority throws unless session is non-null — this is a pure
+  // type-narrowing guard for the rest of the function (an async function
+  // can't carry an `asserts` return type the way requireRole does).
+  if (!session) throw new Error('Forbidden')
 
   if (decision === 'REJECTED' && (!opts.reason || opts.reason.trim().length === 0)) {
     throw new Error('A non-empty reason is required to reject a submission')
@@ -803,7 +843,8 @@ export async function openReviewRound(tx: Tx, munId: string, actorId: string) {
  * mun gets a fresh round first (see `openRepublishSubmission`).
  */
 export async function enqueueForGoLive(munId: string, session: Session | null): Promise<typeof munSubmissions.$inferSelect> {
-  requireRole(session, [...PUBLISH_ROLES])
+  await assertReviewAuthority(munId, session, PUBLISH_ROLES, true)
+  if (!session) throw new Error('Forbidden')
 
   return db.transaction(async (tx) => {
     const active = await lockActiveSubmission(tx, munId)
@@ -975,7 +1016,8 @@ export async function publishFromQueue(
   session: Session | null,
   idempotencyKey?: string,
 ): Promise<PublishFromQueueResult> {
-  requireRole(session, [...PUBLISH_ROLES])
+  await assertReviewAuthority(munId, session, PUBLISH_ROLES, true)
+  if (!session) throw new Error('Forbidden')
 
   const result = await db.transaction(async (tx) => {
     // Step 1: FOR UPDATE lock on the submission row — the serialization
@@ -1079,4 +1121,47 @@ export async function publishFromQueue(
   }
 
   return result
+}
+
+/**
+ * Lets the owning organizer take their own MUN live once their account-level
+ * payout is verified (`organizer_profiles.payoutVerified`, set by
+ * `lib/actions/organizer-admin.ts#verifyOrganizerPayout`) — 2026-09-26,
+ * explicit user instruction: once payout is verified, no admin Gate-2 step
+ * is needed for that organizer.
+ *
+ * Chains `reviewSubmission('APPROVED')` -> `enqueueForGoLive` ->
+ * `publishFromQueue` — the exact same functions the admin-driven path uses,
+ * unmodified beyond the broadened `assertReviewAuthority` check above, so
+ * this gets the exact same transactions, audit trail, and PUBLISH-stage
+ * re-validation against live data as an admin publishing it by hand. Only
+ * ever the approving direction: an organizer can't request changes from or
+ * reject themselves, so this never exposes `reviewSubmission`'s other
+ * decisions.
+ *
+ * Only from VERIFICATION — the organizer's own Gate-3 confirmation
+ * (`lib/lifecycle/organizer-confirmation.ts#submitFinalConfirmation`,
+ * already organizer-authorized) is what gets a mun there; any other status
+ * throws from `reviewSubmission`'s own `lockActiveSubmission` check
+ * ("No active submission found for this mun").
+ */
+export async function organizerSelfPublish(munId: string, session: Session | null): Promise<PublishFromQueueResult> {
+  if (!session || session.role !== 'ORGANIZER') throw new Error('Forbidden')
+
+  const [mun] = await db.select({ organizerId: muns.organizerId }).from(muns).where(eq(muns.id, munId)).limit(1)
+  if (!mun) throw new Error('Mun not found')
+  if (mun.organizerId !== session.userId) throw new Error('Forbidden')
+
+  const [profile] = await db
+    .select({ payoutVerified: organizerProfiles.payoutVerified })
+    .from(organizerProfiles)
+    .where(eq(organizerProfiles.userId, session.userId))
+    .limit(1)
+  if (!profile?.payoutVerified) {
+    throw new Error('Your payout must be verified before your MUN can go live')
+  }
+
+  await reviewSubmission(munId, 'APPROVED', { notes: 'Payout verified — published by the organizer' }, session)
+  await enqueueForGoLive(munId, session)
+  return publishFromQueue(munId, session)
 }

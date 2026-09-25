@@ -7,10 +7,13 @@ import type { Session } from '@/lib/auth/adapter'
 
 import {
   getOrganizerBankDetails,
+  getOrganizerDetail,
   listOrganizers,
   ORGANIZER_NOT_FOUND,
+  PAYOUT_VERIFICATION_ERRORS,
   reinstateOrganizer,
   suspendOrganizer,
+  verifyOrganizerPayout,
 } from './organizer-admin'
 
 async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' | 'SUPER_ADMIN') {
@@ -356,6 +359,222 @@ describe('getOrganizerBankDetails', () => {
 
     const logs = await db.select().from(adminActions).where(eq(adminActions.targetId, student.id))
     expect(logs).toEqual([])
+  })
+})
+
+describe('getOrganizerDetail', () => {
+  it('returns account fields plus onboarding-wizard answers and payout status, and no bank account number', async () => {
+    const admin = await makeUser('ADMIN')
+    const organizer = await makeUser('ORGANIZER')
+    await db.insert(organizerProfiles).values({
+      userId: organizer.id,
+      firstName: 'Priya',
+      lastName: 'Rao',
+      contactPhone: '9876543210',
+      munName: 'Test MUN 2027',
+      munCity: 'Hyderabad',
+      munStartDate: new Date('2027-03-01T00:00:00.000Z'),
+      expectedDelegateCount: 300,
+      munDescription: 'A test conference.',
+      previousEditions: '2026 edition',
+      websiteUrl: 'https://example.com',
+      agreementVersion: '2026-09-17',
+      completedAt: new Date('2026-09-20T10:00:00.000Z'),
+      accountHolderName: 'Test Society',
+      bankName: 'HDFC Bank',
+      bankAccountNumberCiphertext: encryptField('123456789012'),
+      bankAccountLast4: '9012',
+      ifscCode: 'HDFC0001234',
+    })
+
+    const detail = await getOrganizerDetail(organizer.id, sess(admin))
+
+    expect(detail.id).toBe(organizer.id)
+    expect(detail.name).toBe(organizer.name)
+    expect(detail.email).toBe(organizer.email)
+    expect(detail.suspended).toBe(false)
+    expect(detail.profile).toEqual({
+      firstName: 'Priya',
+      lastName: 'Rao',
+      contactPhone: '9876543210',
+      munName: 'Test MUN 2027',
+      munCity: 'Hyderabad',
+      munStartDate: '2027-03-01',
+      expectedDelegateCount: 300,
+      munDescription: 'A test conference.',
+      previousEditions: '2026 edition',
+      websiteUrl: 'https://example.com',
+      agreementVersion: '2026-09-17',
+      completedAt: new Date('2026-09-20T10:00:00.000Z'),
+      // Not yet staff-verified — set below in the payout-status test instead
+      // of here, so this test stays focused on the onboarding answers.
+      payoutVerified: false,
+      paymentGateway: null,
+      payoutVerifiedAt: null,
+    })
+    // Never bundles the bank account number into this plain read.
+    expect(detail).not.toHaveProperty('accountHolderName')
+    expect(detail).not.toHaveProperty('bankAccountNumber')
+  })
+
+  it("reflects a staff-verified organizer's payout status", async () => {
+    const admin = await makeUser('ADMIN')
+    const organizer = await makeUser('ORGANIZER')
+    await db.insert(organizerProfiles).values({
+      userId: organizer.id,
+      accountHolderName: 'Test Society',
+      bankName: 'HDFC Bank',
+      bankAccountNumberCiphertext: encryptField('123456789012'),
+      bankAccountLast4: '9012',
+      ifscCode: 'HDFC0001234',
+    })
+    await verifyOrganizerPayout(organizer.id, 'CASHFREE', sess(admin))
+
+    const detail = await getOrganizerDetail(organizer.id, sess(admin))
+    expect(detail.profile?.payoutVerified).toBe(true)
+    expect(detail.profile?.paymentGateway).toBe('CASHFREE')
+    expect(detail.profile?.payoutVerifiedAt).toBeInstanceOf(Date)
+  })
+
+  it('returns profile: null for an organizer who has not started onboarding', async () => {
+    const admin = await makeUser('ADMIN')
+    const organizer = await makeUser('ORGANIZER')
+
+    const detail = await getOrganizerDetail(organizer.id, sess(admin))
+    expect(detail.profile).toBeNull()
+  })
+
+  it('allows OPERATIONS', async () => {
+    const ops = await makeUser('OPERATIONS')
+    const organizer = await makeUser('ORGANIZER')
+
+    const detail = await getOrganizerDetail(organizer.id, sess(ops))
+    expect(detail.id).toBe(organizer.id)
+  })
+
+  it('throws Forbidden for a non-admin session', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const student = await makeUser('STUDENT')
+
+    await expect(getOrganizerDetail(organizer.id, sess(student))).rejects.toThrow('Forbidden')
+  })
+
+  it('throws Forbidden with no session', async () => {
+    const organizer = await makeUser('ORGANIZER')
+
+    await expect(getOrganizerDetail(organizer.id, null)).rejects.toThrow('Forbidden')
+  })
+
+  it('refuses an unknown user id with ORGANIZER_NOT_FOUND', async () => {
+    const admin = await makeUser('ADMIN')
+    const unknownId = crypto.randomUUID()
+
+    await expect(getOrganizerDetail(unknownId, sess(admin))).rejects.toThrow(ORGANIZER_NOT_FOUND)
+  })
+
+  it('refuses a non-ORGANIZER account (e.g. a delegate) with ORGANIZER_NOT_FOUND', async () => {
+    const admin = await makeUser('ADMIN')
+    const student = await makeUser('STUDENT')
+
+    await expect(getOrganizerDetail(student.id, sess(admin))).rejects.toThrow(ORGANIZER_NOT_FOUND)
+  })
+})
+
+describe('verifyOrganizerPayout', () => {
+  async function makeOnboardedOrganizer(overrides: Partial<typeof organizerProfiles.$inferInsert> = {}) {
+    const organizer = await makeUser('ORGANIZER')
+    await db.insert(organizerProfiles).values({
+      userId: organizer.id,
+      accountHolderName: 'Test Society',
+      bankName: 'HDFC Bank',
+      bankAccountNumberCiphertext: encryptField('123456789012'),
+      bankAccountLast4: '9012',
+      ifscCode: 'HDFC0001234',
+      ...overrides,
+    })
+    return organizer
+  }
+
+  it('marks the organizer payout-verified, records the gateway, and logs ORGANIZER_PAYOUT_VERIFIED', async () => {
+    const admin = await makeUser('ADMIN')
+    const organizer = await makeOnboardedOrganizer()
+
+    const before = new Date()
+    const result = await verifyOrganizerPayout(organizer.id, 'CASHFREE', sess(admin))
+    expect(result.payoutVerified).toBe(true)
+    expect(result.paymentGateway).toBe('CASHFREE')
+    expect(result.payoutVerifiedAt).toBeInstanceOf(Date)
+    expect(result.payoutVerifiedAt!.getTime()).toBeGreaterThanOrEqual(before.getTime())
+
+    const [row] = await db.select().from(organizerProfiles).where(eq(organizerProfiles.userId, organizer.id))
+    expect(row.payoutVerified).toBe(true)
+    expect(row.paymentGateway).toBe('CASHFREE')
+    expect(row.payoutVerifiedBy).toBe(admin.id)
+    expect(row.payoutVerifiedAt).toBeInstanceOf(Date)
+
+    const [log] = await db.select().from(adminActions).where(eq(adminActions.targetId, organizer.id))
+    expect(log.action).toBe('ORGANIZER_PAYOUT_VERIFIED')
+    expect(log.actorId).toBe(admin.id)
+    expect(log.targetType).toBe('user')
+    expect(log.metadata).toEqual({ gateway: 'CASHFREE' })
+  })
+
+  it('allows OPERATIONS, and accepts MANUAL as a gateway', async () => {
+    const ops = await makeUser('OPERATIONS')
+    const organizer = await makeOnboardedOrganizer()
+
+    const result = await verifyOrganizerPayout(organizer.id, 'MANUAL', sess(ops))
+    expect(result.paymentGateway).toBe('MANUAL')
+  })
+
+  it('refuses an organizer with no bank details on file yet', async () => {
+    const admin = await makeUser('ADMIN')
+    const organizer = await makeUser('ORGANIZER')
+
+    await expect(verifyOrganizerPayout(organizer.id, 'CASHFREE', sess(admin))).rejects.toThrow(
+      PAYOUT_VERIFICATION_ERRORS.bankDetailsMissing,
+    )
+
+    const [row] = await db.select().from(organizerProfiles).where(eq(organizerProfiles.userId, organizer.id))
+    expect(row).toBeUndefined()
+  })
+
+  it('refuses an organizer with only some bank fields filled in', async () => {
+    const admin = await makeUser('ADMIN')
+    const organizer = await makeOnboardedOrganizer({ ifscCode: null })
+
+    await expect(verifyOrganizerPayout(organizer.id, 'CASHFREE', sess(admin))).rejects.toThrow(
+      PAYOUT_VERIFICATION_ERRORS.bankDetailsMissing,
+    )
+  })
+
+  it('is idempotent — re-verifying updates the gateway and timestamp rather than erroring', async () => {
+    const admin = await makeUser('ADMIN')
+    const organizer = await makeOnboardedOrganizer()
+
+    await verifyOrganizerPayout(organizer.id, 'CASHFREE', sess(admin))
+    const second = await verifyOrganizerPayout(organizer.id, 'MANUAL', sess(admin))
+
+    expect(second.payoutVerified).toBe(true)
+    expect(second.paymentGateway).toBe('MANUAL')
+
+    const logs = await db.select().from(adminActions).where(eq(adminActions.targetId, organizer.id))
+    expect(logs).toHaveLength(2)
+  })
+
+  it('throws Forbidden for a non-admin session', async () => {
+    const organizer = await makeOnboardedOrganizer()
+    const student = await makeUser('STUDENT')
+
+    await expect(verifyOrganizerPayout(organizer.id, 'CASHFREE', sess(student))).rejects.toThrow('Forbidden')
+  })
+
+  it('refuses an unknown user id with ORGANIZER_NOT_FOUND', async () => {
+    const admin = await makeUser('ADMIN')
+
+    await expect(verifyOrganizerPayout(crypto.randomUUID(), 'CASHFREE', sess(admin))).rejects.toThrow(
+      ORGANIZER_NOT_FOUND,
+    )
   })
 })
 

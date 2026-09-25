@@ -5,6 +5,7 @@ import {
   claimSubmission,
   enqueueForGoLive,
   getGoLiveQueue,
+  organizerSelfPublish,
   publishFromQueue,
   reviewSubmission,
   submitMunForReview,
@@ -101,5 +102,16 @@ export const goLiveRoutes = new Hono<{ Variables: AppVariables }>()
     }
 
     const result = await publishFromQueue(munId, session, idempotencyKey)
+    return c.json(result, 200)
+  })
+  // Organizer-only convenience action — see
+  // lib/lifecycle/go-live.ts#organizerSelfPublish. Only legal once the
+  // organizer's payout is verified; otherwise throws the same way the
+  // staff-only endpoints above do for an unauthorized caller.
+  .post('/muns/:munId/actions/self-publish', async (c) => {
+    const munId = c.req.param('munId')
+    const session = c.get('session')
+
+    const result = await organizerSelfPublish(munId, session)
     return c.json(result, 200)
   })

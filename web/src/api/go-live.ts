@@ -152,3 +152,16 @@ export function publishFromQueue(munId: string, idempotencyKey: string) {
     headers: { "Idempotency-Key": idempotencyKey },
   });
 }
+
+/**
+ * Wraps lib/lifecycle/go-live.ts#organizerSelfPublish — the owning organizer
+ * only, and only once their account-level payout is verified (staff action,
+ * @/api/organizer-admin's verifyOrganizerPayout). Runs the full
+ * approve/enqueue/publish sequence in one call; only legal from VERIFICATION
+ * (reached via the organizer's own Gate-3 confirmation).
+ */
+export function organizerSelfPublish(munId: string) {
+  return request<PublishFromQueueResult>(`/muns/${munId}/actions/self-publish`, {
+    method: "POST",
+  });
+}

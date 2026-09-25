@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PayoutStatusBanner } from "@/components/organizer/payout-status-banner";
 import { WorkspaceSidebar } from "@/components/organizer/workspace-sidebar";
 import { WorkspaceTopbar } from "@/components/organizer/workspace-topbar";
 import { SupportWidget } from "@/components/support/support-widget";
@@ -20,7 +21,10 @@ export function WorkspaceShell({ muns, currentMun, role, children }: WorkspaceSh
       </aside>
       <div className="flex min-w-0 flex-1 flex-col lg:h-dvh lg:overflow-y-auto lg:[scrollbar-gutter:stable]">
         <WorkspaceTopbar muns={muns} currentMun={currentMun} role={role} />
-        <main className="flex flex-1 flex-col">{children}</main>
+        <main className="flex flex-1 flex-col">
+          {role === "ORGANIZER" && <PayoutStatusBanner />}
+          {children}
+        </main>
       </div>
       <SupportWidget />
     </div>

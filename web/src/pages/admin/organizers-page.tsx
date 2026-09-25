@@ -229,6 +229,14 @@ export function AdminOrganizersPage() {
                     {formatDate(organizer.createdAt)}
                   </td>
                   <td className="px-md py-sm text-right">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mr-sm"
+                      render={<Link to={`/admin/organizers/${organizer.id}`} />}
+                    >
+                      View
+                    </Button>
                     {organizer.suspended ? (
                       <Button
                         variant="outline"

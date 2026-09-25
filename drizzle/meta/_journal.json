@@ -344,6 +344,13 @@
       "when": 1790367257735,
       "tag": "0048_chunky_the_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1790369238958,
+      "tag": "0049_dizzy_serpent_society",
+      "breakpoints": true
     }
   ]
 }

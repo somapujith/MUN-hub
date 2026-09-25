@@ -44,6 +44,10 @@ export interface OrganizerOnboarding {
     /** Optional secondary payout address. */
     upiId: string | null;
     upiPhone: string | null;
+    /** Set only by staff, once they verify the organizer's payout details. */
+    payoutVerified: boolean;
+    /** Set only by staff, alongside payoutVerified. */
+    paymentGateway: string | null;
   };
   completedSteps: OnboardingStep[];
   nextStep: OnboardingStep | null;

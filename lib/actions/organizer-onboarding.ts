@@ -69,6 +69,9 @@ export interface OrganizerOnboarding {
     /** Optional secondary payout address. */
     upiId: string | null
     upiPhone: string | null
+    /** Account-level, staff-set (lib/actions/organizer-admin.ts#verifyOrganizerPayout) — never something the organizer sets themselves. */
+    payoutVerified: boolean
+    paymentGateway: string | null
   }
   completedSteps: OnboardingStep[]
   /** The first step not yet done, or null when onboarding is complete. */
@@ -133,6 +136,8 @@ function toOnboarding(row: ProfileRow | undefined, account: AccountFields | unde
       upiId: row?.upiId ?? null,
       // Most organizers take payouts on the number they gave us.
       upiPhone: row?.upiPhone ?? contactPhone ?? null,
+      payoutVerified: row?.payoutVerified ?? false,
+      paymentGateway: row?.paymentGateway ?? null,
     },
     completedSteps,
     nextStep: ONBOARDING_STEPS.find((step) => !completedSteps.includes(step)) ?? null,

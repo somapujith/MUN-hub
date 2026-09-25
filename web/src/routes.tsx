@@ -40,6 +40,7 @@ import {
   AdminStaffPage,
   AdminGoLiveQueuePage,
   AdminOrganizersPage,
+  AdminOrganizerDetailPage,
   AdminOverviewPage,
   AdminPaymentsPage,
   AdminReportingPage,
@@ -284,6 +285,7 @@ export const router = createBrowserRouter([
               { path: "registrations", element: <AdminRegistrationsPage /> },
               { path: "payments", element: <AdminPaymentsPage /> },
               { path: "organizers", element: <AdminOrganizersPage /> },
+              { path: "organizers/:userId", element: <AdminOrganizerDetailPage /> },
               { path: "support", element: <AdminSupportPage /> },
               { path: "audit", element: <AdminAuditPage /> },
               {

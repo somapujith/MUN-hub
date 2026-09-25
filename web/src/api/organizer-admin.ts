@@ -1,4 +1,11 @@
-import type { ListOrganizersParams, ListOrganizersResult, OrganizerBankDetails } from "@/types/organizer-admin";
+import type {
+  ListOrganizersParams,
+  ListOrganizersResult,
+  OrganizerBankDetails,
+  OrganizerDetail,
+  OrganizerPayoutStatus,
+  PaymentGateway,
+} from "@/types/organizer-admin";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -38,6 +45,11 @@ export function reinstateOrganizer(userId: string) {
   return request<void>(`/admin/organizers/${userId}/reinstate`, { method: "POST" });
 }
 
+/** Account info + onboarding-wizard answers for one organizer. Powers the admin organizer detail page. */
+export function getOrganizerDetail(userId: string) {
+  return request<OrganizerDetail>(`/admin/organizers/${userId}`);
+}
+
 /**
  * Decrypts and returns the organizer's full bank payout details — every call
  * is audit-logged server-side. Deliberately not a `useQuery` anywhere it's
@@ -47,4 +59,18 @@ export function reinstateOrganizer(userId: string) {
  */
 export function getOrganizerBankDetails(userId: string) {
   return request<OrganizerBankDetails>(`/admin/organizers/${userId}/bank-details`);
+}
+
+/**
+ * Ties the organizer to a real payment gateway account and marks their
+ * payout verified — wraps lib/actions/organizer-admin.ts#verifyOrganizerPayout.
+ * This is the gate that then lets the organizer publish their own MUN
+ * without a further admin Gate-2 step (see @/api/go-live's
+ * organizerSelfPublish).
+ */
+export function verifyOrganizerPayout(userId: string, gateway: PaymentGateway) {
+  return request<OrganizerPayoutStatus>(`/admin/organizers/${userId}/verify-payout`, {
+    method: "POST",
+    body: JSON.stringify({ gateway }),
+  });
 }

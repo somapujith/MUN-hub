@@ -1,7 +1,15 @@
 import { zValidator } from '../lib/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { getOrganizerBankDetails, listOrganizers, reinstateOrganizer, suspendOrganizer } from '@/lib/actions/organizer-admin'
+import {
+  getOrganizerBankDetails,
+  getOrganizerDetail,
+  listOrganizers,
+  PAYMENT_GATEWAY_OPTIONS,
+  reinstateOrganizer,
+  suspendOrganizer,
+  verifyOrganizerPayout,
+} from '@/lib/actions/organizer-admin'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
 import type { AppVariables } from '../src/types'
@@ -22,6 +30,12 @@ const suspendOrganizerBodySchema = z
   })
   .strict()
 
+const verifyPayoutBodySchema = z
+  .object({
+    gateway: z.enum(PAYMENT_GATEWAY_OPTIONS),
+  })
+  .strict()
+
 export const organizerAdminRoutes = new Hono<{ Variables: AppVariables }>()
 
 organizerAdminRoutes.get(
@@ -31,6 +45,19 @@ organizerAdminRoutes.get(
   async (c) => {
     const params = paginationQuerySchema.parse(c.req.query())
     const result = await listOrganizers(params, c.get('session'))
+    return c.json(result)
+  },
+)
+
+// Account info + onboarding-wizard answers (no bank account number — see
+// lib/actions/organizer-admin.ts#getOrganizerDetail's doc comment). Powers
+// the admin organizer detail page.
+organizerAdminRoutes.get(
+  '/admin/organizers/:userId',
+  requireAuth,
+  requireRole([...ADMIN_ROLES]),
+  async (c) => {
+    const result = await getOrganizerDetail(c.req.param('userId'), c.get('session'))
     return c.json(result)
   },
 )
@@ -68,6 +95,20 @@ organizerAdminRoutes.get(
   async (c) => {
     const result = await getOrganizerBankDetails(c.req.param('userId'), c.get('session'))
     c.header('Cache-Control', 'no-store')
+    return c.json(result)
+  },
+)
+
+// Ties an organizer to a real payment gateway account and marks their
+// payout verified — see lib/actions/organizer-admin.ts#verifyOrganizerPayout.
+organizerAdminRoutes.post(
+  '/admin/organizers/:userId/verify-payout',
+  requireAuth,
+  requireRole([...ADMIN_ROLES]),
+  zValidator('json', verifyPayoutBodySchema),
+  async (c) => {
+    const { gateway } = c.req.valid('json')
+    const result = await verifyOrganizerPayout(c.req.param('userId'), gateway, c.get('session'))
     return c.json(result)
   },
 )

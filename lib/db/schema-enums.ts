@@ -212,6 +212,12 @@ export const adminActionEnum = pgEnum('admin_action', [
   // PII_READ: that one's docstring scopes it to delegate personal data
   // (names/emails), not financial account numbers.
   'ORGANIZER_BANK_DETAILS_REVEALED',
+  // Staff tied an organizer to a real payment gateway account and marked
+  // their payout verified (lib/actions/organizer-admin.ts#verifyOrganizerPayout,
+  // 2026-09-26, explicit user instruction) — the gate that then lets the
+  // organizer self-publish without further admin review (go-live.ts's
+  // organizerSelfPublish).
+  'ORGANIZER_PAYOUT_VERIFIED',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [

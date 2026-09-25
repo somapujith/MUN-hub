@@ -109,6 +109,9 @@ export const AdminGoLiveQueuePage = lazy(() =>
 export const AdminOrganizersPage = lazy(() =>
   import("@/pages/admin/organizers-page").then((m) => ({ default: m.AdminOrganizersPage })),
 );
+export const AdminOrganizerDetailPage = lazy(() =>
+  import("@/pages/admin/organizer-detail-page").then((m) => ({ default: m.AdminOrganizerDetailPage })),
+);
 export const AdminOverviewPage = lazy(() =>
   import("@/pages/admin/overview-page").then((m) => ({ default: m.AdminOverviewPage })),
 );
