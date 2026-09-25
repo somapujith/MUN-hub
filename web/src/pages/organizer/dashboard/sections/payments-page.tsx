@@ -102,16 +102,20 @@ function PaymentsSummarySection({ munId }: { munId: string }) {
 }
 
 /**
- * Read-only payout destination, cross-referencing the UPI details organizers
- * set once during onboarding (`lib/actions/organizer-onboarding.ts`) — the
- * same data `PaymentDetailsCard` on the Settings page reads, so the two
- * never disagree. Editing stays on Settings; this only links there.
+ * Read-only payout destination, cross-referencing the payout details
+ * organizers set once during onboarding (`lib/actions/organizer-onboarding.ts`)
+ * — the same data `PaymentDetailsCard` on the Settings page reads, so the two
+ * never disagree. Editing stays on Settings; this only links there. Bank
+ * account details are the required payout method (2026-09-26); UPI is only
+ * an optional secondary address.
  */
 function PayoutDestinationCard({ munId }: { munId: string }) {
   const onboardingQuery = useQuery({
     queryKey: queryKeys.organizerOnboarding(),
     queryFn: getOrganizerOnboarding,
   });
+  const profile = onboardingQuery.data?.profile;
+  const hasBankDetails = Boolean(profile?.bankAccountLast4);
 
   return (
     <Card className="max-w-2xl">
@@ -124,14 +128,16 @@ function PayoutDestinationCard({ munId }: { munId: string }) {
           <Skeleton className="h-16 w-full rounded-md" />
         ) : onboardingQuery.isError ? (
           <p className="text-body-md text-destructive">{onboardingQuery.error.message}</p>
-        ) : onboardingQuery.data?.profile.upiId ? (
+        ) : hasBankDetails || profile?.upiId ? (
           <div className="flex flex-col gap-xxs rounded-md border border-border bg-card px-md py-sm">
-            <p className="text-body-md text-ink">
-              <span className="font-medium">UPI ID:</span> {onboardingQuery.data.profile.upiId}
-            </p>
-            {onboardingQuery.data.profile.upiPhone && (
+            {hasBankDetails && (
+              <p className="text-body-md text-ink">
+                <span className="font-medium">Bank account:</span> {profile?.bankName} •••{profile?.bankAccountLast4}
+              </p>
+            )}
+            {profile?.upiId && (
               <p className="text-body-md text-muted-foreground">
-                Linked mobile: {onboardingQuery.data.profile.upiPhone}
+                <span className="font-medium text-ink">UPI ID:</span> {profile.upiId}
               </p>
             )}
           </div>

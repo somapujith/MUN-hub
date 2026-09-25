@@ -1,0 +1,2 @@
+ALTER TABLE "organizer_applications" ADD COLUMN "fields_requiring_correction" text[];--> statement-breakpoint
+ALTER TABLE "organizer_applications" ADD COLUMN "resubmission_count" integer DEFAULT 0 NOT NULL;

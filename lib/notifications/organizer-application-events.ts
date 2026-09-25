@@ -26,7 +26,15 @@ const ORGANIZER_SUPPORT_EMAIL = 'organizers@munhub.in'
 
 export type OrganizerApplicationEvent =
   | { type: 'APPLICATION_APPROVED'; munId: string; organizerEmail: string; munName: string }
-  | { type: 'APPLICATION_CHANGES_REQUESTED'; munId: string; organizerEmail: string; munName: string; reason: string }
+  | {
+      type: 'APPLICATION_CHANGES_REQUESTED'
+      munId: string
+      organizerEmail: string
+      munName: string
+      reason: string
+      /** Human labels (already resolved from APPLICATION_FIELD_LABELS by the caller) of the fields flagged for correction, if any. */
+      fieldsRequiringCorrection?: string[]
+    }
   | { type: 'APPLICATION_REJECTED'; munId: string; organizerEmail: string; munName: string; reason: string }
 
 export interface RenderedApplicationNotification {
@@ -89,6 +97,7 @@ export function renderOrganizerApplicationNotification(event: OrganizerApplicati
         area: APPLICATION_AREA,
         decision: 'CHANGES_REQUESTED' as const,
         reason: event.reason,
+        fieldsRequiringCorrection: event.fieldsRequiringCorrection,
         supportEmail: ORGANIZER_SUPPORT_EMAIL,
       }
       return {

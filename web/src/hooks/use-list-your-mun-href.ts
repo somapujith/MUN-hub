@@ -8,7 +8,8 @@ import { resolveZoneUrl } from "@/lib/host-routing";
  * Organizer and delegate accounts are separate, and a delegate account can't
  * become an organizer one — so a signed-in delegate (or staff) account never
  * sees an organizer-registration entry point. Signed-out visitors go to
- * organizer sign-up; organizers go straight to the host application. Hidden
+ * the organizer login (which creates the account on first use — there's no
+ * separate signup); organizers go straight to the host application. Hidden
  * while the session is loading so a delegate never sees it flash in.
  *
  * Returns an absolute publish.munhub.in URL in production; React Router's
@@ -17,7 +18,7 @@ import { resolveZoneUrl } from "@/lib/host-routing";
 export function useListYourMunHref(): string | null {
   const { data: session, isPending } = useSession();
   if (isPending) return null;
-  if (!session) return resolveZoneUrl("organizer", "/organizer/signup");
+  if (!session) return resolveZoneUrl("organizer", "/organizer/login");
   if (session.role === "ORGANIZER") return resolveZoneUrl("organizer", "/organizer/apply");
   return null;
 }

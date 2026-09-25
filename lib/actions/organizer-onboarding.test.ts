@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, organizerApplications, organizerProfiles, userConsents, users } from '@/lib/db/schema'
 import type { Session } from '@/lib/auth/adapter'
+import { decryptField } from '@/lib/crypto/field-encryption'
 import {
   ONBOARDING_ERRORS,
   acceptOrganizerAgreement,
@@ -24,7 +25,16 @@ const DETAILS = {
   previousEditions: '2 editions',
   websiteUrl: 'https://deccanmun.example',
 }
-const PAYMENT = { upiId: 'Asha.Rao@freecharge', upiPhone: '+919876543210' }
+const FULL_ACCOUNT_NUMBER = '123456789012'
+// Bank details are required; UPI is an optional secondary payout address.
+const PAYMENT = {
+  accountHolderName: 'Asha Rao',
+  bankName: 'HDFC Bank',
+  bankAccountNumber: FULL_ACCOUNT_NUMBER,
+  ifscCode: 'hdfc0001234',
+  upiId: 'Asha.Rao@freecharge',
+  upiPhone: '+919876543210',
+}
 
 async function makeUser(role: 'ORGANIZER' | 'STUDENT', name = 'Signup Name Here'): Promise<Session> {
   const [user] = await db
@@ -104,7 +114,16 @@ describe('organizer onboarding', () => {
     expect(state.profile).toMatchObject({ expectedDelegateCount: 350, websiteUrl: 'https://deccanmun.example' })
 
     state = await saveOrganizerPaymentStep(PAYMENT, session)
-    expect(state.profile).toMatchObject({ upiId: 'asha.rao@freecharge', upiPhone: '9876543210' })
+    expect(state.profile).toMatchObject({
+      accountHolderName: 'Asha Rao',
+      bankName: 'HDFC Bank',
+      bankAccountLast4: '9012',
+      ifscCode: 'HDFC0001234',
+      upiId: 'asha.rao@freecharge',
+      upiPhone: '9876543210',
+    })
+    // The full account number is write-only — never present anywhere in the returned profile.
+    expect(JSON.stringify(state.profile)).not.toContain(FULL_ACCOUNT_NUMBER)
     expect(state.nextStep).toBe('AGREEMENT')
     expect(await isOrganizerOnboardingComplete(session.userId)).toBe(false)
 
@@ -182,6 +201,28 @@ describe('organizer onboarding', () => {
     const state = await saveOrganizerDetailsStep({ ...DETAILS, previousEditions: ' ', websiteUrl: '' }, session)
     expect(state.profile).toMatchObject({ previousEditions: null, websiteUrl: null })
 
+    await expect(saveOrganizerPaymentStep({ ...PAYMENT, accountHolderName: ' ' }, session)).rejects.toThrow(
+      'Account holder name is required',
+    )
+    await expect(saveOrganizerPaymentStep({ ...PAYMENT, bankName: ' ' }, session)).rejects.toThrow(
+      'Bank name is required',
+    )
+    await expect(saveOrganizerPaymentStep({ ...PAYMENT, bankAccountNumber: '12345' }, session)).rejects.toThrow(
+      'Account number must be 9 to 18 digits',
+    )
+    await expect(
+      saveOrganizerPaymentStep({ ...PAYMENT, bankAccountNumber: '1'.repeat(19) }, session),
+    ).rejects.toThrow('Account number must be 9 to 18 digits')
+    await expect(saveOrganizerPaymentStep({ ...PAYMENT, bankAccountNumber: 'abc123456' }, session)).rejects.toThrow(
+      'Account number must be 9 to 18 digits',
+    )
+    await expect(saveOrganizerPaymentStep({ ...PAYMENT, ifscCode: 'BAD' }, session)).rejects.toThrow(
+      'IFSC code must look like HDFC0001234',
+    )
+    await expect(saveOrganizerPaymentStep({ ...PAYMENT, ifscCode: '0000HDFC123' }, session)).rejects.toThrow(
+      'IFSC code must look like HDFC0001234',
+    )
+
     await expect(saveOrganizerPaymentStep({ ...PAYMENT, upiId: 'not-a-upi' }, session)).rejects.toThrow(
       'Only a FreeCharge UPI ID is accepted — it must look like name@freecharge',
     )
@@ -191,6 +232,16 @@ describe('organizer onboarding', () => {
     await expect(saveOrganizerPaymentStep({ ...PAYMENT, upiPhone: '5123456789' }, session)).rejects.toThrow(
       'UPI mobile number must be a 10-digit Indian mobile number',
     )
+    // UPI is optional, but it's a pair: one without the other is rejected.
+    const { upiPhone: _omitPhone, ...paymentWithoutUpiPhone } = PAYMENT
+    await expect(saveOrganizerPaymentStep(paymentWithoutUpiPhone, session)).rejects.toThrow(
+      'Mobile number linked to the UPI ID is required',
+    )
+    const { upiId: _omitId, ...paymentWithoutUpiId } = PAYMENT
+    await expect(saveOrganizerPaymentStep(paymentWithoutUpiId, session)).rejects.toThrow(
+      'Enter a UPI ID before its linked mobile number',
+    )
+
     await saveOrganizerPaymentStep(PAYMENT, session)
 
     await expect(acceptOrganizerAgreement({ accepted: false }, session)).rejects.toThrow(
@@ -218,6 +269,45 @@ describe('organizer onboarding', () => {
 
     const [row] = await db.select().from(organizerProfiles).where(eq(organizerProfiles.userId, session.userId))
     expect(row.upiId).toBe('asha.rao@freecharge')
+    expect(row.bankAccountLast4).toBe('9012')
+  })
+
+  it('keeps the bank account number write-only: encrypted at rest, never returned as plaintext', async () => {
+    const session = await makeUser('ORGANIZER')
+    await saveOrganizerProfileStep(PROFILE, session)
+    await saveOrganizerMunStep(MUN, session)
+    await saveOrganizerDetailsStep(DETAILS, session)
+    const state = await saveOrganizerPaymentStep(PAYMENT, session)
+
+    expect(state.profile.bankAccountLast4).toBe(FULL_ACCOUNT_NUMBER.slice(-4))
+    // The type has no plaintext/ciphertext field at all — checked through
+    // `unknown` so this fails if one is ever added back.
+    const asRecord = state.profile as unknown as Record<string, unknown>
+    expect(asRecord.bankAccountNumber).toBeUndefined()
+    expect(asRecord.bankAccountNumberCiphertext).toBeUndefined()
+
+    const [row] = await db.select().from(organizerProfiles).where(eq(organizerProfiles.userId, session.userId))
+    expect(row.bankAccountNumberCiphertext).toBeTruthy()
+    expect(row.bankAccountNumberCiphertext).not.toContain(FULL_ACCOUNT_NUMBER)
+    expect(decryptField(row.bankAccountNumberCiphertext!)).toBe(FULL_ACCOUNT_NUMBER)
+  })
+
+  it('accepts the payment step with bank details only — UPI is optional', async () => {
+    const session = await makeUser('ORGANIZER')
+    await saveOrganizerProfileStep(PROFILE, session)
+    await saveOrganizerMunStep(MUN, session)
+    await saveOrganizerDetailsStep(DETAILS, session)
+
+    const { upiId: _upiId, upiPhone: _upiPhone, ...bankOnly } = PAYMENT
+    const state = await saveOrganizerPaymentStep(bankOnly, session)
+
+    expect(state.nextStep).toBe('AGREEMENT')
+    expect(state.profile.upiId).toBeNull()
+    // upiPhone still defaults from the signup phone when no UPI was ever saved —
+    // that's a pre-fill suggestion for the UI, independent of the UPI pair rule.
+    const [row] = await db.select().from(organizerProfiles).where(eq(organizerProfiles.userId, session.userId))
+    expect(row.upiId).toBeNull()
+    expect(row.upiPhone).toBeNull()
   })
 
   it('handles a double submit of the agreement without a second application', async () => {

@@ -13,11 +13,12 @@ import { expectSignedOutHeader, pageHeading, watchForCrashes } from '../../fixtu
 import { codeInput, enterPlantedCode, freshOrganizer, sessionOf, sessionVia } from './_helpers'
 
 /**
- * Passwordless organizer accounts (lib/actions/organizer-otp.ts). Signup
- * collects name, email, optional phone and consent, then an emailed 6-digit
- * code confirms the address; the account exists only once the code checks
- * out. Organizer and delegate accounts are separate: a delegate can never
- * become an organizer.
+ * Passwordless organizer accounts (lib/actions/organizer-otp.ts). There is no
+ * separate "sign up": /organizer/login is the only door. An email, then an
+ * emailed 6-digit code — the account is created the moment the code checks
+ * out for an address that doesn't have one yet, with a placeholder name (the
+ * onboarding wizard's profile step collects the real one). Organizer and
+ * delegate accounts are separate: a delegate can never become an organizer.
  */
 
 /** Where a brand-new organizer lands. */
@@ -31,48 +32,37 @@ function input(page: Page, label: string) {
   return main(page).getByLabel(label, { exact: true })
 }
 
-async function fillDetails(page: Page, v: { name?: string; email: string; phone?: string; consent?: boolean }) {
-  await input(page, 'Full name').fill(v.name ?? 'E2E Secretariat Lead')
-  await input(page, 'Email address').fill(v.email)
-  if (v.phone) await input(page, 'Phone (optional)').fill(v.phone)
-  if (v.consent ?? true) {
-    await main(page).getByRole('checkbox', { name: /terms of service/i }).click()
-    await main(page).getByRole('checkbox', { name: /privacy policy/i }).click()
-  }
-}
-
-async function sendCode(page: Page) {
+async function sendCode(page: Page, email: string) {
+  await input(page, 'Email address').fill(email)
   await main(page).getByRole('button', { name: 'Send OTP', exact: true }).click()
 }
 
-test.describe('organizer signup (UI)', () => {
-  test('renders a short, organizer-only form with no password', async ({ page }) => {
+test.describe('organizer login (UI)', () => {
+  test('renders a short, organizer-only form with no password and no signup fields', async ({ page }) => {
     const crashes = watchForCrashes(page)
-    await page.goto('/organizer/signup')
-    await expect(pageHeading(page)).toHaveText('Create your organizer account')
-    for (const label of ['Full name', 'Email address', 'Phone (optional)']) {
-      await expect(input(page, label)).toBeVisible()
-    }
+    await page.goto('/organizer/login')
+    await expect(pageHeading(page)).toHaveText('Log in')
+    await expect(input(page, 'Email address')).toBeVisible()
     await expect(main(page).getByLabel(/password/i)).toHaveCount(0)
-    await expect(main(page).getByRole('checkbox', { name: /terms of service/i })).not.toBeChecked()
-    await expect(main(page).getByRole('checkbox', { name: /privacy policy/i })).not.toBeChecked()
-    // None of the delegate profile questions.
-    await expect(main(page).getByLabel(/date of birth|emergency|guardian/i)).toHaveCount(0)
-    await expect(main(page).getByRole('link', { name: 'Log in' })).toHaveAttribute('href', '/organizer/login')
+    // None of the old signup-step fields exist anymore.
+    await expect(main(page).getByLabel(/full name/i)).toHaveCount(0)
+    await expect(main(page).getByLabel(/phone/i)).toHaveCount(0)
+    await expect(main(page).getByRole('checkbox')).toHaveCount(0)
+    await expect(main(page).getByRole('link', { name: 'Terms of Service' })).toBeVisible()
+    await expect(main(page).getByRole('link', { name: 'Privacy Policy' })).toBeVisible()
     crashes.assertNone()
   })
 
-  test('details, then the emailed code, create an ORGANIZER and open the application', async ({ page }) => {
+  test('logging in with an unknown address creates an ORGANIZER and opens the application', async ({ page }) => {
     const crashes = watchForCrashes(page)
-    const email = uniqueEmail('org-signup')
-    await page.goto('/organizer/signup')
-    await fillDetails(page, { email, phone: '9876500000' })
-    await sendCode(page)
+    const email = uniqueEmail('org-login-new')
+    await page.goto('/organizer/login')
+    await sendCode(page, email)
 
     // No account exists until the code is verified.
     await expect(pageHeading(page)).toHaveText('Enter OTP')
     expect(await sessionOf(page)).toBeNull()
-    await expect(main(page).getByRole('button', { name: 'Verify and create account' })).toBeDisabled()
+    await expect(main(page).getByRole('button', { name: 'Verify' })).toBeDisabled()
 
     await enterPlantedCode(page, email)
     await expect(page).toHaveURL(NEW_ORGANIZER_LANDING)
@@ -118,77 +108,53 @@ test.describe('organizer signup (UI)', () => {
     const organizer = await freshOrganizer()
     await organizer.api.dispose()
     await page.goto('/organizer/login')
-    await input(page, 'Email address').fill(organizer.email)
-    await sendCode(page)
+    await sendCode(page, organizer.email)
     await enterPlantedCode(page, organizer.email)
     await expect(page).toHaveURL(/\/organizer\/dashboard$/)
   })
 
   test('?redirectTo= wins over the welcome page', async ({ page }) => {
     const email = uniqueEmail('org-redirect')
-    await page.goto('/organizer/signup?redirectTo=%2Forganizer%2Fsupport')
-    await fillDetails(page, { email })
-    await sendCode(page)
+    await page.goto('/organizer/login?redirectTo=%2Forganizer%2Fsupport')
+    await sendCode(page, email)
     await enterPlantedCode(page, email)
     await expect(page).toHaveURL(/\/organizer\/support$/)
   })
 
-  test('"Change" on the code step returns to the filled-in details', async ({ page }) => {
+  test('"Change" on the code step returns to the email step with the address filled in', async ({ page }) => {
     const email = uniqueEmail('org-back')
-    await page.goto('/organizer/signup')
-    await fillDetails(page, { name: 'E2E Back Button', email, phone: '9876500001' })
-    await sendCode(page)
+    await page.goto('/organizer/login')
+    await sendCode(page, email)
     await expect(pageHeading(page)).toHaveText('Enter OTP')
     await main(page).getByRole('button', { name: 'Change' }).click()
-    await expect(pageHeading(page)).toHaveText('Create your organizer account')
-    await expect(input(page, 'Full name')).toHaveValue('E2E Back Button')
+    await expect(pageHeading(page)).toHaveText('Log in')
     await expect(input(page, 'Email address')).toHaveValue(email)
-    await expect(input(page, 'Phone (optional)')).toHaveValue('9876500001')
-    await expect(main(page).getByRole('checkbox', { name: /terms of service/i })).toBeChecked()
   })
 
   test('a wrong code is refused and nothing is created', async ({ page }) => {
     const email = uniqueEmail('org-wrong')
-    await page.goto('/organizer/signup')
-    await fillDetails(page, { email })
-    await sendCode(page)
+    await page.goto('/organizer/login')
+    await sendCode(page, email)
     await expect(pageHeading(page)).toHaveText('Enter OTP')
     await seedOrganizerLoginCode(email)
     await codeInput(page).fill('000000')
     await expect(main(page).getByRole('alert')).toHaveText('Incorrect code')
     expect(await sessionOf(page)).toBeNull()
-    await expect(page).toHaveURL(/\/organizer\/signup$/)
+    await expect(page).toHaveURL(/\/organizer\/login$/)
   })
 
-  test('client-side checks: name, email and consent', async ({ page }) => {
-    const email = uniqueEmail('org-invalid')
-    await page.goto('/organizer/signup')
-    const alert = main(page).getByRole('alert')
-
-    await fillDetails(page, { name: '   ', email })
-    await sendCode(page)
-    await expect(alert).toHaveText('Enter your full name.')
-
-    await input(page, 'Full name').fill('E2E Secretariat Lead')
+  test('the email field rejects an invalid address before sending', async ({ page }) => {
+    await page.goto('/organizer/login')
+    const send = main(page).getByRole('button', { name: 'Send OTP', exact: true })
+    await expect(send).toBeDisabled()
     await input(page, 'Email address').fill('not-an-email')
-    await sendCode(page)
-    await expect(alert).toHaveText('Enter a valid email address.')
-
-    await page.goto('/organizer/signup')
-    await fillDetails(page, { email, consent: false })
-    await sendCode(page)
-    await expect(alert).toHaveText('Accept the Terms of Service and Privacy Policy to continue.')
-    await expect(input(page, 'Full name')).toHaveValue('E2E Secretariat Lead')
-    await expect(input(page, 'Email address')).toHaveValue(email)
-    await expect(pageHeading(page)).toHaveText('Create your organizer account')
-    expect(await sessionOf(page)).toBeNull()
+    await expect(send).toBeDisabled()
   })
 
-  test('a delegate’s email cannot be used to create an organizer account', async ({ page }) => {
+  test('a delegate’s email cannot be used to log in as an organizer', async ({ page }) => {
     const student = await signUpViaApi()
-    await page.goto('/organizer/signup')
-    await fillDetails(page, { email: student.email })
-    await sendCode(page)
+    await page.goto('/organizer/login')
+    await sendCode(page, student.email)
     await expect(pageHeading(page)).toHaveText('Enter OTP')
     // No live code is ever issued for a delegate address.
     await codeInput(page).fill(TEST_LOGIN_CODE)
@@ -210,47 +176,20 @@ test.describe('organizer signup (UI)', () => {
     await context.close()
   })
 
-  test('a signed-in delegate still sees the organizer form', async ({ browser }) => {
+  test('a signed-in delegate still sees the organizer login form', async ({ browser }) => {
     const student = await signUpViaApi()
     const context = await browserContextFor(browser, student)
     const page = await context.newPage()
-    await page.goto('/organizer/signup')
-    await expect(pageHeading(page)).toHaveText('Create your organizer account')
-    await expect(page).toHaveURL(/\/organizer\/signup$/)
+    await page.goto('/organizer/login')
+    await expect(pageHeading(page)).toHaveText('Log in')
+    await expect(page).toHaveURL(/\/organizer\/login$/)
     await context.close()
   })
 
-  test('the organizer login and signup pages link to each other', async ({ page }) => {
-    await page.goto('/organizer/login')
-    await main(page).getByRole('link', { name: 'Create an organizer account' }).click()
-    await expect(page).toHaveURL(/\/organizer\/signup$/)
-    await main(page).getByRole('link', { name: 'Log in' }).click()
-    await expect(page).toHaveURL(/\/organizer\/login$/)
-  })
-})
-
-test.describe('organizer login with an unknown email', () => {
-  test('asks for details after the code, then creates the account', async ({ page }) => {
-    const email = uniqueEmail('org-login-new')
-    await page.goto('/organizer/login')
-    await main(page).getByRole('textbox', { name: 'Email address' }).fill(email)
-    await sendCode(page)
-    await enterPlantedCode(page, email)
-
-    await expect(pageHeading(page)).toHaveText('Create your organizer account')
-    await expect(main(page)).toContainText(`There's no organizer account for ${email} yet`)
-    expect(await sessionOf(page)).toBeNull()
-
-    const create = main(page).getByRole('button', { name: 'Create account', exact: true })
-    await input(page, 'Full name').fill('E2E Late Details')
-    await create.click()
-    await expect(main(page).getByRole('alert')).toHaveText('Accept the Terms of Service and Privacy Policy to continue.')
-
-    await main(page).getByRole('checkbox', { name: /terms of service/i }).click()
-    await main(page).getByRole('checkbox', { name: /privacy policy/i }).click()
-    await create.click()
-    await expect(page).toHaveURL(NEW_ORGANIZER_LANDING)
-    expect((await sessionOf(page))?.role).toBe('ORGANIZER')
+  test('/organizer/signup is a dead link that redirects straight to /organizer/login, keeping ?redirectTo=', async ({ page }) => {
+    await page.goto('/organizer/signup?redirectTo=%2Forganizer%2Fsupport')
+    await expect(page).toHaveURL(/\/organizer\/login\?redirectTo=%2Forganizer%2Fsupport$/)
+    await expect(pageHeading(page)).toHaveText('Log in')
   })
 })
 
@@ -318,27 +257,24 @@ test.describe('organizer code API', () => {
     await api.dispose()
   })
 
-  test('an unknown address with a valid code but no details is asked for them', async () => {
-    const email = uniqueEmail('org-profile')
+  test('an unknown address with a valid code creates the account outright — no separate signup step', async () => {
+    const email = uniqueEmail('org-new')
     await seedOrganizerLoginCode(email)
     const api = await newApiContext()
     const res = await api.post('auth/organizers/session', { data: { email, code: TEST_LOGIN_CODE } })
-    expect(res.status()).toBe(200)
-    expect(await res.json()).toEqual({ status: 'PROFILE_REQUIRED' })
-    expect(await (await api.get('auth/session')).json()).toBeNull()
+    expect(res.status()).toBe(201)
+    const body = await res.json()
+    expect(body).toMatchObject({ status: 'SIGNED_IN', role: 'ORGANIZER', isNewAccount: true })
+    expect((await (await api.get('auth/session')).json())?.role).toBe('ORGANIZER')
     await api.dispose()
   })
 
-  test('signup without consent is refused', async () => {
-    const email = uniqueEmail('org-noconsent')
+  test('a smuggled `profile` field on the session call is rejected', async () => {
+    const email = uniqueEmail('org-smuggle')
     await seedOrganizerLoginCode(email)
     const api = await newApiContext()
     const res = await api.post('auth/organizers/session', {
-      data: {
-        email,
-        code: TEST_LOGIN_CODE,
-        profile: { name: 'No Consent', acceptedTermsOfService: true, acceptedPrivacyPolicy: false },
-      },
+      data: { email, code: TEST_LOGIN_CODE, profile: { name: 'Smuggled Name' } },
     })
     expect(res.status()).toBe(400)
     expect(await (await api.get('auth/session')).json()).toBeNull()
@@ -349,29 +285,19 @@ test.describe('organizer code API', () => {
     const student = await signUpViaApi()
     await seedOrganizerLoginCode(student.email)
     const api = await newApiContext()
-    const res = await api.post('auth/organizers/session', {
-      data: {
-        email: student.email,
-        code: TEST_LOGIN_CODE,
-        profile: { name: 'Hijack Attempt', acceptedTermsOfService: true, acceptedPrivacyPolicy: true },
-      },
-    })
+    const res = await api.post('auth/organizers/session', { data: { email: student.email, code: TEST_LOGIN_CODE } })
     expect(res.status()).toBe(403)
     expect(await (await api.get('auth/session')).json()).toBeNull()
     expect((await sessionVia(student.api))?.role).toBe('STUDENT')
     await api.dispose()
   })
 
-  test('signing up with an existing organizer email signs into that account instead of duplicating it', async () => {
+  test('logging in with an existing organizer email signs into that account instead of duplicating it', async () => {
     const organizer = await freshOrganizer()
     await seedOrganizerLoginCode(organizer.email)
     const api = await newApiContext()
     const res = await api.post('auth/organizers/session', {
-      data: {
-        email: organizer.email.toUpperCase(),
-        code: TEST_LOGIN_CODE,
-        profile: { name: 'Someone Else', acceptedTermsOfService: true, acceptedPrivacyPolicy: true },
-      },
+      data: { email: organizer.email.toUpperCase(), code: TEST_LOGIN_CODE },
     })
     expect(res.status()).toBe(200)
     const body = await res.json()

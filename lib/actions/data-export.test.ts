@@ -137,10 +137,16 @@ describe('exportAccountData', () => {
       firstName: 'Privacy',
       lastName: 'Organizer',
       contactPhone: '9876500003',
+      accountHolderName: 'Privacy Organizer',
+      bankName: 'Test Bank',
+      bankAccountLast4: '4321',
+      ifscCode: 'TEST0001234',
       upiId: 'privacy@freecharge',
       upiPhone: '9876500003',
       agreementVersion: 'test',
     })
+    // The full account number is write-only and never appears in an export.
+    expect(JSON.stringify(data.organizerProfile)).not.toContain('Ciphertext')
     expect(data.organizerApplications).toEqual([
       {
         munName: 'Upcoming Privacy MUN',

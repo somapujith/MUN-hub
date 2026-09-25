@@ -41,6 +41,19 @@ function maskUpiId(upiId: string): string {
 }
 
 /**
+ * Bank account details are the required payout method (2026-09-26); UPI is
+ * only an optional secondary address. Prefer the bank summary when it's on
+ * file, falling back to UPI only for old/edge-case data that has a UPI id
+ * but no bank details.
+ */
+function formatPayout(payout: { bankName: string | null; bankAccountLast4: string | null; upiId: string | null } | null): string {
+  if (!payout) return "Not set";
+  if (payout.bankAccountLast4) return `${payout.bankName ?? "Bank"} •••${payout.bankAccountLast4}`;
+  if (payout.upiId) return `FreeCharge UPI ${maskUpiId(payout.upiId)}`;
+  return "Not set";
+}
+
+/**
  * Gate 3: the organizer reviews a summary of everything they're submitting and
  * attests to it before MUN Hub's verification starts.
  */
@@ -146,7 +159,7 @@ function ConfirmationSummary({ preview }: { preview: ConfirmationPreview }) {
     { label: "Registration form", value: plural(snapshot.formFields.length, "custom question") },
     {
       label: "Payouts",
-      value: payout?.upiId ? `FreeCharge UPI ${maskUpiId(payout.upiId)}` : "Not set",
+      value: formatPayout(payout),
     },
     { label: "Branding", value: `${hasLogo ? "Logo" : "No logo"}, ${hasCover ? "cover image" : "no cover image"}` },
     {

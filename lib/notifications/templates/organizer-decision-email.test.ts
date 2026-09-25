@@ -85,6 +85,31 @@ describe('renderOrganizerDecisionEmailHtml', () => {
     expect(html).toContain('&lt;img src=x&gt; tag &amp; retry')
   })
 
+  it('lists the flagged fields under the reason block when present', () => {
+    const html = renderOrganizerDecisionEmailHtml({
+      ...CHANGES_REQUESTED_INPUT,
+      fieldsRequiringCorrection: ['Title of your MUN', 'About your MUN'],
+    })
+    expect(html).toContain('<li style="font-size:14px; color:#41454d;">Title of your MUN</li>')
+    expect(html).toContain('<li style="font-size:14px; color:#41454d;">About your MUN</li>')
+  })
+
+  it('renders no field list when fieldsRequiringCorrection is absent or empty', () => {
+    const withoutField = renderOrganizerDecisionEmailHtml(CHANGES_REQUESTED_INPUT)
+    expect(withoutField).not.toContain('<ul style=')
+    const withEmptyArray = renderOrganizerDecisionEmailHtml({ ...CHANGES_REQUESTED_INPUT, fieldsRequiringCorrection: [] })
+    expect(withEmptyArray).not.toContain('<ul style=')
+  })
+
+  it('escapes HTML-significant characters in flagged field labels', () => {
+    const html = renderOrganizerDecisionEmailHtml({
+      ...CHANGES_REQUESTED_INPUT,
+      fieldsRequiringCorrection: ['<script>alert(1)</script>'],
+    })
+    expect(html).not.toContain('<script>alert(1)</script>')
+    expect(html).toContain('&lt;script&gt;')
+  })
+
   it('includes the logo image and the have-questions footer', () => {
     const html = renderOrganizerDecisionEmailHtml(APPROVED_INPUT)
     expect(html).toContain('https://www.munhub.in/images/logo-lockup.png')
@@ -111,5 +136,13 @@ describe('renderOrganizerDecisionEmailText', () => {
   it('falls back to the generic reason line for REJECTED with no reason', () => {
     const text = renderOrganizerDecisionEmailText({ ...REJECTED_INPUT, reason: undefined })
     expect(text).toContain('Why: See your dashboard for details.')
+  })
+
+  it('lists the flagged fields as a bullet list after the reason', () => {
+    const text = renderOrganizerDecisionEmailText({
+      ...CHANGES_REQUESTED_INPUT,
+      fieldsRequiringCorrection: ['Title of your MUN', 'About your MUN'],
+    })
+    expect(text).toContain('What needs to change: The UNSC committee is missing a chair.\n- Title of your MUN\n- About your MUN')
   })
 })

@@ -207,10 +207,17 @@ describe('getConfirmationPreview', () => {
     await expect(getConfirmationPreview(mun.id, sessionFor(stranger))).rejects.toThrow('Forbidden')
   })
 
-  it("returns the organizer's current account-level UPI payout, not the stale mun_payment_settings bank fields", async () => {
+  it("returns the organizer's current account-level payout, not the stale mun_payment_settings bank fields", async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id)
-    await db.insert(organizerProfiles).values({ userId: organizer.id, upiId: 'preview-organizer@freecharge' })
+    await db.insert(organizerProfiles).values({
+      userId: organizer.id,
+      accountHolderName: 'Preview Organizer',
+      bankName: 'Preview Bank',
+      bankAccountLast4: '9012',
+      ifscCode: 'PREV0001234',
+      upiId: 'preview-organizer@freecharge',
+    })
     // A legacy per-mun bank-account row also exists — the regression this
     // guards is `organizerPayout` reading these stale fields instead.
     await db.insert(munPaymentSettings).values({
@@ -236,10 +243,16 @@ describe('getConfirmationPreview', () => {
 
     const preview = await getConfirmationPreview(mun.id, sessionFor(organizer))
 
-    expect(preview.snapshot.organizerPayout).toEqual({ upiId: 'preview-organizer@freecharge' })
+    expect(preview.snapshot.organizerPayout).toEqual({
+      accountHolderName: 'Preview Organizer',
+      bankName: 'Preview Bank',
+      bankAccountLast4: '9012',
+      ifscCode: 'PREV0001234',
+      upiId: 'preview-organizer@freecharge',
+    })
   })
 
-  it('reports no payout when the organizer has not linked a UPI id', async () => {
+  it('reports no payout when the organizer has not linked a payout method', async () => {
     const organizer = await makeUser('ORGANIZER')
     const mun = await makeMun(organizer.id)
 

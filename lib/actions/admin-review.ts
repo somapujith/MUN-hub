@@ -6,6 +6,7 @@ import {
   munModuleVerifications,
   munSubmissions,
   organizerApplications,
+  organizerProfiles,
   payments,
   portfolios,
   registrations,
@@ -24,6 +25,7 @@ import { isEmailNotificationsEnabled } from '@/lib/notifications/email-preferenc
 import { notifyOrganizerApplicationEvent } from '@/lib/notifications/organizer-application-events'
 import { notifyRegistrationConfirmed } from '@/lib/notifications/registration-events'
 import { resolveMunNotificationContext } from '@/lib/notifications/resolve-recipients'
+import { APPLICATION_FIELD_KEYS, APPLICATION_FIELD_LABELS, type ApplicationFieldKey } from '@/lib/actions/organizer-application'
 import type { ApplicationStatus, ModuleVerificationState, RegistrationStatus } from '@/lib/db/schema-enums'
 import type { Mun, MunWithApplication } from '@/lib/types'
 
@@ -46,8 +48,13 @@ export interface ReviewQueueParams {
   offset?: number
 }
 
+export interface ReviewQueueRow extends Mun {
+  /** How many times this application has been resubmitted after CHANGES_REQUESTED. */
+  resubmissionCount: number
+}
+
 export interface ReviewQueueResult {
-  results: Mun[]
+  results: ReviewQueueRow[]
   total: number
 }
 
@@ -83,7 +90,7 @@ export async function getReviewQueue(
   )
 
   const results = await db
-    .select(getTableColumns(muns))
+    .select({ ...getTableColumns(muns), resubmissionCount: organizerApplications.resubmissionCount })
     .from(muns)
     .innerJoin(organizerApplications, eq(organizerApplications.munId, muns.id))
     .innerJoin(users, eq(organizerApplications.organizerId, users.id))
@@ -128,10 +135,21 @@ export async function getMunForReview(munId: string, session: Session | null): P
     .where(eq(verificationLogs.munId, munId))
     .orderBy(desc(verificationLogs.createdAt))
 
+  const [profile] = await db
+    .select({
+      firstName: organizerProfiles.firstName,
+      lastName: organizerProfiles.lastName,
+      contactPhone: organizerProfiles.contactPhone,
+    })
+    .from(organizerProfiles)
+    .where(eq(organizerProfiles.userId, mun.organizerId))
+    .limit(1)
+
   return {
     ...mun,
     organizerApplication: application ?? null,
     verificationLogs: logs,
+    organizerProfile: profile ?? null,
   }
 }
 
@@ -156,6 +174,15 @@ export async function getMunForReview(munId: string, session: Session | null): P
  * status hop writes its own `verificationLogs` row, and those rows are what
  * `listAdminActions` (admin-audit.ts) surfaces as APPLICATION_* entries.
  *
+ * `fieldsRequiringCorrection` (2026-09-26) is the structured counterpart to
+ * `notes`'s free text — which of the organizer's own answers
+ * (`APPLICATION_FIELD_KEYS`) need fixing. Only meaningful, and only stored,
+ * on CHANGES_REQUESTED: an APPROVED/REJECTED decision always clears it to
+ * `[]` (REJECTED is terminal — there is no resubmit loop to flag fields
+ * for). `resubmitOrganizerApplication` (organizer-application.ts) clears it
+ * again once the organizer acts on it, so it only ever describes the
+ * *current* outstanding round, never history.
+ *
  * **Gate 1 only.** This is organizer-APPLICATION review (SUBMITTED/
  * UNDER_REVIEW muns, `organizer_applications`), never mun-content review.
  * Gate 2's content-review decision is `reviewSubmission`
@@ -169,6 +196,7 @@ export async function reviewMunApplication(
   notes: string | undefined,
   internalNotes: string | undefined,
   session: Session | null,
+  fieldsRequiringCorrection?: ApplicationFieldKey[],
 ): Promise<Mun> {
   requireRole(session, [...REVIEW_ROLES])
 
@@ -177,6 +205,12 @@ export async function reviewMunApplication(
   const trimmedNotes = notes?.trim() || undefined
   if (decision !== 'APPROVED' && !trimmedNotes) {
     throw new Error('A reason is required to reject or request changes')
+  }
+
+  const flaggedFields =
+    decision === 'CHANGES_REQUESTED' ? Array.from(new Set(fieldsRequiringCorrection ?? [])) : []
+  for (const key of flaggedFields) {
+    if (!APPLICATION_FIELD_KEYS.includes(key)) throw new Error(`Unknown field: ${key}`)
   }
 
   // Everything below commits (or rolls back) as one unit: the optional
@@ -197,7 +231,7 @@ export async function reviewMunApplication(
 
     await tx
       .update(organizerApplications)
-      .set({ status: decision, reviewNotes: trimmedNotes ?? null })
+      .set({ status: decision, reviewNotes: trimmedNotes ?? null, fieldsRequiringCorrection: flaggedFields })
       .where(eq(organizerApplications.munId, munId))
 
     if (decision === 'APPROVED') {
@@ -214,7 +248,12 @@ export async function reviewMunApplication(
   // decision itself is an OrganizerApplicationEvent, never PipelineEvent's
   // Gate-2-scoped APPROVED/CHANGES_REQUESTED (see that file's header for
   // why).
-  notifyReviewDecisionAfterCommit(munId, decision, trimmedNotes)
+  notifyReviewDecisionAfterCommit(
+    munId,
+    decision,
+    trimmedNotes,
+    flaggedFields.map((key) => APPLICATION_FIELD_LABELS[key]),
+  )
 
   return updated
 }
@@ -263,6 +302,7 @@ function notifyReviewDecisionAfterCommit(
   munId: string,
   decision: 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED',
   reason: string | undefined,
+  fieldLabels: string[],
 ): void {
   // `runInBackground` keeps this alive past the response on Workers.
   runInBackground('admin-review pipeline notification', async () => {
@@ -286,6 +326,9 @@ function notifyReviewDecisionAfterCommit(
       // Non-APPROVED decisions require a non-empty `notes` earlier in this
       // function, so `reason` is guaranteed defined on this branch.
       reason: reason ?? 'See review notes.',
+      // Only CHANGES_REQUESTED ever carries these (REJECTED's flaggedFields
+      // is always []) — see reviewMunApplication's doc comment.
+      fieldsRequiringCorrection: fieldLabels.length > 0 ? fieldLabels : undefined,
     })
   })
 }

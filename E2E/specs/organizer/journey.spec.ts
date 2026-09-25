@@ -50,7 +50,7 @@ function munCard(page: Page, name: string) {
   return main(page).getByRole('link', { name: new RegExp(name) })
 }
 
-test.describe.serial('new organizer: sign up, onboard (which applies), get approved', () => {
+test.describe.serial('new organizer: log in (creating the account), onboard (which applies), get approved', () => {
   const conferenceName = `E2E Journey MUN ${uid()}`
   let page: Page
   let munId = ''
@@ -63,7 +63,7 @@ test.describe.serial('new organizer: sign up, onboard (which applies), get appro
     await page?.context().close()
   })
 
-  test('signs up at /organizer/signup and lands on an empty organizer workspace', async () => {
+  test('logs in at /organizer/login for the first time and lands on an empty organizer workspace', async () => {
     const crashes = watchForCrashes(page)
     await signUpOrganizerThroughUi(page)
 

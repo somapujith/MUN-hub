@@ -87,32 +87,31 @@ export async function anonApi(): Promise<APIRequestContext> {
 
 /*
  * ORGANIZER ACCOUNT CREATION — the only two places specs create organizer
- * accounts (API and UI). Keep it that way so a change to the signup flow
+ * accounts (API and UI). Keep it that way so a change to the login flow
  * (e.g. passwordless sign-in) is a two-function edit.
  */
 
 /**
- * Signs a brand-new organizer up through the /organizer/signup page
- * (details -> emailed code -> verify). Leaves the page signed in, wherever
- * signup lands it. Returns the email used.
+ * Signs a brand-new organizer up through the single /organizer/login form
+ * (email -> emailed code -> verify). There's no separate signup step: the
+ * account is created the moment an unrecognized address's code checks out,
+ * with a placeholder name — the real name comes from the onboarding wizard's
+ * profile step, not from this form. Leaves the page signed in, wherever login
+ * lands it (the welcome page, for a brand-new account). Returns the email used.
  */
-export async function signUpOrganizerThroughUi(page: Page, name = 'E2E Journey Organizer'): Promise<string> {
+export async function signUpOrganizerThroughUi(page: Page): Promise<string> {
   const email = uniqueEmail('journey-org')
-  await page.goto('/organizer/signup')
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/create your organizer account/i)
+  await page.goto('/organizer/login')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Log in')
   const form = main(page)
-  await form.getByLabel('Full name').fill(name)
   await form.getByLabel('Email address').fill(email)
-  await form.getByLabel('Phone (optional)').fill('9876512345')
-  await form.getByRole('checkbox', { name: /terms of service/i }).click()
-  await form.getByRole('checkbox', { name: /privacy policy/i }).click()
   await form.getByRole('button', { name: /^send otp$/i }).click()
 
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Enter OTP')
   await expect(main(page)).toContainText(email.toLowerCase())
   // After "Send OTP": requesting a code consumes any older one.
   await seedOrganizerLoginCode(email)
-  await expect(form.getByRole('button', { name: 'Verify and create account' })).toBeDisabled()
+  await expect(form.getByRole('button', { name: 'Verify' })).toBeDisabled()
   // Entering the sixth digit submits the form by itself.
   await form.getByLabel('6-digit code').fill(TEST_LOGIN_CODE)
   return email
@@ -138,6 +137,10 @@ export function onboardingAnswers(conferenceName = `E2E Wizard MUN ${uid()}`) {
     munDescription: 'Three committees, a crisis cabinet, and a press corps. Our first edition on MUN Hub.',
     previousEditions: '2nd edition, 120 delegates last year',
     websiteUrl: 'https://example.com/e2e-wizard',
+    accountHolderName: 'E2E Debating Society',
+    bankName: 'HDFC Bank',
+    bankAccountNumber: '123456789012',
+    ifscCode: 'HDFC0001234',
     upiId: 'e2e.organizer@freecharge',
     upiPhone: '9123456780',
   }
@@ -179,8 +182,13 @@ export async function completeOnboardingThroughUi(page: Page, answers: Onboardin
   await next.click()
 
   await expect(heading).toHaveText('Payment details')
-  await form.getByLabel('UPI ID', { exact: true }).fill(answers.upiId)
-  await form.getByLabel('Mobile number linked to this UPI ID').fill(answers.upiPhone)
+  await form.getByLabel('Account holder name').fill(answers.accountHolderName)
+  await form.getByLabel('Bank name').fill(answers.bankName)
+  await form.getByLabel('Account number', { exact: true }).fill(answers.bankAccountNumber)
+  await form.getByLabel('Confirm account number').fill(answers.bankAccountNumber)
+  await form.getByLabel('IFSC code').fill(answers.ifscCode)
+  await form.getByLabel('UPI ID (optional)').fill(answers.upiId)
+  await form.getByLabel('Mobile number linked to this UPI ID (optional)').fill(answers.upiPhone)
   await next.click()
 
   await expect(heading).toHaveText('Organizer agreement')
@@ -206,7 +214,18 @@ export async function completeOnboardingViaApi(
         websiteUrl: answers.websiteUrl,
       },
     ],
-    ['payment', 'put', { upiId: answers.upiId, upiPhone: answers.upiPhone }],
+    [
+      'payment',
+      'put',
+      {
+        accountHolderName: answers.accountHolderName,
+        bankName: answers.bankName,
+        bankAccountNumber: answers.bankAccountNumber,
+        ifscCode: answers.ifscCode,
+        upiId: answers.upiId,
+        upiPhone: answers.upiPhone,
+      },
+    ],
     ['agreement', 'post', { accepted: true }],
   ]
   for (const [step, method, data] of steps) {

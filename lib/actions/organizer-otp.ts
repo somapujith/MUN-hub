@@ -5,7 +5,6 @@ import { emailLoginCodes, userConsents, users } from '@/lib/db/schema'
 import { createSession } from '@/lib/auth/session'
 import { hashPassword, verifyPassword } from '@/lib/auth/password'
 import { requiredConsentRows } from '@/lib/actions/auth'
-import { required } from '@/lib/actions/student-profile'
 import { getNotificationsAdapter } from '@/lib/notifications/select-adapter'
 import { renderOtpEmailHtml, renderOtpEmailText } from '@/lib/notifications/templates/otp-email'
 import type { NotificationPayload } from '@/lib/notifications/adapter'
@@ -13,9 +12,13 @@ import type { Role } from '@/lib/db/schema-enums'
 
 /**
  * Passwordless organizer sign-in: the organizer enters an email, we email a
- * 6-digit code, and entering that code signs them in — or, for an email with
- * no account yet, creates their ORGANIZER account once they add a name and
- * accept the policies. There is no organizer password anywhere in this flow.
+ * 6-digit code, and entering that code signs them in — creating their
+ * ORGANIZER account on the spot if the address doesn't have one yet. There is
+ * no separate "sign up" step: logging in for the first time is how the
+ * account comes into existence, and no organizer password anywhere in this
+ * flow. A placeholder name is derived from the email; the organizer onboarding
+ * wizard's first step (lib/actions/organizer-onboarding.ts) collects their
+ * real name and phone right afterwards and overwrites it.
  *
  * Organizer and delegate accounts stay separate: an email that belongs to a
  * delegate (or staff) account never receives a code here; it gets a notice
@@ -39,19 +42,35 @@ export const ORGANIZER_OTP_ERRORS = {
   delegateAccount: 'This email belongs to a delegate account. Use a different email for your organizer account',
 } as const
 
-export interface OrganizerProfileInput {
-  name: string
-  phone?: string
-  acceptedTermsOfService: boolean
-  acceptedPrivacyPolicy: boolean
+export interface OrganizerCodeVerification {
+  status: 'SIGNED_IN'
+  userId: string
+  role: Role
+  token: string
+  expiresAt: Date
+  isNewAccount: boolean
 }
-
-export type OrganizerCodeVerification =
-  | { status: 'PROFILE_REQUIRED' }
-  | { status: 'SIGNED_IN'; userId: string; role: Role; token: string; expiresAt: Date; isNewAccount: boolean }
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase()
+}
+
+/**
+ * A reasonable display name derived from the local part of an email address
+ * (e.g. `priya.rao+mun@example.com` -> `Priya Rao`), used as a placeholder
+ * for a brand-new organizer account until they fill in their real name during
+ * onboarding. Falls back to a generic label if nothing usable survives.
+ */
+function nameFromEmail(email: string): string {
+  const local = email.split('@')[0] ?? ''
+  const words = local
+    .replace(/\+.*$/, '')
+    .replace(/[^a-zA-Z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+  return words.join(' ') || 'New Organizer'
 }
 
 /**
@@ -157,33 +176,25 @@ export async function requestOrganizerLoginCode(email: string): Promise<void> {
  * Checks `code` against the newest code emailed to `email`.
  *
  * - Existing ORGANIZER account: signs in.
- * - No account and no `profile`: returns `PROFILE_REQUIRED` without using up
- *   the code, so the client can ask for a name and policy consent and call
- *   again with the same code.
- * - No account and a `profile`: creates the ORGANIZER account (no password,
- *   no student profile, Terms + Privacy consent recorded) and signs in.
+ * - No account: creates one on the spot (no password, no student profile,
+ *   Terms + Privacy consent recorded, a placeholder name derived from the
+ *   email) and signs in. There is no separate signup step.
  *
  * A wrong code counts against `LOGIN_CODE_MAX_ATTEMPTS`; after that the code
  * is dead and a new one must be requested. A code works once. Returns the same
  * session shape as `signIn`; setting the cookie is the caller's job.
  */
-export async function verifyOrganizerLoginCode(input: {
-  email: string
-  code: string
-  profile?: OrganizerProfileInput
-}): Promise<OrganizerCodeVerification> {
+export async function verifyOrganizerLoginCode(input: { email: string; code: string }): Promise<OrganizerCodeVerification> {
   const normalizedEmail = normalizeEmail(input.email)
   const code = input.code.trim()
   if (!/^\d{6}$/.test(code)) {
     throw new Error(ORGANIZER_OTP_ERRORS.incorrect)
   }
 
-  const profile = input.profile ? validateProfile(input.profile) : null
   const now = new Date()
 
   type Outcome =
     | { kind: 'error'; message: string }
-    | { kind: 'profile-required' }
     | { kind: 'signed-in'; userId: string; role: Role; isNewAccount: boolean }
 
   const outcome = await db.transaction(async (tx): Promise<Outcome> => {
@@ -229,11 +240,9 @@ export async function verifyOrganizerLoginCode(input: {
       return { kind: 'signed-in', userId: user.id, role: user.role, isNewAccount: false }
     }
 
-    if (!profile) return { kind: 'profile-required' }
-
     const [created] = await tx
       .insert(users)
-      .values({ name: profile.name, email: normalizedEmail, phone: profile.phone, role: 'ORGANIZER' })
+      .values({ name: nameFromEmail(normalizedEmail), email: normalizedEmail, role: 'ORGANIZER' })
       .returning({ id: users.id, role: users.role })
     await tx.insert(userConsents).values(requiredConsentRows(created.id, now))
     await consume()
@@ -241,7 +250,6 @@ export async function verifyOrganizerLoginCode(input: {
   })
 
   if (outcome.kind === 'error') throw new Error(outcome.message)
-  if (outcome.kind === 'profile-required') return { status: 'PROFILE_REQUIRED' }
 
   const { token, expiresAt } = await createSession(outcome.userId)
   return {
@@ -268,15 +276,4 @@ function codeEmail(to: string, code: string): NotificationPayload {
     body: renderOtpEmailText(template),
     html: renderOtpEmailHtml(template),
   }
-}
-
-function validateProfile(profile: OrganizerProfileInput): { name: string; phone: string | null } {
-  const name = required(profile.name, 'Name')
-  if (!profile.acceptedTermsOfService) {
-    throw new Error('You must accept the Terms of Service to create an account')
-  }
-  if (!profile.acceptedPrivacyPolicy) {
-    throw new Error('You must accept the Privacy Policy to create an account')
-  }
-  return { name, phone: profile.phone?.trim() || null }
 }

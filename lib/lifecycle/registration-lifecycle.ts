@@ -213,10 +213,13 @@ interface RegistrationReadiness {
   /**
    * Whether the mun's organizer has finished the PAYMENT step of organizer
    * onboarding (lib/actions/organizer-onboarding.ts) — `organizer_profiles`
-   * has a non-null `upiId`/`upiPhone`, the same pair `acceptOrganizerAgreement`
+   * has its bank account fields set (`accountHolderName`/`bankName`/
+   * `bankAccountLast4`/`ifscCode`), the required payout method as of
+   * 2026-09-26 (UPI is now only an optional secondary address, so it's not
+   * part of this check). Same completeness criteria `acceptOrganizerAgreement`
    * requires before it locks the wizard. This is account-level, not per-mun.
    */
-  organizerUpiOnboardingComplete: boolean
+  organizerPayoutOnboardingComplete: boolean
 }
 
 interface PlanStep {
@@ -274,7 +277,7 @@ function planAction(
       }
       if (!readiness) throw new Error('Registration readiness was not loaded')
       if (readiness.purchasablePassCount === 0) return { kind: 'blocked', reason: LIFECYCLE_ERRORS.noActivePass }
-      if (readiness.hasPaidPass && !readiness.organizerUpiOnboardingComplete) {
+      if (readiness.hasPaidPass && !readiness.organizerPayoutOnboardingComplete) {
         return { kind: 'blocked', reason: LIFECYCLE_ERRORS.paymentNotVerified }
       }
       if (!mun.registrationDeadline) return { kind: 'blocked', reason: LIFECYCLE_ERRORS.deadlineMissing }
@@ -416,7 +419,12 @@ async function loadRegistrationReadiness(
   const hasPaidPass = passes.some((pass) => pass.price > 0 || (pass.earlyBirdPrice ?? 0) > 0)
 
   const [profile] = await reader
-    .select({ upiId: organizerProfiles.upiId, upiPhone: organizerProfiles.upiPhone })
+    .select({
+      accountHolderName: organizerProfiles.accountHolderName,
+      bankName: organizerProfiles.bankName,
+      bankAccountLast4: organizerProfiles.bankAccountLast4,
+      ifscCode: organizerProfiles.ifscCode,
+    })
     .from(organizerProfiles)
     .where(eq(organizerProfiles.userId, organizerId))
     .limit(1)
@@ -424,7 +432,9 @@ async function loadRegistrationReadiness(
   return {
     purchasablePassCount: passes.length,
     hasPaidPass,
-    organizerUpiOnboardingComplete: Boolean(profile?.upiId && profile?.upiPhone),
+    organizerPayoutOnboardingComplete: Boolean(
+      profile?.accountHolderName && profile?.bankName && profile?.bankAccountLast4 && profile?.ifscCode,
+    ),
   }
 }
 

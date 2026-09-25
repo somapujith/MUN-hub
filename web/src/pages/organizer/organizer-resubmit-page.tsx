@@ -21,6 +21,7 @@ import {
 import { OrganizerBrightFormSkeleton } from "@/components/organizer/organizer-bright-skeleton";
 import { OrganizerBrightShell } from "@/components/organizer/organizer-bright-shell";
 import { RequireOrganizer } from "@/guards/require-organizer";
+import type { ApplicationFieldKey } from "@/lib/organizer-application-fields";
 import { cn } from "cn";
 
 /**
@@ -108,6 +109,10 @@ function ResubmitForm({ application }: { application: MyOrganizerApplication }) 
   const error =
     resubmit.error instanceof Error ? resubmit.error.message : resubmit.error ? "Couldn't resubmit. Try again." : null;
 
+  const flagged = new Set<ApplicationFieldKey>(application.fieldsRequiringCorrection as ApplicationFieldKey[]);
+  /** Appends a "needs correction" suffix to a field label when the reviewer flagged it. */
+  const fieldLabel = (base: string, key: ApplicationFieldKey) => (flagged.has(key) ? `${base} — needs correction` : base);
+
   return (
     <main className="flex-1 px-lg pt-xl pb-28 md:pt-section">
       <form
@@ -137,7 +142,7 @@ function ResubmitForm({ application }: { application: MyOrganizerApplication }) 
           </div>
         ) : null}
 
-        <BrightField id="resubmit-mun-name" label="Title of your MUN">
+        <BrightField id="resubmit-mun-name" label={fieldLabel("Title of your MUN", "conferenceName")}>
           <input
             id="resubmit-mun-name"
             value={name}
@@ -146,7 +151,7 @@ function ResubmitForm({ application }: { application: MyOrganizerApplication }) 
           />
         </BrightField>
         <div className="grid gap-md sm:grid-cols-2">
-          <BrightField id="resubmit-mun-city" label="Host city">
+          <BrightField id="resubmit-mun-city" label={fieldLabel("Host city", "location")}>
             <input
               id="resubmit-mun-city"
               autoComplete="address-level2"
@@ -155,7 +160,7 @@ function ResubmitForm({ application }: { application: MyOrganizerApplication }) 
               className={BRIGHT_INPUT_CLASS}
             />
           </BrightField>
-          <BrightField id="resubmit-mun-date" label="Expected start date">
+          <BrightField id="resubmit-mun-date" label={fieldLabel("Expected start date", "expectedDate")}>
             <input
               id="resubmit-mun-date"
               type="date"
@@ -166,7 +171,7 @@ function ResubmitForm({ application }: { application: MyOrganizerApplication }) 
             />
           </BrightField>
         </div>
-        <BrightField id="resubmit-delegates" label="Maximum delegates you expect">
+        <BrightField id="resubmit-delegates" label={fieldLabel("Maximum delegates you expect", "expectedDelegateCount")}>
           <input
             id="resubmit-delegates"
             inputMode="numeric"
@@ -177,7 +182,7 @@ function ResubmitForm({ application }: { application: MyOrganizerApplication }) 
         </BrightField>
         <BrightField
           id="resubmit-description"
-          label="About your MUN"
+          label={fieldLabel("About your MUN", "description")}
           hint={
             descriptionLength < MIN_DESCRIPTION_LENGTH
               ? `At least ${MIN_DESCRIPTION_LENGTH} characters (${descriptionLength} so far)`
@@ -192,7 +197,10 @@ function ResubmitForm({ application }: { application: MyOrganizerApplication }) 
           />
         </BrightField>
         <div className="grid gap-md sm:grid-cols-2">
-          <BrightField id="resubmit-previous-editions" label="Previous editions (optional)">
+          <BrightField
+            id="resubmit-previous-editions"
+            label={fieldLabel("Previous editions (optional)", "previousEditions")}
+          >
             <input
               id="resubmit-previous-editions"
               value={previousEditions}
@@ -200,7 +208,7 @@ function ResubmitForm({ application }: { application: MyOrganizerApplication }) 
               className={BRIGHT_INPUT_CLASS}
             />
           </BrightField>
-          <BrightField id="resubmit-website" label="Website (optional)">
+          <BrightField id="resubmit-website" label={fieldLabel("Website (optional)", "websiteUrl")}>
             <input
               id="resubmit-website"
               type="url"

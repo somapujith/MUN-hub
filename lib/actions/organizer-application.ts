@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import type { InferSelectModel } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { muns, organizerApplications, users } from '@/lib/db/schema'
@@ -14,6 +14,39 @@ type Executor = Tx | typeof db
 /** Thrown while an earlier application of the same organizer is still waiting for Gate-1 review. */
 export const APPLICATION_PENDING =
   'Your previous application is still being reviewed. You can apply for another MUN once it has been reviewed.'
+
+/**
+ * The organizer-editable fields on a Gate-1 application — exactly what
+ * `SubmitOrganizerApplicationInput`/`ResubmitOrganizerApplicationInput`
+ * accept. Source of truth for `reviewMunApplication`'s
+ * `fieldsRequiringCorrection` (lib/actions/admin-review.ts): a reviewer can
+ * only flag one of these keys, never an arbitrary string. Keep the labels in
+ * sync with the actual form labels on organizer-apply-page.tsx /
+ * organizer-resubmit-page.tsx — the web side keeps its own copy
+ * (web/src/lib/organizer-application-fields.ts) rather than importing this,
+ * same duplication pattern as e.g. UPI_PATTERN between organizer-onboarding.ts
+ * and settings-page.tsx.
+ */
+export const APPLICATION_FIELD_KEYS = [
+  'conferenceName',
+  'location',
+  'expectedDate',
+  'expectedDelegateCount',
+  'description',
+  'previousEditions',
+  'websiteUrl',
+] as const
+export type ApplicationFieldKey = (typeof APPLICATION_FIELD_KEYS)[number]
+
+export const APPLICATION_FIELD_LABELS: Record<ApplicationFieldKey, string> = {
+  conferenceName: 'Title of your MUN',
+  location: 'Host city',
+  expectedDate: 'Expected start date',
+  expectedDelegateCount: 'Maximum delegates you expect',
+  description: 'About your MUN',
+  previousEditions: 'Previous editions',
+  websiteUrl: 'Website',
+}
 
 export interface SubmitOrganizerApplicationInput {
   // IMPORTANT: `organizerId` is trusted as a plain parameter here — this is
@@ -161,6 +194,10 @@ export interface OrganizerApplicationSummary {
   expectedDelegateCount: number | null
   previousEditions: string | null
   websiteUrl: string | null
+  /** Which answers the reviewer flagged on the current CHANGES_REQUESTED round, if any. */
+  fieldsRequiringCorrection: ApplicationFieldKey[]
+  /** How many times this application has been resubmitted after CHANGES_REQUESTED. */
+  resubmissionCount: number
 }
 
 /** The signed-in organizer's own host applications, newest first. */
@@ -182,11 +219,19 @@ export async function listMyOrganizerApplications(session: Session | null): Prom
       expectedDelegateCount: organizerApplications.expectedDelegateCount,
       previousEditions: organizerApplications.previousEditions,
       websiteUrl: organizerApplications.websiteUrl,
+      fieldsRequiringCorrection: organizerApplications.fieldsRequiringCorrection,
+      resubmissionCount: organizerApplications.resubmissionCount,
     })
     .from(organizerApplications)
     .leftJoin(muns, eq(muns.id, organizerApplications.munId))
     .where(eq(organizerApplications.organizerId, session.userId))
     .orderBy(desc(organizerApplications.submittedAt))
+    .then((rows) =>
+      rows.map((row) => ({
+        ...row,
+        fieldsRequiringCorrection: (row.fieldsRequiringCorrection ?? []) as ApplicationFieldKey[],
+      })),
+    )
 }
 
 export interface ResubmitOrganizerApplicationInput {
@@ -266,6 +311,10 @@ export async function resubmitOrganizerApplication(
         // forward next to a freshly-"Under review" badge would read like
         // unresolved feedback. Full history still lives in verificationLogs.
         reviewNotes: null,
+        // Same reasoning: the flagged fields described the round that just
+        // ended. A fresh CHANGES_REQUESTED decision (if any) sets its own list.
+        fieldsRequiringCorrection: [],
+        resubmissionCount: sql`${organizerApplications.resubmissionCount} + 1`,
         expectedDelegateCount: input.expectedDelegateCount,
         previousEditions: input.previousEditions?.trim() || null,
         websiteUrl: input.websiteUrl?.trim() || null,

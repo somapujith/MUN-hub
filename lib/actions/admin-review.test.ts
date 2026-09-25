@@ -8,6 +8,7 @@ import {
   munModuleVerifications,
   munSubmissions,
   organizerApplications,
+  organizerProfiles,
   registrationProducts,
   registrations,
   users,
@@ -157,6 +158,20 @@ describe('getReviewQueue', () => {
     const byNoMatch = await getReviewQueue({ search: `no-such-thing-${crypto.randomUUID()}` }, __actor)
     expect(byNoMatch.results.some((m) => m.id === mun.id)).toBe(false)
   })
+
+  it('reports resubmissionCount so a repeat round is visible in the queue list', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeQueuedMun(organizer.id, 'SUBMITTED')
+    await db
+      .update(organizerApplications)
+      .set({ resubmissionCount: 2 })
+      .where(eq(organizerApplications.munId, mun.id))
+    const ops = await makeUser('OPERATIONS')
+    const __actor = sess(ops)
+
+    const queue = await getReviewQueue({}, __actor)
+    expect(queue.results.find((m) => m.id === mun.id)?.resubmissionCount).toBe(2)
+  })
 })
 
 describe('getMunForReview', () => {
@@ -189,6 +204,31 @@ describe('getMunForReview', () => {
     const admin = await makeUser('ADMIN')
     const __actor = sess(admin)
     await expect(getMunForReview('does-not-exist', __actor)).rejects.toThrow('Mun not found')
+  })
+
+  it("includes the organizer's onboarding-profile name/phone, or null before they've reached that step", async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const withoutProfile = await makeMun(organizer.id, 'SUBMITTED')
+    await makeApplication(organizer.id, withoutProfile.id)
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    expect((await getMunForReview(withoutProfile.id, __actor)).organizerProfile).toBeNull()
+
+    await db.insert(organizerProfiles).values({
+      userId: organizer.id,
+      firstName: 'Priya',
+      lastName: 'Rao',
+      contactPhone: '9876543210',
+    })
+    const withProfile = await makeMun(organizer.id, 'SUBMITTED')
+    await makeApplication(organizer.id, withProfile.id)
+
+    expect((await getMunForReview(withProfile.id, __actor)).organizerProfile).toEqual({
+      firstName: 'Priya',
+      lastName: 'Rao',
+      contactPhone: '9876543210',
+    })
   })
 })
 
@@ -331,6 +371,75 @@ describe('reviewMunApplication', () => {
     const log = logs.find((l) => l.action === 'CHANGES_REQUESTED')
     expect(log?.notes).toBe('fix dates')
     expect(log?.internalNotes).toBe('organizer is slow to respond')
+  })
+
+  async function fieldsRequiringCorrection(munId: string) {
+    const [row] = await db
+      .select({ fieldsRequiringCorrection: organizerApplications.fieldsRequiringCorrection })
+      .from(organizerApplications)
+      .where(eq(organizerApplications.munId, munId))
+    return row.fieldsRequiringCorrection
+  }
+
+  it('stores fieldsRequiringCorrection on CHANGES_REQUESTED, deduplicated', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'UNDER_REVIEW')
+    await makeApplication(organizer.id, mun.id)
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    await reviewMunApplication(mun.id, 'CHANGES_REQUESTED', 'fix these', undefined, __actor, [
+      'conferenceName',
+      'websiteUrl',
+      'conferenceName',
+    ])
+
+    expect(await fieldsRequiringCorrection(mun.id)).toEqual(expect.arrayContaining(['conferenceName', 'websiteUrl']))
+    expect((await fieldsRequiringCorrection(mun.id))?.length).toBe(2)
+  })
+
+  it('rejects an unknown field key', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'UNDER_REVIEW')
+    await makeApplication(organizer.id, mun.id)
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    await expect(
+      reviewMunApplication(mun.id, 'CHANGES_REQUESTED', 'fix these', undefined, __actor, ['notARealField' as never]),
+    ).rejects.toThrow('Unknown field')
+  })
+
+  it('ignores fieldsRequiringCorrection on APPROVED/REJECTED (stores an empty list)', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const approvedMun = await makeMun(organizer.id, 'UNDER_REVIEW')
+    await makeApplication(organizer.id, approvedMun.id)
+    const rejectedMun = await makeMun(organizer.id, 'UNDER_REVIEW')
+    await makeApplication(organizer.id, rejectedMun.id)
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    await reviewMunApplication(approvedMun.id, 'APPROVED', 'fine', undefined, __actor, ['conferenceName'])
+    await reviewMunApplication(rejectedMun.id, 'REJECTED', 'no', undefined, __actor, ['conferenceName'])
+
+    expect(await fieldsRequiringCorrection(approvedMun.id)).toEqual([])
+    expect(await fieldsRequiringCorrection(rejectedMun.id)).toEqual([])
+  })
+
+  it('clears a previous round\'s flagged fields when a fresh CHANGES_REQUESTED decision names a different set', async () => {
+    const organizer = await makeUser('ORGANIZER')
+    const mun = await makeMun(organizer.id, 'UNDER_REVIEW')
+    await makeApplication(organizer.id, mun.id)
+    const admin = await makeUser('ADMIN')
+    const __actor = sess(admin)
+
+    await reviewMunApplication(mun.id, 'CHANGES_REQUESTED', 'round 1', undefined, __actor, ['conferenceName'])
+    expect(await fieldsRequiringCorrection(mun.id)).toEqual(['conferenceName'])
+
+    // Simulate the organizer's resubmit putting it back under review, then a second round.
+    await transitionMun(mun.id, 'SUBMITTED', organizer.id)
+    await reviewMunApplication(mun.id, 'CHANGES_REQUESTED', 'round 2', undefined, __actor, ['description'])
+    expect(await fieldsRequiringCorrection(mun.id)).toEqual(['description'])
   })
 })
 

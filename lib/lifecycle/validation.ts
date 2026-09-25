@@ -94,11 +94,15 @@ export interface MunValidationContext {
   formFields: FormFieldRow[]
   paymentSettings: MaskedPaymentSettingsRow | null
   /**
-   * Whether the mun's organizer has completed the account-level UPI payout
-   * step (lib/actions/organizer-onboarding.ts#saveOrganizerPaymentStep) —
-   * the real "payment is required" gate as of the minimum-fields cut. The
-   * per-mun `mun_payment_settings` PAN/bank-account row above is legacy and
-   * no longer required for submission (see validators/commerce.ts's
+   * Whether the mun's organizer has completed the account-level payout step
+   * (lib/actions/organizer-onboarding.ts#saveOrganizerPaymentStep) — the real
+   * "payment is required" gate as of the minimum-fields cut. Bank account
+   * details are the required payout method (2026-09-26 — reverses the
+   * earlier UPI-only design); UPI is only an optional secondary address, so
+   * this checks the bank fields, matching organizer-onboarding.ts's
+   * `stepsDone()` PAYMENT criteria, not `upiId`. The per-mun
+   * `mun_payment_settings` PAN/bank-account row above is legacy and no
+   * longer required for submission (see validators/commerce.ts's
    * validatePaymentSettlement).
    */
   organizerPaymentLinked: boolean
@@ -200,7 +204,12 @@ export async function loadValidationContext(munId: string, client: ValidationRea
   ])
 
   const [organizerProfileRow] = await client
-    .select({ upiId: organizerProfiles.upiId })
+    .select({
+      accountHolderName: organizerProfiles.accountHolderName,
+      bankName: organizerProfiles.bankName,
+      bankAccountLast4: organizerProfiles.bankAccountLast4,
+      ifscCode: organizerProfiles.ifscCode,
+    })
     .from(organizerProfiles)
     .where(eq(organizerProfiles.userId, mun.organizerId))
     .limit(1)
@@ -235,7 +244,12 @@ export async function loadValidationContext(munId: string, client: ValidationRea
     ebMembers: ebMemberRows,
     formFields: formFieldRows,
     paymentSettings: paymentSettingsRow ?? null,
-    organizerPaymentLinked: Boolean(organizerProfileRow?.upiId),
+    organizerPaymentLinked: Boolean(
+      organizerProfileRow?.accountHolderName &&
+        organizerProfileRow?.bankName &&
+        organizerProfileRow?.bankAccountLast4 &&
+        organizerProfileRow?.ifscCode,
+    ),
     documents: documentRows,
     scheduleItems: scheduleItemRows,
     contact: contactRow ?? null,

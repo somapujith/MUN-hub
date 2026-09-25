@@ -2,6 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { organizerApplications, organizerProfiles, userConsents, users } from '@/lib/db/schema'
 import { submitOrganizerApplication } from '@/lib/actions/organizer-application'
+import { encryptField } from '@/lib/crypto/field-encryption'
 import type { Session } from '@/lib/auth/adapter'
 
 /**
@@ -11,8 +12,9 @@ import type { Session } from '@/lib/auth/adapter'
  *   2. MUN        the MUN's title, host city and expected start date
  *   3. DETAILS    maximum expected delegates, a description, previous
  *                 editions and website (optional)
- *   4. PAYMENT    a FreeCharge UPI ID payouts go to (no other provider is
- *                 accepted), and the mobile number linked to it
+ *   4. PAYMENT    bank account details payouts go to (account holder name,
+ *                 bank name, account number, IFSC — all required), plus an
+ *                 optional FreeCharge UPI ID + its linked mobile number
  *   5. AGREEMENT  the organizer agreement — accepting it submits the MUN
  *                 answers as the organizer's application (Gate 1)
  *
@@ -38,7 +40,11 @@ export const MAX_EXPECTED_DELEGATES = 10_000
 const PHONE_PATTERN = /^[6-9]\d{9}$/
 // MUN Hub only accepts payouts to a FreeCharge UPI handle (@freecharge),
 // user-directed restriction — every other UPI provider's handle is rejected.
+// UPI itself is optional (2026-09-26) — this only applies once a UPI ID is given.
 const UPI_PATTERN = /^[a-zA-Z0-9._-]{2,256}@freecharge$/
+// Real-world Indian bank account number range.
+const BANK_ACCOUNT_PATTERN = /^\d{9,18}$/
+const IFSC_PATTERN = /^[A-Z]{4}0[A-Z0-9]{6}$/
 
 export interface OrganizerOnboarding {
   profile: {
@@ -55,6 +61,12 @@ export interface OrganizerOnboarding {
     munDescription: string | null
     previousEditions: string | null
     websiteUrl: string | null
+    accountHolderName: string | null
+    bankName: string | null
+    /** Last 4 digits only — the full account number is write-only, never returned. */
+    bankAccountLast4: string | null
+    ifscCode: string | null
+    /** Optional secondary payout address. */
     upiId: string | null
     upiPhone: string | null
   }
@@ -79,7 +91,7 @@ function stepsDone(row: ProfileRow | undefined): OnboardingStep[] {
   if (row.firstName && row.lastName && row.contactPhone) done.push('PROFILE')
   if (row.munName && row.munCity && row.munStartDate) done.push('MUN')
   if (row.expectedDelegateCount && row.munDescription) done.push('DETAILS')
-  if (row.upiId && row.upiPhone) done.push('PAYMENT')
+  if (row.accountHolderName && row.bankName && row.bankAccountLast4 && row.ifscCode) done.push('PAYMENT')
   if (row.completedAt) done.push('AGREEMENT')
   return done
 }
@@ -114,6 +126,10 @@ function toOnboarding(row: ProfileRow | undefined, account: AccountFields | unde
       munDescription: row?.munDescription ?? null,
       previousEditions: row?.previousEditions ?? null,
       websiteUrl: row?.websiteUrl ?? null,
+      accountHolderName: row?.accountHolderName ?? null,
+      bankName: row?.bankName ?? null,
+      bankAccountLast4: row?.bankAccountLast4 ?? null,
+      ifscCode: row?.ifscCode ?? null,
       upiId: row?.upiId ?? null,
       // Most organizers take payouts on the number they gave us.
       upiPhone: row?.upiPhone ?? contactPhone ?? null,
@@ -302,17 +318,65 @@ export async function saveOrganizerDetailsStep(
   return getOrganizerOnboarding(session)
 }
 
+export interface SaveOrganizerPaymentStepInput {
+  accountHolderName: string
+  bankName: string
+  bankAccountNumber: string
+  ifscCode: string
+  /** Optional secondary payout address — a FreeCharge UPI handle. */
+  upiId?: string
+  /** Required alongside upiId, and only alongside upiId. */
+  upiPhone?: string
+}
+
+/**
+ * Bank account details are the required payout method (2026-09-26 — reverses
+ * the earlier UPI-only design, see CLAUDE.md). The account number is never
+ * stored in plaintext: it's encrypted here via lib/crypto/field-encryption.ts
+ * (the same write-only pattern lib/actions/payment-settlement.ts uses for
+ * mun_payment_settings) and only its last 4 digits are kept for display.
+ * There is deliberately no decrypt-and-return path anywhere in this action.
+ *
+ * UPI stays a secondary, optional receiving address: omit both upiId and
+ * upiPhone, or give both together — one without the other is rejected.
+ */
 export async function saveOrganizerPaymentStep(
-  input: { upiId: string; upiPhone: string },
+  input: SaveOrganizerPaymentStepInput,
   session: Session | null,
 ): Promise<OrganizerOnboarding> {
   assertOrganizer(session)
   await rowForStep(session, 'PAYMENT')
-  const upiId = input.upiId.trim()
-  if (!UPI_PATTERN.test(upiId)) throw new Error('Only a FreeCharge UPI ID is accepted — it must look like name@freecharge')
-  const upiPhone = normalizePhone(input.upiPhone, 'UPI mobile number')
 
-  await saveRow(session.userId, { upiId: upiId.toLowerCase(), upiPhone })
+  const accountHolderName = requiredText(input.accountHolderName, 'Account holder name')
+  const bankName = requiredText(input.bankName, 'Bank name')
+  const bankAccountNumber = requiredText(input.bankAccountNumber, 'Account number').replace(/\s+/g, '')
+  if (!BANK_ACCOUNT_PATTERN.test(bankAccountNumber)) {
+    throw new Error('Account number must be 9 to 18 digits')
+  }
+  const ifscCode = requiredText(input.ifscCode, 'IFSC code').toUpperCase()
+  if (!IFSC_PATTERN.test(ifscCode)) throw new Error('IFSC code must look like HDFC0001234')
+
+  const upiIdRaw = input.upiId?.trim()
+  let upiId: string | null = null
+  let upiPhone: string | null = null
+  if (upiIdRaw) {
+    if (!UPI_PATTERN.test(upiIdRaw)) throw new Error('Only a FreeCharge UPI ID is accepted — it must look like name@freecharge')
+    if (!input.upiPhone?.trim()) throw new Error('Mobile number linked to the UPI ID is required')
+    upiId = upiIdRaw.toLowerCase()
+    upiPhone = normalizePhone(input.upiPhone, 'UPI mobile number')
+  } else if (input.upiPhone?.trim()) {
+    throw new Error('Enter a UPI ID before its linked mobile number')
+  }
+
+  await saveRow(session.userId, {
+    accountHolderName,
+    bankName,
+    bankAccountNumberCiphertext: encryptField(bankAccountNumber),
+    bankAccountLast4: bankAccountNumber.slice(-4),
+    ifscCode,
+    upiId,
+    upiPhone,
+  })
   return getOrganizerOnboarding(session)
 }
 

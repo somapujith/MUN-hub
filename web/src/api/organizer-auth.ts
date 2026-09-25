@@ -17,16 +17,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export interface OrganizerProfileInput {
-  name: string;
-  phone?: string;
-  acceptedTermsOfService: boolean;
-  acceptedPrivacyPolicy: boolean;
+export interface OrganizerCodeVerification {
+  status: "SIGNED_IN";
+  userId: string;
+  role: Role;
+  isNewAccount: boolean;
 }
-
-export type OrganizerCodeVerification =
-  | { status: "PROFILE_REQUIRED" }
-  | { status: "SIGNED_IN"; userId: string; role: Role; isNewAccount: boolean };
 
 /**
  * POST /api/v1/auth/organizers/code — emails a 6-digit sign-in code. Succeeds
@@ -41,12 +37,12 @@ export function requestOrganizerCode(email: string, turnstileToken?: string) {
 }
 
 /**
- * POST /api/v1/auth/organizers/session — checks the code. An existing
- * organizer is signed in (session cookie set by the server). A new address
- * gets `PROFILE_REQUIRED` and calls again with the same code plus `profile`,
- * which creates the organizer account. There are no organizer passwords.
+ * POST /api/v1/auth/organizers/session — checks the code and signs in
+ * (session cookie set by the server). An address with no account yet is
+ * created on the spot — there is no separate signup step, and no organizer
+ * passwords.
  */
-export function verifyOrganizerCode(input: { email: string; code: string; profile?: OrganizerProfileInput }) {
+export function verifyOrganizerCode(input: { email: string; code: string }) {
   return request<OrganizerCodeVerification>("/auth/organizers/session", {
     method: "POST",
     body: JSON.stringify(input),

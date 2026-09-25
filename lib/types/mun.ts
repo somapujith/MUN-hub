@@ -143,4 +143,6 @@ export interface PublicMunDetail extends PublicMun {
 export interface MunWithApplication extends Mun {
   organizerApplication: OrganizerApplication | null
   verificationLogs: VerificationLog[]
+  /** The organizer's own onboarding-profile name/phone (organizer_profiles) — null if they haven't reached that step yet. */
+  organizerProfile: { firstName: string | null; lastName: string | null; contactPhone: string | null } | null
 }

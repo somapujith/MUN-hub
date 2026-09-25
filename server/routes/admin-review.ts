@@ -15,6 +15,7 @@ import {
   suspendMun,
   unpublishMun,
 } from '@/lib/actions/admin-review'
+import { APPLICATION_FIELD_KEYS } from '@/lib/actions/organizer-application'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
 import type { AppVariables } from '../src/types'
@@ -45,6 +46,10 @@ const reviewApplicationBodySchema = z
     decision: z.enum(['APPROVED', 'REJECTED', 'CHANGES_REQUESTED']),
     notes: z.string().optional(),
     internalNotes: z.string().optional(),
+    // Structured counterpart to `notes` — which of the organizer's own
+    // answers need fixing. Only meaningful on CHANGES_REQUESTED;
+    // reviewMunApplication itself clears it for any other decision.
+    fieldsRequiringCorrection: z.array(z.enum(APPLICATION_FIELD_KEYS)).optional(),
   })
   .strict()
   // Admin PRD §8: a rejection or change request must carry a reason for the
@@ -118,6 +123,7 @@ adminReviewRoutes.post(
       body.notes,
       body.internalNotes,
       session,
+      body.fieldsRequiringCorrection,
     )
     return c.json(result)
   },

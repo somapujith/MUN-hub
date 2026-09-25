@@ -156,7 +156,8 @@ export function OrganizerQuickSetupPage() {
   const moduleComplete = (key: string) => modules.find((m) => m.key === key)?.completionStatus === "COMPLETE";
   const hasCommittee = moduleComplete("COMMITTEES");
   const hasTicket = moduleComplete("REGISTRATION_TYPES") && moduleComplete("PRICING_CAPACITY");
-  const paymentLinked = Boolean(onboardingQuery.data?.profile.upiId);
+  // Bank details are the required payout method (2026-09-26); UPI is optional.
+  const paymentLinked = Boolean(onboardingQuery.data?.profile.bankAccountLast4);
   const status = progressQuery.data?.lifecycleStatus ?? detailsQuery.data?.status;
   const canSubmit = Boolean(status && SUBMITTABLE_STATUSES.includes(status));
 
@@ -210,7 +211,7 @@ export function OrganizerQuickSetupPage() {
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!paymentLinked) {
-      toast.error("Add your FreeCharge UPI payout details from Settings before submitting");
+      toast.error("Add your bank account payout details from Settings before submitting");
       return;
     }
     const problem = validate(form, hasCommittee, hasTicket);
@@ -380,13 +381,12 @@ export function OrganizerQuickSetupPage() {
                 <fieldset className="flex flex-col gap-md border-t border-border pt-md">
                   <legend className="font-display text-body-md font-medium text-ink">Payment</legend>
                   {paymentLinked ? (
-                    <StepDone label="Your FreeCharge UPI payout details are on file." />
+                    <StepDone label="Your bank account payout details are on file." />
                   ) : (
                     <div className="flex items-center gap-sm rounded-md border border-warning/40 bg-warning/10 px-md py-sm">
                       <Wallet className="size-4 shrink-0 text-warning-text" aria-hidden />
                       <p className="text-body-md text-ink">
-                        We only accept a FreeCharge UPI ID. Create a FreeCharge UPI account, link your bank account to
-                        it, then add that UPI ID from{" "}
+                        Add your bank account payout details from{" "}
                         <Link to={munSectionHref(munId, "settings")} className="font-medium text-link underline-offset-2 hover:underline">
                           Settings
                         </Link>{" "}

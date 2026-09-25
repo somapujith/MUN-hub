@@ -1,23 +1,13 @@
-import { Helmet } from "react-helmet-async";
-import { OrganizerOtpForm } from "@/components/auth/organizer-otp-form";
-import { OrganizerAuthLayout } from "@/pages/organizer/organizer-login-page";
+import { Navigate, useLocation } from "react-router";
 
 /**
- * Organizer account creation on publish.munhub.in. The organizer fills in
- * their details first, then confirms their email with a one-time code; the
- * account is created only once the code checks out. No password, no delegate
- * profile fields, and no path that turns a delegate account into this one.
+ * There is no separate organizer signup anymore (see lib/actions/organizer-otp.ts
+ * and organizer-login-page.tsx): logging in with an email that has no account
+ * yet creates one. This route is kept only so old links/bookmarks still land
+ * somewhere — it redirects straight to /organizer/login, preserving any
+ * `?redirectTo=` in the query string.
  */
 export function OrganizerSignupPage() {
-  return (
-    <>
-      <Helmet>
-        <title>Create an organizer account | MUN Hub</title>
-        <meta name="description" content="Create a MUN Hub organizer account to publish your Model UN conference." />
-      </Helmet>
-      <OrganizerAuthLayout>
-        <OrganizerOtpForm mode="signup" />
-      </OrganizerAuthLayout>
-    </>
-  );
+  const location = useLocation();
+  return <Navigate to={`/organizer/login${location.search}`} replace />;
 }

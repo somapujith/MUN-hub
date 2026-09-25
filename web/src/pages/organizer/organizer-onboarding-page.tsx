@@ -42,9 +42,10 @@ const STEP_LABELS: Record<OnboardingStep, string> = {
 
 /**
  * Organizer onboarding (publish.munhub.in/organizer/onboarding): profile, the
- * organizer's MUN, delegates & details, payout UPI and the organizer
- * agreement, one step at a time. Accepting the agreement submits the MUN as
- * the organizer's application; see lib/actions/organizer-onboarding.ts.
+ * organizer's MUN, delegates & details, payout bank details (+ an optional
+ * UPI ID) and the organizer agreement, one step at a time. Accepting the
+ * agreement submits the MUN as the organizer's application; see
+ * lib/actions/organizer-onboarding.ts.
  */
 export function OrganizerOnboardingPage() {
   return (
@@ -460,44 +461,149 @@ function DetailsStep({ data, onSaved }: StepProps) {
 
 // MUN Hub only accepts payouts to a FreeCharge UPI handle (@freecharge) —
 // user-directed restriction, mirrors lib/actions/organizer-onboarding.ts's UPI_PATTERN.
+// UPI itself is optional (2026-09-26) — bank details below are the required payout method.
 const UPI_FORMAT = /^[a-zA-Z0-9._-]{2,256}@freecharge$/;
+const IFSC_FORMAT = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const BANK_ACCOUNT_FORMAT = /^\d{9,18}$/;
 
 function PaymentStep({ data, onSaved }: StepProps) {
+  const [accountHolderName, setAccountHolderName] = React.useState(data.profile.accountHolderName ?? "");
+  const [bankName, setBankName] = React.useState(data.profile.bankName ?? "");
+  // Never prefilled — the saved account number is write-only and isn't returned by the server.
+  const [accountNumber, setAccountNumber] = React.useState("");
+  const [confirmAccountNumber, setConfirmAccountNumber] = React.useState("");
+  const [ifscCode, setIfscCode] = React.useState(data.profile.ifscCode ?? "");
   const [upiId, setUpiId] = React.useState(data.profile.upiId ?? "");
-  const [upiPhone, setUpiPhone] = React.useState(data.profile.upiPhone ?? "");
+  // Only prefill the linked phone when a UPI ID was already saved — otherwise the account's
+  // default phone would show up next to an empty UPI ID and block submission (see below).
+  const [upiPhone, setUpiPhone] = React.useState(data.profile.upiId ? (data.profile.upiPhone ?? "") : "");
   const { mutation, error } = useStepMutation(savePaymentStep, onSaved);
-  const upiLooksWrong = upiId.includes("@") && upiId.length > 4 && !UPI_FORMAT.test(upiId.trim());
+
+  const accountNumberDigits = accountNumber.replace(/\s+/g, "");
+  const accountNumberValid = BANK_ACCOUNT_FORMAT.test(accountNumberDigits);
+  const accountNumbersMatch = accountNumber === confirmAccountNumber;
+  const trimmedIfsc = ifscCode.trim().toUpperCase();
+  const ifscLooksWrong = trimmedIfsc.length > 0 && !IFSC_FORMAT.test(trimmedIfsc);
+  // If a UPI ID has been started, its linked phone becomes required too — the
+  // same "give both or neither" rule lib/actions/organizer-onboarding.ts enforces.
+  const upiEntered = upiId.trim().length > 0;
+  const upiLooksWrong = upiEntered && !UPI_FORMAT.test(upiId.trim());
+
+  const bankFieldsValid = Boolean(
+    accountHolderName.trim() && bankName.trim() && accountNumberValid && accountNumbersMatch && IFSC_FORMAT.test(trimmedIfsc),
+  );
+  const upiFieldsValid = !upiEntered || (UPI_FORMAT.test(upiId.trim()) && TEN_DIGITS.test(upiPhone));
+
+  const clientError =
+    (accountNumber && confirmAccountNumber && !accountNumbersMatch ? "Account numbers don't match." : null) ??
+    (accountNumber && !accountNumberValid ? "Account number must be 9 to 18 digits." : null) ??
+    (ifscLooksWrong ? "Enter a valid IFSC code, e.g. HDFC0001234." : null) ??
+    (upiLooksWrong ? "Only a FreeCharge UPI ID is accepted — it must look like name@freecharge." : null) ??
+    (upiEntered && upiPhone && !TEN_DIGITS.test(upiPhone) ? "Enter a valid 10-digit mobile number." : null);
 
   return (
     <StepFrame
       title="Payment details"
-      description="We only accept a FreeCharge UPI ID for payouts. Create a FreeCharge UPI account, link your bank account to it, then submit that UPI ID below."
-      error={error ?? (upiLooksWrong ? "Only a FreeCharge UPI ID is accepted — it must look like name@freecharge." : null)}
+      description="Add the bank account payouts should go to. A UPI ID is an optional backup payout address."
+      error={error ?? clientError}
       submitLabel="Continue"
       submitting={mutation.isPending}
-      canSubmit={UPI_FORMAT.test(upiId.trim()) && TEN_DIGITS.test(upiPhone)}
-      onSubmit={() => mutation.mutate({ upiId, upiPhone })}
+      canSubmit={bankFieldsValid && upiFieldsValid}
+      onSubmit={() =>
+        mutation.mutate({
+          accountHolderName,
+          bankName,
+          bankAccountNumber: accountNumberDigits,
+          ifscCode: trimmedIfsc,
+          upiId: upiEntered ? upiId.trim() : undefined,
+          upiPhone: upiEntered ? upiPhone : undefined,
+        })
+      }
     >
-      <BrightField id="onboarding-upi" label="FreeCharge UPI ID">
+      <BrightField id="onboarding-account-holder" label="Account holder name">
         <input
-          id="onboarding-upi"
+          id="onboarding-account-holder"
           autoComplete="off"
-          spellCheck={false}
-          autoCapitalize="none"
-          placeholder="e.g. rahulsharma@freecharge"
-          value={upiId}
-          onChange={(event) => setUpiId(event.target.value.trim())}
-          aria-invalid={upiLooksWrong ? true : undefined}
-          className={cn(BRIGHT_INPUT_CLASS, "max-w-[420px]")}
+          placeholder="As it appears on your bank account"
+          value={accountHolderName}
+          onChange={(event) => setAccountHolderName(event.target.value)}
+          className={BRIGHT_INPUT_CLASS}
         />
       </BrightField>
-      <BrightField
-        id="onboarding-upi-phone"
-        label="Mobile number linked to this UPI ID"
-        hint="Payouts are sent to this UPI ID. Double-check it — it can't be changed here once you submit."
-      >
-        <PhoneInput id="onboarding-upi-phone" value={upiPhone} onChange={setUpiPhone} />
+      <BrightField id="onboarding-bank-name" label="Bank name">
+        <input
+          id="onboarding-bank-name"
+          autoComplete="off"
+          placeholder="e.g. HDFC Bank"
+          value={bankName}
+          onChange={(event) => setBankName(event.target.value)}
+          className={BRIGHT_INPUT_CLASS}
+        />
       </BrightField>
+      <div className="grid gap-md sm:grid-cols-2">
+        <BrightField id="onboarding-account-number" label="Account number">
+          <input
+            id="onboarding-account-number"
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="9 to 18 digits"
+            value={accountNumber}
+            onChange={(event) => setAccountNumber(event.target.value.replace(/[^\d\s]/g, ""))}
+            aria-invalid={accountNumber && !accountNumberValid ? true : undefined}
+            className={BRIGHT_INPUT_CLASS}
+          />
+        </BrightField>
+        <BrightField id="onboarding-confirm-account-number" label="Confirm account number">
+          <input
+            id="onboarding-confirm-account-number"
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="Re-enter the account number"
+            value={confirmAccountNumber}
+            onChange={(event) => setConfirmAccountNumber(event.target.value.replace(/[^\d\s]/g, ""))}
+            aria-invalid={confirmAccountNumber && !accountNumbersMatch ? true : undefined}
+            className={BRIGHT_INPUT_CLASS}
+          />
+        </BrightField>
+      </div>
+      <BrightField id="onboarding-ifsc" label="IFSC code" hint="Found on a cheque leaf or your bank's passbook, e.g. HDFC0001234.">
+        <input
+          id="onboarding-ifsc"
+          autoComplete="off"
+          spellCheck={false}
+          autoCapitalize="characters"
+          maxLength={11}
+          placeholder="e.g. HDFC0001234"
+          value={ifscCode}
+          onChange={(event) => setIfscCode(event.target.value.toUpperCase())}
+          aria-invalid={ifscLooksWrong ? true : undefined}
+          className={cn(BRIGHT_INPUT_CLASS, "max-w-[240px] uppercase")}
+        />
+      </BrightField>
+
+      <div className="mt-2 flex flex-col gap-lg border-t border-[#e2e2e8] pt-lg">
+        <p className="text-[13px] font-semibold tracking-wide text-[#8a8a92] uppercase">Optional backup payout</p>
+        <BrightField id="onboarding-upi" label="UPI ID (optional)">
+          <input
+            id="onboarding-upi"
+            autoComplete="off"
+            spellCheck={false}
+            autoCapitalize="none"
+            placeholder="e.g. rahulsharma@freecharge"
+            value={upiId}
+            onChange={(event) => setUpiId(event.target.value.trim())}
+            aria-invalid={upiLooksWrong ? true : undefined}
+            className={cn(BRIGHT_INPUT_CLASS, "max-w-[420px]")}
+          />
+        </BrightField>
+        <BrightField
+          id="onboarding-upi-phone"
+          label="Mobile number linked to this UPI ID (optional)"
+          hint="Only needed if you give a UPI ID above. MUN Hub only accepts FreeCharge UPI handles."
+        >
+          <PhoneInput id="onboarding-upi-phone" value={upiPhone} onChange={setUpiPhone} />
+        </BrightField>
+      </div>
     </StepFrame>
   );
 }
@@ -505,7 +611,7 @@ function PaymentStep({ data, onSaved }: StepProps) {
 const AGREEMENT_POINTS = [
   "Everything you publish about your conference — dates, venue, committees, fees — is accurate, and you'll keep it up to date.",
   "MUN Hub reviews every application and listing before it goes live, and may ask for changes, pause or remove a listing.",
-  "Delegate payments collected on MUN Hub are settled to the UPI ID you provided, less MUN Hub's platform fee.",
+  "Delegate payments collected on MUN Hub are settled to the bank account you provided, less MUN Hub's platform fee.",
   "Registrations on MUN Hub are final: you won't promise delegates refunds, and you'll handle their queries promptly.",
   "You'll use delegate details only to run your conference, and keep them secure.",
 ];

@@ -1,10 +1,17 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { adminActions, muns, users } from '@/lib/db/schema'
+import { adminActions, muns, organizerProfiles, users } from '@/lib/db/schema'
+import { encryptField } from '@/lib/crypto/field-encryption'
 import type { Session } from '@/lib/auth/adapter'
 
-import { listOrganizers, ORGANIZER_NOT_FOUND, reinstateOrganizer, suspendOrganizer } from './organizer-admin'
+import {
+  getOrganizerBankDetails,
+  listOrganizers,
+  ORGANIZER_NOT_FOUND,
+  reinstateOrganizer,
+  suspendOrganizer,
+} from './organizer-admin'
 
 async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'OPERATIONS' | 'ADMIN' | 'SUPER_ADMIN') {
   const [user] = await db
@@ -253,6 +260,102 @@ describe('listOrganizers', () => {
     const otherRow = results.find((r) => r.id === otherOrganizer.id)
     expect(row?.munCount).toBe(2)
     expect(otherRow?.munCount).toBe(0)
+  })
+})
+
+describe('getOrganizerBankDetails', () => {
+  async function makeOnboardedOrganizer(overrides: Partial<typeof organizerProfiles.$inferInsert> = {}) {
+    const organizer = await makeUser('ORGANIZER')
+    await db.insert(organizerProfiles).values({
+      userId: organizer.id,
+      accountHolderName: 'Test Society',
+      bankName: 'HDFC Bank',
+      bankAccountNumberCiphertext: encryptField('123456789012'),
+      bankAccountLast4: '9012',
+      ifscCode: 'HDFC0001234',
+      ...overrides,
+    })
+    return organizer
+  }
+
+  it('decrypts the full account number and logs ORGANIZER_BANK_DETAILS_REVEALED', async () => {
+    const admin = await makeUser('ADMIN')
+    const organizer = await makeOnboardedOrganizer({ upiId: 'test@freecharge', upiPhone: '9876543210' })
+
+    const details = await getOrganizerBankDetails(organizer.id, sess(admin))
+
+    expect(details).toEqual({
+      accountHolderName: 'Test Society',
+      bankName: 'HDFC Bank',
+      bankAccountNumber: '123456789012',
+      ifscCode: 'HDFC0001234',
+      upiId: 'test@freecharge',
+      upiPhone: '9876543210',
+    })
+
+    const [log] = await db.select().from(adminActions).where(eq(adminActions.targetId, organizer.id))
+    expect(log.action).toBe('ORGANIZER_BANK_DETAILS_REVEALED')
+    expect(log.actorId).toBe(admin.id)
+    expect(log.targetType).toBe('user')
+  })
+
+  it('allows OPERATIONS', async () => {
+    const ops = await makeUser('OPERATIONS')
+    const organizer = await makeOnboardedOrganizer()
+
+    const details = await getOrganizerBankDetails(organizer.id, sess(ops))
+    expect(details.bankAccountNumber).toBe('123456789012')
+  })
+
+  it('returns all-null fields (not an error) for an organizer who has not filled in payment details yet, and still logs the reveal', async () => {
+    const admin = await makeUser('ADMIN')
+    const organizer = await makeUser('ORGANIZER')
+
+    const details = await getOrganizerBankDetails(organizer.id, sess(admin))
+    expect(details).toEqual({
+      accountHolderName: null,
+      bankName: null,
+      bankAccountNumber: null,
+      ifscCode: null,
+      upiId: null,
+      upiPhone: null,
+    })
+
+    const [log] = await db.select().from(adminActions).where(eq(adminActions.targetId, organizer.id))
+    expect(log.action).toBe('ORGANIZER_BANK_DETAILS_REVEALED')
+  })
+
+  it('throws Forbidden for a non-admin session', async () => {
+    const organizer = await makeOnboardedOrganizer()
+    const student = await makeUser('STUDENT')
+
+    await expect(getOrganizerBankDetails(organizer.id, sess(student))).rejects.toThrow('Forbidden')
+  })
+
+  it('throws Forbidden with no session', async () => {
+    const organizer = await makeOnboardedOrganizer()
+
+    await expect(getOrganizerBankDetails(organizer.id, null)).rejects.toThrow('Forbidden')
+  })
+
+  it('refuses an unknown user id with ORGANIZER_NOT_FOUND, and logs nothing', async () => {
+    const admin = await makeUser('ADMIN')
+    const unknownId = crypto.randomUUID()
+
+    await expect(getOrganizerBankDetails(unknownId, sess(admin))).rejects.toThrow(ORGANIZER_NOT_FOUND)
+
+    const logs = await db.select().from(adminActions).where(eq(adminActions.targetId, unknownId))
+    expect(logs).toEqual([])
+  })
+
+  it('refuses a non-ORGANIZER account (e.g. a delegate) with ORGANIZER_NOT_FOUND', async () => {
+    const admin = await makeUser('ADMIN')
+    const student = await makeUser('STUDENT')
+
+    await expect(getOrganizerBankDetails(student.id, sess(admin))).rejects.toThrow(ORGANIZER_NOT_FOUND)
+
+    const logs = await db.select().from(adminActions).where(eq(adminActions.targetId, student.id))
+    expect(logs).toEqual([])
   })
 })
 

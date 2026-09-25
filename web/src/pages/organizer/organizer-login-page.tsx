@@ -29,9 +29,11 @@ export function OrganizerAuthLayout({ children }: { children: ReactNode }) {
 }
 
 /**
- * The organizer door — the landing page of publish.munhub.in. Passwordless:
- * email, then an emailed one-time code. Organizer accounts are separate from
- * delegate accounts; a delegate address never receives a code here.
+ * The organizer door — the landing page of publish.munhub.in, and the only
+ * way in: passwordless email + an emailed one-time code, which also creates
+ * the account on first use. There is no separate "sign up" page. Organizer
+ * accounts are separate from delegate accounts; a delegate address never
+ * receives a code here.
  */
 export function OrganizerLoginPage() {
   return (
@@ -44,7 +46,7 @@ export function OrganizerLoginPage() {
         />
       </Helmet>
       <OrganizerAuthLayout>
-        <OrganizerOtpForm mode="login" />
+        <OrganizerOtpForm />
       </OrganizerAuthLayout>
     </>
   );

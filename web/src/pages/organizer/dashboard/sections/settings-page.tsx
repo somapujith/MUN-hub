@@ -480,16 +480,24 @@ function LifecycleCard({ munId }: { munId: string }) {
 
 // MUN Hub only accepts payouts to a FreeCharge UPI handle (@freecharge) —
 // user-directed restriction, mirrors lib/actions/organizer-onboarding.ts's UPI_PATTERN.
+// UPI itself is optional (2026-09-26) — bank details are the required payout method.
 const UPI_PATTERN = /^[a-zA-Z0-9._-]{2,256}@freecharge$/;
+const IFSC_PATTERN = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const BANK_ACCOUNT_PATTERN = /^\d{9,18}$/;
 
 /**
- * Payout details for this organizer account (not per-MUN): a UPI ID plus the
- * mobile number linked to it, set once during onboarding
- * (lib/actions/organizer-onboarding.ts#saveOrganizerPaymentStep). That step
- * locks once onboarding completes, so once set this only shows a
- * confirmation, never the stored value — changing it goes through support.
+ * Payout details for this organizer account (not per-MUN): bank account
+ * details (required) plus an optional FreeCharge UPI ID, set once during
+ * onboarding (lib/actions/organizer-onboarding.ts#saveOrganizerPaymentStep).
+ * That step locks once onboarding completes, so once set this only shows a
+ * confirmation, never the stored values — changing them goes through support.
  */
 function PaymentDetailsCard() {
+  const [accountHolderName, setAccountHolderName] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [confirmAccountNumber, setConfirmAccountNumber] = useState("");
+  const [ifscCode, setIfscCode] = useState("");
   const [upiId, setUpiId] = useState("");
   const [upiPhone, setUpiPhone] = useState("");
 
@@ -498,8 +506,18 @@ function PaymentDetailsCard() {
     queryFn: getOrganizerOnboarding,
   });
 
+  const upiEntered = upiId.trim().length > 0;
+
   const saveMutation = useMutation({
-    mutationFn: () => savePaymentStep({ upiId: upiId.trim(), upiPhone: upiPhone.trim() }),
+    mutationFn: () =>
+      savePaymentStep({
+        accountHolderName: accountHolderName.trim(),
+        bankName: bankName.trim(),
+        bankAccountNumber: accountNumber.trim(),
+        ifscCode: ifscCode.trim().toUpperCase(),
+        upiId: upiEntered ? upiId.trim() : undefined,
+        upiPhone: upiEntered ? upiPhone.trim() : undefined,
+      }),
     onSuccess: async () => {
       toast.success("Payment details added");
       await onboardingQuery.refetch();
@@ -509,26 +527,44 @@ function PaymentDetailsCard() {
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (!UPI_PATTERN.test(upiId.trim())) {
-      toast.error("Only a FreeCharge UPI ID is accepted — it must look like name@freecharge");
+    if (!accountHolderName.trim() || !bankName.trim()) {
+      toast.error("Account holder name and bank name are required");
       return;
     }
-    if (!upiPhone.trim()) {
-      toast.error("Mobile number is required");
+    if (!BANK_ACCOUNT_PATTERN.test(accountNumber.trim())) {
+      toast.error("Account number must be 9 to 18 digits");
       return;
+    }
+    if (accountNumber.trim() !== confirmAccountNumber.trim()) {
+      toast.error("Account numbers don't match");
+      return;
+    }
+    if (!IFSC_PATTERN.test(ifscCode.trim().toUpperCase())) {
+      toast.error("Enter a valid IFSC code, e.g. HDFC0001234");
+      return;
+    }
+    if (upiEntered) {
+      if (!UPI_PATTERN.test(upiId.trim())) {
+        toast.error("Only a FreeCharge UPI ID is accepted — it must look like name@freecharge");
+        return;
+      }
+      if (!upiPhone.trim()) {
+        toast.error("Mobile number linked to the UPI ID is required");
+        return;
+      }
     }
     saveMutation.mutate();
   };
 
-  const hasPaymentDetails = Boolean(onboardingQuery.data?.profile.upiId);
+  const hasPaymentDetails = Boolean(onboardingQuery.data?.profile.bankAccountLast4);
 
   return (
     <Card className="max-w-2xl">
       <CardHeader>
         <CardTitle>Payments</CardTitle>
         <CardDescription>
-          Where MUNHub sends your payout once the conference is settled. We only accept a FreeCharge UPI ID — create
-          a FreeCharge UPI account, link your bank account to it, then submit that UPI ID below.
+          Where MUNHub sends your payout once the conference is settled — your bank account, plus an optional UPI ID
+          as a backup payout address.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-md">
@@ -542,7 +578,7 @@ function PaymentDetailsCard() {
             <div>
               <p className="text-body-md font-medium text-ink">Payment details on file</p>
               <p className="text-body-md text-muted-foreground">
-                To change your UPI ID or mobile number, contact MUNHub support.
+                To change your bank account or UPI ID, contact MUNHub support.
               </p>
             </div>
           </div>
@@ -550,23 +586,67 @@ function PaymentDetailsCard() {
           <form className="flex flex-col gap-md" onSubmit={handleSubmit}>
             <div className="grid gap-md sm:grid-cols-2">
               <div className="flex flex-col gap-xs">
-                <Label htmlFor="payment-upi-id">FreeCharge UPI ID</Label>
+                <Label htmlFor="payment-account-holder">Account holder name</Label>
+                <Input
+                  id="payment-account-holder"
+                  value={accountHolderName}
+                  onChange={(event) => setAccountHolderName(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-xs">
+                <Label htmlFor="payment-bank-name">Bank name</Label>
+                <Input id="payment-bank-name" value={bankName} onChange={(event) => setBankName(event.target.value)} required />
+              </div>
+              <div className="flex flex-col gap-xs">
+                <Label htmlFor="payment-account-number">Account number</Label>
+                <Input
+                  id="payment-account-number"
+                  inputMode="numeric"
+                  value={accountNumber}
+                  onChange={(event) => setAccountNumber(event.target.value.replace(/[^\d\s]/g, ""))}
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-xs">
+                <Label htmlFor="payment-confirm-account-number">Confirm account number</Label>
+                <Input
+                  id="payment-confirm-account-number"
+                  inputMode="numeric"
+                  value={confirmAccountNumber}
+                  onChange={(event) => setConfirmAccountNumber(event.target.value.replace(/[^\d\s]/g, ""))}
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-xs">
+                <Label htmlFor="payment-ifsc">IFSC code</Label>
+                <Input
+                  id="payment-ifsc"
+                  maxLength={11}
+                  placeholder="e.g. HDFC0001234"
+                  value={ifscCode}
+                  onChange={(event) => setIfscCode(event.target.value.toUpperCase())}
+                  required
+                />
+              </div>
+            </div>
+            <div className="grid gap-md border-t border-border pt-md sm:grid-cols-2">
+              <div className="flex flex-col gap-xs">
+                <Label htmlFor="payment-upi-id">UPI ID (optional)</Label>
                 <Input
                   id="payment-upi-id"
                   placeholder="name@freecharge"
                   value={upiId}
                   onChange={(event) => setUpiId(event.target.value)}
-                  required
                 />
               </div>
               <div className="flex flex-col gap-xs">
-                <Label htmlFor="payment-upi-phone">Mobile number linked to it</Label>
+                <Label htmlFor="payment-upi-phone">Mobile number linked to it (optional)</Label>
                 <Input
                   id="payment-upi-phone"
                   type="tel"
                   value={upiPhone}
                   onChange={(event) => setUpiPhone(event.target.value)}
-                  required
                 />
               </div>
             </div>

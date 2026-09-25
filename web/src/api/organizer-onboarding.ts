@@ -36,6 +36,12 @@ export interface OrganizerOnboarding {
     munDescription: string | null;
     previousEditions: string | null;
     websiteUrl: string | null;
+    accountHolderName: string | null;
+    bankName: string | null;
+    /** Last 4 digits only — the full account number is write-only. */
+    bankAccountLast4: string | null;
+    ifscCode: string | null;
+    /** Optional secondary payout address. */
     upiId: string | null;
     upiPhone: string | null;
   };
@@ -84,7 +90,14 @@ export const saveDetailsStep = (input: {
   websiteUrl?: string;
 }) => put("details", input);
 
-export const savePaymentStep = (input: { upiId: string; upiPhone: string }) => put("payment", input);
+export const savePaymentStep = (input: {
+  accountHolderName: string;
+  bankName: string;
+  bankAccountNumber: string;
+  ifscCode: string;
+  upiId?: string;
+  upiPhone?: string;
+}) => put("payment", input);
 
 /** Accepts the organizer agreement, which also submits the MUN answers as the organizer's application. */
 export function acceptAgreement() {

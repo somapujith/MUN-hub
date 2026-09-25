@@ -69,10 +69,9 @@ test.describe('the three doors render', () => {
     await expect(send).toBeDisabled()
     await email.fill('someone@e2e.munhub.test')
     await expect(send).toBeEnabled()
-    await expect(main(page).getByRole('link', { name: 'Create an organizer account' })).toHaveAttribute(
-      'href',
-      '/organizer/signup',
-    )
+    // No separate signup: an unrecognized address's account is created the
+    // moment its code checks out, so there's nothing to switch to here.
+    await expect(main(page).getByRole('link', { name: 'Create an organizer account' })).toHaveCount(0)
     // No marketplace chrome on the organizer entrance.
     await expect(page.getByRole('banner')).toHaveCount(0)
     crashes.assertNone()

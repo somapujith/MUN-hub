@@ -165,6 +165,11 @@ export interface DataExportOrganizerProfile {
   munDescription: string | null
   previousEditions: string | null
   websiteUrl: string | null
+  accountHolderName: string | null
+  bankName: string | null
+  /** Last 4 digits only — the full account number is write-only, never exported. */
+  bankAccountLast4: string | null
+  ifscCode: string | null
   upiId: string | null
   upiPhone: string | null
   agreementVersion: string | null
@@ -351,6 +356,12 @@ async function loadOrganizerProfile(userId: string): Promise<DataExportOrganizer
       munDescription: organizerProfiles.munDescription,
       previousEditions: organizerProfiles.previousEditions,
       websiteUrl: organizerProfiles.websiteUrl,
+      accountHolderName: organizerProfiles.accountHolderName,
+      bankName: organizerProfiles.bankName,
+      // bankAccountNumberCiphertext is deliberately NOT selected — write-only,
+      // same as firstMunId is deliberately left out below (not the person's data).
+      bankAccountLast4: organizerProfiles.bankAccountLast4,
+      ifscCode: organizerProfiles.ifscCode,
       upiId: organizerProfiles.upiId,
       upiPhone: organizerProfiles.upiPhone,
       agreementVersion: organizerProfiles.agreementVersion,

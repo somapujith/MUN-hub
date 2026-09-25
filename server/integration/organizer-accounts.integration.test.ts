@@ -19,8 +19,6 @@ const APPLICATION_BODY = {
   description: 'Testing that only organizer accounts can apply.',
 }
 
-const PROFILE = { name: 'Route Organizer', acceptedTermsOfService: true, acceptedPrivacyPolicy: true }
-
 let sendSpy: MockInstance<(notification: NotificationPayload) => Promise<void>>
 
 beforeEach(() => {
@@ -48,20 +46,15 @@ async function requestCode(email: string): Promise<string> {
 }
 
 describe('organizer email-code auth routes', () => {
-  it('signs a new organizer up in two steps and sets the session cookie', async () => {
+  it('creates a new organizer on the first correct code and sets the session cookie — no separate signup step', async () => {
     const email = `route-otp-${crypto.randomUUID()}@test.com`
     const code = await requestCode(email)
 
-    const first = await post('/auth/organizers/session', { email, code })
-    expect(first.status).toBe(200)
-    expect(await first.json()).toEqual({ status: 'PROFILE_REQUIRED' })
-    expect(first.headers.get('set-cookie')).toBeNull()
-
-    const second = await post('/auth/organizers/session', { email, code, profile: PROFILE })
-    expect(second.status).toBe(201)
-    const body = await second.json()
+    const res = await post('/auth/organizers/session', { email, code })
+    expect(res.status).toBe(201)
+    const body = await res.json()
     expect(body).toMatchObject({ status: 'SIGNED_IN', role: 'ORGANIZER', isNewAccount: true })
-    expect(second.headers.get('set-cookie')).toContain(`${SESSION_COOKIE_NAME}=`)
+    expect(res.headers.get('set-cookie')).toContain(`${SESSION_COOKIE_NAME}=`)
 
     const [user] = await db.select().from(users).where(eq(users.id, body.userId))
     expect(user).toMatchObject({ role: 'ORGANIZER', passwordHash: null })
@@ -87,14 +80,17 @@ describe('organizer email-code auth routes', () => {
     expect(resend.status).toBe(429)
   })
 
-  it('rejects smuggled fields: a role on the profile, or a password', async () => {
+  it('rejects smuggled fields: a role or profile object on the session call, or a password on the code call', async () => {
     const email = `route-smuggle-${crypto.randomUUID()}@test.com`
-    const withRole = await post('/auth/organizers/session', {
+    const withRole = await post('/auth/organizers/session', { email, code: '123456', role: 'ADMIN' })
+    expect(withRole.status).toBe(400)
+
+    const withProfile = await post('/auth/organizers/session', {
       email,
       code: '123456',
-      profile: { ...PROFILE, role: 'ADMIN' },
+      profile: { name: 'Smuggled Name' },
     })
-    expect(withRole.status).toBe(400)
+    expect(withProfile.status).toBe(400)
 
     const withPassword = await post('/auth/organizers/code', { email, password: 'hunter22' })
     expect(withPassword.status).toBe(400)

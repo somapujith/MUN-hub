@@ -202,6 +202,16 @@ export const adminActionEnum = pgEnum('admin_action', [
   // once per trigger regardless of outcome (still pending, confirmed, failed,
   // exception, ...); the outcome itself lives in `metadata`.
   'PAYMENT_RECONCILE_TRIGGERED',
+  // Staff decrypted and viewed an organizer's full bank payout details
+  // (lib/actions/organizer-admin.ts#getOrganizerBankDetails), so they can set
+  // the organizer up as a payout beneficiary in the real gateway (Cashfree).
+  // The one deliberate, audited exception to the write-only rule
+  // lib/crypto/field-encryption.ts documents for the PAYMENT_FIELD_KEY
+  // domain (2026-09-26, explicit user instruction) — every call writes this
+  // row BEFORE the plaintext is returned. Deliberately its own value, not
+  // PII_READ: that one's docstring scopes it to delegate personal data
+  // (names/emails), not financial account numbers.
+  'ORGANIZER_BANK_DETAILS_REVEALED',
 ])
 
 export const supportCategoryEnum = pgEnum('support_category', [

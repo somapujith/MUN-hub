@@ -260,10 +260,18 @@ export const emailVerificationTokensRelations = relations(emailVerificationToken
 
 // ---------------------------------------------------------------------------
 // organizer_profiles — the one-time organizer onboarding wizard (profile, first
-// MUN, payout UPI, agreement), 1:1 with an ORGANIZER user. See
-// lib/actions/organizer-onboarding.ts. The UPI ID is a receiving address, so
-// it is stored as entered and shown back to its owner. `completedAt` is set by
-// the agreement step, which also submits the organizer application; a MUN
+// MUN, payout bank details, agreement), 1:1 with an ORGANIZER user. See
+// lib/actions/organizer-onboarding.ts.
+//
+// Payout: bank account details are the primary, required payout method
+// (2026-09-26, reverses the earlier UPI-only design — see CLAUDE.md's
+// "Organizer onboarding wizard" section). `bankAccountNumberCiphertext` +
+// `bankAccountLast4` mirror `munPaymentSettings`'s write-only encryption
+// pattern (lib/crypto/field-encryption.ts) — the plaintext account number is
+// never stored and never read back; only the last 4 digits are kept for
+// display. UPI ID stays as a secondary, optional receiving address, stored as
+// entered (not encrypted) and shown back to its owner. `completedAt` is set
+// by the agreement step, which also submits the organizer application; a MUN
 // application requires it.
 // ---------------------------------------------------------------------------
 
@@ -284,6 +292,11 @@ export const organizerProfiles = pgTable('organizer_profiles', {
   previousEditions: text('previous_editions'),
   websiteUrl: text('website_url'),
   firstMunId: text('first_mun_id').references(() => muns.id, { onDelete: 'set null' }),
+  accountHolderName: text('account_holder_name'),
+  bankName: text('bank_name'),
+  bankAccountNumberCiphertext: text('bank_account_number_ciphertext'),
+  bankAccountLast4: text('bank_account_last4'),
+  ifscCode: text('ifsc_code'),
   upiId: text('upi_id'),
   upiPhone: text('upi_phone'),
   agreementVersion: text('agreement_version'),
@@ -1025,6 +1038,18 @@ export const organizerApplications = pgTable(
     previousEditions: text('previous_editions'),
     websiteUrl: text('website_url'),
     submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+    // Gate-1 structured rejection (2026-09-26, explicit user instruction),
+    // alongside the free-text reviewNotes above: which of the organizer's
+    // own answers (see organizer-application.ts's APPLICATION_FIELD_KEYS)
+    // the reviewer flagged as needing correction on a CHANGES_REQUESTED
+    // decision. Cleared to an empty array on APPROVED/REJECTED and on every
+    // resubmission — it describes the CURRENT round only, never history
+    // (that lives in verificationLogs).
+    fieldsRequiringCorrection: text('fields_requiring_correction').array(),
+    // How many times this application has gone CHANGES_REQUESTED -> SUBMITTED
+    // via resubmitOrganizerApplication. Shown to both the organizer and
+    // reviewers as "Resubmitted (N)" so a repeat round is visible at a glance.
+    resubmissionCount: integer('resubmission_count').notNull().default(0),
   },
   (table) => [index('organizer_applications_organizer_id_idx').on(table.organizerId)],
 )

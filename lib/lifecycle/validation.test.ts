@@ -72,8 +72,17 @@ async function makeCompleteMun(organizerId: string) {
   await db.insert(organizerApplications).values({ organizerId, munId: mun.id, status: 'APPROVED' })
   await db
     .insert(organizerProfiles)
-    .values({ userId: organizerId, upiId: 'organizer@upi', upiPhone: '9000000000' })
-    .onConflictDoUpdate({ target: organizerProfiles.userId, set: { upiId: 'organizer@upi' } })
+    .values({
+      userId: organizerId,
+      accountHolderName: 'Test Organizer',
+      bankName: 'Test Bank',
+      bankAccountLast4: '4321',
+      ifscCode: 'TEST0001234',
+    })
+    .onConflictDoUpdate({
+      target: organizerProfiles.userId,
+      set: { accountHolderName: 'Test Organizer', bankName: 'Test Bank', bankAccountLast4: '4321', ifscCode: 'TEST0001234' },
+    })
 
   const [committee] = await db
     .insert(committees)
@@ -217,7 +226,7 @@ describe('validateMunForSubmission', () => {
     expect(result.blockers).toEqual([])
   })
 
-  it('BLOCKER at both stages when the organizer has not linked a UPI payout', async () => {
+  it('BLOCKER at both stages when the organizer has not linked a payout', async () => {
     const organizer = await makeUser()
     const mun = await makeCompleteMun(organizer.id)
     await db.delete(organizerProfiles).where(eq(organizerProfiles.userId, organizer.id))

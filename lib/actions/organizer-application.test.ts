@@ -149,7 +149,10 @@ describe('resubmitOrganizerApplication', () => {
     return { userId: user.id, role: 'ORGANIZER' }
   }
 
-  async function makeChangesRequestedApplication(reviewNotes = 'Please clarify your delegate count.') {
+  async function makeChangesRequestedApplication(
+    reviewNotes = 'Please clarify your delegate count.',
+    fieldsRequiringCorrection: string[] = [],
+  ) {
     const [organizer] = await db
       .insert(users)
       .values({ name: 'Resubmit Org', email: `resubmitorg-${crypto.randomUUID()}@test.com`, role: 'ORGANIZER' })
@@ -172,6 +175,7 @@ describe('resubmitOrganizerApplication', () => {
       status: 'CHANGES_REQUESTED',
       reviewNotes,
       expectedDelegateCount: 50,
+      fieldsRequiringCorrection,
     })
     return { organizer, mun }
   }
@@ -228,7 +232,9 @@ describe('resubmitOrganizerApplication', () => {
   })
 
   it('resubmits: mun + application flip to SUBMITTED, edited fields are saved, reviewNotes clears, and an audit log is written', async () => {
-    const { organizer, mun } = await makeChangesRequestedApplication('Fix your description — too vague.')
+    const { organizer, mun } = await makeChangesRequestedApplication('Fix your description — too vague.', [
+      'description',
+    ])
     const input = resubmitInputFor(mun.id)
 
     const updated = await resubmitOrganizerApplication(input, sess(organizer))
@@ -238,6 +244,10 @@ describe('resubmitOrganizerApplication', () => {
     expect(updated.expectedDelegateCount).toBe(250)
     expect(updated.previousEditions).toBe('2 editions')
     expect(updated.websiteUrl).toBe('https://fixedmun.example.com')
+    // resubmissionCount goes up, and the previous round's flagged fields are
+    // cleared — they described a round that's now over.
+    expect(updated.resubmissionCount).toBe(1)
+    expect(updated.fieldsRequiringCorrection).toEqual([])
 
     const [refreshedMun] = await db.select().from(muns).where(eq(muns.id, mun.id))
     expect(refreshedMun.status).toBe('SUBMITTED')
@@ -273,6 +283,7 @@ describe('resubmitOrganizerApplication', () => {
       sess(organizer),
     )
     expect(second.status).toBe('SUBMITTED')
+    expect(second.resubmissionCount).toBe(2)
 
     const logs = await db
       .select({ action: verificationLogs.action })

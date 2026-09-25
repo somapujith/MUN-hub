@@ -156,16 +156,18 @@ function decryptWithKey(key: Buffer, iv: Buffer, authTag: Buffer, data: Buffer):
  * a tag that isn't 16 bytes) or if no configured key verifies the GCM tag
  * (tampering, or a key that has been rotated out).
  *
- * For the PAYMENT_FIELD_KEY domain specifically: nothing in this codebase
- * decrypts payment ciphertext back to plaintext. It is exported and tested
- * (round-trip + tamper detection) so the encryption format is proven correct
- * ahead of a future settlement-integration slice, but there is deliberately
- * no read path anywhere that does this (design doc Section 2.3: "a decrypt
- * path with no consumer is pure attack surface"). Do NOT wire a payment
- * decrypt into any action or query without a dedicated threat review first.
- * lib/actions/staff-mfa.ts's TOTP_KEY_NAMES domain is different: decrypting
- * the TOTP secret on every code check is the whole point, and is its
- * legitimate, intended caller.
+ * For the PAYMENT_FIELD_KEY domain: this was write-only until 2026-09-26
+ * (design doc Section 2.3: "a decrypt path with no consumer is pure attack
+ * surface") — still the right default. The one deliberate, audited exception
+ * is `lib/actions/organizer-admin.ts#getOrganizerBankDetails`, which staff
+ * use to set an organizer up as a payout beneficiary in the real gateway
+ * (explicit user instruction); every call logs an
+ * `ORGANIZER_BANK_DETAILS_REVEALED` admin_actions row before returning the
+ * plaintext, and it is STAFF-role-gated. Do NOT add another payment decrypt
+ * call site without the same audit-logging discipline and a reason to
+ * believe this one doesn't already cover it. lib/actions/staff-mfa.ts's
+ * TOTP_KEY_NAMES domain is unrelated: decrypting the TOTP secret on every
+ * code check is the whole point, and is its own legitimate caller.
  */
 export function decryptField(ciphertext: string, keyNames: FieldEncryptionKeyNames = PAYMENT_KEY_NAMES): string {
   const { iv, authTag, data } = parseCiphertext(ciphertext)

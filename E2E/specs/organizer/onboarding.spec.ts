@@ -17,10 +17,11 @@ import {
 
 /**
  * Organizer onboarding wizard (publish.munhub.in/organizer/onboarding):
- * profile → your MUN → delegates & details → payout UPI → agreement.
- * Accepting the agreement submits the MUN answers as the organizer's host
- * application (lib/actions/organizer-onboarding.ts). Every test uses its own
- * fresh, not-yet-onboarded organizer.
+ * profile → your MUN → delegates & details → payout bank details (+ an
+ * optional UPI ID) → agreement. Accepting the agreement submits the MUN
+ * answers as the organizer's host application
+ * (lib/actions/organizer-onboarding.ts). Every test uses its own fresh,
+ * not-yet-onboarded organizer.
  */
 
 test.use({ storageState: { cookies: [], origins: [] } })
@@ -126,6 +127,10 @@ test.describe('onboarding wizard', () => {
       munDescription: answers.munDescription,
       previousEditions: answers.previousEditions,
       websiteUrl: answers.websiteUrl,
+      accountHolderName: answers.accountHolderName,
+      bankName: answers.bankName,
+      bankAccountLast4: answers.bankAccountNumber.slice(-4),
+      ifscCode: answers.ifscCode,
       upiId: answers.upiId,
       upiPhone: answers.upiPhone,
     })
@@ -230,13 +235,30 @@ test.describe('onboarding wizard', () => {
     await form.getByLabel('Website (optional)').fill('')
     await continueButton(page).click()
 
-    // Payment: the UPI ID must look like name@bank.
+    // Payment: bank details are required, the account number must match its
+    // confirmation and the IFSC code must be valid; UPI stays optional but
+    // starting it requires the linked phone too.
     await expect(pageHeading(page)).toHaveText('Payment details')
-    await form.getByLabel('UPI ID', { exact: true }).fill('not@a-real@upi')
-    await expect(form.getByRole('alert')).toHaveText('UPI IDs look like name@bank.')
-    await form.getByLabel('Mobile number linked to this UPI ID').fill(answers.upiPhone)
+    await form.getByLabel('Account holder name').fill(answers.accountHolderName)
+    await form.getByLabel('Bank name').fill(answers.bankName)
     await expect(continueButton(page)).toBeDisabled()
-    await form.getByLabel('UPI ID', { exact: true }).fill(answers.upiId)
+    await form.getByLabel('Account number', { exact: true }).fill(answers.bankAccountNumber)
+    await form.getByLabel('Confirm account number').fill('999999999')
+    await expect(form.getByRole('alert')).toHaveText("Account numbers don't match.")
+    await expect(continueButton(page)).toBeDisabled()
+    await form.getByLabel('Confirm account number').fill(answers.bankAccountNumber)
+    await form.getByLabel('IFSC code').fill('BAD')
+    await expect(form.getByRole('alert')).toHaveText('Enter a valid IFSC code, e.g. HDFC0001234.')
+    await expect(continueButton(page)).toBeDisabled()
+    await form.getByLabel('IFSC code').fill(answers.ifscCode)
+    await expect(continueButton(page)).toBeEnabled()
+    await form.getByLabel('UPI ID (optional)').fill('not-a-real-upi')
+    await expect(form.getByRole('alert')).toHaveText(
+      'Only a FreeCharge UPI ID is accepted — it must look like name@freecharge.',
+    )
+    await expect(continueButton(page)).toBeDisabled()
+    await form.getByLabel('UPI ID (optional)').fill('')
+    await expect(continueButton(page)).toBeEnabled()
     await continueButton(page).click()
 
     // Agreement: can't submit without ticking the box.
@@ -302,13 +324,28 @@ test.describe('onboarding wizard', () => {
     }
     expect((await put('details', details)).status()).toBe(200)
 
-    await expectError(await put('payment', { upiId: 'no-at-sign', upiPhone: answers.upiPhone }), 400, 'UPI ID must look like name@bank')
+    const bankOnly = {
+      accountHolderName: answers.accountHolderName,
+      bankName: answers.bankName,
+      bankAccountNumber: answers.bankAccountNumber,
+      ifscCode: answers.ifscCode,
+    }
+    await expectError(await put('payment', { ...bankOnly, accountHolderName: ' ' }), 400, 'Account holder name is required')
+    await expectError(await put('payment', { ...bankOnly, bankAccountNumber: '12345' }), 400, 'Account number must be 9 to 18 digits')
+    await expectError(await put('payment', { ...bankOnly, ifscCode: 'BAD' }), 400, 'IFSC code must look like HDFC0001234')
     await expectError(
-      await put('payment', { upiId: answers.upiId, upiPhone: '555' }),
+      await put('payment', { ...bankOnly, upiId: 'no-at-sign' }),
+      400,
+      'Only a FreeCharge UPI ID is accepted — it must look like name@freecharge',
+    )
+    await expectError(
+      await put('payment', { ...bankOnly, upiId: answers.upiId, upiPhone: '555' }),
       400,
       'UPI mobile number must be a 10-digit Indian mobile number',
     )
-    expect((await put('payment', { upiId: answers.upiId, upiPhone: answers.upiPhone })).status()).toBe(200)
+    await expectError(await put('payment', { ...bankOnly, upiPhone: answers.upiPhone }), 400, 'Enter a UPI ID before its linked mobile number')
+    await expectError(await put('payment', { ...bankOnly, upiId: answers.upiId }), 400, 'Mobile number linked to the UPI ID is required')
+    expect((await put('payment', { ...bankOnly, upiId: answers.upiId, upiPhone: answers.upiPhone })).status()).toBe(200)
 
     await expectError(
       await api.post('organizer/onboarding/agreement', { data: { accepted: false } }),
@@ -316,7 +353,9 @@ test.describe('onboarding wizard', () => {
       'You must accept the organizer agreement to continue',
     )
     // Unknown fields are refused outright.
-    expect((await put('payment', { upiId: answers.upiId, upiPhone: answers.upiPhone, completedAt: new Date().toISOString() })).status()).toBe(400)
+    expect(
+      (await put('payment', { ...bankOnly, upiId: answers.upiId, upiPhone: answers.upiPhone, completedAt: new Date().toISOString() })).status(),
+    ).toBe(400)
     expect((await api.post('organizer/onboarding/agreement', { data: { accepted: 'yes' } })).status()).toBe(400)
 
     const state = await onboardingOf(api)
@@ -333,7 +372,20 @@ test.describe('onboarding wizard', () => {
       409,
       OUT_OF_ORDER,
     )
-    await expectError(await api.put('organizer/onboarding/payment', { data: { upiId: answers.upiId, upiPhone: answers.upiPhone } }), 409, OUT_OF_ORDER)
+    await expectError(
+      await api.put('organizer/onboarding/payment', {
+        data: {
+          accountHolderName: answers.accountHolderName,
+          bankName: answers.bankName,
+          bankAccountNumber: answers.bankAccountNumber,
+          ifscCode: answers.ifscCode,
+          upiId: answers.upiId,
+          upiPhone: answers.upiPhone,
+        },
+      }),
+      409,
+      OUT_OF_ORDER,
+    )
     await expectError(await api.post('organizer/onboarding/agreement', { data: { accepted: true } }), 409, OUT_OF_ORDER)
     expect((await onboardingOf(api)).completedSteps).toEqual([])
     expect(await workspaceMuns(api)).toHaveLength(0)
@@ -415,7 +467,18 @@ test.describe('onboarding is locked once submitted', () => {
       ['profile', 'put', { firstName: 'Changed', lastName: 'Name', contactPhone: '9000000000' }],
       ['mun', 'put', { munName: 'Renamed MUN', munCity: 'Delhi', munStartDate: answers.munStartDate }],
       ['details', 'put', { expectedDelegateCount: 5, munDescription: answers.munDescription }],
-      ['payment', 'put', { upiId: 'attacker@freecharge', upiPhone: '9000000000' }],
+      [
+        'payment',
+        'put',
+        {
+          accountHolderName: 'Attacker',
+          bankName: 'Attacker Bank',
+          bankAccountNumber: '999999999999',
+          ifscCode: 'ATTK0009999',
+          upiId: 'attacker@freecharge',
+          upiPhone: '9000000000',
+        },
+      ],
       ['agreement', 'post', { accepted: true }],
     ] as const) {
       await expectError(await org.api[method](`organizer/onboarding/${path}`, { data }), 409, LOCKED)

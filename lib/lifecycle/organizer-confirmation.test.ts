@@ -77,8 +77,25 @@ async function makeCompleteMun(organizerId: string, status: 'CONTENT_SUBMITTED' 
   await db.insert(organizerApplications).values({ organizerId, munId: mun.id, status: 'APPROVED' })
   await db
     .insert(organizerProfiles)
-    .values({ userId: organizerId, upiId: 'organizer@upi', upiPhone: '9000000000' })
-    .onConflictDoUpdate({ target: organizerProfiles.userId, set: { upiId: 'organizer@upi' } })
+    .values({
+      userId: organizerId,
+      accountHolderName: 'Test Organizer',
+      bankName: 'Test Bank',
+      bankAccountLast4: '4321',
+      ifscCode: 'TEST0001234',
+      upiId: 'organizer@upi',
+      upiPhone: '9000000000',
+    })
+    .onConflictDoUpdate({
+      target: organizerProfiles.userId,
+      set: {
+        accountHolderName: 'Test Organizer',
+        bankName: 'Test Bank',
+        bankAccountLast4: '4321',
+        ifscCode: 'TEST0001234',
+        upiId: 'organizer@upi',
+      },
+    })
 
   const [committee] = await db
     .insert(committees)
@@ -159,9 +176,16 @@ describe('submitFinalConfirmation', () => {
     expect(snapshot.contact).toBeTruthy()
     expect(snapshot.accommodationOptions).toBeTruthy()
     // The Gate-3 "Payouts" row bug fix: the organizer's current account-level
-    // UPI payout, not the legacy per-mun paymentSettings bank fields above
-    // (makeCompleteMun seeds both — this must read the UPI one).
-    expect(snapshot.organizerPayout).toEqual({ upiId: 'organizer@upi' })
+    // payout (bank details, plus an optional UPI ID), not the legacy per-mun
+    // paymentSettings bank fields above (makeCompleteMun seeds both — this
+    // must read the account-level organizer_profiles one).
+    expect(snapshot.organizerPayout).toEqual({
+      accountHolderName: 'Test Organizer',
+      bankName: 'Test Bank',
+      bankAccountLast4: '4321',
+      ifscCode: 'TEST0001234',
+      upiId: 'organizer@upi',
+    })
   })
 
   it('does not leak payment ciphertext columns into the snapshot', async () => {
@@ -171,9 +195,13 @@ describe('submitFinalConfirmation', () => {
     await submitFinalConfirmation(mun.id, { userId: organizer.id, role: 'ORGANIZER' })
 
     const [confirmation] = await db.select().from(organizerConfirmations).where(eq(organizerConfirmations.munId, mun.id))
-    const snapshot = confirmation.snapshotJson as { paymentSettings: Record<string, unknown> }
+    const snapshot = confirmation.snapshotJson as {
+      paymentSettings: Record<string, unknown>
+      organizerPayout: Record<string, unknown>
+    }
     expect(snapshot.paymentSettings).not.toHaveProperty('panCiphertext')
     expect(snapshot.paymentSettings).not.toHaveProperty('accountNumberCiphertext')
+    expect(snapshot.organizerPayout).not.toHaveProperty('bankAccountNumberCiphertext')
   })
 
   it('accepts ORGANIZER_CONFIRMATION as a starting status and skips the redundant transition', async () => {

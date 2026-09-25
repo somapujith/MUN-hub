@@ -28,7 +28,16 @@ const detailsBodySchema = z
     websiteUrl: z.string().optional(),
   })
   .strict()
-const paymentBodySchema = z.object({ upiId: z.string(), upiPhone: z.string() }).strict()
+const paymentBodySchema = z
+  .object({
+    accountHolderName: z.string(),
+    bankName: z.string(),
+    bankAccountNumber: z.string(),
+    ifscCode: z.string(),
+    upiId: z.string().optional(),
+    upiPhone: z.string().optional(),
+  })
+  .strict()
 const agreementBodySchema = z.object({ accepted: z.boolean() }).strict()
 
 const organizerOnly = [requireAuth, requireRole(['ORGANIZER'])] as const

@@ -113,17 +113,17 @@ test.describe('footer', () => {
     }
   })
 
-  test('the organizer column offers "List your MUN" to a signed-out visitor, pointing at organizer signup', async ({
+  test('the organizer column offers "List your MUN" to a signed-out visitor, pointing at the organizer login', async ({
     page,
   }) => {
     await page.goto('/')
     const column = footer(page).getByRole('navigation', { name: 'For organizers' })
     await expect(column).toBeVisible()
     const link = column.getByRole('link', { name: 'List your MUN' })
-    await expect(link).toHaveAttribute('href', '/organizer/signup')
+    await expect(link).toHaveAttribute('href', '/organizer/login')
     await link.click()
-    await expect(page).toHaveURL(/\/organizer\/signup$/)
-    await expect(pageHeading(page)).toHaveText('Create your organizer account')
+    await expect(page).toHaveURL(/\/organizer\/login$/)
+    await expect(pageHeading(page)).toHaveText('Log in')
   })
 
   test('the footer logo returns home', async ({ page }) => {
@@ -134,13 +134,13 @@ test.describe('footer', () => {
 })
 
 test.describe('"List your MUN" for signed-out visitors', () => {
-  test('the home page pitch points at organizer signup', async ({ page }) => {
+  test('the home page pitch points at the organizer login', async ({ page }) => {
     await page.goto('/')
     const cta = page.getByRole('main').getByRole('button', { name: 'List your MUN' })
-    await expect(cta).toHaveAttribute('href', '/organizer/signup')
+    await expect(cta).toHaveAttribute('href', '/organizer/login')
     await cta.click()
-    await expect(page).toHaveURL(/\/organizer\/signup$/)
-    await expect(pageHeading(page)).toHaveText('Create your organizer account')
+    await expect(page).toHaveURL(/\/organizer\/login$/)
+    await expect(pageHeading(page)).toHaveText('Log in')
   })
 })
 

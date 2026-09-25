@@ -130,9 +130,11 @@ export const router = createBrowserRouter([
           // Labelled per-role doors. Same POST /auth/session underneath — these
           // differ only in signposting and post-login destination. /admin/login is
           // intentionally unlinked from the public nav.
+          // The only organizer door: logging in with an email that has no
+          // account yet creates it (email-code confirmed) — never by converting
+          // a delegate account. See lib/actions/organizer-otp.ts.
           { path: "organizer/login", element: withSuspense(<OrganizerLoginPage />) },
-          // Organizer accounts are created here (email-code confirmed), never by
-          // converting a delegate account — see lib/actions/organizer-otp.ts.
+          // Kept only so old links/bookmarks still resolve; redirects to /organizer/login.
           { path: "organizer/signup", element: withSuspense(<OrganizerSignupPage />) },
           { path: "admin/login", element: withSuspense(<AdminLoginPage />) },
           { path: "signup", element: withSuspense(<SignupPage />) },

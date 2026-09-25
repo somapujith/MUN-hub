@@ -21,6 +21,7 @@ import {
 import { OrganizerBrightApplySkeleton } from "@/components/organizer/organizer-bright-skeleton";
 import { OrganizerBrightShell } from "@/components/organizer/organizer-bright-shell";
 import { RequireOrganizer } from "@/guards/require-organizer";
+import { applicationFieldLabel } from "@/lib/organizer-application-fields";
 import { cn } from "cn";
 
 const STATUS_LABELS: Record<MyOrganizerApplication["status"], { label: string; className: string }> = {
@@ -265,7 +266,13 @@ function MyApplications({ applications }: { applications: MyOrganizerApplication
       </h2>
       <ul className="flex flex-col gap-sm">
         {applications.map((application) => {
-          const status = STATUS_LABELS[application.status];
+          // A resubmission puts the application back to SUBMITTED — say so
+          // explicitly rather than showing the generic "Under review" label,
+          // so a repeat round is visible at a glance.
+          const status =
+            application.status === "SUBMITTED" && application.resubmissionCount > 0
+              ? { label: `Resubmitted (${application.resubmissionCount})`, className: "bg-[#fff4e0] text-[#8a5300]" }
+              : STATUS_LABELS[application.status];
           return (
             <li key={application.id} className="rounded-lg border border-[#e2e2e8] bg-white p-md">
               <div className="flex items-start justify-between gap-sm">
@@ -281,6 +288,12 @@ function MyApplications({ applications }: { applications: MyOrganizerApplication
                 <p className="mt-sm rounded-md bg-[#f6f6f8] p-sm text-[13px] whitespace-pre-wrap text-[#3d3d44]">
                   <span className="font-medium text-[#121212]">Note from MUN Hub: </span>
                   {application.reviewNotes}
+                </p>
+              ) : null}
+              {application.status === "CHANGES_REQUESTED" && application.fieldsRequiringCorrection.length > 0 ? (
+                <p className="mt-sm text-[13px] text-[#a3261b]">
+                  <span className="font-medium">Needs correction: </span>
+                  {application.fieldsRequiringCorrection.map((key) => applicationFieldLabel(key)).join(", ")}
                 </p>
               ) : null}
               {application.munId && application.status === "CHANGES_REQUESTED" ? (

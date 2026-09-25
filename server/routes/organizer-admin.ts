@@ -1,7 +1,7 @@
 import { zValidator } from '../lib/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { listOrganizers, reinstateOrganizer, suspendOrganizer } from '@/lib/actions/organizer-admin'
+import { getOrganizerBankDetails, listOrganizers, reinstateOrganizer, suspendOrganizer } from '@/lib/actions/organizer-admin'
 import { requireAuth } from '../middleware/require-auth'
 import { requireRole } from '../middleware/require-role'
 import type { AppVariables } from '../src/types'
@@ -54,5 +54,20 @@ organizerAdminRoutes.post(
   async (c) => {
     await reinstateOrganizer(c.req.param('userId'), c.get('session'))
     return c.body(null, 204)
+  },
+)
+
+// Decrypts and returns the organizer's full bank payout details — see
+// lib/actions/organizer-admin.ts#getOrganizerBankDetails's doc comment
+// before adding another caller. no-store: this must never sit in a browser
+// or intermediate cache even for a moment.
+organizerAdminRoutes.get(
+  '/admin/organizers/:userId/bank-details',
+  requireAuth,
+  requireRole([...ADMIN_ROLES]),
+  async (c) => {
+    const result = await getOrganizerBankDetails(c.req.param('userId'), c.get('session'))
+    c.header('Cache-Control', 'no-store')
+    return c.json(result)
   },
 )

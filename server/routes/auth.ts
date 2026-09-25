@@ -118,21 +118,12 @@ const organizerCodeRequestBodySchema = z
   })
   .strict()
 
-// `profile` is only sent for a brand-new organizer, after the first verify
-// answered PROFILE_REQUIRED. Deliberately none of the delegate profile fields.
+// No `profile` field: an unrecognized address is created on the spot as soon
+// as the code checks out — there is no separate signup step.
 const organizerCodeVerifyBodySchema = z
   .object({
     email: z.string().trim().min(1).email(),
     code: z.string().trim().regex(/^\d{6}$/),
-    profile: z
-      .object({
-        name: z.string().trim().min(1),
-        phone: z.string().optional(),
-        acceptedTermsOfService: z.boolean(),
-        acceptedPrivacyPolicy: z.boolean(),
-      })
-      .strict()
-      .optional(),
   })
   .strict()
 
@@ -267,14 +258,11 @@ authRoutes.post('/organizers/code', async (c) => {
 })
 
 // Step 2 checks the code. This is the only way an ORGANIZER account comes into
-// existence — a delegate account is never turned into an organizer one.
+// existence — a delegate account is never turned into an organizer one, and an
+// unrecognized address is created here rather than through a separate signup.
 authRoutes.post('/organizers/session', async (c) => {
   const body = organizerCodeVerifyBodySchema.parse(await c.req.json())
   const result = await verifyOrganizerLoginCode(body)
-
-  if (result.status === 'PROFILE_REQUIRED') {
-    return c.json({ status: result.status })
-  }
 
   setSessionCookie(c, result.token)
 

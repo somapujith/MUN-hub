@@ -99,12 +99,22 @@ export interface ConfirmationPreview {
     formFields: Row[];
     /**
      * The organizer's current account-level payout method
-     * (`organizer_profiles.upiId`, set once at onboarding) — NOT the legacy
+     * (`organizer_profiles`, set once at onboarding) — NOT the legacy
      * per-MUN `mun_payment_settings` bank-account fields, which nothing
      * writes to anymore and which this type deliberately omits (that stale
      * read was the Gate-3 "Payouts" row bug this type was fixed to close).
+     * Bank account details are the required payout method (2026-09-26); UPI
+     * is only an optional secondary address. `bankAccountLast4` is the full
+     * account number's last 4 digits only — it's write-only, encrypted at
+     * rest, and never sent to the client in full.
      */
-    organizerPayout: { upiId: string | null } | null;
+    organizerPayout: {
+      accountHolderName: string | null;
+      bankName: string | null;
+      bankAccountLast4: string | null;
+      ifscCode: string | null;
+      upiId: string | null;
+    } | null;
     documents: { kind: string; title: string }[];
     scheduleItems: Row[];
     contact: { officialEmail: string | null; phone: string | null } | null;

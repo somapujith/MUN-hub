@@ -87,7 +87,12 @@ export async function seedOrganizerLoginCode(email: string, code = TEST_LOGIN_CO
 /**
  * Marks an organizer's onboarding wizard (lib/actions/organizer-onboarding.ts)
  * as finished, the way server/integration/helpers.ts does. Organizers can't
- * apply to host until this is done. Safe to call twice.
+ * apply to host until this is done. Also sets the bank account fields — the
+ * required payout method as of 2026-09-26 — since `open-registration`'s
+ * payout gate (`lib/lifecycle/registration-lifecycle.ts#organizerPayoutOnboardingComplete`)
+ * checks those, not `upiId`; a plain `bank_account_last4` is enough to satisfy
+ * it without needing a real encrypted ciphertext for a test fixture. Safe to
+ * call twice.
  */
 export async function completeOrganizerOnboarding(userId: string): Promise<void> {
   assertLocalDatabase()
@@ -95,8 +100,11 @@ export async function completeOrganizerOnboarding(userId: string): Promise<void>
   try {
     await sql`
       insert into organizer_profiles (user_id, first_name, last_name, contact_phone,
+        account_holder_name, bank_name, bank_account_last4, ifsc_code,
         upi_id, upi_phone, agreement_version, completed_at)
-      values (${userId}, 'E2E', 'Organizer', '9876543210', 'e2e@freecharge', '9876543210', 'e2e', now())
+      values (${userId}, 'E2E', 'Organizer', '9876543210',
+        'E2E Organizer', 'E2E Test Bank', '4321', 'TEST0001234',
+        'e2e@freecharge', '9876543210', 'e2e', now())
       on conflict (user_id) do nothing`
   } finally {
     await sql.end()
@@ -104,8 +112,14 @@ export async function completeOrganizerOnboarding(userId: string): Promise<void>
 }
 
 /**
- * Creates a brand-new ORGANIZER through the real passwordless signup endpoint.
- * By default its onboarding is marked complete so it can apply to host; pass
+ * Creates a brand-new ORGANIZER through the real passwordless login endpoint
+ * — there is no separate signup: a first correct code for an unknown address
+ * creates the account, with a placeholder name derived from the email. Real
+ * organizers only get a real name once they complete the onboarding wizard's
+ * profile step, but specs pass `name` here to get a readable, distinguishable
+ * label immediately, so it's set directly afterwards the same way
+ * `completeOrganizerOnboarding` below shortcuts other setup. By default its
+ * onboarding is marked complete so it can apply to host; pass
  * `{ onboarded: false }` for tests that walk the onboarding wizard themselves.
  */
 export async function signUpOrganizerViaApi(
@@ -115,19 +129,24 @@ export async function signUpOrganizerViaApi(
 ): Promise<ApiSession> {
   await seedOrganizerLoginCode(email)
   const api = await newApiContext()
-  const response = await api.post('auth/organizers/session', {
-    data: {
-      email,
-      code: TEST_LOGIN_CODE,
-      profile: { name, acceptedTermsOfService: true, acceptedPrivacyPolicy: true },
-    },
-  })
+  const response = await api.post('auth/organizers/session', { data: { email, code: TEST_LOGIN_CODE } })
   if (response.status() !== 201) {
     throw new Error(`signUpOrganizerViaApi failed: ${response.status()} ${await response.text()}`)
   }
   const body = (await response.json()) as { userId: string; role: string }
+  await setUserName(body.userId, name)
   if (onboarded) await completeOrganizerOnboarding(body.userId)
   return { api, userId: body.userId, role: body.role, email, password: '' }
+}
+
+async function setUserName(userId: string, name: string): Promise<void> {
+  assertLocalDatabase()
+  const sql = postgres(DATABASE_URL, { max: 1, prepare: false, onnotice: () => {} })
+  try {
+    await sql`update users set name = ${name} where id = ${userId}`
+  } finally {
+    await sql.end()
+  }
 }
 
 /** Signs an existing organizer in with a planted code (organizers have no password). */

@@ -39,17 +39,22 @@ import { validateMunForSubmission } from './validation'
  *
  * `paymentSettings` above is the legacy per-MUN PAN/bank-account table —
  * nothing writes to it anymore since the org moved to account-level
- * UPI-only payouts (`organizer_profiles.upiId`, set once at onboarding).
+ * payouts (`organizer_profiles`, set once at onboarding — bank account
+ * details are the required payout method as of 2026-09-26, with an optional
+ * secondary UPI ID; see CLAUDE.md's "Organizer onboarding wizard" section).
  * It's kept here only so an old mun's historical snapshot/version data
  * stays intact; it is deliberately NOT what the Gate-3 "Payouts" summary
  * row displays (see `organizerPayout` below fixing that exact bug).
  *
  * `organizerPayout` is the organizer's actual, current payout method —
- * looked up by `mun.organizerId`, same query shape as
+ * looked up by `mun.organizerId`, same fields
  * `lib/lifecycle/validation.ts#loadValidationContext`'s
- * `organizerPaymentLinked` check (the thing that actually gates
- * submit/publish). `null` mun (bad munId) yields `null` here rather than
- * throwing, matching this function's existing no-guard-on-`mun` behavior.
+ * `organizerPaymentLinked` check uses (the thing that actually gates
+ * submit/publish). Only `bankAccountLast4` is ever included, never the
+ * ciphertext — same write-only rule `lib/actions/payment-settlement.ts`
+ * follows for `mun_payment_settings`. `null` mun (bad munId) yields `null`
+ * here rather than throwing, matching this function's existing
+ * no-guard-on-`mun` behavior.
  *
  * Exported (Task 11, 2026-09-14) — `publishFromQueue` (lib/lifecycle/
  * go-live.ts) reuses this exact snapshot builder for the `mun_versions` row
@@ -111,7 +116,13 @@ export async function buildSnapshot(munId: string) {
 
   const [organizerPayoutRow] = mun
     ? await db
-        .select({ upiId: organizerProfiles.upiId })
+        .select({
+          accountHolderName: organizerProfiles.accountHolderName,
+          bankName: organizerProfiles.bankName,
+          bankAccountLast4: organizerProfiles.bankAccountLast4,
+          ifscCode: organizerProfiles.ifscCode,
+          upiId: organizerProfiles.upiId,
+        })
         .from(organizerProfiles)
         .where(eq(organizerProfiles.userId, mun.organizerId))
         .limit(1)
@@ -126,7 +137,15 @@ export async function buildSnapshot(munId: string) {
     executiveBoard,
     formFields,
     paymentSettings: paymentSettings ?? null,
-    organizerPayout: organizerPayoutRow ? { upiId: organizerPayoutRow.upiId } : null,
+    organizerPayout: organizerPayoutRow
+      ? {
+          accountHolderName: organizerPayoutRow.accountHolderName,
+          bankName: organizerPayoutRow.bankName,
+          bankAccountLast4: organizerPayoutRow.bankAccountLast4,
+          ifscCode: organizerPayoutRow.ifscCode,
+          upiId: organizerPayoutRow.upiId,
+        }
+      : null,
     documents,
     scheduleItems,
     contact: contact ?? null,

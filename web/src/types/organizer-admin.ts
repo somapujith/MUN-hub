@@ -21,3 +21,13 @@ export interface ListOrganizersParams {
   offset?: number;
   search?: string;
 }
+
+/** Decrypted, full detail — see `getOrganizerBankDetails` in `@/api/organizer-admin` before adding another caller. */
+export interface OrganizerBankDetails {
+  accountHolderName: string | null;
+  bankName: string | null;
+  bankAccountNumber: string | null;
+  ifscCode: string | null;
+  upiId: string | null;
+  upiPhone: string | null;
+}

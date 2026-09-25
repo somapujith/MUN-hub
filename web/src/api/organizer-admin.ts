@@ -1,4 +1,4 @@
-import type { ListOrganizersParams, ListOrganizersResult } from "@/types/organizer-admin";
+import type { ListOrganizersParams, ListOrganizersResult, OrganizerBankDetails } from "@/types/organizer-admin";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1";
 
@@ -36,4 +36,15 @@ export function suspendOrganizer(userId: string, reason: string) {
 
 export function reinstateOrganizer(userId: string) {
   return request<void>(`/admin/organizers/${userId}/reinstate`, { method: "POST" });
+}
+
+/**
+ * Decrypts and returns the organizer's full bank payout details — every call
+ * is audit-logged server-side. Deliberately not a `useQuery` anywhere it's
+ * called: fire it only on an explicit "reveal" click, never prefetched or
+ * cached under a persistent key, so a viewer who never asks for it never
+ * causes a reveal (and its log entry) to happen on their behalf.
+ */
+export function getOrganizerBankDetails(userId: string) {
+  return request<OrganizerBankDetails>(`/admin/organizers/${userId}/bank-details`);
 }

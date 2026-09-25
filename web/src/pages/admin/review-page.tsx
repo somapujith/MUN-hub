@@ -4,6 +4,7 @@ import { ClipboardListIcon, SearchIcon } from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { bulkApproveMunApplications, getMunForReview, getReviewQueue, reviewMunApplication } from "@/api/admin-review";
+import { getOrganizerBankDetails } from "@/api/organizer-admin";
 import { queryKeys } from "@/api/query-keys";
 import { AdminPageFrame } from "@/components/admin/admin-page-frame";
 import { MunStatusBadge } from "@/components/mun/mun-status-badge";
@@ -22,7 +23,9 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { adminSelectClassName } from "@/lib/admin/styles";
 import { usePageClamp } from "@/lib/admin/use-page-clamp";
+import { ORGANIZER_APPLICATION_FIELDS } from "@/lib/organizer-application-fields";
 import type { ApplicationStatus, BulkApplicationDecisionResult, ReviewDecision, ReviewQueueRow } from "@/types/admin-review";
+import type { OrganizerBankDetails } from "@/types/organizer-admin";
 
 const PAGE_SIZE = 20;
 
@@ -68,6 +71,13 @@ export function AdminReviewPage() {
   const [bulkSummary, setBulkSummary] = useState<{ ok: number; failed: BulkApplicationDecisionResult[] } | null>(
     null,
   );
+  // Local state, not a query: a reveal must only ever happen on an explicit
+  // click (see @/api/organizer-admin's getOrganizerBankDetails), and must not
+  // outlive this dialog — cleared in closeDialog below.
+  const [bankDetails, setBankDetails] = useState<OrganizerBankDetails | null>(null);
+  // Which fields to flag as needing correction — only sent/shown when
+  // decision is CHANGES_REQUESTED. Cleared in closeDialog below.
+  const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -106,7 +116,15 @@ export function AdminReviewPage() {
     setInternalNotes("");
     setDecision("APPROVED");
     setShowReasonError(false);
+    setBankDetails(null);
+    setSelectedFields(new Set());
   };
+
+  const revealBankDetailsMutation = useMutation({
+    mutationFn: () => getOrganizerBankDetails(detailQuery.data!.organizerId),
+    onSuccess: setBankDetails,
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Unable to load bank details"),
+  });
 
   const decideMutation = useMutation({
     mutationFn: () =>
@@ -114,6 +132,7 @@ export function AdminReviewPage() {
         decision,
         notes: notes.trim() || undefined,
         internalNotes: internalNotes.trim() || undefined,
+        fieldsRequiringCorrection: decision === "CHANGES_REQUESTED" ? Array.from(selectedFields) : undefined,
       }),
     onSuccess: async () => {
       await refresh();
@@ -340,7 +359,14 @@ export function AdminReviewPage() {
                     {[row.city, row.country].filter(Boolean).join(", ") || "—"}
                   </td>
                   <td className="px-md py-sm">
-                    <MunStatusBadge status={row.status} />
+                    <div className="flex flex-wrap items-center gap-xs">
+                      <MunStatusBadge status={row.status} />
+                      {row.resubmissionCount > 0 && (
+                        <span className="rounded-full bg-warning/15 px-2 py-0.5 text-caption font-medium text-warning-text">
+                          Resubmitted ({row.resubmissionCount})
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-md py-sm tabular-nums text-muted-foreground">{formatDate(row.createdAt)}</td>
                   <td className="px-md py-sm text-right">
@@ -352,6 +378,8 @@ export function AdminReviewPage() {
                         setDecision("APPROVED");
                         setNotes("");
                         setInternalNotes("");
+                        setBankDetails(null);
+                        setSelectedFields(new Set());
                       }}
                     >
                       Review
@@ -392,7 +420,14 @@ export function AdminReviewPage() {
         <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-lg">
           <form onSubmit={handleSubmit} noValidate className="flex min-h-0 flex-1 flex-col gap-lg">
             <DialogHeader>
-              <DialogTitle>Review {reviewTarget?.name}</DialogTitle>
+              <DialogTitle className="flex flex-wrap items-center gap-sm">
+                Review {reviewTarget?.name}
+                {(detailQuery.data?.organizerApplication?.resubmissionCount ?? 0) > 0 && (
+                  <span className="rounded-full bg-warning/15 px-2 py-0.5 text-caption font-medium text-warning-text">
+                    Resubmitted ({detailQuery.data!.organizerApplication!.resubmissionCount})
+                  </span>
+                )}
+              </DialogTitle>
               <DialogDescription>
                 Gate 1 decision — approves or rejects the organizing entity, not the MUN's content.
               </DialogDescription>
@@ -405,12 +440,32 @@ export function AdminReviewPage() {
               <Skeleton className="h-24 w-full" />
             ) : detailQuery.data ? (
               <div className="flex flex-col gap-sm rounded-md border border-border bg-surface-soft/60 p-md text-body-md">
+                {detailQuery.data.organizerProfile && (
+                  <p>
+                    <span className="text-muted-foreground">Organizer:</span>{" "}
+                    {[detailQuery.data.organizerProfile.firstName, detailQuery.data.organizerProfile.lastName]
+                      .filter(Boolean)
+                      .join(" ") || "—"}
+                    {detailQuery.data.organizerProfile.contactPhone
+                      ? ` · ${detailQuery.data.organizerProfile.contactPhone}`
+                      : ""}
+                  </p>
+                )}
                 <p>
                   <span className="text-muted-foreground">Application submitted:</span>{" "}
                   {detailQuery.data.organizerApplication
                     ? formatDate(detailQuery.data.organizerApplication.submittedAt)
                     : "—"}
                 </p>
+                {detailQuery.data.organizerApplication?.fieldsRequiringCorrection &&
+                  detailQuery.data.organizerApplication.fieldsRequiringCorrection.length > 0 && (
+                    <p>
+                      <span className="text-muted-foreground">Flagged for correction:</span>{" "}
+                      {detailQuery.data.organizerApplication.fieldsRequiringCorrection
+                        .map((key) => ORGANIZER_APPLICATION_FIELDS.find((f) => f.key === key)?.label ?? key)
+                        .join(", ")}
+                    </p>
+                  )}
                 {detailQuery.data.startDate && (
                   <p>
                     <span className="text-muted-foreground">Expected start:</span>{" "}
@@ -470,6 +525,54 @@ export function AdminReviewPage() {
               </div>
             ) : null}
 
+            {detailQuery.data && (
+              <div className="flex flex-col gap-sm rounded-md border border-warning/40 bg-warning/5 p-md text-body-md">
+                <div className="flex items-center justify-between gap-sm">
+                  <span className="font-medium text-ink">Payout bank details</span>
+                  {!bankDetails && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => revealBankDetailsMutation.mutate()}
+                      disabled={revealBankDetailsMutation.isPending}
+                    >
+                      {revealBankDetailsMutation.isPending ? "Revealing…" : "Reveal bank details"}
+                    </Button>
+                  )}
+                </div>
+                {bankDetails ? (
+                  bankDetails.bankAccountNumber ? (
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-md gap-y-xxs">
+                      <dt className="text-muted-foreground">Account holder</dt>
+                      <dd>{bankDetails.accountHolderName}</dd>
+                      <dt className="text-muted-foreground">Bank</dt>
+                      <dd>{bankDetails.bankName}</dd>
+                      <dt className="text-muted-foreground">Account number</dt>
+                      <dd className="font-mono tabular-nums">{bankDetails.bankAccountNumber}</dd>
+                      <dt className="text-muted-foreground">IFSC</dt>
+                      <dd className="font-mono">{bankDetails.ifscCode}</dd>
+                      {bankDetails.upiId && (
+                        <>
+                          <dt className="text-muted-foreground">UPI ID (optional)</dt>
+                          <dd>
+                            {bankDetails.upiId} · {bankDetails.upiPhone}
+                          </dd>
+                        </>
+                      )}
+                    </dl>
+                  ) : (
+                    <p className="text-muted-foreground">This organizer hasn't entered bank payout details yet.</p>
+                  )
+                ) : (
+                  <p className="text-muted-foreground">
+                    Only reveal this to set the organizer up as a payout beneficiary in the payment gateway — every
+                    reveal is recorded in the audit log.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex flex-col gap-xs">
               <Label htmlFor="review-decision">Decision</Label>
               <select
@@ -513,6 +616,33 @@ export function AdminReviewPage() {
                 </p>
               )}
             </div>
+
+            {decision === "CHANGES_REQUESTED" && (
+              <fieldset className="flex flex-col gap-xs">
+                <legend className="text-body-md font-medium text-ink">Fields that need correction</legend>
+                <p className="text-body-md text-muted-foreground">
+                  Shown to the organizer on the resubmit form — optional, in addition to the note above.
+                </p>
+                <div className="flex flex-col gap-xs">
+                  {ORGANIZER_APPLICATION_FIELDS.map((field) => (
+                    <label key={field.key} className="flex items-center gap-sm text-body-md text-body">
+                      <Checkbox
+                        checked={selectedFields.has(field.key)}
+                        onCheckedChange={(checked) =>
+                          setSelectedFields((prev) => {
+                            const next = new Set(prev);
+                            if (checked === true) next.add(field.key);
+                            else next.delete(field.key);
+                            return next;
+                          })
+                        }
+                      />
+                      {field.label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
 
             <div className="flex flex-col gap-xs">
               <Label htmlFor="review-internal-notes">Internal notes (ops only)</Label>

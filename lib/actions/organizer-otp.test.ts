@@ -13,8 +13,6 @@ import {
   verifyOrganizerLoginCode,
 } from './organizer-otp'
 
-const PROFILE = { name: 'New Organizer', acceptedTermsOfService: true, acceptedPrivacyPolicy: true }
-
 let sendSpy: MockInstance<(notification: NotificationPayload) => Promise<void>>
 
 beforeEach(() => {
@@ -68,24 +66,22 @@ async function makeUser(role: 'STUDENT' | 'ORGANIZER' | 'ADMIN', extra: { suspen
   return user
 }
 
-describe('organizer email-code sign-up', () => {
-  it('asks for a profile first, then creates a password-less ORGANIZER with consent and no student profile', async () => {
-    const email = uniqueEmail('new')
+describe('organizer email-code sign-up (logging in with an unknown address creates the account)', () => {
+  it('creates a password-less ORGANIZER with a placeholder name, consent, and no student profile', async () => {
+    const email = `otp.new-organizer-${crypto.randomUUID()}@test.com`
     await requestOrganizerLoginCode(email)
     const code = lastCodeSentTo(email)
     const stored = await latestRow(email)
     expect(stored.codeHash).not.toContain(code)
 
-    await expect(verifyOrganizerLoginCode({ email, code })).resolves.toEqual({ status: 'PROFILE_REQUIRED' })
-
-    const result = await verifyOrganizerLoginCode({ email, code, profile: { ...PROFILE, phone: ' 9990004444 ' } })
+    const result = await verifyOrganizerLoginCode({ email, code })
     expect(result.status).toBe('SIGNED_IN')
-    if (result.status !== 'SIGNED_IN') return
     expect(result.role).toBe('ORGANIZER')
     expect(result.isNewAccount).toBe(true)
 
     const [user] = await db.select().from(users).where(eq(users.id, result.userId))
-    expect(user).toMatchObject({ email, role: 'ORGANIZER', name: 'New Organizer', phone: '9990004444', passwordHash: null })
+    expect(user).toMatchObject({ email, role: 'ORGANIZER', phone: null, passwordHash: null })
+    expect(user.name).toBeTruthy()
 
     const consents = await db.select().from(userConsents).where(eq(userConsents.userId, user.id))
     expect(consents.map((row) => row.consentType).sort()).toEqual(['PRIVACY_POLICY', 'TERMS_OF_SERVICE'])
@@ -95,20 +91,16 @@ describe('organizer email-code sign-up', () => {
     expect(session.userId).toBe(user.id)
   })
 
-  it('keeps the code usable when the profile is invalid, so the organizer can fix it and retry', async () => {
-    const email = uniqueEmail('bad-profile')
+  it('derives the placeholder name from the local part of the email, dropping a plus-suffix', async () => {
+    // Constructed directly (not via uniqueEmail, which prefixes a label that
+    // would pollute the derived name) — the uuid after '+' keeps it unique.
+    const email = `priya.rao+mun-${crypto.randomUUID()}@test.com`
     await requestOrganizerLoginCode(email)
     const code = lastCodeSentTo(email)
 
-    await expect(
-      verifyOrganizerLoginCode({ email, code, profile: { ...PROFILE, acceptedPrivacyPolicy: false } }),
-    ).rejects.toThrow('You must accept the Privacy Policy to create an account')
-    await expect(verifyOrganizerLoginCode({ email, code, profile: { ...PROFILE, name: ' ' } })).rejects.toThrow(
-      'Name is required',
-    )
-
-    const result = await verifyOrganizerLoginCode({ email, code, profile: PROFILE })
-    expect(result.status).toBe('SIGNED_IN')
+    const result = await verifyOrganizerLoginCode({ email, code })
+    const [user] = await db.select({ name: users.name }).from(users).where(eq(users.id, result.userId))
+    expect(user.name).toBe('Priya Rao')
   })
 })
 

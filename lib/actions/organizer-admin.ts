@@ -1,9 +1,10 @@
 import { and, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { muns, users } from '@/lib/db/schema'
+import { muns, organizerProfiles, users } from '@/lib/db/schema'
 import { requireRole } from '@/lib/auth/authorize'
 import type { Session } from '@/lib/auth/adapter'
 import { recordAdminAction } from '@/lib/audit/log'
+import { decryptField } from '@/lib/crypto/field-encryption'
 import type { User } from '@/lib/types'
 
 const ADMIN_ROLES = ['OPERATIONS', 'ADMIN', 'SUPER_ADMIN'] as const
@@ -186,4 +187,64 @@ export async function reinstateOrganizer(userId: string, session: Session | null
 
     await recordAdminAction(tx, session.userId, 'ORGANIZER_REINSTATED', 'user', userId)
   })
+}
+
+export interface OrganizerBankDetails {
+  accountHolderName: string | null
+  bankName: string | null
+  /** Decrypted in full — see the function doc below before adding another caller. */
+  bankAccountNumber: string | null
+  ifscCode: string | null
+  /** Optional secondary payout address (lib/actions/organizer-onboarding.ts). */
+  upiId: string | null
+  upiPhone: string | null
+}
+
+/**
+ * Decrypts and returns an organizer's full payout bank details, so staff can
+ * manually add them as a payout beneficiary in the real payment gateway
+ * (Cashfree) — there is no automated settlement/payout integration yet (see
+ * CLAUDE.md's deferred list). This is the one deliberate, audited exception
+ * to the write-only rule lib/crypto/field-encryption.ts documents for the
+ * PAYMENT_FIELD_KEY domain (2026-09-26, explicit user instruction — read
+ * that file's `decryptField` doc comment before adding a second call site).
+ *
+ * Every call records an `ORGANIZER_BANK_DETAILS_REVEALED` admin_actions row
+ * BEFORE returning the plaintext, unconditionally once the target is
+ * confirmed to be an ORGANIZER — matching suspend/reinstate's
+ * action-then-log shape, not the search-oriented recordPiiRead pattern (this
+ * is a single, deliberate targeted reveal, not a list that may disclose
+ * nothing). Requires OPERATIONS/ADMIN/SUPER_ADMIN, and only ever acts on an
+ * ORGANIZER account (see `lockOrganizer`'s reasoning) — a non-organizer id
+ * reads as "not found", not "forbidden".
+ */
+export async function getOrganizerBankDetails(userId: string, session: Session | null): Promise<OrganizerBankDetails> {
+  requireRole(session, [...ADMIN_ROLES])
+
+  const [target] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1)
+  if (!target || target.role !== 'ORGANIZER') throw new Error(ORGANIZER_NOT_FOUND)
+
+  const [row] = await db
+    .select({
+      accountHolderName: organizerProfiles.accountHolderName,
+      bankName: organizerProfiles.bankName,
+      bankAccountNumberCiphertext: organizerProfiles.bankAccountNumberCiphertext,
+      ifscCode: organizerProfiles.ifscCode,
+      upiId: organizerProfiles.upiId,
+      upiPhone: organizerProfiles.upiPhone,
+    })
+    .from(organizerProfiles)
+    .where(eq(organizerProfiles.userId, userId))
+    .limit(1)
+
+  await recordAdminAction(db, session.userId, 'ORGANIZER_BANK_DETAILS_REVEALED', 'user', userId)
+
+  return {
+    accountHolderName: row?.accountHolderName ?? null,
+    bankName: row?.bankName ?? null,
+    bankAccountNumber: row?.bankAccountNumberCiphertext ? decryptField(row.bankAccountNumberCiphertext) : null,
+    ifscCode: row?.ifscCode ?? null,
+    upiId: row?.upiId ?? null,
+    upiPhone: row?.upiPhone ?? null,
+  }
 }

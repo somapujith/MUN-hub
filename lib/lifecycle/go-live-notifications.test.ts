@@ -79,8 +79,19 @@ async function makeCompleteMun(organizerId: string) {
   await db.insert(organizerApplications).values({ organizerId, munId: mun.id, status: 'APPROVED' })
   await db
     .insert(organizerProfiles)
-    .values({ userId: organizerId, upiId: 'organizer@upi', upiPhone: '9000000000' })
-    .onConflictDoUpdate({ target: organizerProfiles.userId, set: { upiId: 'organizer@upi' } })
+    .values({
+      userId: organizerId,
+      accountHolderName: 'Test Organizer',
+      bankName: 'Test Bank',
+      bankAccountLast4: '4321',
+      ifscCode: 'TEST0001234',
+      upiId: 'organizer@upi',
+      upiPhone: '9000000000',
+    })
+    .onConflictDoUpdate({
+      target: organizerProfiles.userId,
+      set: { accountHolderName: 'Test Organizer', bankName: 'Test Bank', bankAccountLast4: '4321', ifscCode: 'TEST0001234' },
+    })
 
   const [committee] = await db
     .insert(committees)

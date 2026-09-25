@@ -19,6 +19,8 @@ export interface OrganizerDecisionEmailInput {
   decision: 'APPROVED' | 'CHANGES_REQUESTED' | 'REJECTED'
   /** Why, when decision isn't APPROVED. Optional even then - fall back to "See your dashboard for details." if omitted on a non-APPROVED decision. */
   reason?: string
+  /** Already-resolved human labels of the specific fields that need correction, if the reviewer flagged any (Gate-1 organizer-application CHANGES_REQUESTED only, 2026-09-26). */
+  fieldsRequiringCorrection?: string[]
   supportEmail: string
 }
 
@@ -64,6 +66,13 @@ export function renderOrganizerDecisionEmailHtml(input: OrganizerDecisionEmailIn
   const supportEmail = escapeHtml(input.supportEmail)
   const copy = DECISION_COPY[input.decision]
 
+  const fieldsListHtml =
+    input.fieldsRequiringCorrection && input.fieldsRequiringCorrection.length > 0
+      ? `<ul style="margin:8px 0 0; padding-left:18px; text-align:left;">${input.fieldsRequiringCorrection
+          .map((label) => `<li style="font-size:14px; color:#41454d;">${escapeHtml(label)}</li>`)
+          .join('')}</ul>`
+      : ''
+
   const reasonBlock =
     input.decision === 'APPROVED'
       ? ''
@@ -72,6 +81,7 @@ export function renderOrganizerDecisionEmailHtml(input: OrganizerDecisionEmailIn
                     <td style="background-color:#fdf1ea; padding:16px; border-radius:8px; text-align:left;">
                       <p style="margin:0 0 4px; font-size:12px; font-weight:700; color:#181d26;">${escapeHtml(copy.reasonLabel)}</p>
                       <p style="margin:0; font-size:14px; color:#41454d;">${escapeHtml(input.reason ?? '') || FALLBACK_REASON}</p>
+                      ${fieldsListHtml}
                     </td>
                   </tr>
                 </table>`
@@ -117,8 +127,12 @@ export function renderOrganizerDecisionEmailHtml(input: OrganizerDecisionEmailIn
 /** Plain-text fallback for clients that don't render HTML — always send alongside the HTML body, never HTML alone. */
 export function renderOrganizerDecisionEmailText(input: OrganizerDecisionEmailInput): string {
   const copy = DECISION_COPY[input.decision]
+  const fieldsList =
+    input.fieldsRequiringCorrection && input.fieldsRequiringCorrection.length > 0
+      ? `\n${input.fieldsRequiringCorrection.map((label) => `- ${label}`).join('\n')}`
+      : ''
   const reasonBlock =
-    input.decision === 'APPROVED' ? '' : `\n\n${copy.reasonLabel}: ${input.reason || FALLBACK_REASON}`
+    input.decision === 'APPROVED' ? '' : `\n\n${copy.reasonLabel}: ${input.reason || FALLBACK_REASON}${fieldsList}`
 
   return (
     `${copy.headline(input.munName)}\n` +

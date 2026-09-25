@@ -53,6 +53,10 @@ export interface MyOrganizerApplication {
   expectedDelegateCount: number | null;
   previousEditions: string | null;
   websiteUrl: string | null;
+  /** Which fields the reviewer flagged on the current CHANGES_REQUESTED round, if any. */
+  fieldsRequiringCorrection: string[];
+  /** How many times this application has been resubmitted after CHANGES_REQUESTED. */
+  resubmissionCount: number;
 }
 
 /**

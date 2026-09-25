@@ -19,6 +19,8 @@ export interface ReviewQueueRow {
   city: string | null;
   country: string | null;
   createdAt: string;
+  /** How many times this application has been resubmitted after CHANGES_REQUESTED. */
+  resubmissionCount: number;
 }
 
 export interface ReviewQueueResult {
@@ -46,6 +48,10 @@ export interface OrganizerApplicationSummary {
   expectedDelegateCount: number | null;
   previousEditions: string | null;
   websiteUrl: string | null;
+  /** Which fields the reviewer flagged on the current CHANGES_REQUESTED round, if any. */
+  fieldsRequiringCorrection: string[];
+  /** How many times this application has been resubmitted after CHANGES_REQUESTED. */
+  resubmissionCount: number;
 }
 
 export interface VerificationLogEntry {
@@ -72,6 +78,10 @@ export interface MunReviewDetail {
   description: string | null;
   startDate: string | null;
   createdAt: string;
+  /** The organizer account's user id — for `getOrganizerBankDetails` (`@/api/organizer-admin`). */
+  organizerId: string;
+  /** The organizer's own onboarding-profile name/phone — null if they haven't reached that step yet. */
+  organizerProfile: { firstName: string | null; lastName: string | null; contactPhone: string | null } | null;
   organizerApplication: OrganizerApplicationSummary | null;
   verificationLogs: VerificationLogEntry[];
 }
@@ -80,6 +90,8 @@ export interface ReviewMunApplicationInput {
   decision: ReviewDecision;
   notes?: string;
   internalNotes?: string;
+  /** Only meaningful (and only sent) with decision CHANGES_REQUESTED. */
+  fieldsRequiringCorrection?: string[];
 }
 
 export interface ReviewMunApplicationResult {

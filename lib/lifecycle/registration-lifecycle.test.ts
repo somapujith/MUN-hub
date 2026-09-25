@@ -54,10 +54,13 @@ const DAY = 24 * HOUR
 
 interface MakeUserOptions {
   /**
-   * For an ORGANIZER: whether to finish the UPI (PAYMENT) step of organizer
-   * onboarding on creation — the account-level `organizer_profiles.upiId`/
-   * `upiPhone` pair `open-registration`'s payout gate now checks. Default
-   * true, mirroring the old fixture's `payment: 'VERIFIED'` default.
+   * For an ORGANIZER: whether to finish the PAYMENT step of organizer
+   * onboarding on creation — the account-level bank fields
+   * (`accountHolderName`/`bankName`/`bankAccountLast4`/`ifscCode`)
+   * `open-registration`'s payout gate now checks (2026-09-26: bank details
+   * are the required payout method, UPI is optional and not part of this
+   * gate). Default true, mirroring the old fixture's `payment: 'VERIFIED'`
+   * default.
    */
   upiOnboarding?: boolean
 }
@@ -73,8 +76,10 @@ async function makeUser(role: Role = 'ORGANIZER', options: MakeUserOptions = {})
       firstName: 'Test',
       lastName: 'Organizer',
       contactPhone: '9876543210',
-      upiId: 'test@freecharge',
-      upiPhone: '9876543210',
+      accountHolderName: 'Test Organizer',
+      bankName: 'Test Bank',
+      bankAccountLast4: '4321',
+      ifscCode: 'TEST0001234',
       agreementVersion: 'test',
       completedAt: new Date(),
     })
@@ -262,7 +267,7 @@ describe('open-registration', () => {
     )
 
     // Mid-onboarding — a profile row exists (earlier steps done) but the
-    // PAYMENT step (upiId/upiPhone) was never finished.
+    // PAYMENT step (bank details) was never finished.
     const midOnboarding = await makeUser('ORGANIZER', { upiOnboarding: false })
     await db.insert(organizerProfiles).values({
       userId: midOnboarding.id,
